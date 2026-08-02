@@ -1,0 +1,24 @@
+[project]
+name = "fleditscrape"
+version = "0.1.0"
+description = "FL26 (Football Life) player transfer automation tool"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.0.0",
+    "rapidfuzz>=3.5.0",
+    "crawlee[parsel]>=0.6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["scraper*", "editor*"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"

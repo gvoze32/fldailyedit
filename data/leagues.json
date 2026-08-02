@@ -1,0 +1,27 @@
+[
+    {
+        "name": "Premier League",
+        "url": "https://www.transfermarkt.co.uk/premier-league/transfers/wettbewerb/GB1",
+        "season": "2025"
+    },
+    {
+        "name": "La Liga",
+        "url": "https://www.transfermarkt.co.uk/la-liga/transfers/wettbewerb/ES1",
+        "season": "2025"
+    },
+    {
+        "name": "Serie A",
+        "url": "https://www.transfermarkt.co.uk/serie-a/transfers/wettbewerb/IT1",
+        "season": "2025"
+    },
+    {
+        "name": "Bundesliga",
+        "url": "https://www.transfermarkt.co.uk/bundesliga/transfers/wettbewerb/L1",
+        "season": "2025"
+    },
+    {
+        "name": "Ligue 1",
+        "url": "https://www.transfermarkt.co.uk/ligue-1/transfers/wettbewerb/FR1",
+        "season": "2025"
+    }
+]
