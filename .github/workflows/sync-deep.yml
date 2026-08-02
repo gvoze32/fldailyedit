@@ -1,21 +1,10 @@
-name: Sync Live Transfers (Deep Sweep)
+name: Sync Live Transfers (Deep)
 
 on:
   schedule:
     # Run daily at 00:00 UTC (07:00 WIB)
     - cron: "0 0 * * *"
   workflow_dispatch:
-    inputs:
-      window:
-        description: "Transfer Window (all = Entire Season, auto = Current active window)"
-        type: choice
-        options:
-          - all
-          - auto
-          - summer
-          - winter
-        default: all
-        required: false
 
 jobs:
   sync:
@@ -48,7 +37,7 @@ jobs:
         run: |
           MODE_FLAG="--deep"
 
-          WINDOW="${{ github.event.inputs.window || 'all' }}"
+          WINDOW="all"
 
           eval python run.py run \
             --window "$WINDOW" \

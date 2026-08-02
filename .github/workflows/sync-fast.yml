@@ -2,17 +2,6 @@ name: Sync Live Transfers (Fast)
 
 on:
   workflow_dispatch:
-    inputs:
-      window:
-        description: "Transfer Window (all = Entire Season, auto = Current active window)"
-        type: choice
-        options:
-          - all
-          - auto
-          - summer
-          - winter
-        default: all
-        required: false
 
 jobs:
   sync:
@@ -45,7 +34,7 @@ jobs:
         run: |
           MODE_FLAG=""
 
-          WINDOW="${{ github.event.inputs.window || 'all' }}"
+          WINDOW="all"
 
           eval python run.py run \
             --window "$WINDOW" \
