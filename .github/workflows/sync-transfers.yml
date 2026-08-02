@@ -70,11 +70,9 @@ jobs:
           fi
 
           WINDOW="${{ github.event.inputs.window || 'all' }}"
-          PAGES="200"
 
           eval python run.py run \
             --window "$WINDOW" \
-            --pages "$PAGES" \
             $MODE_FLAG \
             --edit-file sample/EDIT00000000 \
             --output output/EDIT00000000
