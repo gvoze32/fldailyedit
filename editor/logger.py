@@ -98,7 +98,7 @@ def print_summary(last_n: int = 20):
         )
 
 
-def generate_markdown_report(entries: list[dict], title: str = "Football Life Live Transfer Sync Report") -> str:
+def generate_markdown_report(entries: list[dict], title: str = "Football Life Live Transfer Sync Report", include_table: bool = True) -> str:
     """Generate a clean, structured GitHub Markdown report card from transfer log entries."""
     if not entries:
         return f"## 📊 {title}\n\n*No transfers recorded in this sync run.*"
@@ -121,21 +121,26 @@ def generate_markdown_report(entries: list[dict], title: str = "Football Life Li
         f"- **Dry-Run Validated:** `{dry}`",
         f"- **Permanent Transfers:** `{perm}` | **Loans / Loan Returns:** `{loans}`",
         "",
-        "### 📋 Transfer Details",
-        "| Status | Player | Pos | From Club | To Club | Fee / Type | Conf |",
-        "| :---: | :--- | :---: | :--- | :--- | :--- | :---: |",
     ]
 
-    for e in entries:
-        status = "🧪 Dry-Run" if e.get("dry_run") else "✅ Applied"
-        pname = f"**{e.get('player_name', 'Unknown')}**"
-        pos = e.get("position", "-") or "-"
-        from_c = e.get("from_team", "-")
-        to_c = e.get("to_team", "-")
-        fee_type = e.get("fee") or e.get("transfer_type", "transfer")
-        conf = f"{e.get('confidence', 0):.0f}%"
+    if include_table:
+        md.extend([
+            "### 📋 Transfer Details",
+            "| Status | Player | Pos | From Club | To Club | Fee / Type | Conf |",
+            "| :---: | :--- | :---: | :--- | :--- | :--- | :---: |",
+        ])
 
-        md.append(f"| {status} | {pname} | `{pos}` | {from_c} | {to_c} | {fee_type} | {conf} |")
+    if include_table:
+        for e in entries:
+            status = "🧪 Dry-Run" if e.get("dry_run") else "✅ Applied"
+            pname = f"**{e.get('player_name', 'Unknown')}**"
+            pos = e.get("position", "-") or "-"
+            from_c = e.get("from_team", "-")
+            to_c = e.get("to_team", "-")
+            fee_type = e.get("fee") or e.get("transfer_type", "transfer")
+            conf = f"{e.get('confidence', 0):.0f}%"
+
+            md.append(f"| {status} | {pname} | `{pos}` | {from_c} | {to_c} | {fee_type} | {conf} |")
 
     return "\n".join(md) + "\n"
 
@@ -323,14 +328,16 @@ def save_reports(
 
     logger.info(f"Saved visual report cards: {md_path} and {html_path}")
 
-    # GitHub Actions Step Summary support
+    # GitHub Actions Step Summary support (Keep it concise, no huge table)
     if write_github_summary:
         summary_env = os.environ.get("GITHUB_STEP_SUMMARY")
         if summary_env:
             try:
+                # Generate a short version of the markdown report just for the step summary
+                short_md_report = generate_markdown_report(entries, include_table=False)
                 with open(summary_env, "a", encoding="utf-8") as f:
-                    f.write(md_report + "\n")
-                logger.info(f"Appended markdown report to $GITHUB_STEP_SUMMARY")
+                    f.write(short_md_report + "\n")
+                logger.info(f"Appended short markdown report to $GITHUB_STEP_SUMMARY")
             except Exception as e:
                 logger.warning(f"Could not write to $GITHUB_STEP_SUMMARY: {e}")
 
