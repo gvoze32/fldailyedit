@@ -25,8 +25,7 @@ Pre-built and updated `EDIT00000000` save files and visual transfer report cards
 
 | Game | Save Directory (Windows) |
 |---|---|
-| **SP Football Life 2026** | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\` |
-| **SP Football Life 2025 / 2024** | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2025\save\` |
+| **SP Football Life (All Versions)** | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\save\` |
 | **eFootball PES 2021 Vanilla** | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\<user_id>\save\` |
 
 > [!TIP]
