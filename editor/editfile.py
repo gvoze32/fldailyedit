@@ -959,9 +959,10 @@ class EditFile:
         if D == L or replacement_idx < 0:
             pos_L = lineup.index(L)
             if pos_L < 11 and N > 11:
-                sub = lineup[11]
+                sub_pos = 11 if pos_L == 0 else (12 if N > 12 else 11)
+                sub = lineup[sub_pos]
                 lineup[pos_L] = sub
-                lineup[11:N-1] = lineup[12:N]
+                lineup[sub_pos:N-1] = lineup[sub_pos+1:N]
                 lineup[N-1] = L
             elif 11 <= pos_L < N:
                 lineup[pos_L:N-1] = lineup[pos_L+1:N]
@@ -974,9 +975,10 @@ class EditFile:
             lineup[pos_L] = D
 
             if pos_D < 11 and N > 11:
-                sub = lineup[11]
+                sub_pos = 11 if pos_D == 0 else (12 if N > 12 else 11)
+                sub = lineup[sub_pos]
                 lineup[pos_D] = sub
-                lineup[11:N-1] = lineup[12:N]
+                lineup[sub_pos:N-1] = lineup[sub_pos+1:N]
                 lineup[N-1] = L
             elif 11 <= pos_D < N:
                 lineup[pos_D:N-1] = lineup[pos_D+1:N]

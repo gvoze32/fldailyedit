@@ -1,6 +1,8 @@
 """Comprehensive corruption checker for EDIT00000000 file."""
-import struct
+import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import struct
 from editor.editfile import (
     EditFile,
     GAME_PLAN_ENTRY_SIZE,
