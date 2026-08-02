@@ -1,26 +1,26 @@
 # FLEditScrape — Football Life & PES 2021 Transfer Tool
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-72%2F72%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-73%2F73%20passed-brightgreen.svg)]()
 [![Daily Sync](https://img.shields.io/badge/Cloud%20Sync-Automated%20Daily-success.svg)]()
 [![Compatibility](https://img.shields.io/badge/compatibility-All%20Versions-orange.svg)](https://www.pessmokepatch.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 An automated, safe, and intelligent player transfer synchronization tool for **SP Football Life (All Versions)** and **eFootball PES 2021**.
 
-It automatically fetches live, verified football transfers from **FotMob's real-time transfer feed**, cross-verifies player positions and squad rosters, handles squad limits with position-aware ability logic, and writes updates directly into your `EDIT00000000` save file.
+It automatically fetches live, verified football transfers from **FotMob's real-time transfer feed**, cross-verifies player positions, nationalities, ages, and squad rosters, handles squad limits with position-aware ability logic, auto-assigns conflict-free shirt numbers, protects tactical game plans, and writes updates directly into your `EDIT00000000` save file.
 
 ---
 
 ## 📥 Download Latest Save File (Cloud Sync)
 
-Pre-built and updated `EDIT00000000` save files are generated automatically every day via GitHub Actions. You can download the latest version directly without needing to install or run anything locally.
+Pre-built and updated `EDIT00000000` save files and visual transfer report cards are generated automatically every day via GitHub Actions. You can download the latest version directly without needing to install or run anything locally.
 
 ### How to Download:
 
 1. Navigate to the [**Actions**](../../actions/workflows/sync-transfers.yml) tab.
 2. Click on the latest successful workflow run (**`Scrape & Apply Transfers`**).
-3. Under the **Artifacts** section at the bottom, download **`updated-fl-save-and-logs.zip`**.
+3. Under the **Artifacts** section at the bottom, download **`updated-fl-save-and-reports.zip`**.
 4. Extract `EDIT00000000` and copy it into your game save directory:
 
 | Game | Save Directory (Windows) |
@@ -30,15 +30,18 @@ Pre-built and updated `EDIT00000000` save files are generated automatically ever
 | **eFootball PES 2021 Vanilla** | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\<user_id>\save\` |
 
 > [!TIP]
-> **Custom Transfers**: To run sync on-demand with custom date cutoffs or transfer windows, fork this repository and trigger **Run workflow** in your fork's Actions tab.
+> **Custom Transfers**: To run sync on-demand with custom clubs, transfer windows, or deep European club coverage, fork this repository and trigger **Run workflow** in your fork's Actions tab.
 
 ---
 
 ## ⚡ Key Features
 
 - **🚀 Live Real-Time Scraping**: Direct async HTTP stream from FotMob for all latest transfers, loans, releases, and signings (<0.5s execution, 0 bot blocks).
-- **🛡️ Position Compatibility Gate & GK Protection**: Strict position isolation preventing outfield players (strikers/midfielders/defenders) from being mistakenly matched to Goalkeepers (GK) even with similar names.
+- **🛡️ Formation & Game Plan Doctor**: Automatically safeguards team tactics. When a captain, free-kick taker, or corner specialist is transferred out, the Game Plan Doctor safely reassigns captaincy and set-piece roles to the highest-rated remaining active team member.
+- **🔢 Smart Shirt Number Auto-Assignment**: Automatically manages kit numbers for incoming signings. Respects preferred jersey numbers if available, and intelligently assigns the lowest free number without jersey collisions.
+- **🎯 Tri-Factor Disambiguation Gate**: Strict multi-parameter matching combining name similarity, position gate, nationality verification, and age checks (+6.0 boost for exact nationality match, age-range alignment).
 - **👥 Bidirectional Squad Roster Verification**: Matches player candidates against active club rosters in the decrypted save file (`from_team` for departures, `to_team` for arrivals and loan returns), achieving **100% match accuracy**.
+- **📊 Visual HTML & Markdown Report Cards**: Automatically compiles clean, beautiful visual report tables with status badges, player positions, transfer fees, and confidence ratings into `transfer_summary.html` and GitHub Step Summaries.
 - **🔄 Intelligent Loan & Loan Return Handling**: On-loan players are seamlessly transferred to their loan clubs, and players returning from loans (*End of Loan*) are accurately restored to their parent clubs.
 - **📋 Contract Extension Auto-Filter**: Automatically detects and skips same-club contract renewals (`contractExtension: true`) to avoid redundant roster operations.
 - **🧠 Position-Aware Overflow & Starting XI Protection**: When a squad reaches the 40-player limit, the tool automatically releases deep reserves with the lowest overall ability while **protecting Starting XI players** and **preserving at least 2 Goalkeepers per squad**.

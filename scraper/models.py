@@ -24,6 +24,9 @@ class Transfer:
     to_club_id_fotmob: Optional[int] = None
     from_club_full_name: str = ""
     to_club_full_name: str = ""
+    nationality: str = ""
+    age: int = 0
+    shirt_number: Optional[int] = None
 
     def __str__(self):
         pos_badge = f" [{self.position}]" if self.position else ""

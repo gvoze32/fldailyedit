@@ -137,6 +137,30 @@ class TestPlayerMatching:
         pid, name, conf = m.match_player("David Raya", position="ST")
         assert pid == 7002
 
+    def test_tri_factor_nationality_and_age_disambiguation(self):
+        """Disambiguate identical or very similar names using nationality and age."""
+        m = NameMatcher()
+        m.load_player_db(
+            players={
+                "Gabriel Magalhaes": 8001,
+                "Gabriel Jesus": 8002,
+                "Gabriel Paulista": 8003,
+            },
+            positions={8001: "CB", 8002: "CF", 8003: "CB"},
+            nationalities={8001: "Brazil", 8002: "Brazil", 8003: "Spain"},
+            ages={8001: 27, 8002: 27, 8003: 34},
+        )
+        # Search for Gabriel with CB position and Spain nationality / 34 age
+        pid, name, conf = m.match_player("Gabriel", position="CB", nationality="Spain", age=34)
+        assert pid == 8003
+        assert name == "Gabriel Paulista"
+
+        # Search for Gabriel with CB position and Brazil nationality / 27 age
+        pid, name, conf = m.match_player("Gabriel", position="CB", nationality="Brazil", age=27)
+        assert pid == 8001
+        assert name == "Gabriel Magalhaes"
+
+
 
 
 # --- Team matching tests ---

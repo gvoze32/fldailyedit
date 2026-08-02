@@ -32,7 +32,15 @@ from editor import backup as backup_mod
 from editor import crypto
 from editor.editfile import EditFile
 from editor import logger as transfer_logger
-from scraper.fotmob import fetch_fotmob_transfers, get_transfer_window_range
+from scraper.fotmob import (
+    fetch_fotmob_transfers,
+    fetch_top_clubs_transfers,
+    fetch_transfers_for_club_names,
+    get_transfer_window_range,
+    merge_transfers,
+    FotmobScraper,
+    TOP_EUROPEAN_CLUBS,
+)
 from scraper.matcher import NameMatcher
 from scraper.models import MatchedTransfer
 
@@ -112,6 +120,8 @@ def cmd_inspect(args):
 
         print(f"\nTotal Clubs: {len([t for t in teams.values() if t.team_id > 100])}")
         print(f"Total National Teams: {len([t for t in teams.values() if t.team_id <= 100])}")
+        managers = ef.get_all_managers()
+        print(f"Total Managers / Coaches: {len(managers)}")
 
     finally:
         crypto.cleanup_temp(temp_dir)
@@ -144,27 +154,28 @@ def cmd_run(args):
     popular_only = getattr(args, "popular", False) or False
     window = getattr(args, "window", "auto") or "auto"
     since_date = getattr(args, "since", None)
+    club_filter = getattr(args, "club", None)
+    deep_mode = getattr(args, "deep", False)
 
     start_d, end_d = get_transfer_window_range(window)
     cutoff_info = f"since {since_date}" if since_date else f"window '{window}' (from {start_d})"
-    print(f"\n📡 Scraping live transfers from FotMob ({cutoff_info}, max_pages={pages}, popular={popular_only})...")
-    transfers = fetch_fotmob_transfers(
-        max_pages=pages,
-        popular_only=popular_only,
-        since_date=since_date,
-        window=window,
-    )
-    print(f"  FotMob found {len(transfers)} transfers")
 
-    # Deduplicate transfers by (player_name, from_club, to_club)
-    seen = set()
-    deduped_transfers = []
-    for t in transfers:
-        key = (t.player_name.lower().strip(), t.from_club.lower().strip(), t.to_club.lower().strip())
-        if key not in seen:
-            seen.add(key)
-            deduped_transfers.append(t)
-    transfers = deduped_transfers
+    transfers_list = []
+    if club_filter:
+        clubs = [c.strip() for c in club_filter.split(",") if c.strip()]
+        print(f"\n🎯 Scraping club-focused transfers for: {', '.join(clubs)} ({cutoff_info})...")
+        transfers_list.append(fetch_transfers_for_club_names(clubs, since_date=since_date, window=window))
+    elif deep_mode:
+        print(f"\n🔎 Deep Coverage Mode: Scraping transfers for Top {len(TOP_EUROPEAN_CLUBS)} European Clubs ({cutoff_info})...")
+        transfers_list.append(fetch_top_clubs_transfers(since_date=since_date, window=window))
+        # Also include standard feed
+        transfers_list.append(fetch_fotmob_transfers(max_pages=pages, popular_only=popular_only, since_date=since_date, window=window))
+    else:
+        print(f"\n📡 Scraping live transfers from FotMob ({cutoff_info}, max_pages={pages}, popular={popular_only})...")
+        transfers_list.append(fetch_fotmob_transfers(max_pages=pages, popular_only=popular_only, since_date=since_date, window=window))
+
+    transfers = merge_transfers(transfers_list)
+    print(f"  FotMob found {len(transfers)} total unique verified transfers")
 
     print(f"\nTotal unique transfers to process: {len(transfers)}")
 
@@ -209,12 +220,19 @@ def cmd_run(args):
 
         player_name_to_id = {p.name: pid for pid, p in players.items()}
         player_positions = {pid: p.position for pid, p in players.items()}
+        player_nationalities = {pid: p.nationality for pid, p in players.items() if p.nationality}
+        player_ages = {pid: p.age for pid, p in players.items() if p.age}
         team_name_to_id = {t.name: tid for tid, t in teams_info.items() if tid in club_ids}
 
         print(f"  {len(player_name_to_id)} players, {len(team_name_to_id)} playable clubs (national teams excluded)")
 
         matcher = NameMatcher()
-        matcher.load_player_db(player_name_to_id, positions=player_positions)
+        matcher.load_player_db(
+            player_name_to_id,
+            positions=player_positions,
+            nationalities=player_nationalities,
+            ages=player_ages,
+        )
         matcher.load_team_db(team_name_to_id)
 
         # Build team_player_map for context-aware disambiguation
@@ -225,7 +243,7 @@ def cmd_run(args):
         }
 
         # ── Step 5: Match scraped names to FL26 IDs ──
-        print(f"\n🔍 Matching transfers with squad & position verification (threshold={threshold}%)...")
+        print(f"\n🔍 Matching transfers with Tri-Factor verification (threshold={threshold}%)...")
         matched = []
         for t in transfers:
             ftid, ftname, ftconf = matcher.match_team(t.from_club)
@@ -237,6 +255,8 @@ def cmd_run(args):
                 to_team_id=ttid,
                 team_player_map=team_player_map,
                 position=t.position,
+                nationality=t.nationality,
+                age=t.age,
             )
 
             mt = MatchedTransfer(
@@ -272,6 +292,7 @@ def cmd_run(args):
             return
 
         # ── Step 6: Apply transfers ──
+        run_records = []
         if dry_run:
             print(f"\n🔍 DRY-RUN — would apply {len(fully_matched)} transfers:")
             for m in fully_matched:
@@ -290,7 +311,18 @@ def cmd_run(args):
                     fee=m.transfer.fee,
                     market_value=m.transfer.market_value,
                 )
-            print(f"\nDry-run complete. {len(fully_matched)} transfers would be applied.")
+                run_records.append({
+                    "player_name": m.matched_player_name or m.transfer.player_name,
+                    "from_team": m.matched_from_team or m.transfer.from_club,
+                    "to_team": m.matched_to_team or m.transfer.to_club,
+                    "position": m.transfer.position,
+                    "fee": m.transfer.fee,
+                    "transfer_type": m.transfer.transfer_type,
+                    "confidence": m.min_confidence,
+                    "dry_run": True,
+                })
+            transfer_logger.save_reports(run_records)
+            print(f"\nDry-run complete. {len(fully_matched)} transfers validated and logged.")
             return
 
         # Create backup before modifying
@@ -298,7 +330,7 @@ def cmd_run(args):
         backup_path = backup_mod.create_backup(edit_path)
         print(f"  Backup: {backup_path}")
 
-        print(f"\n⚡ Applying {len(fully_matched)} transfers...")
+        print(f"\n⚡ Applying {len(fully_matched)} transfers with Smart Shirt Numbers & Game Plan Doctor...")
         applied = 0
         failed = 0
 
@@ -307,20 +339,21 @@ def cmd_run(args):
 
         for m in fully_matched:
             ok = False
+            pref_shirt = m.transfer.shirt_number
             if m.is_club_transfer:
                 to_roster = ef.get_team_roster(m.to_team_id)
                 if to_roster and to_roster.has_player(m.player_id):
                     ok = True
                 else:
-                    ok = ef.move_player(m.player_id, m.from_team_id, m.to_team_id)
+                    ok = ef.move_player(m.player_id, m.from_team_id, m.to_team_id, shirt_number=pref_shirt)
                     if not ok:
                         current_tid = ef.find_player_team(m.player_id, club_only=True)
                         if current_tid == m.to_team_id:
                             ok = True
                         elif current_tid is not None:
-                            ok = ef.move_player(m.player_id, current_tid, m.to_team_id)
+                            ok = ef.move_player(m.player_id, current_tid, m.to_team_id, shirt_number=pref_shirt)
                         else:
-                            ok = ef.add_player(m.player_id, m.to_team_id)
+                            ok = ef.add_player(m.player_id, m.to_team_id, shirt_number=pref_shirt)
             elif m.is_release:
                 from_roster = ef.get_team_roster(m.from_team_id)
                 if from_roster and not from_roster.has_player(m.player_id):
@@ -338,13 +371,13 @@ def cmd_run(args):
                 if to_roster and to_roster.has_player(m.player_id):
                     ok = True
                 else:
-                    ok = ef.add_player(m.player_id, m.to_team_id)
+                    ok = ef.add_player(m.player_id, m.to_team_id, shirt_number=pref_shirt)
                     if not ok:
                         current_tid = ef.find_player_team(m.player_id, club_only=True)
                         if current_tid == m.to_team_id:
                             ok = True
                         elif current_tid is not None:
-                            ok = ef.move_player(m.player_id, current_tid, m.to_team_id)
+                            ok = ef.move_player(m.player_id, current_tid, m.to_team_id, shirt_number=pref_shirt)
 
             if ok:
                 applied += 1
@@ -362,6 +395,16 @@ def cmd_run(args):
                     fee=m.transfer.fee,
                     market_value=m.transfer.market_value,
                 )
+                run_records.append({
+                    "player_name": m.matched_player_name or m.transfer.player_name,
+                    "from_team": m.matched_from_team or m.transfer.from_club,
+                    "to_team": m.matched_to_team or m.transfer.to_club,
+                    "position": m.transfer.position,
+                    "fee": m.transfer.fee,
+                    "transfer_type": m.transfer.transfer_type,
+                    "confidence": m.min_confidence,
+                    "dry_run": False,
+                })
             else:
                 failed += 1
                 print(f"  ✗ Failed: {m.matched_player_name or m.transfer.player_name} ({m.action_type})")
@@ -376,12 +419,18 @@ def cmd_run(args):
         print(f"\n🔒 Re-encrypting → {output_path}...")
         crypto.encrypt(temp_dir, output_path)
 
+        # Save visual reports
+        transfer_logger.save_reports(run_records)
+
         print(f"\n✅ Done! {applied} transfers applied successfully.")
         if output_path.resolve() != edit_path.resolve():
             print(f"   Input (sample/pristine): {edit_path}")
             print(f"   Output (updated save):   {output_path}")
         else:
             print(f"   Updated file:            {output_path}")
+        print(f"   Backup at:               {backup_path}")
+        print(f"   Log at:                  {config.TRANSFER_LOG_FILE}")
+        print(f"   Visual Summary Report:   {config.OUTPUT_DIR / 'transfer_summary.md'}")
         print(f"   Backup at: {backup_path}")
         print(f"   Log at: {config.TRANSFER_LOG_FILE}")
 
@@ -452,6 +501,8 @@ def main():
     p_run.add_argument("--edit-file", type=str, help="Path to input edit00000000 (default: config.EDIT_FILE_PATH or sample/EDIT00000000)")
     p_run.add_argument("-o", "--output", type=str, help="Path to output updated edit00000000 (default: output/EDIT00000000)")
     p_run.add_argument("--in-place", action="store_true", help="Overwrite input edit file in-place instead of writing to output/")
+    p_run.add_argument("--club", type=str, help="Target specific club(s) (comma-separated, e.g. 'Chelsea, Real Madrid')")
+    p_run.add_argument("--deep", action="store_true", help="Deep coverage sync across Top ~30 European clubs directly")
     p_run.add_argument("--window", type=str, choices=["auto", "summer", "winter", "all"], default="auto", help="Transfer window (default: auto)")
     p_run.add_argument("--since", type=str, help="Scrape transfers since date (YYYY-MM-DD)")
     p_run.add_argument("--pages", type=int, default=10, help="Maximum number of pages to scrape (50 transfers/page, default: 10)")
@@ -466,6 +517,8 @@ def main():
     p_sched.add_argument("--edit-file", type=str, help="Path to input edit00000000")
     p_sched.add_argument("-o", "--output", type=str, help="Path to output updated edit00000000 (default: output/EDIT00000000)")
     p_sched.add_argument("--in-place", action="store_true", help="Overwrite input edit file in-place")
+    p_sched.add_argument("--club", type=str, help="Target specific club(s) (comma-separated)")
+    p_sched.add_argument("--deep", action="store_true", help="Deep coverage sync across Top European clubs")
     p_sched.add_argument("--window", type=str, choices=["auto", "summer", "winter", "all"], default="auto", help="Transfer window (default: auto)")
     p_sched.add_argument("--since", type=str, help="Scrape transfers since date (YYYY-MM-DD)")
     p_sched.add_argument("--pages", type=int, default=10, help="Maximum number of pages to scrape (50 transfers/page, default: 10)")
@@ -483,27 +536,20 @@ def main():
     p_inspect.add_argument("--edit-file", type=str, required=True, help="Path to edit00000000")
     p_inspect.set_defaults(func=cmd_inspect)
 
-    # log
-    p_log = sub.add_parser("log", help="Show recent transfer log")
-    p_log.add_argument("--last", type=int, default=20, help="Number of entries to show")
-    p_log.set_defaults(func=cmd_log)
+    # Pre-parse argv: if first arg is a flag or omitted, default to 'run'
+    subcommands = {"run", "schedule", "cron", "inspect", "log", "-h", "--help"}
+    if len(sys.argv) > 1 and sys.argv[1] not in subcommands:
+        sys.argv.insert(1, "run")
+    elif len(sys.argv) == 1:
+        sys.argv.append("run")
 
     args = parser.parse_args()
     setup_logging(args.verbose)
 
-    if not args.command:
-        # Default to 'run' with remaining args
-        args.command = "run"
-        args.dry_run = "--dry-run" in sys.argv
-        args.edit_file = None
-        args.window = "auto"
-        args.since = None
-        args.pages = 10
-        args.popular = False
-        args.threshold = None
-        args.func = cmd_run
-
-    args.func(args)
+    if hasattr(args, "func"):
+        args.func(args)
+    else:
+        parser.print_help()
 
 
 if __name__ == "__main__":

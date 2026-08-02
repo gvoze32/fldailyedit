@@ -249,7 +249,7 @@ class FotmobScraper:
         since_date: Optional[Union[str, date]] = None,
         window: str = "auto",
     ) -> list[Transfer]:
-        """Synchronous wrapper to fetch transfers."""
+        """Synchronous wrapper to fetch global transfers."""
         return asyncio.run(
             self._fetch_transfers_async(
                 max_pages=max_pages,
@@ -258,6 +258,226 @@ class FotmobScraper:
                 window=window,
             )
         )
+
+    async def _fetch_club_data_async(
+        self,
+        session: aiohttp.ClientSession,
+        team_id: int,
+    ) -> Optional[dict]:
+        """Fetch raw team data JSON from FotMob API."""
+        url = f"https://www.fotmob.com/api/data/teams?id={team_id}"
+        try:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    return await resp.json(content_type=None)
+                logger.warning(f"FotMob team API {team_id} returned HTTP {resp.status}")
+        except Exception as e:
+            logger.error(f"Error fetching FotMob team {team_id}: {e}")
+        return None
+
+    async def fetch_club_transfers_async(
+        self,
+        team_id: int,
+        since_date: Optional[Union[str, date]] = None,
+        window: str = "auto",
+    ) -> list[Transfer]:
+        """Fetch all verified transfers (in & out) for a specific club."""
+        cutoff_date: Optional[date] = None
+        if since_date:
+            if isinstance(since_date, str):
+                cutoff_date = parse_iso_date(since_date)
+            elif isinstance(since_date, date):
+                cutoff_date = since_date
+        elif window and window != "all":
+            cutoff_date, _ = get_transfer_window_range(window)
+
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(headers=self.headers, timeout=timeout) as session:
+            data = await self._fetch_club_data_async(session, team_id)
+            if not data:
+                return []
+
+            return self._extract_transfers_from_team_data(data, cutoff_date)
+
+    def _extract_transfers_from_team_data(
+        self,
+        data: dict,
+        cutoff_date: Optional[date] = None,
+    ) -> list[Transfer]:
+        """Extract Transfer objects from FotMob team API payload."""
+        results: list[Transfer] = []
+        transfers_section = data.get("transfers", {})
+        if not isinstance(transfers_section, dict):
+            return results
+
+        transfers_data = transfers_section.get("data", {})
+        if not isinstance(transfers_data, dict):
+            return results
+
+        for category in ("Players in", "Players out"):
+            items = transfers_data.get(category, [])
+            if not isinstance(items, list):
+                continue
+
+            for raw_item in items:
+                t = self._parse_fotmob_item(raw_item)
+                if not t:
+                    continue
+
+                if cutoff_date:
+                    item_date = parse_iso_date(t.date)
+                    if item_date and item_date < cutoff_date:
+                        continue
+
+                results.append(t)
+
+        return results
+
+    async def fetch_club_coach_async(
+        self,
+        team_id: int,
+    ) -> Optional[str]:
+        """Fetch current head coach/manager name for a club."""
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(headers=self.headers, timeout=timeout) as session:
+            data = await self._fetch_club_data_async(session, team_id)
+            if not data:
+                return None
+
+            coach_hist = data.get("overview", {}).get("coachHistory", [])
+            if coach_hist and isinstance(coach_hist, list):
+                latest = coach_hist[-1]
+                if isinstance(latest, dict) and latest.get("name"):
+                    return latest["name"].strip()
+        return None
+
+    async def fetch_transfers_for_clubs_async(
+        self,
+        team_ids: list[int],
+        since_date: Optional[Union[str, date]] = None,
+        window: str = "auto",
+    ) -> list[Transfer]:
+        """Fetch transfers for multiple clubs concurrently."""
+        cutoff_date: Optional[date] = None
+        if since_date:
+            if isinstance(since_date, str):
+                cutoff_date = parse_iso_date(since_date)
+            elif isinstance(since_date, date):
+                cutoff_date = since_date
+        elif window and window != "all":
+            cutoff_date, _ = get_transfer_window_range(window)
+
+        timeout = aiohttp.ClientTimeout(total=20)
+        async with aiohttp.ClientSession(headers=self.headers, timeout=timeout) as session:
+            tasks = [self._fetch_club_data_async(session, tid) for tid in team_ids]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            all_transfers: list[Transfer] = []
+            for res in results:
+                if isinstance(res, dict):
+                    all_transfers.extend(self._extract_transfers_from_team_data(res, cutoff_date))
+
+            return merge_transfers([all_transfers])
+
+
+TOP_EUROPEAN_CLUBS: dict[str, int] = {
+    # Premier League
+    "Arsenal": 9825,
+    "Aston Villa": 10252,
+    "Chelsea": 8455,
+    "Liverpool": 8650,
+    "Manchester City": 8456,
+    "Manchester United": 10260,
+    "Newcastle United": 10261,
+    "Tottenham Hotspur": 8586,
+    "Brighton": 10204,
+    "West Ham": 8654,
+
+    # La Liga
+    "Real Madrid": 8633,
+    "Barcelona": 8634,
+    "Atletico Madrid": 9906,
+    "Real Sociedad": 8560,
+    "Villarreal": 10205,
+    "Athletic Club": 8315,
+    "Sevilla": 8302,
+    "Girona": 9812,
+
+    # Serie A
+    "Inter": 8636,
+    "Juventus": 9885,
+    "AC Milan": 8564,
+    "Napoli": 9875,
+    "AS Roma": 8686,
+    "Lazio": 8543,
+    "Atalanta": 8524,
+    "Fiorentina": 8535,
+
+    # Bundesliga
+    "Bayern München": 9823,
+    "Borussia Dortmund": 9789,
+    "Bayer Leverkusen": 8178,
+    "RB Leipzig": 178475,
+    "Eintracht Frankfurt": 9810,
+    "VfB Stuttgart": 10269,
+
+    # Ligue 1
+    "Paris Saint-Germain": 9847,
+    "Marseille": 8588,
+    "Monaco": 9829,
+    "Lyon": 9748,
+    "Lille": 8639,
+
+    # Portugal, Netherlands, Turkey, etc.
+    "Sporting CP": 9768,
+    "Benfica": 9772,
+    "Porto": 9773,
+    "Ajax": 8593,
+    "PSV": 8640,
+    "Feyenoord": 10235,
+    "Galatasaray": 8637,
+    "Fenerbahce": 8695,
+    "Celtic": 9925,
+    "Rangers": 8548,
+    "Al-Hilal": 8659,
+    "Al-Nassr": 8660,
+    "Inter Miami": 1157146,
+}
+
+
+def merge_transfers(transfer_lists: list[list[Transfer]]) -> list[Transfer]:
+    """
+    Merge multiple transfer lists and deduplicate by player, from_club, to_club, and date.
+    Preserves richer metadata when duplicate entries exist.
+    """
+    seen: dict[tuple[str, str, str, str], Transfer] = {}
+
+    for t_list in transfer_lists:
+        for t in t_list:
+            key = (
+                t.player_name.strip().lower(),
+                t.from_club.strip().lower(),
+                t.to_club.strip().lower(),
+                (t.date or "").split("T")[0],
+            )
+
+            if key not in seen:
+                seen[key] = t
+            else:
+                existing = seen[key]
+                # Upgrade with position/fee/shirt if existing is empty
+                if not existing.position and t.position:
+                    existing.position = t.position
+                if not existing.fee and t.fee:
+                    existing.fee = t.fee
+                if not existing.shirt_number and t.shirt_number:
+                    existing.shirt_number = t.shirt_number
+                if not existing.nationality and t.nationality:
+                    existing.nationality = t.nationality
+                if not existing.age and t.age:
+                    existing.age = t.age
+
+    return list(seen.values())
 
 
 def fetch_fotmob_transfers(
@@ -274,3 +494,57 @@ def fetch_fotmob_transfers(
         since_date=since_date,
         window=window,
     )
+
+
+def fetch_top_clubs_transfers(
+    since_date: Optional[Union[str, date]] = None,
+    window: str = "auto",
+) -> list[Transfer]:
+    """Deep scrape of transfers from all Top ~30 European clubs directly."""
+    scraper = FotmobScraper()
+    team_ids = list(TOP_EUROPEAN_CLUBS.values())
+    return asyncio.run(
+        scraper.fetch_transfers_for_clubs_async(
+            team_ids=team_ids,
+            since_date=since_date,
+            window=window,
+        )
+    )
+
+
+def fetch_transfers_for_club_names(
+    club_names: list[str],
+    since_date: Optional[Union[str, date]] = None,
+    window: str = "auto",
+) -> list[Transfer]:
+    """Fetch transfers for specific club names or FotMob IDs."""
+    team_ids: list[int] = []
+    for name in club_names:
+        clean = name.strip()
+        if clean.isdigit():
+            team_ids.append(int(clean))
+        else:
+            # Look up in TOP_EUROPEAN_CLUBS
+            matched_id = None
+            for club, cid in TOP_EUROPEAN_CLUBS.items():
+                if clean.lower() in club.lower() or club.lower() in clean.lower():
+                    matched_id = cid
+                    break
+            if matched_id:
+                team_ids.append(matched_id)
+            else:
+                logger.warning(f"Could not find FotMob ID for club '{clean}'")
+
+    if not team_ids:
+        logger.warning("No valid club IDs found to fetch")
+        return []
+
+    scraper = FotmobScraper()
+    return asyncio.run(
+        scraper.fetch_transfers_for_clubs_async(
+            team_ids=team_ids,
+            since_date=since_date,
+            window=window,
+        )
+    )
+

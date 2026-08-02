@@ -18,7 +18,7 @@ import struct
 from pathlib import Path
 
 import config
-from editor.models import PlayerInfo, TeamData, TeamInfo
+from editor.models import ManagerInfo, PlayerInfo, TeamData, TeamInfo
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +77,15 @@ PE_PRINT_NAME = 0x73       # 61 bytes null-terminated string
 
 # Team entry
 TE_TEAM_ID = 0x000         # 4 bytes uint32 LE
+TE_MANAGER_ID = 0x004      # 4 bytes uint32 LE
 TE_TEAM_NAME = 0x068       # 70 bytes null-terminated string
 TE_ABBREVIATION = 0x0AE    # 4 bytes null-terminated string
+
+# Manager entry
+ME_MANAGER_ID = 0x000      # 4 bytes uint32 LE
+ME_NATIONALITY = 0x004     # 2 bytes uint16 LE
+ME_PICTURE_ID = 0x006      # 2 bytes uint16 LE
+ME_MANAGER_NAME = 0x009    # 79 bytes null-terminated string
 
 # Team-Player table entry
 TP_TEAM_ID = 0x00          # 4 bytes uint32 LE
@@ -89,7 +96,59 @@ TP_MAX_PLAYERS = 40
 # Game plan entry
 GP_TEAM_ID = 0x000         # 4 bytes uint32 LE
 GP_LINEUP = 0x1E4          # 40 bytes (40 × 1 byte index IDs)
+GP_LONG_FK = 0x209         # 1 byte index ID
+GP_SHORT_FK = 0x20A        # 1 byte index ID
+GP_FK_2 = 0x20B            # 1 byte index ID
+GP_LEFT_CK = 0x20C         # 1 byte index ID
+GP_RIGHT_CK = 0x20D        # 1 byte index ID
+GP_PK = 0x20E              # 1 byte index ID
+GP_ATTACK_PLAYERS = 0x20F  # 3 bytes (3 × 1 byte index IDs)
 GP_CAPTAIN = 0x212         # 1 byte index ID
+
+
+def assign_smart_shirt_number(
+    used_numbers: set[int],
+    preferred_number: int | None = None,
+    position: str = "",
+    is_gk: bool = False,
+) -> int:
+    """
+    Allocate a smart, conflict-free shirt number (1-99).
+
+    1. If preferred_number is specified (1-99) and vacant -> allocate it.
+    2. Otherwise, allocate the most position-appropriate vacant number:
+       - Goalkeeper: [1, 12, 13, 22, 23, 25, 30, 31, 33, 40, 99, 1..99]
+       - Defender: [2, 3, 4, 5, 6, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30..99]
+       - Midfielder: [6, 7, 8, 10, 11, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29..99]
+       - Forward: [9, 7, 10, 11, 14, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30..99]
+    3. Fallback: lowest available integer 1-99.
+    """
+    if preferred_number and 1 <= preferred_number <= 99 and preferred_number not in used_numbers:
+        return preferred_number
+
+    pos_upper = (position or "").strip().upper()
+
+    if is_gk or pos_upper == "GK":
+        priority = [1, 12, 13, 22, 23, 25, 30, 31, 33, 40, 99]
+    elif pos_upper in ("CB", "LB", "RB", "CB/LB", "CB/RB", "LWB", "RWB"):
+        priority = [2, 3, 4, 5, 6, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+    elif pos_upper in ("CMF", "DMF", "AMF", "LM", "RM", "DM", "AM", "CM"):
+        priority = [6, 7, 8, 10, 11, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+    elif pos_upper in ("CF", "SS", "LWF", "RWF", "ST", "LW", "RW"):
+        priority = [9, 7, 10, 11, 14, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+    else:
+        priority = [7, 8, 9, 10, 11, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+
+    for num in priority:
+        if num not in used_numbers:
+            return num
+
+    for num in range(1, 100):
+        if num not in used_numbers:
+            return num
+
+    return 99
+
 
 
 class EditFile:
@@ -305,7 +364,7 @@ class EditFile:
 
     def get_all_team_info(self) -> dict[int, TeamInfo]:
         """
-        Read all team entries (ID + name + abbreviation).
+        Read all team entries (ID + name + abbreviation + manager_id).
 
         Returns:
             {team_id: TeamInfo}
@@ -319,6 +378,7 @@ class EditFile:
                 break
 
             team_id = struct.unpack_from("<I", self._data, entry_offset + TE_TEAM_ID)[0]
+            manager_id = struct.unpack_from("<I", self._data, entry_offset + TE_MANAGER_ID)[0]
             name = self._read_string(entry_offset + TE_TEAM_NAME, 70)
             abbrev = self._read_string(entry_offset + TE_ABBREVIATION, 4)
 
@@ -326,10 +386,56 @@ class EditFile:
                 team_id=team_id,
                 name=name,
                 abbreviation=abbrev,
+                manager_id=manager_id,
             )
 
         logger.info(f"Read {len(teams)} teams")
         return teams
+
+    def get_all_managers(self) -> dict[int, ManagerInfo]:
+        """
+        Read all manager entries from the Manager Entry table.
+
+        Returns:
+            {manager_id: ManagerInfo}
+        """
+        managers = {}
+        for i in range(self.manager_count):
+            entry_offset = self.manager_start + i * MANAGER_ENTRY_SIZE
+            if entry_offset + MANAGER_ENTRY_SIZE > len(self._data):
+                break
+
+            mid = struct.unpack_from("<I", self._data, entry_offset + ME_MANAGER_ID)[0]
+            nat = struct.unpack_from("<H", self._data, entry_offset + ME_NATIONALITY)[0]
+            name = self._read_string(entry_offset + ME_MANAGER_NAME, 79)
+
+            if mid != 0 or name:
+                managers[mid] = ManagerInfo(
+                    manager_id=mid,
+                    name=name,
+                    nationality=nat,
+                )
+
+        logger.info(f"Read {len(managers)} managers")
+        return managers
+
+    def get_team_manager(self, team_id: int) -> int | None:
+        """Get the assigned manager ID for a team."""
+        team_info = self.get_all_team_info().get(team_id)
+        return team_info.manager_id if team_info else None
+
+    def set_team_manager(self, team_id: int, manager_id: int) -> bool:
+        """Set the assigned manager ID for a team."""
+        for i in range(self.team_count):
+            entry_offset = self.team_start + i * TEAM_ENTRY_SIZE
+            if entry_offset + TEAM_ENTRY_SIZE > len(self._data):
+                break
+            tid = struct.unpack_from("<I", self._data, entry_offset + TE_TEAM_ID)[0]
+            if tid == team_id:
+                struct.pack_into("<I", self._data, entry_offset + TE_MANAGER_ID, manager_id)
+                logger.info(f"Assigned manager ID {manager_id} to team {team_id}")
+                return True
+        return False
 
     def get_league_divisions(self) -> list[list[int]]:
         """
@@ -529,7 +635,15 @@ class EditFile:
         best_slot, best_pid = min(active_slots, key=candidate_sort_key)
         return best_slot, best_pid
 
-    def move_player(self, player_id: int, from_team_id: int, to_team_id: int) -> bool:
+    def move_player(
+        self,
+        player_id: int,
+        from_team_id: int,
+        to_team_id: int,
+        shirt_number: int | None = None,
+        preferred_shirt_number: int | None = None,
+        position: str = "",
+    ) -> bool:
         """
         Transfer a player from one team to another.
 
@@ -537,17 +651,22 @@ class EditFile:
         1. Find player in source team's roster
         2. Remove from source (compact slots by shifting last non-zero entry)
         3. Add to destination (first empty slot or auto-release lowest ability player if full)
-        4. Assign an unused shirt number
-        5. Update game plan index IDs if needed
+        4. Assign a smart, conflict-free shirt number based on position & preference
+        5. Update game plan index IDs and repair captaincy / set-piece roles if needed
 
         Args:
             player_id: The player to transfer.
             from_team_id: Source team ID.
             to_team_id: Destination team ID.
+            shirt_number: Optional preferred kit number.
+            preferred_shirt_number: Optional alias for shirt_number.
+            position: Player position label (e.g. 'GK', 'ST', 'CB').
 
         Returns:
             True if transfer succeeded, False otherwise.
         """
+        target_shirt = shirt_number if shirt_number is not None else preferred_shirt_number
+
         # Find team-player entries
         from_entry = self._find_team_player_entry_offset(from_team_id)
         to_entry = self._find_team_player_entry_offset(to_team_id)
@@ -573,6 +692,12 @@ class EditFile:
             logger.warning(f"Player {player_id} already on destination team {to_team_id}")
             return False
 
+        # If no preferred shirt number was passed, use their existing shirt number from source
+        if target_shirt is None and player_idx < len(from_roster.shirt_numbers):
+            old_sn = from_roster.shirt_numbers[player_idx]
+            if old_sn > 0:
+                target_shirt = old_sn
+
         # --- Step 1: Remove from source ---
         # Find last non-zero player in source roster
         last_idx = -1
@@ -584,6 +709,7 @@ class EditFile:
         if last_idx == player_idx:
             # Player is the last one — just zero out
             self._write_player_slot(from_entry, player_idx, 0, 0)
+            self._update_game_plan_after_removal(from_team_id, player_idx, -1)
         elif last_idx > player_idx:
             # Move last player into the vacated slot (compact)
             self._write_player_slot(
@@ -594,11 +720,12 @@ class EditFile:
             # Zero out the last slot
             self._write_player_slot(from_entry, last_idx, 0, 0)
 
-            # Update game plan for source team (index IDs shifted)
+            # Update game plan for source team (index IDs shifted & repaired)
             self._update_game_plan_after_removal(from_team_id, player_idx, last_idx)
         else:
             # player_idx > last_idx shouldn't happen, but handle gracefully
             self._write_player_slot(from_entry, player_idx, 0, 0)
+            self._update_game_plan_after_removal(from_team_id, player_idx, -1)
 
         # Re-read to_roster in case from_entry == to_entry
         to_roster = self._read_team_player_entry(to_entry)
@@ -613,19 +740,25 @@ class EditFile:
             self.release_player(pid_to_rel, to_team_id)
             to_roster = self._read_team_player_entry(to_entry)
 
-        # --- Step 3: Add to destination ---
+        # --- Step 3: Add to destination with Smart Shirt Number ---
         dest_slot = to_roster.first_empty_slot()
         if dest_slot == -1:
             logger.error(f"No empty slot in destination team {to_team_id}")
             return False
 
-        # Pick a shirt number (use a simple unused number)
-        used_numbers = set(to_roster.shirt_numbers)
-        shirt_num = 1
-        for candidate in range(1, 100):
-            if candidate not in used_numbers:
-                shirt_num = candidate
-                break
+        if not hasattr(self, "_player_cache") or not self._player_cache:
+            self._player_cache = self.get_all_players()
+        pinfo = self._player_cache.get(player_id)
+        effective_pos = position or (pinfo.position if pinfo else "")
+        is_gk = (pinfo.is_goalkeeper if pinfo else False) or (effective_pos.upper() == "GK")
+
+        used_numbers = {sn for sn in to_roster.shirt_numbers if sn > 0}
+        shirt_num = assign_smart_shirt_number(
+            used_numbers=used_numbers,
+            preferred_number=target_shirt,
+            position=effective_pos,
+            is_gk=is_gk,
+        )
 
         self._write_player_slot(to_entry, dest_slot, player_id, shirt_num)
 
@@ -670,6 +803,7 @@ class EditFile:
 
         if last_idx == player_idx:
             self._write_player_slot(from_entry, player_idx, 0, 0)
+            self._update_game_plan_after_removal(from_team_id, player_idx, -1)
         elif last_idx > player_idx:
             self._write_player_slot(
                 from_entry, player_idx,
@@ -680,21 +814,34 @@ class EditFile:
             self._update_game_plan_after_removal(from_team_id, player_idx, last_idx)
         else:
             self._write_player_slot(from_entry, player_idx, 0, 0)
+            self._update_game_plan_after_removal(from_team_id, player_idx, -1)
 
         logger.info(f"Released player {player_id} from team {from_team_id} (now Free Agent)")
         return True
 
-    def add_player(self, player_id: int, to_team_id: int) -> bool:
+    def add_player(
+        self,
+        player_id: int,
+        to_team_id: int,
+        shirt_number: int | None = None,
+        preferred_shirt_number: int | None = None,
+        position: str = "",
+    ) -> bool:
         """
         Sign a player from Free Agent into a team.
 
         Args:
             player_id: Player ID to add.
             to_team_id: Destination team ID.
+            shirt_number: Optional preferred kit number.
+            preferred_shirt_number: Optional alias for shirt_number.
+            position: Player position label.
 
         Returns:
             True if added successfully, False otherwise.
         """
+        target_shirt = shirt_number if shirt_number is not None else preferred_shirt_number
+
         to_entry = self._find_team_player_entry_offset(to_team_id)
         if to_entry is None:
             logger.error(f"Team {to_team_id} not found in Team-Player table")
@@ -719,12 +866,19 @@ class EditFile:
             logger.error(f"Team {to_team_id} roster is full (40 players)")
             return False
 
-        used_numbers = set(to_roster.shirt_numbers)
-        shirt_num = 1
-        for candidate in range(1, 100):
-            if candidate not in used_numbers:
-                shirt_num = candidate
-                break
+        if not hasattr(self, "_player_cache") or not self._player_cache:
+            self._player_cache = self.get_all_players()
+        pinfo = self._player_cache.get(player_id)
+        effective_pos = position or (pinfo.position if pinfo else "")
+        is_gk = (pinfo.is_goalkeeper if pinfo else False) or (effective_pos.upper() == "GK")
+
+        used_numbers = {sn for sn in to_roster.shirt_numbers if sn > 0}
+        shirt_num = assign_smart_shirt_number(
+            used_numbers=used_numbers,
+            preferred_number=target_shirt,
+            position=effective_pos,
+            is_gk=is_gk,
+        )
 
         self._write_player_slot(to_entry, dest_slot, player_id, shirt_num)
         logger.info(f"Signed player {player_id} to team {to_team_id} (slot {dest_slot}, shirt #{shirt_num})")
@@ -751,36 +905,77 @@ class EditFile:
 
     def _update_game_plan_after_removal(self, team_id: int, removed_idx: int, replacement_idx: int):
         """
-        Update game plan index IDs after a player is compacted out of the roster.
+        Game Plan Doctor: Repair and maintain squad tactics integrity when a player is removed.
 
         When slot[removed_idx] is replaced by slot[replacement_idx] (last player),
-        any game plan reference to replacement_idx should become removed_idx,
-        and any reference to removed_idx should be cleared.
+        1. Any game plan reference to replacement_idx becomes removed_idx.
+        2. If Captain or set-piece takers referenced the removed player (or an invalid slot),
+           reassigns captaincy and set pieces to the highest rated remaining players.
+        3. Ensures Lineup index array contains valid slot indices.
         """
         gp_offset = self._find_game_plan_offset(team_id)
-        if gp_offset is None:
+        if gp_offset is None or gp_offset + GAME_PLAN_ENTRY_SIZE > len(self._data):
             return
 
+        team_roster = self.get_team_roster(team_id)
+        if not team_roster:
+            return
+
+        active_slots = [i for i, pid in enumerate(team_roster.player_ids) if pid != 0]
+        if not active_slots:
+            return
+
+        if not hasattr(self, "_player_cache") or not self._player_cache:
+            self._player_cache = self.get_all_players()
+
+        # Find best captain candidate (highest OVR starter or active player)
+        def player_ovr(slot_idx: int) -> int:
+            pid = team_roster.player_ids[slot_idx]
+            p = self._player_cache.get(pid)
+            return p.overall_rating if p and p.overall_rating > 0 else 50
+
+        best_captain_slot = max(active_slots, key=lambda s: (1 if s < 11 else 0, player_ovr(s)))
+        best_fk_slot = max(active_slots, key=lambda s: player_ovr(s))
+
+        # Re-map 1-byte role index fields
+        role_offsets = [
+            GP_CAPTAIN,
+            GP_LONG_FK,
+            GP_SHORT_FK,
+            GP_FK_2,
+            GP_LEFT_CK,
+            GP_RIGHT_CK,
+            GP_PK,
+        ]
+
+        for roff in role_offsets:
+            target_off = gp_offset + roff
+            if target_off < len(self._data):
+                val = self._data[target_off]
+                if val == replacement_idx and replacement_idx >= 0:
+                    self._data[target_off] = removed_idx
+                elif val == removed_idx or val not in active_slots:
+                    # Pointed to departed player or invalid index -> reassign!
+                    fallback_slot = best_captain_slot if roff == GP_CAPTAIN else best_fk_slot
+                    self._data[target_off] = fallback_slot
+
+        # Repair Players to Join Attack (3 bytes)
+        att_off = gp_offset + GP_ATTACK_PLAYERS
+        for b in range(3):
+            if att_off + b < len(self._data):
+                val = self._data[att_off + b]
+                if val == replacement_idx and replacement_idx >= 0:
+                    self._data[att_off + b] = removed_idx
+                elif val == removed_idx or (val != 0xFF and val not in active_slots):
+                    self._data[att_off + b] = 0xFF  # None
+
+        # Re-map Lineup (40 bytes)
         lineup_offset = gp_offset + GP_LINEUP
-
         for i in range(TP_MAX_PLAYERS):
-            idx_byte = self._data[lineup_offset + i]
-
-            if idx_byte == replacement_idx:
-                # This player moved to removed_idx's slot
-                self._data[lineup_offset + i] = removed_idx
-            elif idx_byte == removed_idx:
-                # The removed player — set to the replacement's new position
-                # Actually this player was removed, so we could set to 0 or leave
-                # But since the slot now contains the replacement player,
-                # and we already handled that case above, this shouldn't normally trigger
-                pass
-
-        # Also update captain if needed
-        captain_offset = gp_offset + GP_CAPTAIN
-        captain_idx = self._data[captain_offset]
-        if captain_idx == replacement_idx:
-            self._data[captain_offset] = removed_idx
+            if lineup_offset + i < len(self._data):
+                idx_byte = self._data[lineup_offset + i]
+                if idx_byte == replacement_idx and replacement_idx >= 0:
+                    self._data[lineup_offset + i] = removed_idx
 
     def _find_game_plan_offset(self, team_id: int) -> int | None:
         """Find the byte offset of a team's game plan entry."""

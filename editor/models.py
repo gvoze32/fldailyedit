@@ -12,6 +12,8 @@ class PlayerInfo:
     print_name: str = ""  # shirt/club print name
     overall_rating: int = 0  # player overall ability (0 if unknown)
     position: str = ""  # e.g. 'GK', 'CB', 'LB', 'RB', 'DMF', 'CMF', 'AMF', 'LWF', 'RWF', 'SS', 'CF'
+    nationality: str = ""  # country or nationality code
+    age: int = 0  # player age
 
     @property
     def is_goalkeeper(self) -> bool:
@@ -58,7 +60,17 @@ class TeamData:
 
 @dataclass
 class TeamInfo:
-    """Team metadata from the Team Entry table (name, abbreviation)."""
+    """Team metadata from the Team Entry table (name, abbreviation, manager)."""
     team_id: int
     name: str
     abbreviation: str = ""
+    manager_id: int = 0
+
+
+@dataclass
+class ManagerInfo:
+    """Manager metadata from the Manager Entry table."""
+    manager_id: int
+    name: str
+    nationality: int = 0
+

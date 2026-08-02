@@ -124,6 +124,10 @@ class NameMatcher:
 
         # {player_id: position_str}
         self._player_positions: dict[int, str] = {}
+        # {player_id: nationality_str}
+        self._player_nationalities: dict[int, str] = {}
+        # {player_id: age_int}
+        self._player_ages: dict[int, int] = {}
 
         # For rapidfuzz: list of normalized names
         self._player_names: list[str] = []
@@ -148,20 +152,34 @@ class NameMatcher:
         if self._team_aliases:
             logger.info(f"Loaded {len(self._team_aliases)} team aliases")
 
-    def load_player_db(self, players: dict[str, int], positions: Optional[dict[int, str]] = None):
+    def load_player_db(
+        self,
+        players: dict[str, int],
+        positions: Optional[dict[int, str]] = None,
+        nationalities: Optional[dict[int, str]] = None,
+        ages: Optional[dict[int, int]] = None,
+    ):
         """
         Load the FL26 player database.
 
         Args:
             players: {player_name: player_id}
             positions: Optional {player_id: position_string} (e.g. {123: 'GK', 456: 'CF'})
+            nationalities: Optional {player_id: nationality_string}
+            ages: Optional {player_id: age_int}
         """
         self._player_db.clear()
         self._player_id_to_names.clear()
         self._player_positions.clear()
+        self._player_nationalities.clear()
+        self._player_ages.clear()
 
         if positions:
             self._player_positions = {pid: pos for pid, pos in positions.items()}
+        if nationalities:
+            self._player_nationalities = {pid: nat for pid, nat in nationalities.items()}
+        if ages:
+            self._player_ages = {pid: age for pid, age in ages.items()}
 
         for name, pid in players.items():
             norm = _normalize(name)
@@ -198,10 +216,18 @@ class NameMatcher:
         self._cleaned_team_names = list(self._cleaned_team_db.keys())
         logger.info(f"Loaded {len(self._team_db)} teams into matcher (clubs_only={clubs_only})")
 
-    def _score_player(self, query_norm: str, candidate_norm: str, position: Optional[str] = None, candidate_pid: Optional[int] = None) -> float:
+    def _score_player(
+        self,
+        query_norm: str,
+        candidate_norm: str,
+        position: Optional[str] = None,
+        candidate_pid: Optional[int] = None,
+        nationality: Optional[str] = None,
+        age: Optional[int] = None,
+    ) -> float:
         """
-        Calculate a composite fuzzy score for player names.
-        Combines token_set_ratio, token_sort_ratio, and WRatio with length penalty and position gate.
+        Calculate a composite fuzzy score for player names with Tri-Factor verification
+        (Name match + Positional compatibility + Nationality/Age alignment).
         """
         # Position Compatibility Gate
         if position and candidate_pid and self._player_positions:
@@ -236,6 +262,25 @@ class NameMatcher:
             if pes_pos and _get_pos_category(position) == _get_pos_category(pes_pos):
                 base_score = min(100.0, base_score + 2.0)
 
+        # Tri-Factor Nationality verification
+        if nationality and candidate_pid and self._player_nationalities:
+            db_nat = self._player_nationalities.get(candidate_pid, "")
+            if db_nat:
+                norm_scraped_nat = _normalize(nationality)
+                norm_db_nat = _normalize(db_nat)
+                if norm_scraped_nat in norm_db_nat or norm_db_nat in norm_scraped_nat:
+                    base_score = min(100.0, base_score + 6.0)
+
+        # Tri-Factor Age verification
+        if age and age > 0 and candidate_pid and self._player_ages:
+            db_age = self._player_ages.get(candidate_pid, 0)
+            if db_age > 0:
+                diff = abs(age - db_age)
+                if diff <= 1:
+                    base_score = min(100.0, base_score + 4.0)
+                elif diff > 4:
+                    base_score = max(0.0, base_score - 10.0)
+
         return min(100.0, float(base_score))
 
     def match_player(
@@ -246,6 +291,8 @@ class NameMatcher:
         to_team_id: Optional[int] = None,
         team_player_map: Optional[dict[int, list[int]]] = None,
         position: Optional[str] = None,
+        nationality: Optional[str] = None,
+        age: Optional[int] = None,
     ) -> tuple[Optional[int], str, float]:
         """
         Match a scraped player name to the FL26 database with optional context verification.
@@ -257,6 +304,8 @@ class NameMatcher:
             to_team_id: Optional destination/parent club ID for loan returns/verification.
             team_player_map: Optional {team_id: [player_ids]} map to confirm player is on roster.
             position: Optional position string (e.g. 'GK', 'CB', 'CF') from transfer metadata.
+            nationality: Optional player nationality.
+            age: Optional player age.
 
         Returns:
             (player_id, matched_fl26_name, confidence)
@@ -308,7 +357,14 @@ class NameMatcher:
                 if cand_norm in self._player_db:
                     orig, pid = self._player_db[cand_norm]
                     if pid in relevant_rosters:
-                        composite_score = self._score_player(norm_query, cand_norm, position=position, candidate_pid=pid)
+                        composite_score = self._score_player(
+                            norm_query,
+                            cand_norm,
+                            position=position,
+                            candidate_pid=pid,
+                            nationality=nationality,
+                            age=age,
+                        )
                         if composite_score >= 68.0:
                             logger.debug(
                                 f"Context confirmed: '{scraped_name}' found in club roster "
@@ -319,7 +375,14 @@ class NameMatcher:
         # Step 4: General Multi-Scorer Matching with position check
         for cand_norm, _, _ in candidates:
             cand_orig, cand_pid = self._player_db[cand_norm]
-            score = self._score_player(norm_query, cand_norm, position=position, candidate_pid=cand_pid)
+            score = self._score_player(
+                norm_query,
+                cand_norm,
+                position=position,
+                candidate_pid=cand_pid,
+                nationality=nationality,
+                age=age,
+            )
             if score > best_conf:
                 best_conf = score
                 best_name = cand_norm
