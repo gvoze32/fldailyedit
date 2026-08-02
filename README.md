@@ -136,8 +136,9 @@ python run.py run --edit-file /path/to/EDIT00000000 --in-place
 
 ```text
 fleditscrape/
-├── .github/workflows/     # GitHub Actions workflow (daily cloud sync + artifacts)
-│   └── sync-transfers.yml
+├── .github/workflows/     # GitHub Actions workflows
+│   ├── sync-deep.yml      # Daily cron (00:00 UTC) full deep sweep 150+ clubs
+│   └── sync-fast.yml      # Daily cron (00:00 UTC) fast global live feed
 ├── sample/                # Pristine / base save file (never overwritten)
 │   └── EDIT00000000
 ├── output/                # Generated updated save file
