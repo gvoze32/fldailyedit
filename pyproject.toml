@@ -1,7 +1,7 @@
 [project]
 name = "fleditscrape"
 version = "0.1.0"
-description = "FL26 (Football Life) player transfer automation tool"
+description = "Player transfer automation tool for Football Life (All Versions) & PES 2021"
 requires-python = ">=3.10"
 dependencies = [
     "requests>=2.31.0",

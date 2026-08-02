@@ -1,21 +1,22 @@
-# FLEditScrape — Football Life 2026 (FL26) Transfer Automation Tool
+# FLEditScrape — Football Life & PES 2021 Transfer Tool
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Tests](https://img.shields.io/badge/tests-57%2F57%20passed-brightgreen.svg)]()
-[![Target](https://img.shields.io/badge/target-SP%20Football%20Life%202026-orange.svg)](https://www.pessmokepatch.com/)
+[![Compatibility](https://img.shields.io/badge/compatibility-All%20Versions-orange.svg)](https://www.pessmokepatch.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-An automated, safe, and intelligent player transfer synchronization tool for **SP Football Life 2026 (eFootball PES 2021 engine)**.
+An automated, safe, and intelligent player transfer synchronization tool for **Football Life (All Versions)** and **eFootball PES 2021**.
 
-It automatically fetches live, verified football transfers from **FotMob's real-time transfer feed**, matches players and clubs against the internal FL26 database using high-confidence fuzzy matching, creates automatic backups, and directly applies roster updates into your encrypted `EDIT00000000` save file.
+It automatically fetches live, verified football transfers from **FotMob's real-time transfer feed**, matches players and clubs against your game database using high-confidence fuzzy matching, creates automatic backups, and directly applies roster updates into your encrypted `EDIT00000000` save file.
 
 ---
 
 ## ⚡ Features
 
-- **🚀 Live Transfer Scraping**: Fetches up-to-the-minute global transfer data (transfers, loans, free agent releases, and signings) from FotMob via lightweight, direct async HTTP requests (<0.5s execution, 0 bot blocks).
+- **🚀 Live Real-Time Transfer Scraping**: Fetches up-to-the-minute global transfer data (transfers, loans, free agent releases, and signings) from FotMob via lightweight, direct async HTTP requests (<0.5s execution, 0 bot blocks).
 - **🧠 Intelligent Fuzzy Matching**: RapidFuzz-powered matching with diacritic normalization, custom team aliases ([data/team_aliases.json](data/team_aliases.json)), and manual overrides ([data/name_overrides.json](data/name_overrides.json)).
-- **📊 Comprehensive FL26 Database**: Pre-indexed database of **23,780 players** and **583 playable club teams** across 29 leagues. National teams are automatically protected and excluded from club transfer operations.
+- **📊 Universal Game Database**: Pre-indexed database of **23,780 players** and **580+ playable club teams** across 29 leagues. National teams are automatically protected and excluded from club transfer operations.
+- **🔄 Universal Compatibility**: Works seamlessly across all Football Life versions and PES 2021.
 - **🛡️ Save File Integrity & Safety**:
   - **Automatic Rolling Backups**: Automatically creates timestamped copies in `backups/` before any file modification.
   - **Dry-Run Mode**: Inspect and simulate transfer matching without modifying your save file.
@@ -34,12 +35,12 @@ It automatically fetches live, verified football transfers from **FotMob's real-
 graph LR
     A[FotMob Live API] -->|Direct Async HTTP| B[Scraper Engine]
     B -->|Transfer Records| C[Fuzzy Matcher RapidFuzz]
-    D[FL26 DB & CSV 23k Players] --> C
+    D[Game DB & CSV 23k Players] --> C
     C -->|Matched Transfers| E[Safety Backup Engine]
     E -->|edit00000000 backup| F[pesXdecrypter Decrypt]
     F -->|data.dat| G[Binary EditFile Engine]
     G -->|Move / Sign / Release| H[pesXdecrypter Encrypt]
-    H -->|Updated Save File| I[FL26 Game Ready]
+    H -->|Updated Save File| I[Game Ready Save]
     G -->|Audit Record| J[transfer_log.jsonl]
 ```
 
@@ -57,14 +58,14 @@ fleditscrape/
 │   ├── fotmob.py          # Direct async FotMob transfer scraper
 │   ├── matcher.py         # Fuzzy matching engine (players & clubs)
 │   └── models.py          # Transfer and MatchedTransfer data models
-├── editor/                # PES 2021 / FL26 binary save editor
+├── editor/                # PES 2021 / Football Life binary save editor
 │   ├── editfile.py        # Binary parser, player mover, roster manager
 │   ├── crypto.py          # pesXdecrypter wrapper (decrypt & re-encrypt)
 │   ├── backup.py          # Automatic rolling backup system
 │   ├── logger.py          # JSON Lines transfer audit logging
 │   └── models.py          # PlayerInfo & TeamData data structures
 ├── data/                  # Game databases and alias tables
-│   ├── players.csv        # FL26 23k player database registry
+│   ├── players.csv        # 23k player database registry
 │   ├── team_aliases.json  # Club name aliases and abbreviations
 │   ├── name_overrides.json# Manual name/ID override mappings
 │   └── leagues.json       # Playable league definitions
@@ -122,7 +123,7 @@ python run.py run --dry-run --edit-file sample/EDIT00000000 --pages 2
 ```
 
 ### 2. Apply Live Transfers
-Scrape and write transfers directly into your FL26 save file:
+Scrape and write transfers directly into your save file:
 
 ```bash
 python run.py run --edit-file sample/EDIT00000000 --pages 2
@@ -150,7 +151,7 @@ python run.py cron --interval-hours 12
 ```
 
 ### 5. Inspect Save File Structure
-View total players, playable teams, and player slots in your `EDIT00000000` file:
+View total players, playable teams, and player slots in any `EDIT00000000` file:
 
 ```bash
 python run.py inspect --edit-file sample/EDIT00000000
@@ -172,7 +173,7 @@ python run.py log --last 25
 | [config.py](config.py) | Central settings (default paths, match thresholds, backup retention). |
 | [data/team_aliases.json](data/team_aliases.json) | Custom team name aliases for matching variations (e.g., `Man Utd` → `Manchester United`). |
 | [data/name_overrides.json](data/name_overrides.json) | Manual overrides for players with special nicknames or IDs. |
-| [data/players.csv](data/players.csv) | Full FL26 player registry database (23,780 players). |
+| [data/players.csv](data/players.csv) | Full player registry database (23,780 players). |
 
 ---
 
@@ -194,13 +195,16 @@ All **57 unit tests** cover:
 
 ## 💡 Troubleshooting & FAQ
 
-### Where is my FL26 `EDIT00000000` file located?
-- **Windows / Steam**:
+### Where is my `EDIT00000000` save file located?
+- **Windows / Steam / SP Football Life**:
   `C:\Users\<YourUsername>\Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\save\EDIT00000000`
-- **Linux (Wine / Proton)**:
+- **Linux (Wine / Proton / Steam Deck)**:
   `~/.steam/steam/steamapps/compatdata/.../pfx/drive_c/users/steamuser/Documents/KONAMI/.../save/EDIT00000000`
-- **macOS / Sample**:
-  You can point directly to any test file using `--edit-file sample/EDIT00000000`.
+- **macOS / Custom Path**:
+  You can point directly to any file using `--edit-file <path_to_EDIT00000000>`.
+
+### Will this work across all versions?
+Yes! It is fully compatible with all Football Life versions and PES 2021.
 
 ### Are my original saves safe?
 Yes. Before any edit file is modified, an automated backup is created in the `backups/` folder with timestamp notation (`EDIT00000000.bak.YYYYMMDD_HHMMSS`).
