@@ -93,6 +93,35 @@ class TestPlayerMatching:
         assert pid is None
         assert conf == 0.0
 
+    def test_middle_name_token_set(self, matcher):
+        """'Gabriel Jesus' matching 'Gabriel Fernando de Jesus'."""
+        matcher.load_player_db({"Gabriel Fernando de Jesus": 5001})
+        pid, name, conf = matcher.match_player("Gabriel Jesus", threshold=75)
+        assert pid == 5001
+        assert conf >= 75
+
+    def test_contextual_disambiguation(self):
+        """When multiple players share similar names, context chooses the one on from_team."""
+        m = NameMatcher()
+        m.load_player_db({
+            "Danilo Luiz da Silva": 3001,   # Juventus
+            "Danilo Pereira": 3002,         # PSG
+        })
+        # Roster: 2007 (Juventus) has 3001, 2006 (PSG) has 3002
+        roster_map = {
+            2007: [3001, 9999],
+            2006: [3002, 8888],
+        }
+        # Searching "Danilo" with origin team Juventus should pick 3001
+        pid, name, conf = m.match_player(
+            "Danilo",
+            threshold=70,
+            from_team_id=2007,
+            team_player_map=roster_map,
+        )
+        assert pid == 3001
+        assert conf == 100.0
+
 
 # --- Team matching tests ---
 
@@ -109,6 +138,7 @@ class TestTeamMatching:
             "Paris Saint-Germain": 2006,
             "Juventus": 2007,
             "Inter Milan": 2008,
+            "AC Sparta Praha": 2009,
         })
         return m
 
@@ -139,6 +169,12 @@ class TestTeamMatching:
         assert tid == 2003
         assert conf >= 60
 
+    def test_club_affix_cleaning(self, matcher):
+        """'Sparta Praha' or 'Sparta Prague' should match 'AC Sparta Praha'."""
+        tid, name, conf = matcher.match_team("Sparta Praha", threshold=80)
+        assert tid == 2009
+        assert conf >= 80
+
     def test_no_match(self, matcher):
         tid, name, conf = matcher.match_team("Nonexistent FC", threshold=80)
         assert tid is None
@@ -148,3 +184,4 @@ class TestTeamMatching:
         tid, name, conf = m.match_team("Any Team")
         assert tid is None
         assert conf == 0.0
+

@@ -1,15 +1,18 @@
 """
-Fuzzy name matching engine for mapping Transfermarkt names to FL26 database names.
+Fuzzy name matching engine for mapping scraped names to FL26 database names.
 
 Uses a multi-strategy approach:
 1. Manual override lookup (highest priority)
 2. Exact match after normalization
-3. token_sort_ratio (handles word order: "Ronaldo Cristiano" vs "Cristiano Ronaldo")
-4. partial_ratio (handles abbreviations: "K. Mbappé" vs "Kylian Mbappé")
-5. WRatio (weighted combination, general fallback)
+3. Context-aware roster confirmation (boosts confidence if player is in from_team)
+4. token_set_ratio (handles extra middle names / mononyms)
+5. token_sort_ratio (handles word order: "Ronaldo Cristiano" vs "Cristiano Ronaldo")
+6. WRatio (weighted combination, general fallback)
+7. Club prefix/suffix normalization (strips FC, CF, AC, SV, etc.)
 """
 import json
 import logging
+import re
 import unicodedata
 from pathlib import Path
 from typing import Optional
@@ -20,6 +23,12 @@ import config
 
 logger = logging.getLogger(__name__)
 
+# Common club prefix/suffix tokens that often differ between data sources
+_CLUB_AFFIX_REGEX = re.compile(
+    r"\b(fc|cf|sc|ac|cd|ud|fk|sk|as|us|ss|sv|vfl|vfb|spvgg|kaa|krc|rsc|vv|afc|bsc|ogc|club|calcio|sad|kv|tsv|fsv|1\.\s*fc|1\.fc)\b",
+    re.IGNORECASE,
+)
+
 
 def _normalize(name: str) -> str:
     """
@@ -29,10 +38,19 @@ def _normalize(name: str) -> str:
     - Collapse whitespace
     - Strip leading/trailing whitespace
     """
-    # Decompose unicode chars, then strip combining marks (diacritics)
     nfkd = unicodedata.normalize("NFKD", name)
     stripped = "".join(c for c in nfkd if unicodedata.category(c) != "Mn")
     return " ".join(stripped.lower().split())
+
+
+def _clean_club_name(name: str) -> str:
+    """
+    Normalize a club name and strip common noise affixes (FC, CF, AC, etc.).
+    Example: 'FC Barcelona' → 'barcelona', 'Union Saint-Gilloise' → 'union saint-gilloise'
+    """
+    norm = _normalize(name)
+    cleaned = _CLUB_AFFIX_REGEX.sub(" ", norm)
+    return " ".join(cleaned.split())
 
 
 def _load_json(path: Path) -> dict:
@@ -45,11 +63,10 @@ def _load_json(path: Path) -> dict:
 
 class NameMatcher:
     """
-    Matches scraped names (from Transfermarkt) against a database of known names (from FL26).
+    Matches scraped names (from FotMob/Transfermarkt) against a database of known names (from FL26).
 
     Usage:
         matcher = NameMatcher()
-        # Load FL26 data
         matcher.load_player_db({"Lionel Messi": 12345, "Kylian Mbappé": 67890})
         matcher.load_team_db({"FC Barcelona": 101, "Paris Saint-Germain": 202})
 
@@ -63,9 +80,16 @@ class NameMatcher:
         self._player_db: dict[str, tuple[str, int]] = {}
         self._team_db: dict[str, tuple[str, int]] = {}
 
+        # {player_id: [(normalized_name, original_name)]}
+        self._player_id_to_names: dict[int, list[tuple[str, str]]] = {}
+
         # For rapidfuzz: list of normalized names
         self._player_names: list[str] = []
         self._team_names: list[str] = []
+
+        # Cleaned team names for fallback affix-insensitive matching: {cleaned_name: (orig_name, tid)}
+        self._cleaned_team_db: dict[str, tuple[str, int]] = {}
+        self._cleaned_team_names: list[str] = []
 
         # Manual overrides
         self._player_overrides: dict[str, str] = {}  # scraped_name → fl26_name
@@ -90,9 +114,14 @@ class NameMatcher:
             players: {player_name: player_id}
         """
         self._player_db.clear()
+        self._player_id_to_names.clear()
         for name, pid in players.items():
             norm = _normalize(name)
             self._player_db[norm] = (name, pid)
+            if pid not in self._player_id_to_names:
+                self._player_id_to_names[pid] = []
+            self._player_id_to_names[pid].append((norm, name))
+
         self._player_names = list(self._player_db.keys())
         logger.info(f"Loaded {len(self._player_db)} players into matcher")
 
@@ -105,29 +134,68 @@ class NameMatcher:
             clubs_only: If True, exclude national teams (team_id <= 100).
         """
         self._team_db.clear()
+        self._cleaned_team_db.clear()
+
         for name, tid in teams.items():
             if clubs_only and tid <= 100:
                 continue
             norm = _normalize(name)
             self._team_db[norm] = (name, tid)
+
+            cleaned = _clean_club_name(name)
+            if cleaned and cleaned not in self._cleaned_team_db:
+                self._cleaned_team_db[cleaned] = (name, tid)
+
         self._team_names = list(self._team_db.keys())
+        self._cleaned_team_names = list(self._cleaned_team_db.keys())
         logger.info(f"Loaded {len(self._team_db)} teams into matcher (clubs_only={clubs_only})")
+
+    def _score_player(self, query_norm: str, candidate_norm: str) -> float:
+        """
+        Calculate a composite fuzzy score for player names.
+        Combines token_set_ratio, token_sort_ratio, and WRatio with length penalty.
+        """
+        # 1. token_set_ratio handles extra middle names / substrings cleanly
+        s_set = fuzz.token_set_ratio(query_norm, candidate_norm)
+        # 2. token_sort_ratio handles word order
+        s_sort = fuzz.token_sort_ratio(query_norm, candidate_norm)
+        # 3. WRatio as general weighted metric
+        s_w = fuzz.WRatio(query_norm, candidate_norm)
+
+        base_score = max(s_set, s_sort, s_w)
+
+        # Check for Initial + Surname match (e.g. "k mbappe" vs "kylian mbappe")
+        q_tokens = query_norm.split()
+        c_tokens = candidate_norm.split()
+        if len(q_tokens) >= 2 and len(c_tokens) >= 2:
+            if len(q_tokens[0]) == 1 and q_tokens[0] == c_tokens[0][0] and q_tokens[-1] == c_tokens[-1]:
+                base_score = max(base_score, 90.0)
+
+        # Length penalty for very short query strings matching long candidates
+        # (prevents 3-4 letter acronyms/first names from false matching long unrelated names)
+        if len(query_norm) < 5 and len(candidate_norm) >= len(query_norm) * 2.5:
+            base_score *= 0.75
+
+        return min(100.0, float(base_score))
 
     def match_player(
         self,
         scraped_name: str,
         threshold: float = 0,
+        from_team_id: Optional[int] = None,
+        team_player_map: Optional[dict[int, list[int]]] = None,
     ) -> tuple[Optional[int], str, float]:
         """
-        Match a scraped player name to the FL26 database.
+        Match a scraped player name to the FL26 database with optional context verification.
 
         Args:
-            scraped_name: Player name from Transfermarkt.
+            scraped_name: Player name from FotMob / Transfermarkt.
             threshold: Minimum confidence. 0 = use config default.
+            from_team_id: Optional origin club ID for context-aware disambiguation.
+            team_player_map: Optional {team_id: [player_ids]} map to confirm player is on roster.
 
         Returns:
             (player_id, matched_fl26_name, confidence)
-            Returns (None, "", 0) if no match found above threshold.
         """
         if threshold == 0:
             threshold = config.MATCH_THRESHOLD_PLAYER
@@ -147,37 +215,43 @@ class NameMatcher:
 
         norm_query = _normalize(scraped_name)
 
-        # Step 2: Exact match
+        # Step 2: Exact match after normalization
         if norm_query in self._player_db:
             orig, pid = self._player_db[norm_query]
             return pid, orig, 100.0
 
-        # Step 3: Fuzzy match with multiple strategies
+        # Step 3: Context-Aware Candidate Search
+        # Extract top 10 candidates using token_set_ratio
+        candidates = process.extract(
+            norm_query,
+            self._player_names,
+            scorer=fuzz.token_set_ratio,
+            limit=10,
+        )
+
         best_id, best_name, best_conf = None, "", 0.0
 
-        # 3a: token_sort_ratio — best for word order differences
-        result = process.extractOne(
-            norm_query, self._player_names, scorer=fuzz.token_sort_ratio
-        )
-        if result and result[1] > best_conf:
-            best_conf = result[1]
-            best_name = result[0]
+        # If origin team roster is provided, check if any candidate with score >= 70% is on that team
+        if from_team_id is not None and team_player_map and from_team_id in team_player_map:
+            roster_pids = set(team_player_map[from_team_id])
+            for cand_norm, cand_raw_score, _ in candidates:
+                if cand_norm in self._player_db:
+                    orig, pid = self._player_db[cand_norm]
+                    if pid in roster_pids:
+                        composite_score = self._score_player(norm_query, cand_norm)
+                        if composite_score >= 68.0:
+                            logger.debug(
+                                f"Context confirmed: '{scraped_name}' found in from_team ({from_team_id}) "
+                                f"as '{orig}' (pid={pid}, score={composite_score:.1f}%)"
+                            )
+                            return pid, orig, 100.0
 
-        # 3b: partial_ratio — best for abbreviations ("K. Mbappé" vs "Kylian Mbappé")
-        result = process.extractOne(
-            norm_query, self._player_names, scorer=fuzz.partial_ratio
-        )
-        if result and result[1] > best_conf:
-            best_conf = result[1]
-            best_name = result[0]
-
-        # 3c: WRatio — weighted combination (general fallback)
-        result = process.extractOne(
-            norm_query, self._player_names, scorer=fuzz.WRatio
-        )
-        if result and result[1] > best_conf:
-            best_conf = result[1]
-            best_name = result[0]
+        # Step 4: General Multi-Scorer Matching
+        for cand_norm, _, _ in candidates:
+            score = self._score_player(norm_query, cand_norm)
+            if score > best_conf:
+                best_conf = score
+                best_name = cand_norm
 
         if best_conf >= threshold and best_name in self._player_db:
             orig, pid = self._player_db[best_name]
@@ -198,12 +272,11 @@ class NameMatcher:
         Match a scraped team name to the FL26 database.
 
         Args:
-            scraped_name: Team name from Transfermarkt.
+            scraped_name: Team name from FotMob / Transfermarkt.
             threshold: Minimum confidence. 0 = use config default.
 
         Returns:
             (team_id, matched_fl26_name, confidence)
-            Returns (None, "", 0) if no match found above threshold.
         """
         if threshold == 0:
             threshold = config.MATCH_THRESHOLD_TEAM
@@ -215,7 +288,6 @@ class NameMatcher:
         # Step 1: Check aliases
         alias_target = self._team_aliases.get(scraped_name)
         if not alias_target:
-            # Try case-insensitive alias lookup
             for alias, target in self._team_aliases.items():
                 if alias.lower() == scraped_name.lower():
                     alias_target = target
@@ -235,14 +307,32 @@ class NameMatcher:
             orig, tid = self._team_db[norm_query]
             return tid, orig, 100.0
 
-        # Step 3: Fuzzy match
+        # Step 3: Exact match on cleaned club name (stripping FC, CF, AC, etc.)
+        cleaned_query = _clean_club_name(scraped_name)
+        if cleaned_query and cleaned_query in self._cleaned_team_db:
+            orig, tid = self._cleaned_team_db[cleaned_query]
+            return tid, orig, 98.0
+
+        # Step 4: Fuzzy match across standard team names
         best_id, best_name, best_conf = None, "", 0.0
 
-        for scorer in (fuzz.token_sort_ratio, fuzz.partial_ratio, fuzz.WRatio):
+        for scorer in (fuzz.token_set_ratio, fuzz.token_sort_ratio, fuzz.WRatio):
             result = process.extractOne(norm_query, self._team_names, scorer=scorer)
             if result and result[1] > best_conf:
                 best_conf = result[1]
                 best_name = result[0]
+
+        # Step 5: Fallback fuzzy match on cleaned club names
+        if best_conf < threshold and cleaned_query and self._cleaned_team_names:
+            for scorer in (fuzz.token_set_ratio, fuzz.token_sort_ratio):
+                result = process.extractOne(cleaned_query, self._cleaned_team_names, scorer=scorer)
+                if result and result[1] > best_conf:
+                    best_conf = result[1]
+                    best_name = result[0]
+                    if best_name in self._cleaned_team_db:
+                        orig, tid = self._cleaned_team_db[best_name]
+                        if best_conf >= threshold:
+                            return tid, orig, best_conf
 
         if best_conf >= threshold and best_name in self._team_db:
             orig, tid = self._team_db[best_name]
@@ -253,3 +343,4 @@ class NameMatcher:
             f"(best: '{best_name}' at {best_conf:.0f}%, threshold: {threshold}%)"
         )
         return None, "", best_conf
+

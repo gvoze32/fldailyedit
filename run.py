@@ -216,13 +216,25 @@ def cmd_run(args):
         matcher.load_player_db(player_name_to_id)
         matcher.load_team_db(team_name_to_id)
 
+        # Build team_player_map for context-aware disambiguation
+        all_rosters = ef.get_all_rosters()
+        team_player_map = {
+            tid: roster.roster
+            for tid, roster in all_rosters.items()
+        }
+
         # ── Step 5: Match scraped names to FL26 IDs ──
         print(f"\n🔍 Matching transfers (threshold={threshold}%)...")
         matched = []
         for t in transfers:
-            pid, pname, pconf = matcher.match_player(t.player_name, threshold=threshold)
             ftid, ftname, ftconf = matcher.match_team(t.from_club)
             ttid, ttname, ttconf = matcher.match_team(t.to_club)
+            pid, pname, pconf = matcher.match_player(
+                t.player_name,
+                threshold=threshold,
+                from_team_id=ftid,
+                team_player_map=team_player_map,
+            )
 
             mt = MatchedTransfer(
                 transfer=t,
@@ -238,14 +250,17 @@ def cmd_run(args):
             )
             matched.append(mt)
 
+        club_transfers = [m for m in matched if m.is_club_transfer]
+        releases = [m for m in matched if m.is_release]
+        signings = [m for m in matched if m.is_sign]
         fully_matched = [m for m in matched if m.is_fully_matched]
         partial = [m for m in matched if not m.is_fully_matched]
 
-        print(f"  ✓ Fully matched: {len(fully_matched)}")
-        print(f"  ✗ Partial/unmatched: {len(partial)}")
+        print(f"  ✓ Fully actionable: {len(fully_matched)} (Club Transfers: {len(club_transfers)}, Departures to Free Agent: {len(releases)}, Signings: {len(signings)})")
+        print(f"  ✗ Unmatched: {len(partial)}")
 
         if partial:
-            print("\n  Unmatched transfers:")
+            print("\n  Unmatched transfers (sample):")
             for m in partial[:10]:
                 print(f"    {m}")
 
