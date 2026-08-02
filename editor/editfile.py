@@ -924,58 +924,77 @@ class EditFile:
 
     def _update_game_plan_after_removal(self, team_id: int, removed_idx: int, replacement_idx: int):
         """
-        Game Plan Doctor: Repair and maintain squad tactics integrity when a player is removed.
-
-        When slot[removed_idx] is replaced by slot[replacement_idx] (last player),
-        1. Any game plan reference to replacement_idx becomes removed_idx.
-        2. If Captain or set-piece takers referenced the removed player (or an invalid slot),
-           reassigns captaincy and set pieces to the highest rated remaining players.
-        3. Ensures Lineup index array contains valid slot indices.
+        Game Plan Doctor: Repair squad tactics integrity when a player is removed.
+        - lineup[] array stores roster indices (0-39).
+        - Roles (Captain, FK, PK) store lineup slots (0-10).
         """
         gp_offset = self._find_game_plan_offset(team_id)
         if gp_offset is None or gp_offset + GAME_PLAN_ENTRY_SIZE > len(self._data):
             return
 
-        team_roster = self.get_team_roster(team_id)
-        if not team_roster:
-            return
+        lineup_offset = gp_offset + GP_LINEUP
+        lineup = list(self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS])
 
-        active_slots = [i for i, pid in enumerate(team_roster.player_ids) if pid != 0]
-        if not active_slots:
-            return
+        # Find the departed player and replacement player in the lineup
+        try:
+            slot_D = lineup.index(removed_idx)
+        except ValueError:
+            slot_D = -1
 
-        if not hasattr(self, "_player_cache") or not self._player_cache:
-            self._player_cache = self.get_all_players()
+        try:
+            slot_R = lineup.index(replacement_idx) if replacement_idx >= 0 else -1
+        except ValueError:
+            slot_R = -1
 
-        # Find best captain candidate (highest OVR starter or active player)
-        def player_ovr(slot_idx: int) -> int:
-            pid = team_roster.player_ids[slot_idx]
-            p = self._player_cache.get(pid)
-            return p.overall_rating if p and p.overall_rating > 0 else 50
+        # 1. Remove departed player from lineup
+        if slot_D != -1:
+            if slot_D < 11:
+                # Departed was a Starter. Find the first valid sub to promote.
+                sub_slot = -1
+                for i in range(11, 40):
+                    if lineup[i] != 0xFF and lineup[i] != replacement_idx:
+                        sub_slot = i
+                        break
+                
+                if sub_slot != -1:
+                    lineup[slot_D] = lineup[sub_slot]
+                    lineup[sub_slot] = 0xFF
+                else:
+                    # No subs available, leave a hole (rare)
+                    lineup[slot_D] = 0xFF
+            else:
+                # Departed was a Sub
+                lineup[slot_D] = 0xFF
 
-        best_captain_slot = max(active_slots, key=lambda s: (1 if s < 11 else 0, player_ovr(s)))
-        best_fk_slot = max(active_slots, key=lambda s: player_ovr(s))
+        # 2. Pack the bench (slots 11-39) to push all 0xFF to the end
+        bench = lineup[11:40]
+        valid_bench = [p for p in bench if p != 0xFF]
+        packed_bench = valid_bench + [0xFF] * (29 - len(valid_bench))
+        lineup[11:40] = packed_bench
 
-        # Re-map 1-byte role index fields
-        role_offsets = [
-            GP_CAPTAIN,
-            GP_LONG_FK,
-            GP_SHORT_FK,
-            GP_FK_2,
-            GP_LEFT_CK,
-            GP_RIGHT_CK,
-            GP_PK,
-        ]
+        # 3. Rename replacement_idx to removed_idx in the lineup
+        if replacement_idx >= 0:
+            for i in range(40):
+                if lineup[i] == replacement_idx:
+                    lineup[i] = removed_idx
 
+        # Write lineup back to memory
+        for i in range(TP_MAX_PLAYERS):
+            self._data[lineup_offset + i] = lineup[i]
+
+        # 4. Repair Roles (Captain, FK, PK, Attack Players)
+        # These fields store LINEUP SLOTS (0-10), not roster indices!
+        valid_starters = [i for i in range(11) if lineup[i] != 0xFF]
+        fallback_slot = valid_starters[0] if valid_starters else 0
+
+        # Repair 1-byte role index fields
+        role_offsets = [GP_CAPTAIN, GP_LONG_FK, GP_SHORT_FK, GP_FK_2, GP_LEFT_CK, GP_RIGHT_CK, GP_PK]
         for roff in role_offsets:
             target_off = gp_offset + roff
             if target_off < len(self._data):
                 val = self._data[target_off]
-                if val == replacement_idx and replacement_idx >= 0:
-                    self._data[target_off] = removed_idx
-                elif val == removed_idx or val not in active_slots:
-                    # Pointed to departed player or invalid index -> reassign!
-                    fallback_slot = best_captain_slot if roff == GP_CAPTAIN else best_fk_slot
+                # If the role points to a slot that is now empty, reassign it
+                if val >= 11 or lineup[val] == 0xFF:
                     self._data[target_off] = fallback_slot
 
         # Repair Players to Join Attack (3 bytes)
@@ -983,45 +1002,8 @@ class EditFile:
         for b in range(3):
             if att_off + b < len(self._data):
                 val = self._data[att_off + b]
-                if val == replacement_idx and replacement_idx >= 0:
-                    self._data[att_off + b] = removed_idx
-                elif val == removed_idx or (val != 0xFF and val not in active_slots):
+                if val != 0xFF and (val >= 11 or lineup[val] == 0xFF):
                     self._data[att_off + b] = 0xFF  # None
-
-        # Re-map Lineup (40 bytes)
-        lineup_offset = gp_offset + GP_LINEUP
-        
-        # Extract the current 40-byte lineup array
-        lineup = list(self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS])
-        
-        # Safe Game Plan Doctor: Remove the departed player and patch the hole
-        try:
-            pos_A = lineup.index(removed_idx)
-        except ValueError:
-            pos_A = -1
-            
-        if pos_A != -1:
-            if pos_A < 11:
-                # If departed was a Starter, promote the 1st Sub (index 11) to Starter.
-                # Then shift the rest of the bench/reserves left.
-                lineup[pos_A] = lineup[11]
-                for i in range(11, 39):
-                    lineup[i] = lineup[i+1]
-                lineup[39] = 0xFF
-            else:
-                # If departed was on the bench, just shift the bench left.
-                for i in range(pos_A, 39):
-                    lineup[i] = lineup[i+1]
-                lineup[39] = 0xFF
-            
-        # Re-map the replacement player's index to the new removed_idx hole
-        for i in range(len(lineup)):
-            if lineup[i] == replacement_idx and replacement_idx >= 0:
-                lineup[i] = removed_idx
-                
-        # Write back to memory
-        for i in range(TP_MAX_PLAYERS):
-            self._data[lineup_offset + i] = lineup[i]
 
     def _find_game_plan_offset(self, team_id: int) -> int | None:
         """Find the byte offset of a team's game plan entry."""
