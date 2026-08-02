@@ -95,14 +95,11 @@ TP_MAX_PLAYERS = 40
 
 # Game plan entry
 GP_TEAM_ID = 0x000         # 4 bytes uint32 LE
-GP_LINEUP = 0x1E4          # 40 bytes (40 × 1 byte index IDs)
-GP_LONG_FK = 0x209         # 1 byte index ID
-GP_SHORT_FK = 0x20A        # 1 byte index ID
-GP_FK_2 = 0x20B            # 1 byte index ID
+GP_LINEUP = 0x1E4          # 40 bytes (40 × 1 byte index IDs, offsets 0x1E4 to 0x20B)
 GP_LEFT_CK = 0x20C         # 1 byte index ID
 GP_RIGHT_CK = 0x20D        # 1 byte index ID
 GP_PK = 0x20E              # 1 byte index ID
-GP_ATTACK_PLAYERS = 0x20F  # 3 bytes (3 × 1 byte index IDs)
+GP_ATTACK_PLAYERS = 0x20F  # 3 bytes (3 × 1 byte index IDs: 0x20F, 0x210, 0x211)
 GP_CAPTAIN = 0x212         # 1 byte index ID
 
 
@@ -194,6 +191,9 @@ class EditFile:
         self.unknown_start: int = 0
         self.team_player_start: int = 0
         self.game_plan_start: int = 0
+
+        # Track players transferred in the current session to protect them from overflow auto-release
+        self.transferred_player_ids: set[int] = set()
 
     def load(self, path: str | Path | None = None):
         """Load and parse data.dat from disk."""
@@ -587,11 +587,20 @@ class EditFile:
             return 39, 0
 
         to_roster = self._read_team_player_entry(to_entry)
+        # Protect both the current incoming player and any player transferred in this run
+        protected_ids = {exclude_player_id} | getattr(self, "transferred_player_ids", set())
         active_slots = [
             (slot, pid)
             for slot, pid in enumerate(to_roster.player_ids)
-            if pid != 0 and pid != exclude_player_id
+            if pid != 0 and pid not in protected_ids
         ]
+        # If all players in squad were transferred in this run, fallback to all except current
+        if not active_slots:
+            active_slots = [
+                (slot, pid)
+                for slot, pid in enumerate(to_roster.player_ids)
+                if pid != 0 and pid != exclude_player_id
+            ]
         if not active_slots:
             return 39, 0
 
@@ -779,7 +788,9 @@ class EditFile:
             is_gk=is_gk,
         )
 
+        self.transferred_player_ids.add(player_id)
         self._write_player_slot(to_entry, dest_slot, player_id, shirt_num)
+        self._update_game_plan_after_addition(to_team_id, dest_slot)
 
         logger.info(
             f"Transfer: player {player_id} moved from team {from_team_id} "
@@ -899,7 +910,9 @@ class EditFile:
             is_gk=is_gk,
         )
 
+        self.transferred_player_ids.add(player_id)
         self._write_player_slot(to_entry, dest_slot, player_id, shirt_num)
+        self._update_game_plan_after_addition(to_team_id, dest_slot)
         logger.info(f"Signed player {player_id} to team {to_team_id} (slot {dest_slot}, shirt #{shirt_num})")
         return True
 
@@ -925,8 +938,8 @@ class EditFile:
     def _update_game_plan_after_removal(self, team_id: int, removed_idx: int, replacement_idx: int):
         """
         Game Plan Doctor: Repair squad tactics integrity when a player is removed.
-        - lineup[] array stores roster indices (0-39).
-        - Roles (Captain, FK, PK) store lineup slots (0-10).
+        Guarantees that the 40-byte lineup array remains a strict mathematical
+        permutation of numbers 0..39 (no duplicate 0s, no 0xFF, no missing values).
         """
         gp_offset = self._find_game_plan_offset(team_id)
         if gp_offset is None or gp_offset + GAME_PLAN_ENTRY_SIZE > len(self._data):
@@ -935,75 +948,91 @@ class EditFile:
         lineup_offset = gp_offset + GP_LINEUP
         lineup = list(self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS])
 
-        # Find the departed player and replacement player in the lineup
-        try:
-            slot_D = lineup.index(removed_idx)
-        except ValueError:
-            slot_D = -1
+        # If dummy team or not a valid permutation, skip
+        if sorted(lineup) != list(range(40)):
+            return
 
-        try:
-            slot_R = lineup.index(replacement_idx) if replacement_idx >= 0 else -1
-        except ValueError:
-            slot_R = -1
+        N = (replacement_idx + 1) if replacement_idx >= 0 else (removed_idx + 1)
+        L = N - 1
+        D = removed_idx
 
-        # 1. Remove departed player from lineup
-        if slot_D != -1:
-            if slot_D < 11:
-                # Departed was a Starter. Find the first valid sub to promote.
-                sub_slot = -1
-                for i in range(11, 40):
-                    if lineup[i] != 0xFF and lineup[i] != replacement_idx:
-                        sub_slot = i
-                        break
-                
-                if sub_slot != -1:
-                    lineup[slot_D] = lineup[sub_slot]
-                    lineup[sub_slot] = 0xFF
-                else:
-                    # No subs available, leave a hole (rare)
-                    lineup[slot_D] = 0xFF
+        if D == L or replacement_idx < 0:
+            pos_L = lineup.index(L)
+            if pos_L < 11 and N > 11:
+                sub = lineup[11]
+                lineup[pos_L] = sub
+                lineup[11:N-1] = lineup[12:N]
+                lineup[N-1] = L
+            elif 11 <= pos_L < N:
+                lineup[pos_L:N-1] = lineup[pos_L+1:N]
+                lineup[N-1] = L
+        else:
+            pos_D = lineup.index(D)
+            pos_L = lineup.index(L)
+
+            # Player at L moves into slot D
+            lineup[pos_L] = D
+
+            if pos_D < 11 and N > 11:
+                sub = lineup[11]
+                lineup[pos_D] = sub
+                lineup[11:N-1] = lineup[12:N]
+                lineup[N-1] = L
+            elif 11 <= pos_D < N:
+                lineup[pos_D:N-1] = lineup[pos_D+1:N]
+                lineup[N-1] = L
             else:
-                # Departed was a Sub
-                lineup[slot_D] = 0xFF
-
-        # 2. Pack the bench (slots 11-39) to push all 0xFF to the end
-        bench = lineup[11:40]
-        valid_bench = [p for p in bench if p != 0xFF]
-        packed_bench = valid_bench + [0xFF] * (29 - len(valid_bench))
-        lineup[11:40] = packed_bench
-
-        # 3. Rename replacement_idx to removed_idx in the lineup
-        if replacement_idx >= 0:
-            for i in range(40):
-                if lineup[i] == replacement_idx:
-                    lineup[i] = removed_idx
+                lineup[pos_D] = L
 
         # Write lineup back to memory
         for i in range(TP_MAX_PLAYERS):
             self._data[lineup_offset + i] = lineup[i]
 
-        # 4. Repair Roles (Captain, FK, PK, Attack Players)
-        # These fields store LINEUP SLOTS (0-10), not roster indices!
-        valid_starters = [i for i in range(11) if lineup[i] != 0xFF]
-        fallback_slot = valid_starters[0] if valid_starters else 0
-
-        # Repair 1-byte role index fields
-        role_offsets = [GP_CAPTAIN, GP_LONG_FK, GP_SHORT_FK, GP_FK_2, GP_LEFT_CK, GP_RIGHT_CK, GP_PK]
+        # Update role bytes (Captain, CK, PK, Attackers)
+        # In PES21, these bytes store the ROSTER INDEX (0..39) or 0xFF (Default/Auto)
+        role_offsets = [GP_CAPTAIN, GP_LEFT_CK, GP_RIGHT_CK, GP_PK]
         for roff in role_offsets:
             target_off = gp_offset + roff
             if target_off < len(self._data):
                 val = self._data[target_off]
-                # If the role points to a slot that is now empty, reassign it
-                if val >= 11 or lineup[val] == 0xFF:
-                    self._data[target_off] = fallback_slot
+                if val == D:
+                    self._data[target_off] = 0xFF
+                elif val == L:
+                    self._data[target_off] = D
 
-        # Repair Players to Join Attack (3 bytes)
         att_off = gp_offset + GP_ATTACK_PLAYERS
         for b in range(3):
             if att_off + b < len(self._data):
                 val = self._data[att_off + b]
-                if val != 0xFF and (val >= 11 or lineup[val] == 0xFF):
-                    self._data[att_off + b] = 0xFF  # None
+                if val == D:
+                    self._data[att_off + b] = 0xFF
+                elif val == L:
+                    self._data[att_off + b] = D
+
+    def _update_game_plan_after_addition(self, team_id: int, added_slot: int):
+        """
+        Ensure newly signed player at added_slot is placed on active bench
+        while preserving strict 0..39 permutation invariant.
+        """
+        gp_offset = self._find_game_plan_offset(team_id)
+        if gp_offset is None or gp_offset + GAME_PLAN_ENTRY_SIZE > len(self._data):
+            return
+
+        lineup_offset = gp_offset + GP_LINEUP
+        lineup = list(self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS])
+
+        if sorted(lineup) != list(range(40)):
+            return
+
+        try:
+            pos = lineup.index(added_slot)
+        except ValueError:
+            return
+
+        if pos != added_slot and added_slot < 40:
+            lineup[pos], lineup[added_slot] = lineup[added_slot], lineup[pos]
+            for i in range(TP_MAX_PLAYERS):
+                self._data[lineup_offset + i] = lineup[i]
 
     def _find_game_plan_offset(self, team_id: int) -> int | None:
         """Find the byte offset of a team's game plan entry."""
