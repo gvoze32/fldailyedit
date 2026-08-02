@@ -1,31 +1,24 @@
 # FLEditScrape — Football Life & PES 2021 Transfer Tool
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-63%2F63%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-66%2F66%20passed-brightgreen.svg)]()
 [![Compatibility](https://img.shields.io/badge/compatibility-All%20Versions-orange.svg)](https://www.pessmokepatch.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 An automated, safe, and intelligent player transfer synchronization tool for **Football Life (All Versions)** and **eFootball PES 2021**.
 
-It automatically fetches live, verified football transfers from **FotMob's real-time transfer feed**, matches players and clubs against your game database using high-confidence fuzzy matching, creates automatic backups, and directly applies roster updates into your encrypted `EDIT00000000` save file.
+It automatically fetches live, verified football transfers from **FotMob's real-time transfer feed**, matches players and clubs using fuzzy matching, handles squad limits with position-aware ability logic, and writes updates directly into your `EDIT00000000` save file.
 
 ---
 
-## ⚡ Features
+## ⚡ Key Features
 
-- **🚀 Live Real-Time Transfer Scraping**: Fetches up-to-the-minute global transfer data (transfers, loans, free agent releases, and signings) from FotMob via lightweight, direct async HTTP requests (<0.5s execution, 0 bot blocks).
-- **🧠 Intelligent Fuzzy Matching**: RapidFuzz-powered matching with diacritic normalization, custom team aliases ([data/team_aliases.json](data/team_aliases.json)), and manual overrides ([data/name_overrides.json](data/name_overrides.json)).
-- **📊 Universal Game Database**: Pre-indexed database of **23,780 players** and **580+ playable club teams** across 29 leagues. National teams are automatically protected and excluded from club transfer operations.
-- **🔄 Universal Compatibility**: Works seamlessly across all Football Life versions and PES 2021.
-- **🛡️ Save File Integrity & Safety**:
-  - **Automatic Rolling Backups**: Automatically creates timestamped copies in `backups/` before any file modification.
-  - **Dry-Run Mode**: Inspect and simulate transfer matching without modifying your save file.
-  - **pesXdecrypter Integration**: Native high-speed binary decryption and encryption for PES 2021 edit files.
-- **⏰ Automation & Scheduling**:
-  - **Live Runner**: Apply transfers on-demand with a single command.
-  - **Background Scheduler**: Continuous interval-based runner (`schedule --interval-hours 6`).
-  - **Crontab Generator**: Ready-to-use cron job generator (`cron`).
-  - **Audit Logging**: Structured JSON Lines log ([data/transfer_log.jsonl](data/transfer_log.jsonl)) recording every transfer with confidence score and timestamp.
+- **🚀 Live Real-Time Scraping**: Direct async HTTP requests to FotMob for all latest transfers, loans, releases, and signings (<0.5s execution, 0 bot blocks).
+- **🔄 Loan = Transfer Treatment**: On-loan players are seamlessly transferred to ensure accurate current squads.
+- **🧠 Position-Aware Overflow & GK Protection**: When a team hits the 40-player limit, the tool automatically releases deep reserves with the lowest overall ability while **protecting Starting XI players** and **preserving at least 2 Goalkeepers per squad**.
+- **📊 23k+ Universal Database**: Pre-indexed database of **23,780 players** and **580+ club teams** across 29 leagues. National teams are safely protected.
+- **🤖 GitHub Actions Cloud Automation**: Automated daily sync in the cloud with downloadable updated save files via **GitHub Actions Artifacts**.
+- **🛡️ Safe & Reversible**: Automatic rolling backups before every modification, dry-run simulation mode, and structured JSONL audit logs.
 
 ---
 
@@ -39,7 +32,7 @@ graph LR
     C -->|Matched Transfers| E[Safety Backup Engine]
     E -->|edit00000000 backup| F[pesXdecrypter Decrypt]
     F -->|data.dat| G[Binary EditFile Engine]
-    G -->|Move / Sign / Release| H[pesXdecrypter Encrypt]
+    G -->|Move / Sign / Smart Release| H[pesXdecrypter Encrypt]
     H -->|Updated Save File| I[Game Ready Save]
     G -->|Audit Record| J[transfer_log.jsonl]
 ```
@@ -50,6 +43,8 @@ graph LR
 
 ```text
 fleditscrape/
+├── .github/workflows/     # GitHub Actions workflow (daily cloud sync + artifacts)
+│   └── sync-transfers.yml
 ├── config.py              # Central configurations and paths
 ├── run.py                 # Unified CLI tool (run, schedule, cron, inspect, log)
 ├── pyproject.toml         # Package metadata and dependencies
@@ -71,149 +66,88 @@ fleditscrape/
 │   └── leagues.json       # Playable league definitions
 ├── vendor/                # Native decryption tools
 │   └── pesXdecrypter/     # C implementation of PES2021 crypto engine
-└── tests/                 # Complete unit test suite (57 tests)
-    ├── test_editor.py     # Binary editor & slot safety tests
-    ├── test_matcher.py    # Fuzzy matcher tests
-    └── test_scraper.py    # FotMob parser & model tests
+└── tests/                 # Complete unit test suite (66 tests)
 ```
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Quick Start (Local)
 
-### 1. Requirements
-- **Python 3.10+**
-- **macOS, Linux, or Windows (WSL/Native)**
-- **GCC / Clang** (for compiling `pesXdecrypter` if not already built)
-
-### 2. Installation
+### 1. Installation
 
 ```bash
 git clone https://github.com/gvoze32/fleditscrape.git
 cd fleditscrape
 
-# Create and activate virtual environment
+# Create virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
 
-# Install dependencies
+# Install package
 pip install -e .
-pip install pytest
 ```
 
-### 3. Compile pesXdecrypter (macOS / Linux)
-
-If the binaries in `vendor/pesXdecrypter/` need to be built for your operating system:
+### 2. Compile pesXdecrypter (macOS / Linux)
 
 ```bash
-cd vendor/pesXdecrypter
-make
-cd ../..
+cd vendor/pesXdecrypter && make && cd ../..
 ```
 
----
-
-## 📖 Usage Guide
-
-### 1. Preview Transfers (Dry-Run Mode)
-Inspect matched transfers without modifying your save file:
+### 3. Run Transfer Sync
 
 ```bash
-python run.py run --dry-run --edit-file sample/EDIT00000000 --pages 2
-```
+# Preview transfers (Dry-run mode)
+python run.py run --dry-run --edit-file sample/EDIT00000000 --pages 5
 
-### 2. Apply Live Transfers
-Scrape and write transfers directly into your save file:
-
-```bash
-python run.py run --edit-file sample/EDIT00000000 --pages 2
-```
-
-**Common Flags:**
-- `--edit-file PATH`: Path to your `EDIT00000000` save file (defaults to `config.EDIT_FILE_PATH`).
-- `--window {auto,summer,winter,all}`: Transfer window to scrape from (default: `auto`).
-  - `auto`: Automatically selects the current active transfer window (e.g. Summer: June 1, Winter: Jan 1).
-  - `summer`: Scrapes all transfers since June 1 of the current season.
-  - `winter`: Scrapes all transfers since January 1 of the current season.
-  - `all`: Scrapes without date cutoffs.
-- `--since YYYY-MM-DD`: Custom cutoff date to scrape all transfers since (e.g. `--since 2026-06-01`).
-- `--pages N`: Maximum number of FotMob pages to paginate (50 transfers per page, default: `10`).
-- `--popular`: Restrict scraping to major / popular transfers.
-- `--threshold N`: Minimum fuzzy match confidence score (0-100, default: `80`).
-- `--dry-run`: Simulate transfer matching without modifying the save file.
-
-### 3. Continuous Background Scheduler
-Run the transfer synchronization continuously on a timer:
-
-```bash
-python run.py schedule --interval-hours 6 --edit-file sample/EDIT00000000
-```
-
-### 4. Crontab Generator
-Generate an automated cron job configuration for background execution on Linux/macOS:
-
-```bash
-python run.py cron --interval-hours 12
-```
-
-### 5. Inspect Save File Structure
-View total players, playable teams, and player slots in any `EDIT00000000` file:
-
-```bash
-python run.py inspect --edit-file sample/EDIT00000000
-```
-
-### 6. View Audit Log
-Display recent transfer operations recorded in `data/transfer_log.jsonl`:
-
-```bash
-python run.py log --last 25
+# Apply live transfers directly
+python run.py run --edit-file sample/EDIT00000000 --pages 10
 ```
 
 ---
 
-## ⚙️ Configuration & Customization
+## ☁️ GitHub Actions Cloud Automation
 
-| File | Description |
-|---|---|
-| [config.py](config.py) | Central settings (default paths, match thresholds, backup retention). |
-| [data/team_aliases.json](data/team_aliases.json) | Custom team name aliases for matching variations (e.g., `Man Utd` → `Manchester United`). |
-| [data/name_overrides.json](data/name_overrides.json) | Manual overrides for players with special nicknames or IDs. |
-| [data/players.csv](data/players.csv) | Full player registry database (23,780 players). |
+You can run the transfer sync entirely in the cloud without keeping your computer on:
+
+1. **Scheduled Daily Sync**: Runs automatically every day at **00:00 UTC (07:00 WIB)**.
+2. **On-Demand Manual Trigger**:
+   - Go to **Actions** ➡️ **Sync Live Transfers** ➡️ **Run workflow**.
+   - Choose your transfer window (`auto`, `summer`, `winter`, `all`) and number of pages.
+3. **Download Updated Save File**:
+   - Once completed, open the workflow run and scroll to **Artifacts**.
+   - Download **`updated-fl-save-and-logs.zip`** to get your freshly updated `EDIT00000000`.
 
 ---
 
-## 🧪 Running Tests
+## 📖 CLI Commands Reference
 
-Execute the complete test suite with `pytest`:
+| Command | Usage | Description |
+|---|---|---|
+| `run` | `python run.py run --edit-file <PATH>` | Scrape live transfers and apply to edit file. |
+| `log` | `python run.py log --last 20` | View human-readable summary of recently applied transfers. |
+| `inspect` | `python run.py inspect --edit-file <PATH>` | Inspect teams, player counts, and offsets of any edit file. |
+| `schedule`| `python run.py schedule --interval-hours 6` | Run periodic sync in the background. |
+| `cron` | `python run.py cron --interval-hours 6` | Generate Linux/macOS crontab entry string. |
+
+**Common Flags for `run`:**
+- `--window {auto,summer,winter,all}`: Transfer window cutoff date (default: `auto`).
+- `--since YYYY-MM-DD`: Custom cutoff date (e.g. `--since 2026-06-01`).
+- `--pages N`: Maximum FotMob pages to scrape (50 transfers/page, default: `10`).
+- `--popular`: Scrape only high-profile / major transfers.
+- `--threshold N`: Fuzzy match threshold score (0–100, default: `80`).
+- `--dry-run`: Test and display matches without writing changes.
+
+---
+
+## 🧪 Testing
+
+Run the automated test suite:
 
 ```bash
-source .venv/bin/activate
 pytest -v
 ```
 
-All **57 unit tests** cover:
-- Binary save file reading, writing, moving, signing, releasing, and slot boundary safety.
-- Fuzzy name and team matching algorithms.
-- FotMob payload parsing and data model integrity.
-
----
-
-## 💡 Troubleshooting & FAQ
-
-### Where is my `EDIT00000000` save file located?
-- **Windows / Steam / SP Football Life**:
-  `C:\Users\<YourUsername>\Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\save\EDIT00000000`
-- **Linux (Wine / Proton / Steam Deck)**:
-  `~/.steam/steam/steamapps/compatdata/.../pfx/drive_c/users/steamuser/Documents/KONAMI/.../save/EDIT00000000`
-- **macOS / Custom Path**:
-  You can point directly to any file using `--edit-file <path_to_EDIT00000000>`.
-
-### Will this work across all versions?
-Yes! It is fully compatible with all Football Life versions and PES 2021.
-
-### Are my original saves safe?
-Yes. Before any edit file is modified, an automated backup is created in the `backups/` folder with timestamp notation (`EDIT00000000.bak.YYYYMMDD_HHMMSS`).
+All **66 unit tests** pass, covering binary parsing, roster slot shifting, loan transfers, goalkeeper protection, and fuzzy matching.
 
 ---
 
