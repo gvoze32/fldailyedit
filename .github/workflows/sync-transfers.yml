@@ -2,8 +2,8 @@ name: Sync Live Transfers
 
 on:
   schedule:
-    # Run every 6 hours
-    - cron: "0 */6 * * *"
+    # Run daily at 00:00 UTC (07:00 WIB)
+    - cron: "0 0 * * *"
   workflow_dispatch:
     inputs:
       window:
@@ -108,7 +108,7 @@ jobs:
           for line in sys.stdin:
               if line.strip():
                   d = json.loads(line)
-                  print(f\"| {d.get('timestamp','')} | **{d.get('player_name','')}** | {d.get('from_team_name','')} | {d.get('to_team_name','')} | {d.get('transfer_type','')} | {d.get('confidence',0):.1f}% |\")
+                  print(f\"| {d.get('timestamp','')} | **{d.get('player_name','')}** | {d.get('from_team','')} | {d.get('to_team','')} | {d.get('transfer_type','')} | {d.get('confidence',0):.1f}% |\")
           " >> $GITHUB_STEP_SUMMARY
           else
             echo "ℹ️ No new transfers written to log (dry-run or no matching transfers)." >> $GITHUB_STEP_SUMMARY

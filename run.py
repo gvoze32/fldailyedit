@@ -270,14 +270,49 @@ def cmd_run(args):
         applied = 0
         failed = 0
 
+        # Sort transfers: releases first, then club transfers, then signings to avoid slot overflow
+        fully_matched.sort(key=lambda m: 0 if m.is_release else (1 if m.is_club_transfer else 2))
+
         for m in fully_matched:
             ok = False
             if m.is_club_transfer:
-                ok = ef.move_player(m.player_id, m.from_team_id, m.to_team_id)
+                to_roster = ef.get_team_roster(m.to_team_id)
+                if to_roster and to_roster.has_player(m.player_id):
+                    ok = True
+                else:
+                    ok = ef.move_player(m.player_id, m.from_team_id, m.to_team_id)
+                    if not ok:
+                        current_tid = ef.find_player_team(m.player_id, club_only=True)
+                        if current_tid == m.to_team_id:
+                            ok = True
+                        elif current_tid is not None:
+                            ok = ef.move_player(m.player_id, current_tid, m.to_team_id)
+                        else:
+                            ok = ef.add_player(m.player_id, m.to_team_id)
             elif m.is_release:
-                ok = ef.release_player(m.player_id, m.from_team_id)
+                from_roster = ef.get_team_roster(m.from_team_id)
+                if from_roster and not from_roster.has_player(m.player_id):
+                    ok = True
+                else:
+                    ok = ef.release_player(m.player_id, m.from_team_id)
+                    if not ok:
+                        current_tid = ef.find_player_team(m.player_id, club_only=True)
+                        if current_tid is not None:
+                            ok = ef.release_player(m.player_id, current_tid)
+                        else:
+                            ok = True
             elif m.is_sign:
-                ok = ef.add_player(m.player_id, m.to_team_id)
+                to_roster = ef.get_team_roster(m.to_team_id)
+                if to_roster and to_roster.has_player(m.player_id):
+                    ok = True
+                else:
+                    ok = ef.add_player(m.player_id, m.to_team_id)
+                    if not ok:
+                        current_tid = ef.find_player_team(m.player_id, club_only=True)
+                        if current_tid == m.to_team_id:
+                            ok = True
+                        elif current_tid is not None:
+                            ok = ef.move_player(m.player_id, current_tid, m.to_team_id)
 
             if ok:
                 applied += 1

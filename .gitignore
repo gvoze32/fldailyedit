@@ -19,6 +19,7 @@ venv/
 # Project
 backups/
 storage/
+*.dat
 *.log
 data/transfer_log.jsonl
 data/cron.log

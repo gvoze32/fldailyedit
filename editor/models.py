@@ -6,10 +6,16 @@ from dataclasses import dataclass, field
 
 @dataclass
 class PlayerInfo:
-    """Minimal player info extracted from the edit file (just for identification)."""
+    """Minimal player info extracted from the edit file or database."""
     player_id: int
     name: str
     print_name: str = ""  # shirt/club print name
+    overall_rating: int = 0  # player overall ability (0 if unknown)
+    position: str = ""  # e.g. 'GK', 'CB', 'LB', 'RB', 'DMF', 'CMF', 'AMF', 'LWF', 'RWF', 'SS', 'CF'
+
+    @property
+    def is_goalkeeper(self) -> bool:
+        return self.position.strip().upper() == "GK"
 
 
 @dataclass

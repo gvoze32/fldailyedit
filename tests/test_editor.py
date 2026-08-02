@@ -430,3 +430,101 @@ class TestReleaseAndAddPlayer:
         ok = ef.add_player(2001, to_team_id=102)
         assert ok is False
 
+    def test_overflow_releases_lowest_rated_player(self):
+        """When team is full (40/40), adding a 41st player auto-releases the lowest rated player."""
+        data = self._build_test_data()
+        ef = EditFile()
+        ef.load_bytes(data)
+
+        # Fill team 101 to 40 players
+        to_entry = ef._find_team_player_entry_offset(101)
+        for slot in range(40):
+            ef._write_player_slot(to_entry, slot, 1000 + slot, slot + 1)
+
+        roster = ef.get_team_roster(101)
+        assert roster.is_full is True
+        assert roster.roster_size == 40
+
+        # Inject fake player ratings into cache: make slot 30 (player 1030) have lowest rating
+        from editor.models import PlayerInfo
+        ef._player_cache = {
+            1000 + i: PlayerInfo(player_id=1000 + i, name=f"P{i}", overall_rating=85 if i != 30 else 55)
+            for i in range(40)
+        }
+
+        # Add a new 41st player
+        ok = ef.add_player(9999, to_team_id=101)
+        assert ok is True
+
+        new_roster = ef.get_team_roster(101)
+        assert new_roster.roster_size == 40
+        assert 9999 in new_roster.roster
+        # Player 1030 (lowest rating 55) should have been released
+        assert 1030 not in new_roster.roster
+
+    def test_overflow_protects_goalkeepers(self):
+        """Even if backup GK has lowest raw rating, they must NOT be released if squad has <= 2 GKs."""
+        data = self._build_test_data()
+        ef = EditFile()
+        ef.load_bytes(data)
+
+        # Fill team 101 to 40 players
+        to_entry = ef._find_team_player_entry_offset(101)
+        for slot in range(40):
+            ef._write_player_slot(to_entry, slot, 1000 + slot, slot + 1)
+
+        # 2 GKs: slot 0 (starting GK, 80 OVR) and slot 25 (backup GK, 52 OVR)
+        # Outfield reserve: slot 35 (winger, 62 OVR)
+        from editor.models import PlayerInfo
+        ef._player_cache = {
+            1000 + i: PlayerInfo(
+                player_id=1000 + i,
+                name=f"P{i}",
+                overall_rating=80 if i != 25 and i != 35 else (52 if i == 25 else 62),
+                position="GK" if i in (0, 25) else "CF",
+            )
+            for i in range(40)
+        }
+
+        # Add 41st player
+        ok = ef.add_player(9999, to_team_id=101)
+        assert ok is True
+
+        new_roster = ef.get_team_roster(101)
+        # Backup GK (1025) must remain protected because team only has 2 GKs
+        assert 1025 in new_roster.roster
+        # Outfield reserve (1035) should be released instead
+        assert 1035 not in new_roster.roster
+
+    def test_overflow_releases_excess_third_goalkeeper(self):
+        """If squad has 3+ GKs and 3rd GK is lowest, 3rd reserve GK can be released while preserving 2 GKs."""
+        data = self._build_test_data()
+        ef = EditFile()
+        ef.load_bytes(data)
+
+        to_entry = ef._find_team_player_entry_offset(101)
+        for slot in range(40):
+            ef._write_player_slot(to_entry, slot, 1000 + slot, slot + 1)
+
+        # 3 GKs: slot 0 (85), slot 11 (75), slot 38 (3rd reserve GK, 45 OVR)
+        from editor.models import PlayerInfo
+        ef._player_cache = {
+            1000 + i: PlayerInfo(
+                player_id=1000 + i,
+                name=f"P{i}",
+                overall_rating=80 if i != 38 else 45,
+                position="GK" if i in (0, 11, 38) else "CMF",
+            )
+            for i in range(40)
+        }
+
+        ok = ef.add_player(9999, to_team_id=101)
+        assert ok is True
+
+        new_roster = ef.get_team_roster(101)
+        # 3rd GK (1038) is released
+        assert 1038 not in new_roster.roster
+        # Starting and 2nd GKs (1000, 1011) remain
+        assert 1000 in new_roster.roster
+        assert 1011 in new_roster.roster
+

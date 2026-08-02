@@ -254,7 +254,23 @@ class EditFile:
                         if len(row) >= 2 and row[0].strip().isdigit():
                             pid = int(row[0].strip())
                             pname = row[1].strip()
-                            players[pid] = PlayerInfo(player_id=pid, name=pname, print_name=pname)
+                            ovr = 0
+                            pos = ""
+                            if len(row) >= 3:
+                                val = row[2].strip()
+                                if val.isdigit():
+                                    ovr = int(val)
+                                else:
+                                    pos = val
+                            if len(row) >= 4:
+                                val = row[3].strip()
+                                if val.isdigit():
+                                    ovr = int(val)
+                                else:
+                                    pos = val
+                            players[pid] = PlayerInfo(
+                                player_id=pid, name=pname, print_name=pname, overall_rating=ovr, position=pos
+                            )
                 logger.info(f"Loaded {len(players)} players from database CSV ({csv_file})")
             except Exception as e:
                 logger.warning(f"Failed to load player database CSV: {e}")
@@ -430,6 +446,89 @@ class EditFile:
     # Write operations
     # ──────────────────────────────────────────────────────────
 
+    def find_player_team(self, player_id: int, club_only: bool = True) -> int | None:
+        """Find the team ID that currently has this player registered."""
+        club_ids = self.get_club_team_ids() if club_only else None
+        for i in range(self.team_player_count):
+            entry_offset = self.team_player_start + i * TEAM_PLAYER_ENTRY_SIZE
+            if entry_offset + TEAM_PLAYER_ENTRY_SIZE > len(self._data):
+                break
+            tid = struct.unpack_from("<I", self._data, entry_offset + TP_TEAM_ID)[0]
+            if club_ids and tid not in club_ids:
+                continue
+            for j in range(TP_MAX_PLAYERS):
+                pid = struct.unpack_from("<I", self._data, entry_offset + TP_PLAYER_IDS + j * 4)[0]
+                if pid == player_id:
+                    return tid
+        return None
+
+    def find_overflow_release_candidate(
+        self, team_id: int, exclude_player_id: int | None = None
+    ) -> tuple[int, int]:
+        """
+        Find the best player to release to Free Agent when team roster is full (40/40).
+
+        Selection criteria:
+        1. Prioritizes players with the lowest overall ability (OVR).
+        2. Protects starters (slots 0-10) and primary substitutes (slots 11-17) if possible.
+        3. For players with equal or unknown ability, chooses the deepest reserve slot (closest to slot 39).
+
+        Returns:
+            (slot_index, player_id)
+        """
+        to_entry = self._find_team_player_entry_offset(team_id)
+        if to_entry is None:
+            return 39, 0
+
+        to_roster = self._read_team_player_entry(to_entry)
+        active_slots = [
+            (slot, pid)
+            for slot, pid in enumerate(to_roster.player_ids)
+            if pid != 0 and pid != exclude_player_id
+        ]
+        if not active_slots:
+            return 39, 0
+
+        if not hasattr(self, "_player_cache") or not self._player_cache:
+            self._player_cache = self.get_all_players()
+
+        # Count total goalkeepers in active roster to protect minimum GK requirement
+        total_gks = 0
+        for slot, pid in active_slots:
+            pinfo = self._player_cache.get(pid)
+            if (pinfo and pinfo.is_goalkeeper) or slot == 0:
+                total_gks += 1
+
+        def candidate_sort_key(item: tuple[int, int]):
+            slot, pid = item
+            pinfo = self._player_cache.get(pid)
+            ovr = pinfo.overall_rating if pinfo and pinfo.overall_rating > 0 else 999
+            is_gk = (pinfo.is_goalkeeper if pinfo else False) or (slot == 0)
+
+            # Role & Positional Tier:
+            # Tier 3: Starters (slots 0-10) -> Strictly protected
+            # Tier 2: Substitutes (slots 11-17) or Protected GK (min 2 GKs rule)
+            # Tier 0: Deep Reserves (slots 18-39) -> Normal candidate pool
+            if slot < 11:
+                tier = 3
+            elif slot < 18:
+                tier = 2
+            elif is_gk and total_gks <= 2:
+                tier = 2  # Protect minimum 2 GKs rule
+            else:
+                tier = 0
+
+            # Position-adjusted effective rating:
+            # Goalkeepers have different stat scaling and specialist value.
+            # Give reserve GKs +10 effective rating bonus so outfield surplus reserves
+            # are preferred for release over specialist goalkeepers.
+            effective_ovr = ovr + (10 if is_gk else 0)
+
+            return (tier, effective_ovr, -slot)
+
+        best_slot, best_pid = min(active_slots, key=candidate_sort_key)
+        return best_slot, best_pid
+
     def move_player(self, player_id: int, from_team_id: int, to_team_id: int) -> bool:
         """
         Transfer a player from one team to another.
@@ -437,7 +536,7 @@ class EditFile:
         Steps:
         1. Find player in source team's roster
         2. Remove from source (compact slots by shifting last non-zero entry)
-        3. Add to destination (first empty slot)
+        3. Add to destination (first empty slot or auto-release lowest ability player if full)
         4. Assign an unused shirt number
         5. Update game plan index IDs if needed
 
@@ -474,10 +573,6 @@ class EditFile:
             logger.warning(f"Player {player_id} already on destination team {to_team_id}")
             return False
 
-        if to_roster.is_full:
-            logger.error(f"Destination team {to_team_id} is full (40 players)")
-            return False
-
         # --- Step 1: Remove from source ---
         # Find last non-zero player in source roster
         last_idx = -1
@@ -505,10 +600,23 @@ class EditFile:
             # player_idx > last_idx shouldn't happen, but handle gracefully
             self._write_player_slot(from_entry, player_idx, 0, 0)
 
-        # --- Step 2: Add to destination ---
+        # Re-read to_roster in case from_entry == to_entry
+        to_roster = self._read_team_player_entry(to_entry)
+
+        # --- Step 2: Handle Full Roster (40 slots limit) ---
+        if to_roster.is_full:
+            slot_to_rel, pid_to_rel = self.find_overflow_release_candidate(to_team_id, exclude_player_id=player_id)
+            logger.warning(
+                f"Destination team {to_team_id} is full (40/40). "
+                f"Auto-releasing lowest ability player {pid_to_rel} (slot {slot_to_rel}) to Free Agent."
+            )
+            self.release_player(pid_to_rel, to_team_id)
+            to_roster = self._read_team_player_entry(to_entry)
+
+        # --- Step 3: Add to destination ---
         dest_slot = to_roster.first_empty_slot()
         if dest_slot == -1:
-            logger.error(f"No empty slot in destination team {to_team_id} (should have been caught)")
+            logger.error(f"No empty slot in destination team {to_team_id}")
             return False
 
         # Pick a shirt number (use a simple unused number)
@@ -596,6 +704,15 @@ class EditFile:
         if to_roster.has_player(player_id):
             logger.warning(f"Player {player_id} already on team {to_team_id}")
             return False
+
+        if to_roster.is_full:
+            slot_to_rel, pid_to_rel = self.find_overflow_release_candidate(to_team_id, exclude_player_id=player_id)
+            logger.warning(
+                f"Team {to_team_id} roster is full (40/40). "
+                f"Auto-releasing lowest ability player {pid_to_rel} (slot {slot_to_rel}) to Free Agent."
+            )
+            self.release_player(pid_to_rel, to_team_id)
+            to_roster = self._read_team_player_entry(to_entry)
 
         dest_slot = to_roster.first_empty_slot()
         if dest_slot == -1:
