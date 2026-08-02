@@ -18,6 +18,7 @@ venv/
 
 # Project
 backups/
+output/
 storage/
 *.dat
 *.log

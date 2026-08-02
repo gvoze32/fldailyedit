@@ -8,10 +8,12 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent
 DATA_DIR = PROJECT_ROOT / "data"
 VENDOR_DIR = PROJECT_ROOT / "vendor"
+OUTPUT_DIR = PROJECT_ROOT / "output"
 
 # --- Edit file ---
 # Set this to your actual FL26 edit file path
 EDIT_FILE_PATH = Path.home() / "Documents" / "KONAMI" / "eFootball PES 2021 SEASON UPDATE" / "save" / "edit00000000"
+OUTPUT_FILE_PATH = OUTPUT_DIR / "EDIT00000000"
 
 # --- pesXdecrypter ---
 DECRYPTER_BIN = VENDOR_DIR / "pesXdecrypter" / "decrypter21"

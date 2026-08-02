@@ -45,6 +45,10 @@ graph LR
 fleditscrape/
 ├── .github/workflows/     # GitHub Actions workflow (daily cloud sync + artifacts)
 │   └── sync-transfers.yml
+├── sample/                # Base / pristine edit file (never overwritten)
+│   └── EDIT00000000
+├── output/                # Generated updated save file (auto-created)
+│   └── EDIT00000000
 ├── config.py              # Central configurations and paths
 ├── run.py                 # Unified CLI tool (run, schedule, cron, inspect, log)
 ├── pyproject.toml         # Package metadata and dependencies
@@ -96,11 +100,15 @@ cd vendor/pesXdecrypter && make && cd ../..
 ### 3. Run Transfer Sync
 
 ```bash
-# Preview transfers (Dry-run mode)
+# Preview transfers without changing files (Dry-run mode)
 python run.py run --dry-run --edit-file sample/EDIT00000000 --pages 5
 
-# Apply live transfers directly
-python run.py run --edit-file sample/EDIT00000000 --pages 10
+# Apply transfers: reads from sample/ and writes cleanly to output/EDIT00000000
+python run.py run --edit-file sample/EDIT00000000 --pages 40
+
+# Custom output destination (or in-place update)
+python run.py run --edit-file sample/EDIT00000000 -o output/EDIT00000000
+python run.py run --edit-file /path/to/EDIT00000000 --in-place
 ```
 
 ---

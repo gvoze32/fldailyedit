@@ -29,7 +29,7 @@ on:
       pages:
         description: "Maximum number of FotMob pages to scrape (50 transfers per page)"
         type: number
-        default: 10
+        default: 40
         required: false
       popular:
         description: "Only scrape popular / major transfers"
@@ -82,7 +82,7 @@ jobs:
           fi
 
           WINDOW="${{ github.event.inputs.window || 'auto' }}"
-          PAGES="${{ github.event.inputs.pages || 10 }}"
+          PAGES="${{ github.event.inputs.pages || 40 }}"
 
           python run.py run \
             --window "$WINDOW" \
@@ -90,7 +90,8 @@ jobs:
             $SINCE_FLAG \
             $POPULAR_FLAG \
             $DRY_RUN_FLAG \
-            --edit-file sample/EDIT00000000
+            --edit-file sample/EDIT00000000 \
+            --output output/EDIT00000000
 
       - name: Generate Actions Summary
         if: always()
@@ -120,6 +121,6 @@ jobs:
         with:
           name: updated-fl-save-and-logs
           path: |
-            sample/EDIT00000000
+            output/EDIT00000000
             data/transfer_log.jsonl
           retention-days: 14

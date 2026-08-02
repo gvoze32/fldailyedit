@@ -123,6 +123,17 @@ def cmd_run(args):
     edit_path = Path(args.edit_file) if args.edit_file else config.EDIT_FILE_PATH
     threshold = args.threshold or config.MATCH_THRESHOLD_PLAYER
 
+    output_arg = getattr(args, "output", None)
+    in_place = getattr(args, "in_place", False)
+
+    if output_arg:
+        output_path = Path(output_arg)
+    elif in_place:
+        output_path = edit_path
+    else:
+        # Default behavior: write to output/EDIT00000000 to preserve sample/ input
+        output_path = config.OUTPUT_FILE_PATH
+
     if not dry_run and not edit_path.exists():
         print(f"Edit file not found: {edit_path}")
         print("Use --edit-file to specify the path, or set EDIT_FILE_PATH in config.py")
@@ -336,10 +347,16 @@ def cmd_run(args):
         ef.save(data_dat)
 
         # Re-encrypt
-        print(f"\n🔒 Re-encrypting → {edit_path}...")
-        crypto.encrypt(temp_dir, edit_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        print(f"\n🔒 Re-encrypting → {output_path}...")
+        crypto.encrypt(temp_dir, output_path)
 
         print(f"\n✅ Done! {applied} transfers applied successfully.")
+        if output_path.resolve() != edit_path.resolve():
+            print(f"   Input (sample/pristine): {edit_path}")
+            print(f"   Output (updated save):   {output_path}")
+        else:
+            print(f"   Updated file:            {output_path}")
         print(f"   Backup at: {backup_path}")
         print(f"   Log at: {config.TRANSFER_LOG_FILE}")
 
@@ -407,7 +424,9 @@ def main():
     # run (default)
     p_run = sub.add_parser("run", help="Scrape + match + apply transfers")
     p_run.add_argument("--dry-run", action="store_true", help="Don't modify the edit file")
-    p_run.add_argument("--edit-file", type=str, help="Path to edit00000000")
+    p_run.add_argument("--edit-file", type=str, help="Path to input edit00000000 (default: config.EDIT_FILE_PATH or sample/EDIT00000000)")
+    p_run.add_argument("-o", "--output", type=str, help="Path to output updated edit00000000 (default: output/EDIT00000000)")
+    p_run.add_argument("--in-place", action="store_true", help="Overwrite input edit file in-place instead of writing to output/")
     p_run.add_argument("--window", type=str, choices=["auto", "summer", "winter", "all"], default="auto", help="Transfer window (default: auto)")
     p_run.add_argument("--since", type=str, help="Scrape transfers since date (YYYY-MM-DD)")
     p_run.add_argument("--pages", type=int, default=10, help="Maximum number of pages to scrape (50 transfers/page, default: 10)")
@@ -419,7 +438,9 @@ def main():
     p_sched = sub.add_parser("schedule", help="Run transfers continuously on a timer")
     p_sched.add_argument("--interval-hours", type=float, default=6.0, help="Interval between runs in hours (default: 6.0)")
     p_sched.add_argument("--dry-run", action="store_true", help="Don't modify the edit file")
-    p_sched.add_argument("--edit-file", type=str, help="Path to edit00000000")
+    p_sched.add_argument("--edit-file", type=str, help="Path to input edit00000000")
+    p_sched.add_argument("-o", "--output", type=str, help="Path to output updated edit00000000 (default: output/EDIT00000000)")
+    p_sched.add_argument("--in-place", action="store_true", help="Overwrite input edit file in-place")
     p_sched.add_argument("--window", type=str, choices=["auto", "summer", "winter", "all"], default="auto", help="Transfer window (default: auto)")
     p_sched.add_argument("--since", type=str, help="Scrape transfers since date (YYYY-MM-DD)")
     p_sched.add_argument("--pages", type=int, default=10, help="Maximum number of pages to scrape (50 transfers/page, default: 10)")
