@@ -407,12 +407,12 @@ class FotmobScraper:
         all_transfers: list[Transfer] = []
         timeout = aiohttp.ClientTimeout(total=15)
         
-        clubs_to_sweep = get_deep_sweep_clubs()
-        total_clubs = len(clubs_to_sweep)
+        deep_clubs = get_deep_clubs()
+        total_clubs = len(deep_clubs)
         
         async with aiohttp.ClientSession(headers=self.headers, timeout=timeout) as session:
-            for i, (club_name, tid) in enumerate(clubs_to_sweep.items(), 1):
-                logger.info(f"Sweeping {club_name} (ID: {tid}) [{i}/{total_clubs}]...")
+            for i, (club_name, tid) in enumerate(deep_clubs.items(), 1):
+                logger.info(f"Deep fetching {club_name} (ID: {tid}) [{i}/{total_clubs}]...")
                 try:
                     data = await self._fetch_club_data_async(session, tid)
                     if data:
@@ -424,7 +424,7 @@ class FotmobScraper:
                         club_squad = self._extract_squad_from_team_data(data, tid, club_name)
                         all_transfers.extend(club_squad)
                 except Exception as e:
-                    logger.warning(f"Failed to sweep {club_name}: {e}")
+                    logger.warning(f"Failed to deep fetch {club_name}: {e}")
                 
                 # Sleep to prevent Cloudflare ban
                 await asyncio.sleep(0.5)
@@ -434,7 +434,7 @@ class FotmobScraper:
 
 
 
-def get_deep_sweep_clubs() -> dict[str, int]:
+def get_deep_clubs() -> dict[str, int]:
     import json
     from pathlib import Path
     
@@ -522,7 +522,7 @@ def fetch_major_clubs_transfers_safely(
     since_date: Optional[Union[str, date]] = None,
     window: str = "auto",
 ) -> list[Transfer]:
-    """Deep sweep of transfers and squad data from all Major Global clubs."""
+    """Deep fetch of transfers and squad data from all Major Global clubs."""
     scraper = FotmobScraper()
     return asyncio.run(
         scraper.fetch_major_clubs_transfers_safely_async(
@@ -546,7 +546,7 @@ def fetch_transfers_for_club_names(
         else:
             # Look up in available clubs
             matched_id = None
-            available_clubs = get_deep_sweep_clubs()
+            available_clubs = get_deep_clubs()
             for club, cid in available_clubs.items():
                 if clean.lower() in club.lower() or club.lower() in clean.lower():
                     matched_id = cid

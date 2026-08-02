@@ -41,7 +41,7 @@ Pre-built and updated `EDIT00000000` save files and visual transfer report cards
 ## ⚡ Key Features
 
 - **🚀 Live Real-Time Scraping**: Direct async HTTP stream from FotMob for all latest transfers, loans, releases, and signings (<0.5s execution, 0 bot blocks).
-- **🌪️ Deep Mode (Ultimate 5,700+ Clubs)**: Bypass FotMob Cloudflare blocks by sequentially deep-sweeping the profiles of all **5,707 clubs** actively indexed by FotMob, retrieving 100% of full-season transfers across the globe.
+- **🌪️ Deep Mode (Ultimate 5,700+ Clubs)**: Bypass FotMob Cloudflare blocks by sequentially deep-fetching the profiles of all **5,707 clubs** actively indexed by FotMob, retrieving 100% of full-season transfers across the globe.
 - **🛡️ Formation & Game Plan Doctor**: Automatically safeguards team tactics. When a captain, free-kick taker, or corner specialist is transferred out, the Game Plan Doctor safely reassigns captaincy and set-piece roles to the highest-rated remaining active team member.
 - **🔢 Authentic Squad Sync**: Beyond just transfers, the script extracts real **Shirt Numbers** from FotMob squad lists and perfectly applies them in-game! Falls back to smart auto-assignment if the data is missing.
 - **🎯 Tri-Factor Disambiguation Gate**: Strict multi-parameter matching combining name similarity, position gate, nationality verification, and age checks (+6.0 boost for exact nationality match, age-range alignment).
@@ -123,7 +123,7 @@ python run.py run --edit-file /path/to/EDIT00000000 --in-place
 | `cron` | `python run.py cron --interval-hours 6` | Generate Linux/macOS crontab entry string. |
 
 **Parameter Flags for `run`:**
-- `--deep`: **(Default in Actions)** Deep sweep across all **5,700+ Global Clubs** (via local JSON crawler dataset) to extract full-season transfers and real squad shirt numbers.
+- `--deep`: **(Default in Actions)** Deep fetch across all **5,700+ Global Clubs** (via local JSON crawler dataset) to extract full-season transfers and real squad shirt numbers.
 - `--club "Chelsea,Arsenal"`: Target specific club(s).
 - `--window {auto,summer,winter,all}`: Transfer window cutoff date (default: `auto`).
 - `--since YYYY-MM-DD`: Custom cutoff date (e.g. `--since 2026-06-01`).
@@ -137,7 +137,7 @@ python run.py run --edit-file /path/to/EDIT00000000 --in-place
 ```text
 fleditscrape/
 ├── .github/workflows/     # GitHub Actions workflows
-│   ├── sync-deep.yml      # Daily cron (00:00 UTC) full deep sweep of 5,700+ clubs
+│   ├── sync-deep.yml      # Daily cron (00:00 UTC) full deep fetch of 5,700+ clubs
 │   └── sync-fast.yml      # Daily cron (00:00 UTC) fast global live feed
 ├── sample/                # Pristine / base save file (never overwritten)
 │   └── EDIT00000000
