@@ -990,11 +990,24 @@ class EditFile:
 
         # Re-map Lineup (40 bytes)
         lineup_offset = gp_offset + GP_LINEUP
+        
+        # Extract the current 40-byte lineup array
+        lineup = list(self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS])
+        
+        # Remove the departed player (removed_idx) from the lineup to prevent duplicates,
+        # shifting everyone else up, and padding the end with 0xFF.
+        if removed_idx in lineup:
+            lineup.remove(removed_idx)
+            lineup.append(0xFF)
+            
+        # Re-map the replacement player's index to the new removed_idx hole
+        for i in range(len(lineup)):
+            if lineup[i] == replacement_idx and replacement_idx >= 0:
+                lineup[i] = removed_idx
+                
+        # Write back to memory
         for i in range(TP_MAX_PLAYERS):
-            if lineup_offset + i < len(self._data):
-                idx_byte = self._data[lineup_offset + i]
-                if idx_byte == replacement_idx and replacement_idx >= 0:
-                    self._data[lineup_offset + i] = removed_idx
+            self._data[lineup_offset + i] = lineup[i]
 
     def _find_game_plan_offset(self, team_id: int) -> int | None:
         """Find the byte offset of a team's game plan entry."""
