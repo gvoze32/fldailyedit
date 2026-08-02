@@ -60,10 +60,10 @@ def get_transfer_window_range(
     # auto mode
     if ref_date.month >= 6:
         # Currently in or after summer window
-        return date(ref_date.year, 6, 1), date(ref_date.year, 9, 30)
+        return date(ref_date.year, 6, 1), None
     else:
         # Currently in or after winter window
-        return date(ref_date.year, 1, 1), date(ref_date.year, 2, 28)
+        return date(ref_date.year, 1, 1), None
 
 
 def parse_iso_date(date_str: str) -> Optional[date]:
@@ -99,17 +99,19 @@ class FotmobScraper:
         transfers: list[Transfer] = []
         popular_param = "true" if popular_only else "false"
 
-        cutoff_date: Optional[date] = None
+        start_date: Optional[date] = None
+        end_date: Optional[date] = None
+
         if since_date:
             if isinstance(since_date, str):
-                cutoff_date = parse_iso_date(since_date)
+                start_date = parse_iso_date(since_date)
             elif isinstance(since_date, date):
-                cutoff_date = since_date
+                start_date = since_date
         elif window and window != "all":
-            cutoff_date, _ = get_transfer_window_range(window)
+            start_date, end_date = get_transfer_window_range(window)
 
-        if cutoff_date:
-            logger.info(f"Scraping FotMob transfers with cutoff date since: {cutoff_date} (window='{window}')")
+        if start_date:
+            logger.info(f"Scraping FotMob transfers window: {start_date} to {end_date or 'latest'}")
 
         timeout = aiohttp.ClientTimeout(total=15)
         async with aiohttp.ClientSession(headers=self.headers, timeout=timeout) as session:
@@ -140,16 +142,18 @@ class FotmobScraper:
                     if not t:
                         continue
 
-                    # Check date cutoff
                     item_date = parse_iso_date(t.date)
-                    if cutoff_date and item_date and item_date < cutoff_date:
-                        reached_cutoff = True
-                        continue
+                    if item_date:
+                        if end_date and item_date > end_date:
+                            continue
+                        if start_date and item_date < start_date:
+                            reached_cutoff = True
+                            continue
 
                     transfers.append(t)
 
                 if reached_cutoff:
-                    logger.info(f"Reached transfers older than cutoff {cutoff_date} on page {page_num}. Stopping.")
+                    logger.info(f"Reached window start date {start_date} on page {page_num}. Stopping pagination.")
                     break
 
         return transfers
@@ -282,14 +286,16 @@ class FotmobScraper:
         window: str = "auto",
     ) -> list[Transfer]:
         """Fetch all verified transfers (in & out) for a specific club."""
-        cutoff_date: Optional[date] = None
+        start_date: Optional[date] = None
+        end_date: Optional[date] = None
+
         if since_date:
             if isinstance(since_date, str):
-                cutoff_date = parse_iso_date(since_date)
+                start_date = parse_iso_date(since_date)
             elif isinstance(since_date, date):
-                cutoff_date = since_date
+                start_date = since_date
         elif window and window != "all":
-            cutoff_date, _ = get_transfer_window_range(window)
+            start_date, end_date = get_transfer_window_range(window)
 
         timeout = aiohttp.ClientTimeout(total=15)
         async with aiohttp.ClientSession(headers=self.headers, timeout=timeout) as session:
@@ -297,12 +303,13 @@ class FotmobScraper:
             if not data:
                 return []
 
-            return self._extract_transfers_from_team_data(data, cutoff_date)
+            return self._extract_transfers_from_team_data(data, start_date, end_date)
 
     def _extract_transfers_from_team_data(
         self,
         data: dict,
-        cutoff_date: Optional[date] = None,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
     ) -> list[Transfer]:
         """Extract Transfer objects from FotMob team API payload."""
         results: list[Transfer] = []
@@ -324,19 +331,48 @@ class FotmobScraper:
                 if not t:
                     continue
 
-                if cutoff_date:
-                    item_date = parse_iso_date(t.date)
-                    if item_date and item_date < cutoff_date:
+                item_date = parse_iso_date(t.date)
+                if item_date:
+                    if end_date and item_date > end_date:
+                        continue
+                    if start_date and item_date < start_date:
                         continue
 
                 results.append(t)
 
         return results
 
-    async def fetch_club_coach_async(
-        self,
-        team_id: int,
-    ) -> Optional[str]:
+    def _extract_squad_from_team_data(self, data: dict, team_id: int, team_name: str) -> list[Transfer]:
+        """Extract current squad members to sync real shirt numbers."""
+        results: list[Transfer] = []
+        try:
+            squad_sections = data.get("squad", {}).get("squad", [])
+            for section in squad_sections:
+                members = section.get("members", [])
+                for m in members:
+                    name = m.get("name")
+                    shirt = m.get("shirtNumber")
+                    if not name or not shirt:
+                        continue
+                    
+                    pos = m.get("role", {}).get("fallback", "")
+                    
+                    results.append(Transfer(
+                        player_name=name.strip(),
+                        from_club=team_name,
+                        to_club=team_name,
+                        transfer_type="squad_update",
+                        shirt_number=int(shirt),
+                        position=pos,
+                        to_club_id_fotmob=team_id,
+                        from_club_id_fotmob=team_id,
+                    ))
+        except Exception as e:
+            logger.debug(f"Failed to parse squad data: {e}")
+            
+        return results
+
+    async def _fetch_club_manager_async(self, team_id: int) -> Optional[str]:
         """Fetch current head coach/manager name for a club."""
         timeout = aiohttp.ClientTimeout(total=15)
         async with aiohttp.ClientSession(headers=self.headers, timeout=timeout) as session:
@@ -351,97 +387,99 @@ class FotmobScraper:
                     return latest["name"].strip()
         return None
 
-    async def fetch_transfers_for_clubs_async(
+    async def fetch_major_clubs_transfers_safely_async(
         self,
-        team_ids: list[int],
         since_date: Optional[Union[str, date]] = None,
         window: str = "auto",
     ) -> list[Transfer]:
-        """Fetch transfers for multiple clubs concurrently."""
-        cutoff_date: Optional[date] = None
+        """Fetch transfers for all major global clubs sequentially with a delay to avoid rate limits."""
+        start_date: Optional[date] = None
+        end_date: Optional[date] = None
+
         if since_date:
             if isinstance(since_date, str):
-                cutoff_date = parse_iso_date(since_date)
+                start_date = parse_iso_date(since_date)
             elif isinstance(since_date, date):
-                cutoff_date = since_date
+                start_date = since_date
         elif window and window != "all":
-            cutoff_date, _ = get_transfer_window_range(window)
+            start_date, end_date = get_transfer_window_range(window)
 
-        timeout = aiohttp.ClientTimeout(total=20)
+        all_transfers: list[Transfer] = []
+        timeout = aiohttp.ClientTimeout(total=15)
+        
         async with aiohttp.ClientSession(headers=self.headers, timeout=timeout) as session:
-            tasks = [self._fetch_club_data_async(session, tid) for tid in team_ids]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for club_name, tid in MAJOR_GLOBAL_CLUBS.items():
+                logger.info(f"Sweeping {club_name} (ID: {tid})...")
+                try:
+                    data = await self._fetch_club_data_async(session, tid)
+                    if data:
+                        # 1. Extract Transfers
+                        club_transfers = self._extract_transfers_from_team_data(data, start_date, end_date)
+                        all_transfers.extend(club_transfers)
+                        
+                        # 2. Extract Squad (Shirt Numbers)
+                        club_squad = self._extract_squad_from_team_data(data, tid, club_name)
+                        all_transfers.extend(club_squad)
+                except Exception as e:
+                    logger.warning(f"Failed to sweep {club_name}: {e}")
+                
+                # Sleep to prevent Cloudflare ban
+                await asyncio.sleep(0.5)
 
-            all_transfers: list[Transfer] = []
-            for res in results:
-                if isinstance(res, dict):
-                    all_transfers.extend(self._extract_transfers_from_team_data(res, cutoff_date))
-
-            return merge_transfers([all_transfers])
+        return merge_transfers([all_transfers])
 
 
-TOP_EUROPEAN_CLUBS: dict[str, int] = {
+
+
+MAJOR_GLOBAL_CLUBS: dict[str, int] = {
     # Premier League
-    "Arsenal": 9825,
-    "Aston Villa": 10252,
-    "Chelsea": 8455,
-    "Liverpool": 8650,
-    "Manchester City": 8456,
-    "Manchester United": 10260,
-    "Newcastle United": 10261,
-    "Tottenham Hotspur": 8586,
-    "Brighton": 10204,
-    "West Ham": 8654,
+    "Arsenal": 9825, "Aston Villa": 10252, "Chelsea": 8455, "Liverpool": 8650, 
+    "Manchester City": 8456, "Manchester United": 10260, "Newcastle United": 10261, 
+    "Tottenham Hotspur": 8586, "Brighton": 10204, "West Ham": 8654,
+    "Everton": 8668, "Crystal Palace": 9826, "Fulham": 8701, 
+    "Brentford": 9937, "Nottingham Forest": 10203, "Bournemouth": 8678,
+    "Wolverhampton": 8602, "Leicester City": 8197, "Southampton": 8466,
 
     # La Liga
-    "Real Madrid": 8633,
-    "Barcelona": 8634,
-    "Atletico Madrid": 9906,
-    "Real Sociedad": 8560,
-    "Villarreal": 10205,
-    "Athletic Club": 8315,
-    "Sevilla": 8302,
-    "Girona": 9812,
+    "Real Madrid": 8633, "Barcelona": 8634, "Atletico Madrid": 9906, 
+    "Real Sociedad": 8560, "Villarreal": 10205, "Athletic Club": 8315, 
+    "Sevilla": 8302, "Girona": 9812, "Real Betis": 8603, "Valencia": 8284,
+    "Celta Vigo": 8581, "Osasuna": 8371, "Mallorca": 8661, "Getafe": 8305,
 
     # Serie A
-    "Inter": 8636,
-    "Juventus": 9885,
-    "AC Milan": 8564,
-    "Napoli": 9875,
-    "AS Roma": 8686,
-    "Lazio": 8543,
-    "Atalanta": 8524,
-    "Fiorentina": 8535,
+    "Inter": 8636, "Juventus": 9885, "AC Milan": 8564, "Napoli": 9875, 
+    "AS Roma": 8686, "Lazio": 8543, "Atalanta": 8524, "Fiorentina": 8535,
+    "Bologna": 9857, "Torino": 9804, "Sassuolo": 7943, "Udinese": 8600, 
+    "Monza": 6504, "Genoa": 10233,
 
     # Bundesliga
-    "Bayern München": 9823,
-    "Borussia Dortmund": 9789,
-    "Bayer Leverkusen": 8178,
-    "RB Leipzig": 178475,
-    "Eintracht Frankfurt": 9810,
-    "VfB Stuttgart": 10269,
+    "Bayern München": 9823, "Borussia Dortmund": 9789, "Bayer Leverkusen": 8178, 
+    "RB Leipzig": 178475, "Eintracht Frankfurt": 9810, "VfB Stuttgart": 10269,
+    "Wolfsburg": 8721, "Borussia Mönchengladbach": 9788, "SC Freiburg": 8358, 
+    "Hoffenheim": 8226, "Werder Bremen": 8697,
 
     # Ligue 1
-    "Paris Saint-Germain": 9847,
-    "Marseille": 8588,
-    "Monaco": 9829,
-    "Lyon": 9748,
-    "Lille": 8639,
+    "Paris Saint-Germain": 9847, "Marseille": 8588, "Monaco": 9829, 
+    "Lyon": 9748, "Lille": 8639, "Lens": 8583, "Rennes": 9851, 
+    "Nice": 9827, "Strasbourg": 9848, "Montpellier": 8228,
 
-    # Portugal, Netherlands, Turkey, etc.
-    "Sporting CP": 9768,
-    "Benfica": 9772,
-    "Porto": 9773,
-    "Ajax": 8593,
-    "PSV": 8640,
-    "Feyenoord": 10235,
-    "Galatasaray": 8637,
-    "Fenerbahce": 8695,
-    "Celtic": 9925,
-    "Rangers": 8548,
-    "Al-Hilal": 8659,
-    "Al-Nassr": 8660,
-    "Inter Miami": 1157146,
+    # Eredivisie & Portugal
+    "Ajax": 8593, "PSV": 8640, "Feyenoord": 10235, "AZ Alkmaar": 8277,
+    "Sporting CP": 9768, "Benfica": 9772, "Porto": 9773, "Braga": 10228,
+
+    # Rest of Europe (Turkey, Scotland, Belgium, etc)
+    "Galatasaray": 8637, "Fenerbahce": 8695, "Besiktas": 10188, "Trabzonspor": 10206,
+    "Celtic": 9925, "Rangers": 8548,
+    "Club Brugge": 8392, "Anderlecht": 8635, "Genk": 9987, "Union SG": 6722,
+    "Salzburg": 6333, "Dinamo Zagreb": 6777, "Red Star": 7443,
+    "Olympiacos": 8536, "Panathinaikos": 8537, "AEK Athens": 8585,
+    "Copenhagen": 8391, "Midtjylland": 8415,
+    "Shakhtar Donetsk": 6608, "Dynamo Kyiv": 8613,
+
+    # Americas & Saudi Arabia
+    "Flamengo": 10020, "Palmeiras": 10214, "River Plate": 10072, "Boca Juniors": 10077,
+    "Inter Miami": 1157146, "LA Galaxy": 8262,
+    "Al-Hilal": 8659, "Al-Nassr": 8660, "Al-Ittihad": 10243, "Al-Ahli": 8014,
 }
 
 
@@ -496,16 +534,14 @@ def fetch_fotmob_transfers(
     )
 
 
-def fetch_top_clubs_transfers(
+def fetch_major_clubs_transfers_safely(
     since_date: Optional[Union[str, date]] = None,
     window: str = "auto",
 ) -> list[Transfer]:
-    """Deep scrape of transfers from all Top ~30 European clubs directly."""
+    """Deep sweep of transfers and squad data from all Major Global clubs."""
     scraper = FotmobScraper()
-    team_ids = list(TOP_EUROPEAN_CLUBS.values())
     return asyncio.run(
-        scraper.fetch_transfers_for_clubs_async(
-            team_ids=team_ids,
+        scraper.fetch_major_clubs_transfers_safely_async(
             since_date=since_date,
             window=window,
         )
@@ -524,9 +560,9 @@ def fetch_transfers_for_club_names(
         if clean.isdigit():
             team_ids.append(int(clean))
         else:
-            # Look up in TOP_EUROPEAN_CLUBS
+            # Look up in MAJOR_GLOBAL_CLUBS
             matched_id = None
-            for club, cid in TOP_EUROPEAN_CLUBS.items():
+            for club, cid in MAJOR_GLOBAL_CLUBS.items():
                 if clean.lower() in club.lower() or club.lower() in clean.lower():
                     matched_id = cid
                     break
@@ -539,12 +575,26 @@ def fetch_transfers_for_club_names(
         logger.warning("No valid club IDs found to fetch")
         return []
 
+    # Since fetch_transfers_for_clubs_async was removed, we just reuse the sequential logic for a subset
     scraper = FotmobScraper()
-    return asyncio.run(
-        scraper.fetch_transfers_for_clubs_async(
-            team_ids=team_ids,
-            since_date=since_date,
-            window=window,
-        )
-    )
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    if since_date:
+        if isinstance(since_date, str):
+            start_date = parse_iso_date(since_date)
+        elif isinstance(since_date, date):
+            start_date = since_date
+    elif window and window != "all":
+        start_date, end_date = get_transfer_window_range(window)
 
+    all_t = []
+    async def fetch_subset():
+        async with aiohttp.ClientSession(headers=scraper.headers, timeout=aiohttp.ClientTimeout(total=15)) as sess:
+            for tid in team_ids:
+                data = await scraper._fetch_club_data_async(sess, tid)
+                if data:
+                    all_t.extend(scraper._extract_transfers_from_team_data(data, start_date, end_date))
+                    # We can also extract squad for specific club filter
+                    all_t.extend(scraper._extract_squad_from_team_data(data, tid, ""))
+    asyncio.run(fetch_subset())
+    return merge_transfers([all_t])

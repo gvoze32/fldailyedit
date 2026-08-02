@@ -635,6 +635,25 @@ class EditFile:
         best_slot, best_pid = min(active_slots, key=candidate_sort_key)
         return best_slot, best_pid
 
+    def update_player_shirt_number(self, team_id: int, player_id: int, shirt_number: int) -> bool:
+        """Update a player's shirt number directly without transferring."""
+        entry = self._find_team_player_entry_offset(team_id)
+        if entry is None:
+            return False
+        
+        roster = self._read_team_player_entry(entry)
+        idx = roster.player_index(player_id)
+        if idx == -1:
+            return False
+            
+        # Avoid unnecessary writes
+        if roster.shirt_numbers[idx] == shirt_number:
+            return True
+            
+        self._write_player_slot(entry, idx, player_id, shirt_number)
+        logger.debug(f"Updated player {player_id} on team {team_id} to shirt #{shirt_number}")
+        return True
+
     def move_player(
         self,
         player_id: int,

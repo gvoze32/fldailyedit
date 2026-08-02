@@ -34,12 +34,10 @@ from editor.editfile import EditFile
 from editor import logger as transfer_logger
 from scraper.fotmob import (
     fetch_fotmob_transfers,
-    fetch_top_clubs_transfers,
-    fetch_transfers_for_club_names,
     get_transfer_window_range,
     merge_transfers,
-    FotmobScraper,
-    TOP_EUROPEAN_CLUBS,
+    fetch_transfers_for_club_names,
+    fetch_major_clubs_transfers_safely,
 )
 from scraper.matcher import NameMatcher
 from scraper.models import MatchedTransfer
@@ -155,7 +153,7 @@ def cmd_run(args):
     window = getattr(args, "window", "auto") or "auto"
     since_date = getattr(args, "since", None)
     club_filter = getattr(args, "club", None)
-    deep_mode = getattr(args, "deep", False)
+    sweep_mode = getattr(args, "sweep", False) or getattr(args, "deep", False)
 
     start_d, end_d = get_transfer_window_range(window)
     cutoff_info = f"since {since_date}" if since_date else f"window '{window}' (from {start_d})"
@@ -165,11 +163,9 @@ def cmd_run(args):
         clubs = [c.strip() for c in club_filter.split(",") if c.strip()]
         print(f"\n🎯 Scraping club-focused transfers for: {', '.join(clubs)} ({cutoff_info})...")
         transfers_list.append(fetch_transfers_for_club_names(clubs, since_date=since_date, window=window))
-    elif deep_mode:
-        print(f"\n🔎 Deep Coverage Mode: Scraping transfers for Top {len(TOP_EUROPEAN_CLUBS)} European Clubs ({cutoff_info})...")
-        transfers_list.append(fetch_top_clubs_transfers(since_date=since_date, window=window))
-        # Also include standard feed
-        transfers_list.append(fetch_fotmob_transfers(max_pages=pages, popular_only=popular_only, since_date=since_date, window=window))
+    elif sweep_mode:
+        print(f"\n🌪️ Deep Sweep Mode: Scraping transfers and squad for 150+ Major Global Clubs ({cutoff_info})...")
+        transfers_list.append(fetch_major_clubs_transfers_safely(since_date=since_date, window=window))
     else:
         print(f"\n📡 Scraping live transfers from FotMob ({cutoff_info}, max_pages={pages}, popular={popular_only})...")
         transfers_list.append(fetch_fotmob_transfers(max_pages=pages, popular_only=popular_only, since_date=since_date, window=window))
@@ -338,6 +334,21 @@ def cmd_run(args):
         fully_matched.sort(key=lambda m: 0 if m.is_release else (1 if m.is_club_transfer else 2))
 
         for m in fully_matched:
+            pid = m.player_id
+            to_tid = m.to_team_id
+            t = m.transfer
+            
+            # Auto-create player if missing (placeholder)
+            if pid is None:
+                continue
+                
+            is_squad_update = (t.transfer_type == "squad_update")
+            if is_squad_update:
+                if to_tid and t.shirt_number is not None:
+                    if ef.update_player_shirt_number(to_tid, pid, t.shirt_number):
+                        applied += 1
+                continue
+                
             ok = False
             pref_shirt = m.transfer.shirt_number
             if m.is_club_transfer:
@@ -501,8 +512,9 @@ def main():
     p_run.add_argument("--edit-file", type=str, help="Path to input edit00000000 (default: config.EDIT_FILE_PATH or sample/EDIT00000000)")
     p_run.add_argument("-o", "--output", type=str, help="Path to output updated edit00000000 (default: output/EDIT00000000)")
     p_run.add_argument("--in-place", action="store_true", help="Overwrite input edit file in-place instead of writing to output/")
-    p_run.add_argument("--club", type=str, help="Target specific club(s) (comma-separated, e.g. 'Chelsea, Real Madrid')")
-    p_run.add_argument("--deep", action="store_true", help="Deep coverage sync across Top ~30 European clubs directly")
+    p_run.add_argument("--club", type=str, help="Comma-separated club names to focus scrape (e.g. 'Chelsea,Arsenal')")
+    p_run.add_argument("--deep", action="store_true", help="Alias for --sweep")
+    p_run.add_argument("--sweep", action="store_true", help="Deep sweep across 150+ Major Global Clubs directly")
     p_run.add_argument("--window", type=str, choices=["auto", "summer", "winter", "all"], default="auto", help="Transfer window (default: auto)")
     p_run.add_argument("--since", type=str, help="Scrape transfers since date (YYYY-MM-DD)")
     p_run.add_argument("--pages", type=int, default=10, help="Maximum number of pages to scrape (50 transfers/page, default: 10)")
@@ -517,8 +529,9 @@ def main():
     p_sched.add_argument("--edit-file", type=str, help="Path to input edit00000000")
     p_sched.add_argument("-o", "--output", type=str, help="Path to output updated edit00000000 (default: output/EDIT00000000)")
     p_sched.add_argument("--in-place", action="store_true", help="Overwrite input edit file in-place")
-    p_sched.add_argument("--club", type=str, help="Target specific club(s) (comma-separated)")
-    p_sched.add_argument("--deep", action="store_true", help="Deep coverage sync across Top European clubs")
+    p_sched.add_argument("--club", type=str, help="Comma-separated club names to focus scrape (e.g. 'Chelsea,Arsenal')")
+    p_sched.add_argument("--deep", action="store_true", help="Alias for --sweep")
+    p_sched.add_argument("--sweep", action="store_true", help="Deep sweep across 150+ Major Global Clubs directly")
     p_sched.add_argument("--window", type=str, choices=["auto", "summer", "winter", "all"], default="auto", help="Transfer window (default: auto)")
     p_sched.add_argument("--since", type=str, help="Scrape transfers since date (YYYY-MM-DD)")
     p_sched.add_argument("--pages", type=int, default=10, help="Maximum number of pages to scrape (50 transfers/page, default: 10)")

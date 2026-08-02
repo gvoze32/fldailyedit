@@ -7,13 +7,14 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "Sync Mode: global (all leagues), deep (Top 30 EU clubs direct), club (specific target)"
+        description: "Sync Mode: sweep (150+ clubs + squad sync), global (all leagues), deep, club (specific target)"
         type: choice
         options:
+          - sweep
           - global
           - deep
           - club
-        default: global
+        default: sweep
         required: false
       club:
         description: "Target Club(s) (only used if Mode=club, e.g. 'Chelsea, Real Madrid')"
@@ -28,7 +29,7 @@ on:
           - summer
           - winter
           - all
-        default: auto
+        default: all
         required: false
       since:
         description: "Scrape transfers since date (YYYY-MM-DD, optional override)"
@@ -97,14 +98,16 @@ jobs:
             SINCE_FLAG="--since ${{ github.event.inputs.since }}"
           fi
 
-          MODE_FLAG=""
+          MODE_FLAG="--sweep"
           if [ "${{ github.event.inputs.mode }}" = "deep" ]; then
             MODE_FLAG="--deep"
+          elif [ "${{ github.event.inputs.mode }}" = "global" ]; then
+            MODE_FLAG=""
           elif [ "${{ github.event.inputs.mode }}" = "club" ] && [ -n "${{ github.event.inputs.club }}" ]; then
             MODE_FLAG="--club '${{ github.event.inputs.club }}'"
           fi
 
-          WINDOW="${{ github.event.inputs.window || 'auto' }}"
+          WINDOW="${{ github.event.inputs.window || 'all' }}"
           PAGES="${{ github.event.inputs.pages || 40 }}"
 
           eval python run.py run \
