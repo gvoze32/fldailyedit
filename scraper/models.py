@@ -43,22 +43,62 @@ class MatchedTransfer:
 
     @property
     def is_fully_matched(self) -> bool:
-        """True if player, source team, and dest team are all matched."""
-        return all([
-            self.player_id is not None,
-            self.from_team_id is not None,
-            self.to_team_id is not None,
-        ])
+        """True if player and at least one valid transfer action can be taken."""
+        return self.is_club_transfer or self.is_release or self.is_sign
+
+    @property
+    def is_club_transfer(self) -> bool:
+        """Both source and destination clubs are known in FL26 database."""
+        return (
+            self.player_id is not None
+            and self.from_team_id is not None
+            and self.to_team_id is not None
+        )
+
+    @property
+    def is_release(self) -> bool:
+        """Player exists in source team, but destination is Free Agent or unrepresented club."""
+        return (
+            self.player_id is not None
+            and self.from_team_id is not None
+            and self.to_team_id is None
+        )
+
+    @property
+    def is_sign(self) -> bool:
+        """Player exists in FL26, but coming from Free Agent or unrepresented club into an FL26 team."""
+        return (
+            self.player_id is not None
+            and self.from_team_id is None
+            and self.to_team_id is not None
+        )
+
+    @property
+    def action_type(self) -> str:
+        if self.is_club_transfer:
+            return "transfer"
+        elif self.is_release:
+            return "release_to_free_agent"
+        elif self.is_sign:
+            return "sign_from_free_agent"
+        return "unmatched"
 
     @property
     def min_confidence(self) -> float:
-        """Lowest confidence score among all matches."""
-        return min(self.player_confidence, self.from_team_confidence, self.to_team_confidence)
+        """Lowest confidence score among matched components."""
+        confs = [self.player_confidence]
+        if self.from_team_id is not None:
+            confs.append(self.from_team_confidence)
+        if self.to_team_id is not None:
+            confs.append(self.to_team_confidence)
+        return min(confs) if confs else 0.0
 
     def __str__(self):
         status = "✓" if self.is_fully_matched else "✗"
+        action = f" ({self.action_type})" if self.is_fully_matched else ""
         return (
             f"[{status}] {self.transfer.player_name} (id={self.player_id}, "
             f"conf={self.player_confidence:.0f}%): "
-            f"{self.transfer.from_club} → {self.transfer.to_club}"
+            f"{self.transfer.from_club} → {self.transfer.to_club}{action}"
         )
+

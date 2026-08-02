@@ -210,12 +210,12 @@ def cmd_run(args):
             for m in fully_matched:
                 print(f"  {m}")
                 transfer_logger.log_transfer(
-                    player_name=m.matched_player_name,
+                    player_name=m.matched_player_name or m.transfer.player_name,
                     player_id=m.player_id,
-                    from_team=m.matched_from_team,
-                    from_team_id=m.from_team_id,
-                    to_team=m.matched_to_team,
-                    to_team_id=m.to_team_id,
+                    from_team=m.matched_from_team or m.transfer.from_club,
+                    from_team_id=m.from_team_id or 0,
+                    to_team=m.matched_to_team or m.transfer.to_club,
+                    to_team_id=m.to_team_id or 0,
                     confidence=m.min_confidence,
                     transfer_type=m.transfer.transfer_type,
                     dry_run=True,
@@ -233,22 +233,29 @@ def cmd_run(args):
         failed = 0
 
         for m in fully_matched:
-            ok = ef.move_player(m.player_id, m.from_team_id, m.to_team_id)
+            ok = False
+            if m.is_club_transfer:
+                ok = ef.move_player(m.player_id, m.from_team_id, m.to_team_id)
+            elif m.is_release:
+                ok = ef.release_player(m.player_id, m.from_team_id)
+            elif m.is_sign:
+                ok = ef.add_player(m.player_id, m.to_team_id)
+
             if ok:
                 applied += 1
                 transfer_logger.log_transfer(
-                    player_name=m.matched_player_name,
+                    player_name=m.matched_player_name or m.transfer.player_name,
                     player_id=m.player_id,
-                    from_team=m.matched_from_team,
-                    from_team_id=m.from_team_id,
-                    to_team=m.matched_to_team,
-                    to_team_id=m.to_team_id,
+                    from_team=m.matched_from_team or m.transfer.from_club,
+                    from_team_id=m.from_team_id or 0,
+                    to_team=m.matched_to_team or m.transfer.to_club,
+                    to_team_id=m.to_team_id or 0,
                     confidence=m.min_confidence,
                     transfer_type=m.transfer.transfer_type,
                 )
             else:
                 failed += 1
-                print(f"  ✗ Failed: {m.matched_player_name}")
+                print(f"  ✗ Failed: {m.matched_player_name or m.transfer.player_name} ({m.action_type})")
 
         print(f"\n  Applied: {applied}, Failed: {failed}")
 

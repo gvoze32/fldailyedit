@@ -273,6 +273,7 @@ class TestMovePlayer:
         assert 1003 not in src.roster
 
         dst = ef.get_team_roster(102)
+        assert dst.roster_size == 3
         assert 1003 in dst.roster
 
     def test_transfer_player_not_on_team(self):
@@ -321,7 +322,7 @@ class TestMovePlayer:
         idx = dst.player_index(1001)
         assert idx >= 0
         shirt = dst.shirt_numbers[idx]
-        assert shirt > 0  # should have a valid shirt number
+        assert shirt > 0
 
     def test_multiple_transfers(self):
         """Move two players sequentially."""
@@ -372,3 +373,60 @@ class TestTeamDataModel:
         td = TeamData(team_id=1, player_ids=[100, 200, 300, 0])
         assert td.player_index(200) == 1
         assert td.player_index(999) == -1
+
+
+class TestReleaseAndAddPlayer:
+    def _build_test_data(self):
+        return _build_mock_data(
+            num_players=5,
+            num_teams=2,
+            num_team_player=2,
+            team_player_entries=[
+                (101, [1001, 1002, 1003], [7, 10, 11]),
+                (102, [2001, 2002], [1, 9]),
+            ],
+        )
+
+    def test_release_player_compaction(self):
+        """Releasing a middle player compacts the team roster."""
+        data = self._build_test_data()
+        ef = EditFile()
+        ef.load_bytes(data)
+
+        ok = ef.release_player(1002, from_team_id=101)
+        assert ok is True
+
+        roster = ef.get_team_roster(101)
+        assert 1002 not in roster.roster
+        assert roster.roster_size == 2
+        assert roster.player_ids[0] == 1001
+        assert roster.player_ids[1] == 1003  # compacted from slot 2
+
+    def test_release_player_not_found(self):
+        data = self._build_test_data()
+        ef = EditFile()
+        ef.load_bytes(data)
+
+        ok = ef.release_player(9999, from_team_id=101)
+        assert ok is False
+
+    def test_add_player_from_free_agent(self):
+        data = self._build_test_data()
+        ef = EditFile()
+        ef.load_bytes(data)
+
+        ok = ef.add_player(3001, to_team_id=102)
+        assert ok is True
+
+        roster = ef.get_team_roster(102)
+        assert 3001 in roster.roster
+        assert roster.roster_size == 3
+
+    def test_add_player_already_exists(self):
+        data = self._build_test_data()
+        ef = EditFile()
+        ef.load_bytes(data)
+
+        ok = ef.add_player(2001, to_team_id=102)
+        assert ok is False
+

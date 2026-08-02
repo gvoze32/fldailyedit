@@ -454,6 +454,92 @@ class EditFile:
         )
         return True
 
+    def release_player(self, player_id: int, from_team_id: int) -> bool:
+        """
+        Release a player to Free Agent (or when moving to an unrepresented club).
+
+        Removes the player from the team's 40-slot roster and compacts the slots.
+        In PES21, any registered player not assigned to a club automatically
+        becomes a Free Agent.
+
+        Args:
+            player_id: Player ID to release.
+            from_team_id: Team ID to remove player from.
+
+        Returns:
+            True if released successfully, False otherwise.
+        """
+        from_entry = self._find_team_player_entry_offset(from_team_id)
+        if from_entry is None:
+            logger.error(f"Team {from_team_id} not found in Team-Player table")
+            return False
+
+        from_roster = self._read_team_player_entry(from_entry)
+        player_idx = from_roster.player_index(player_id)
+        if player_idx == -1:
+            logger.error(f"Player {player_id} not found on team {from_team_id}")
+            return False
+
+        # Find last non-zero player in roster
+        last_idx = -1
+        for k in range(TP_MAX_PLAYERS - 1, -1, -1):
+            if from_roster.player_ids[k] != 0:
+                last_idx = k
+                break
+
+        if last_idx == player_idx:
+            self._write_player_slot(from_entry, player_idx, 0, 0)
+        elif last_idx > player_idx:
+            self._write_player_slot(
+                from_entry, player_idx,
+                from_roster.player_ids[last_idx],
+                from_roster.shirt_numbers[last_idx],
+            )
+            self._write_player_slot(from_entry, last_idx, 0, 0)
+            self._update_game_plan_after_removal(from_team_id, player_idx, last_idx)
+        else:
+            self._write_player_slot(from_entry, player_idx, 0, 0)
+
+        logger.info(f"Released player {player_id} from team {from_team_id} (now Free Agent)")
+        return True
+
+    def add_player(self, player_id: int, to_team_id: int) -> bool:
+        """
+        Sign a player from Free Agent into a team.
+
+        Args:
+            player_id: Player ID to add.
+            to_team_id: Destination team ID.
+
+        Returns:
+            True if added successfully, False otherwise.
+        """
+        to_entry = self._find_team_player_entry_offset(to_team_id)
+        if to_entry is None:
+            logger.error(f"Team {to_team_id} not found in Team-Player table")
+            return False
+
+        to_roster = self._read_team_player_entry(to_entry)
+        if to_roster.has_player(player_id):
+            logger.warning(f"Player {player_id} already on team {to_team_id}")
+            return False
+
+        dest_slot = to_roster.first_empty_slot()
+        if dest_slot == -1:
+            logger.error(f"Team {to_team_id} roster is full (40 players)")
+            return False
+
+        used_numbers = set(to_roster.shirt_numbers)
+        shirt_num = 1
+        for candidate in range(1, 100):
+            if candidate not in used_numbers:
+                shirt_num = candidate
+                break
+
+        self._write_player_slot(to_entry, dest_slot, player_id, shirt_num)
+        logger.info(f"Signed player {player_id} to team {to_team_id} (slot {dest_slot}, shirt #{shirt_num})")
+        return True
+
     def _find_team_player_entry_offset(self, team_id: int) -> int | None:
         """Find the byte offset of a team's Team-Player table entry."""
         for i in range(self.team_player_count):

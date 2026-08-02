@@ -23,5 +23,35 @@
         "name": "Ligue 1",
         "url": "https://www.transfermarkt.co.uk/ligue-1/transfers/wettbewerb/FR1",
         "season": "2025"
+    },
+    {
+        "name": "Saudi Pro League",
+        "url": "https://www.transfermarkt.co.uk/saudi-pro-league/transfers/wettbewerb/SA1",
+        "season": "2025"
+    },
+    {
+        "name": "Eredivisie",
+        "url": "https://www.transfermarkt.co.uk/eredivisie/transfers/wettbewerb/NL1",
+        "season": "2025"
+    },
+    {
+        "name": "Liga Portugal",
+        "url": "https://www.transfermarkt.co.uk/liga-portugal/transfers/wettbewerb/PO1",
+        "season": "2025"
+    },
+    {
+        "name": "Championship",
+        "url": "https://www.transfermarkt.co.uk/championship/transfers/wettbewerb/GB2",
+        "season": "2025"
+    },
+    {
+        "name": "Süper Lig",
+        "url": "https://www.transfermarkt.co.uk/super-lig/transfers/wettbewerb/TR1",
+        "season": "2025"
+    },
+    {
+        "name": "Major League Soccer",
+        "url": "https://www.transfermarkt.co.uk/major-league-soccer/transfers/wettbewerb/MLS1",
+        "season": "2025"
     }
 ]
