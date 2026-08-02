@@ -450,8 +450,8 @@ def get_deep_clubs() -> dict[str, int]:
         except Exception as e:
             logger.warning(f"Failed to load major_clubs.json: {e}")
             
-    # 3. Load the rest of the teams from crawler
-    json_path = Path("data/fotmob_teams.json")
+    # 2. Try to load the validated FotMob teams (filtered by PES overlap)
+    json_path = Path("data/fotmob_teams_validated.json")
     if json_path.exists():
         try:
             with open(json_path, "r", encoding="utf-8") as f:

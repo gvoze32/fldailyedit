@@ -15,6 +15,18 @@ It automatically fetches live, verified football transfers from **FotMob's real-
 
 ---
 
+## ❓ Why This Exists?
+
+If you play SP Football Life or PES 2021, you know the struggle of keeping your game updated with the latest real-world transfers. 
+
+- **Waiting for Official Updates:** Official FL patches take a long time to release.
+- **Unreliable Option Files:** Waiting for random people on YouTube to upload their "Option Files" is frustrating. They are often **inaccurate, incomplete, or break your game's tactics**.
+- **Missing the Hype:** Especially during the transfer window, when your favorite club just signed a new star player, you want to play with them *immediately*—not weeks later.
+
+**FLEditScrape solves this completely.** Instead of waiting, this tool directly intercepts live, verified transfers from FotMob's real-time database and writes them perfectly into your save file—handling squad limits, shirt numbers, and positions automatically. Your game is now synced with the real world, every single day.
+
+---
+
 ## 📥 Download Latest Save File (Cloud Sync)
 
 Pre-built and updated `EDIT00000000` save files and visual transfer report cards are generated automatically every day via GitHub Actions. You can download the latest version directly without needing to install or run anything locally.
