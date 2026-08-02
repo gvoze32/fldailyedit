@@ -1,6 +1,7 @@
 # FLEditScrape — Football Life & PES 2021 Transfer Tool
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![Database](https://img.shields.io/badge/Base%20Database-SP%20Football%20Life%202026-blueviolet.svg)]()
 [![Tests](https://img.shields.io/badge/tests-73%2F73%20passed-brightgreen.svg)]()
 [![Daily Sync](https://img.shields.io/badge/Cloud%20Sync-Automated%20Daily-success.svg)]()
 [![Compatibility](https://img.shields.io/badge/compatibility-All%20Versions-orange.svg)](https://www.pessmokepatch.com/)
@@ -9,6 +10,10 @@
 An automated, safe, and intelligent player transfer synchronization tool for **SP Football Life (All Versions)** and **eFootball PES 2021**.
 
 It automatically fetches live, verified football transfers from **FotMob's real-time transfer feed**, cross-verifies player positions, nationalities, ages, and squad rosters, handles squad limits with position-aware ability logic, auto-assigns conflict-free shirt numbers, protects tactical game plans, and writes updates directly into your `EDIT00000000` save file.
+
+> [!NOTE]
+> **Current Base Database: SP Football Life 2026**
+> The `sample/EDIT00000000` currently tracking transfers uses the base database from **SP Football Life 2026**. Future version upgrades will dynamically update this sample base.
 
 ---
 
