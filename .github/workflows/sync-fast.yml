@@ -1,0 +1,89 @@
+name: Sync Live Transfers (Fast)
+
+on:
+  workflow_dispatch:
+    inputs:
+      window:
+        description: "Transfer Window (all = Entire Season, auto = Current active window)"
+        type: choice
+        options:
+          - all
+          - auto
+          - summer
+          - winter
+        default: all
+        required: false
+
+jobs:
+  sync:
+    name: Scrape & Apply Transfers
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Compile pesXdecrypter
+        run: |
+          make -C vendor/pesXdecrypter clean
+          make -C vendor/pesXdecrypter
+          chmod +x vendor/pesXdecrypter/decrypter21 vendor/pesXdecrypter/encrypter21
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Run Transfer Sync
+        id: run_sync
+        run: |
+          MODE_FLAG=""
+
+          WINDOW="${{ github.event.inputs.window || 'all' }}"
+
+          eval python run.py run \
+            --window "$WINDOW" \
+            $MODE_FLAG \
+            --edit-file sample/EDIT00000000 \
+            --output output/EDIT00000000
+
+      - name: Generate Actions Summary
+        if: always()
+        run: |
+          echo "## ⚽ FLEditScrape Transfer Execution Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f data/transfer_log.jsonl ]; then
+            COUNT=$(wc -l < data/transfer_log.jsonl | tr -d ' ')
+            echo "✅ **Transfers Processed:** $COUNT" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Timestamp | Player | From Club | To Club | Type | Confidence |" >> $GITHUB_STEP_SUMMARY
+            echo "|---|---|---|---|---|---|" >> $GITHUB_STEP_SUMMARY
+            tail -n 20 data/transfer_log.jsonl | python3 -c "
+          import sys, json
+          for line in sys.stdin:
+              if line.strip():
+                  d = json.loads(line)
+                  print(f\"| {d.get('timestamp','')} | **{d.get('player_name','')}** | {d.get('from_team','')} | {d.get('to_team','')} | {d.get('transfer_type','')} | {d.get('confidence',0):.1f}% |\")
+          " >> $GITHUB_STEP_SUMMARY
+          else
+            echo "ℹ️ No new transfers written to log (dry-run or no matching transfers)." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload Updated Save File & Visual Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: updated-fl-save-and-reports
+          path: |
+            output/EDIT00000000
+            output/transfer_summary.md
+            output/transfer_summary.html
+            data/transfer_log.jsonl
+          if-no-files-found: ignore
+          retention-days: 14
