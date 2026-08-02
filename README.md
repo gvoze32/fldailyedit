@@ -23,8 +23,8 @@ Pre-built and updated `EDIT00000000` save files and visual transfer report cards
 
 ### How to Download:
 
-1. Navigate to the [**Actions**](../../actions) tab.
-2. Click on the latest successful workflow run (e.g. **`Sync Live Transfers (Deep)`** or **`Fast`**).
+1. Navigate to either the [**Sync Live Transfers (Deep)**](https://github.com/gvoze32/fleditscrape/actions/workflows/sync-deep.yml) or [**Fast**](https://github.com/gvoze32/fleditscrape/actions/workflows/sync-fast.yml) workflow in the Actions tab.
+2. Click on the latest successful workflow run.
 3. Under the **Artifacts** section at the bottom, download **`updated-fl-save-and-reports.zip`**.
 4. Extract `EDIT00000000` and copy it into your game save directory:
 
