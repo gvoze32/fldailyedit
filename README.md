@@ -1,7 +1,7 @@
 # FLEditScrape — Football Life & PES 2021 Transfer Tool
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-57%2F57%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-63%2F63%20passed-brightgreen.svg)]()
 [![Compatibility](https://img.shields.io/badge/compatibility-All%20Versions-orange.svg)](https://www.pessmokepatch.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -131,7 +131,13 @@ python run.py run --edit-file sample/EDIT00000000 --pages 2
 
 **Common Flags:**
 - `--edit-file PATH`: Path to your `EDIT00000000` save file (defaults to `config.EDIT_FILE_PATH`).
-- `--pages N`: Number of pages to fetch from FotMob (50 transfers per page, default: `2`).
+- `--window {auto,summer,winter,all}`: Transfer window to scrape from (default: `auto`).
+  - `auto`: Automatically selects the current active transfer window (e.g. Summer: June 1, Winter: Jan 1).
+  - `summer`: Scrapes all transfers since June 1 of the current season.
+  - `winter`: Scrapes all transfers since January 1 of the current season.
+  - `all`: Scrapes without date cutoffs.
+- `--since YYYY-MM-DD`: Custom cutoff date to scrape all transfers since (e.g. `--since 2026-06-01`).
+- `--pages N`: Maximum number of FotMob pages to paginate (50 transfers per page, default: `10`).
 - `--popular`: Restrict scraping to major / popular transfers.
 - `--threshold N`: Minimum fuzzy match confidence score (0-100, default: `80`).
 - `--dry-run`: Simulate transfer matching without modifying the save file.

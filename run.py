@@ -32,7 +32,7 @@ from editor import backup as backup_mod
 from editor import crypto
 from editor.editfile import EditFile
 from editor import logger as transfer_logger
-from scraper.fotmob import fetch_fotmob_transfers
+from scraper.fotmob import fetch_fotmob_transfers, get_transfer_window_range
 from scraper.matcher import NameMatcher
 from scraper.models import MatchedTransfer
 
@@ -129,11 +129,20 @@ def cmd_run(args):
         sys.exit(1)
 
     # ── Step 1: Scrape live transfers from FotMob ──
-    pages = getattr(args, "pages", 2) or 2
+    pages = getattr(args, "pages", 10) or 10
     popular_only = getattr(args, "popular", False) or False
+    window = getattr(args, "window", "auto") or "auto"
+    since_date = getattr(args, "since", None)
 
-    print(f"\n📡 Scraping live transfers from FotMob (pages=1..{pages}, popular={popular_only})...")
-    transfers = fetch_fotmob_transfers(max_pages=pages, popular_only=popular_only)
+    start_d, end_d = get_transfer_window_range(window)
+    cutoff_info = f"since {since_date}" if since_date else f"window '{window}' (from {start_d})"
+    print(f"\n📡 Scraping live transfers from FotMob ({cutoff_info}, max_pages={pages}, popular={popular_only})...")
+    transfers = fetch_fotmob_transfers(
+        max_pages=pages,
+        popular_only=popular_only,
+        since_date=since_date,
+        window=window,
+    )
     print(f"  FotMob found {len(transfers)} transfers")
 
     # Deduplicate transfers by (player_name, from_club, to_club)
@@ -364,7 +373,9 @@ def main():
     p_run = sub.add_parser("run", help="Scrape + match + apply transfers")
     p_run.add_argument("--dry-run", action="store_true", help="Don't modify the edit file")
     p_run.add_argument("--edit-file", type=str, help="Path to edit00000000")
-    p_run.add_argument("--pages", type=int, default=2, help="Number of pages to scrape from FotMob (50 transfers/page, default: 2)")
+    p_run.add_argument("--window", type=str, choices=["auto", "summer", "winter", "all"], default="auto", help="Transfer window (default: auto)")
+    p_run.add_argument("--since", type=str, help="Scrape transfers since date (YYYY-MM-DD)")
+    p_run.add_argument("--pages", type=int, default=10, help="Maximum number of pages to scrape (50 transfers/page, default: 10)")
     p_run.add_argument("--popular", action="store_true", help="Only scrape popular/major transfers from FotMob")
     p_run.add_argument("--threshold", type=float, help="Fuzzy match confidence threshold (0-100)")
     p_run.set_defaults(func=cmd_run)
@@ -374,7 +385,9 @@ def main():
     p_sched.add_argument("--interval-hours", type=float, default=6.0, help="Interval between runs in hours (default: 6.0)")
     p_sched.add_argument("--dry-run", action="store_true", help="Don't modify the edit file")
     p_sched.add_argument("--edit-file", type=str, help="Path to edit00000000")
-    p_sched.add_argument("--pages", type=int, default=2, help="Number of pages to scrape from FotMob (50 transfers/page, default: 2)")
+    p_sched.add_argument("--window", type=str, choices=["auto", "summer", "winter", "all"], default="auto", help="Transfer window (default: auto)")
+    p_sched.add_argument("--since", type=str, help="Scrape transfers since date (YYYY-MM-DD)")
+    p_sched.add_argument("--pages", type=int, default=10, help="Maximum number of pages to scrape (50 transfers/page, default: 10)")
     p_sched.add_argument("--popular", action="store_true", help="Only scrape popular/major transfers from FotMob")
     p_sched.add_argument("--threshold", type=float, help="Fuzzy match confidence threshold (0-100)")
     p_sched.set_defaults(func=cmd_schedule)
@@ -402,7 +415,9 @@ def main():
         args.command = "run"
         args.dry_run = "--dry-run" in sys.argv
         args.edit_file = None
-        args.pages = 2
+        args.window = "auto"
+        args.since = None
+        args.pages = 10
         args.popular = False
         args.threshold = None
         args.func = cmd_run

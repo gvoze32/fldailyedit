@@ -6,15 +6,30 @@ on:
     - cron: "0 */6 * * *"
   workflow_dispatch:
     inputs:
+      window:
+        description: "Transfer Window to scrape"
+        type: choice
+        options:
+          - auto
+          - summer
+          - winter
+          - all
+        default: auto
+        required: false
+      since:
+        description: "Scrape transfers since date (YYYY-MM-DD, optional override)"
+        type: string
+        default: ""
+        required: false
       dry_run:
         description: "Dry Run (simulate only, do not alter save file)"
         type: boolean
         default: false
         required: false
       pages:
-        description: "Number of FotMob pages to scrape (50 transfers per page)"
+        description: "Maximum number of FotMob pages to scrape (50 transfers per page)"
         type: number
-        default: 2
+        default: 10
         required: false
       popular:
         description: "Only scrape popular / major transfers"
@@ -61,10 +76,18 @@ jobs:
             POPULAR_FLAG="--popular"
           fi
 
-          PAGES="${{ github.event.inputs.pages || 2 }}"
+          SINCE_FLAG=""
+          if [ -n "${{ github.event.inputs.since }}" ]; then
+            SINCE_FLAG="--since ${{ github.event.inputs.since }}"
+          fi
+
+          WINDOW="${{ github.event.inputs.window || 'auto' }}"
+          PAGES="${{ github.event.inputs.pages || 10 }}"
 
           python run.py run \
+            --window "$WINDOW" \
             --pages "$PAGES" \
+            $SINCE_FLAG \
             $POPULAR_FLAG \
             $DRY_RUN_FLAG \
             --edit-file sample/EDIT00000000

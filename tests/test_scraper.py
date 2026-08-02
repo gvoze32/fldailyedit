@@ -124,3 +124,56 @@ class TestFotmobScraper:
         t = scraper._parse_fotmob_item(item)
         assert t is None
 
+
+class TestTransferWindowLogic:
+    def test_window_range_summer(self):
+        from datetime import date
+        from scraper.fotmob import get_transfer_window_range
+
+        ref = date(2026, 8, 15)
+        start, end = get_transfer_window_range("summer", ref_date=ref)
+        assert start == date(2026, 6, 1)
+        assert end == date(2026, 9, 30)
+
+    def test_window_range_winter(self):
+        from datetime import date
+        from scraper.fotmob import get_transfer_window_range
+
+        ref = date(2026, 1, 15)
+        start, end = get_transfer_window_range("winter", ref_date=ref)
+        assert start == date(2026, 1, 1)
+        assert end == date(2026, 2, 28)
+
+    def test_window_range_auto_summer(self):
+        from datetime import date
+        from scraper.fotmob import get_transfer_window_range
+
+        ref = date(2026, 7, 1)
+        start, end = get_transfer_window_range("auto", ref_date=ref)
+        assert start == date(2026, 6, 1)
+
+    def test_window_range_auto_winter(self):
+        from datetime import date
+        from scraper.fotmob import get_transfer_window_range
+
+        ref = date(2026, 2, 1)
+        start, end = get_transfer_window_range("auto", ref_date=ref)
+        assert start == date(2026, 1, 1)
+
+    def test_window_range_all(self):
+        from datetime import date
+        from scraper.fotmob import get_transfer_window_range
+
+        start, end = get_transfer_window_range("all")
+        assert start == date(2000, 1, 1)
+        assert end is None
+
+    def test_parse_iso_date(self):
+        from datetime import date
+        from scraper.fotmob import parse_iso_date
+
+        assert parse_iso_date("2026-08-02T13:11:45Z") == date(2026, 8, 2)
+        assert parse_iso_date("2026-01-15") == date(2026, 1, 15)
+        assert parse_iso_date("") is None
+        assert parse_iso_date("invalid-date") is None
+

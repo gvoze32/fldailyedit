@@ -2,11 +2,13 @@
 FotMob Transfer Scraper module.
 
 Scrapes live, verified football transfer data directly from FotMob's API
-using direct lightweight async HTTP requests.
+using direct lightweight async HTTP requests with automatic transfer window
+detection and date filtering.
 """
 import asyncio
+from datetime import date, datetime, timezone
 import logging
-from typing import Optional
+from typing import Optional, Union
 import aiohttp
 
 from scraper.models import Transfer
@@ -27,6 +29,54 @@ DEFAULT_HEADERS = {
 }
 
 
+def get_transfer_window_range(
+    window: str = "auto",
+    ref_date: Optional[date] = None,
+) -> tuple[date, Optional[date]]:
+    """
+    Get the (start_date, end_date) for a football transfer window.
+
+    - "summer": June 1 to Sept 30
+    - "winter": Jan 1 to Feb 28/29
+    - "auto": Current or most recent active window based on ref_date
+    - "all": No cutoff (start from 2000-01-01)
+    """
+    if ref_date is None:
+        ref_date = datetime.now(timezone.utc).date()
+
+    w = (window or "auto").lower()
+
+    if w == "all":
+        return date(2000, 1, 1), None
+
+    if w == "summer":
+        year = ref_date.year if ref_date.month >= 6 else ref_date.year - 1
+        return date(year, 6, 1), date(year, 9, 30)
+
+    if w == "winter":
+        year = ref_date.year
+        return date(year, 1, 1), date(year, 2, 28)
+
+    # auto mode
+    if ref_date.month >= 6:
+        # Currently in or after summer window
+        return date(ref_date.year, 6, 1), date(ref_date.year, 9, 30)
+    else:
+        # Currently in or after winter window
+        return date(ref_date.year, 1, 1), date(ref_date.year, 2, 28)
+
+
+def parse_iso_date(date_str: str) -> Optional[date]:
+    """Parse an ISO date/timestamp string into a date object."""
+    if not date_str:
+        return None
+    try:
+        clean_str = date_str.split("T")[0].split(" ")[0]
+        return datetime.strptime(clean_str, "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
 class FotmobScraper:
     """Scraper for football transfer data from FotMob."""
 
@@ -35,12 +85,31 @@ class FotmobScraper:
 
     async def _fetch_transfers_async(
         self,
-        max_pages: int = 2,
+        max_pages: int = 10,
         popular_only: bool = False,
+        since_date: Optional[Union[str, date]] = None,
+        window: str = "auto",
     ) -> list[Transfer]:
-        """Fetch transfers asynchronously from FotMob API."""
+        """
+        Fetch transfers asynchronously from FotMob API.
+
+        If since_date or window is specified, automatically paginates until
+        transfers older than the cutoff date are reached.
+        """
         transfers: list[Transfer] = []
         popular_param = "true" if popular_only else "false"
+
+        cutoff_date: Optional[date] = None
+        if since_date:
+            if isinstance(since_date, str):
+                cutoff_date = parse_iso_date(since_date)
+            elif isinstance(since_date, date):
+                cutoff_date = since_date
+        elif window and window != "all":
+            cutoff_date, _ = get_transfer_window_range(window)
+
+        if cutoff_date:
+            logger.info(f"Scraping FotMob transfers with cutoff date since: {cutoff_date} (window='{window}')")
 
         timeout = aiohttp.ClientTimeout(total=15)
         async with aiohttp.ClientSession(headers=self.headers, timeout=timeout) as session:
@@ -52,19 +121,36 @@ class FotmobScraper:
                     async with session.get(api_url) as resp:
                         if resp.status != 200:
                             logger.warning(f"FotMob page {page_num} returned HTTP {resp.status}")
-                            continue
+                            break
                         data = await resp.json(content_type=None)
                 except Exception as e:
                     logger.error(f"Failed to fetch FotMob page {page_num}: {e}")
-                    continue
+                    break
 
                 raw_transfers = data.get("transfers", [])
+                if not raw_transfers:
+                    logger.info(f"FotMob page {page_num} returned empty transfers list. Stopping.")
+                    break
+
                 logger.info(f"FotMob page {page_num} returned {len(raw_transfers)} items")
 
+                reached_cutoff = False
                 for item in raw_transfers:
                     t = self._parse_fotmob_item(item)
-                    if t:
-                        transfers.append(t)
+                    if not t:
+                        continue
+
+                    # Check date cutoff
+                    item_date = parse_iso_date(t.date)
+                    if cutoff_date and item_date and item_date < cutoff_date:
+                        reached_cutoff = True
+                        continue
+
+                    transfers.append(t)
+
+                if reached_cutoff:
+                    logger.info(f"Reached transfers older than cutoff {cutoff_date} on page {page_num}. Stopping.")
+                    break
 
         return transfers
 
@@ -119,14 +205,33 @@ class FotmobScraper:
 
     def fetch_transfers(
         self,
-        max_pages: int = 2,
+        max_pages: int = 10,
         popular_only: bool = False,
+        since_date: Optional[Union[str, date]] = None,
+        window: str = "auto",
     ) -> list[Transfer]:
         """Synchronous wrapper to fetch transfers."""
-        return asyncio.run(self._fetch_transfers_async(max_pages=max_pages, popular_only=popular_only))
+        return asyncio.run(
+            self._fetch_transfers_async(
+                max_pages=max_pages,
+                popular_only=popular_only,
+                since_date=since_date,
+                window=window,
+            )
+        )
 
 
-def fetch_fotmob_transfers(max_pages: int = 2, popular_only: bool = False) -> list[Transfer]:
+def fetch_fotmob_transfers(
+    max_pages: int = 10,
+    popular_only: bool = False,
+    since_date: Optional[Union[str, date]] = None,
+    window: str = "auto",
+) -> list[Transfer]:
     """Convenience function to fetch transfers from FotMob."""
     scraper = FotmobScraper()
-    return scraper.fetch_transfers(max_pages=max_pages, popular_only=popular_only)
+    return scraper.fetch_transfers(
+        max_pages=max_pages,
+        popular_only=popular_only,
+        since_date=since_date,
+        window=window,
+    )
