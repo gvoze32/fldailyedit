@@ -1,0 +1,749 @@
+1 - Ireland
+2 - Northern Ireland
+3 - Scotland
+4 - Wales
+5 - England
+6 - Portugal
+7 - Spain
+8 - France
+9 - Belgium
+10 - Netherlands
+11 - Switzerland
+12 - Italy
+13 - Czech Republic
+14 - Germany
+15 - Denmark
+16 - Norway
+17 - Sweden
+18 - Finland
+19 - Poland
+20 - Slovakia
+21 - Austria
+22 - Hungary
+23 - Slovenia
+24 - Croatia
+26 - Romania
+27 - Bulgaria
+28 - Greece
+29 - Turkey
+30 - Ukraine
+31 - Russia
+32 - Morocco
+33 - Tunisia
+34 - Egypt
+35 - Nigeria
+36 - Cameroon
+37 - South Africa
+38 - Senegal
+39 - United States
+40 - Mexico
+41 - Jamaica
+42 - Costa Rica
+43 - Honduras
+44 - Colombia
+45 - Brazil
+46 - Peru
+47 - Chile
+48 - Paraguay
+49 - Uruguay
+50 - Argentina
+51 - Ecuador
+52 - Japan
+53 - South Korea
+54 - China
+55 - Iran
+56 - Saudi Arabia
+57 - Australia
+59 - Latvia
+100 - Manchester United
+101 - Arsenal FC
+102 - Chelsea FC
+103 - Liverpool FC
+104 - Leeds United
+105 - West Ham United
+106 - Newcastle United
+107 - Aston Villa FC
+108 - FC Barcelona
+109 - Real Madrid CF
+110 - Valencia CF
+111 - Deportivo La Coruña
+112 - AS Monaco
+113 - Olympique Marseille
+114 - Paris Saint-Germain
+116 - Ajax Amsterdam
+117 - Feyenoord Rotterdam
+118 - PSV Eindhoven
+119 - Inter Milan
+120 - Juventus FC
+121 - AC Milan
+122 - SS Lazio
+123 - Parma Calcio
+124 - ACF Fiorentina
+125 - AS Roma
+126 - Borussia Dortmund
+127 - Bayern München
+128 - Bayer 04 Leverkusen
+129 - Hamburger SV
+130 - Galatasaray SK
+131 - Celtic FC
+132 - Rangers FC
+133 - Olympiakos Piraeus
+134 - Dynamo Kyiv
+135 - Spartak Moskva
+136 - Vasco da Gama
+137 - SE Palmeiras
+138 - CA River Plate
+139 - CA Boca Juniors
+140 - ML Default Europe
+146 - Kashima Antlers
+147 - Urawa Red Diamonds
+148 - JEF United Chiba
+149 - Kashiwa Reysol
+150 - FC Tokyo
+151 - Tokyo Verdy
+152 - Yokohama F. Marinos
+153 - Shimizu S-Pulse
+155 - Nagoya Grampus
+156 - Kyoto Sanga
+157 - Gamba Osaka
+158 - Vissel Kobe
+159 - Sanfrecce Hiroshima
+161 - Mito Hollyhock
+163 - Kawasaki Frontale
+164 - Yokohama FC
+165 - Shonan Bellmare
+167 - Albirex Niigata
+168 - Cerezo Osaka
+169 - Avispa Fukuoka
+172 - Atlético Madrid
+173 - Manchester City
+174 - RSC Anderlecht
+175 - AC Sparta Prague
+176 - Blackburn Rovers
+177 - Everton FC
+178 - Fulham FC
+179 - Tottenham Hotspur
+180 - AJ Auxerre
+181 - Olympique Lyonnais
+182 - RC Lens
+185 - SV Werder Bremen
+186 - Bologna FC
+190 - Udinese Calcio
+191 - SL Benfica
+192 - FC Porto
+193 - Sporting CP
+194 - Real Betis
+195 - Celta de Vigo
+196 - Real Sociedad
+197 - Fenerbahçe SK
+198 - Panathinaikos FC
+199 - Zalgiris Vilnius
+200 - Ceres Negros
+201 - Birmingham City
+203 - Charlton Athletic
+204 - Leicester City
+205 - Middlesbrough FC
+207 - Southampton FC
+208 - Wolverhampton Wanderers
+210 - SC Bastia
+211 - EA Guingamp
+212 - Le Mans FC
+213 - LOSC Lille
+215 - Montpellier HSC
+216 - FC Nantes
+217 - OGC Nice
+218 - Stade Rennais FC
+219 - FC Sochaux-Montbéliard
+221 - Toulouse FC
+225 - Borussia Mönchengladbach
+226 - Eintracht Frankfurt
+227 - SC Freiburg
+231 - VfB Stuttgart
+232 - VfL Wolfsburg
+234 - Atalanta BC
+235 - FC Empoli
+237 - Modena FC
+238 - Palermo FC
+240 - UC Sampdoria
+242 - AZ Alkmaar
+244 - FC Groningen
+245 - SC Heerenveen
+246 - NAC Breda
+247 - NEC Nijmegen
+250 - FC Twente
+251 - FC Utrecht
+253 - FC Volendam
+256 - PEC Zwolle
+258 - Athletic Bilbao
+259 - RCD Espanyol
+260 - Málaga CF
+261 - RCD Mallorca
+263 - CA Osasuna
+264 - Racing Santander
+265 - Sevilla FC
+266 - Real Valladolid
+267 - Villarreal CF
+268 - Real Zaragoza
+269 - Club Brugge KV
+270 - AEK Athens
+271 - Lokomotiv Moskva
+272 - FK Partizan
+273 - Beşiktaş JK
+274 - Cruzeiro EC
+295 - Beijing Guoan
+297 - Qingdao Hainiu
+302 - Chongqing Tonglianglong
+304 - Wuhan Three Towns
+314 - Chengdu Rongcheng
+319 - SSC Bari
+320 - Cagliari Calcio
+323 - Genoa CFC
+327 - SSC Napoli
+328 - Delfino Pescara
+333 - Torino FC
+336 - Hellas Verona
+344 - Excelsior Rotterdam
+345 - Fortuna Sittard
+346 - Go Ahead Eagles
+349 - Heracles Almelo
+351 - Sparta Rotterdam
+352 - SC Telstar
+357 - UD Almería
+359 - Córdoba CF
+361 - Elche CF
+362 - Getafe CF
+363 - Sporting Gijón
+364 - UD Las Palmas
+366 - Levante UD
+370 - Rayo Vallecano
+377 - Brighton & Hove Albion
+378 - Burnley FC
+382 - Crystal Palace FC
+383 - Derby County
+386 - Ipswich Town
+387 - Millwall FC
+388 - Norwich City
+389 - Nottingham Forest
+394 - Sheffield Wednesday
+395 - Stoke City
+396 - Sunderland AFC
+398 - Watford FC
+399 - West Bromwich Albion
+403 - Angers SCO
+405 - Stade Malherbe Caen
+407 - Clermont Foot
+412 - Stade Lavallois
+413 - AC Le Havre
+414 - FC Lorient
+415 - AS Nancy Lorraine
+418 - AS Saint-Étienne
+420 - ESTAC Troyes
+436 - FSV Mainz 05
+899 - Zamora FC
+900 -  Rainmakers Classics
+901 -  Fireblast Classics
+902 -  Warmstorm Classics
+903 -  Powerball Classics
+904 -  Wildcats Classics
+905 -  Screambeem Classics
+906 -  Meanmachine Classics
+907 -  Predators Classics
+908 -  Thunderstrike Classics
+909 -  Monsters Classics
+1001 - Afghanistan
+1002 - Bahrain
+1003 - Bangladesh
+1006 - Cambodia
+1007 - Hong Kong
+1008 - India
+1010 - Iraq
+1011 - Jordan
+1012 - North Korea
+1013 - Kuwait
+1015 - Lebanon
+1017 - Malaysia
+1020 - Myanmar
+1021 - Nepal
+1022 - Oman
+1023 - Pakistan
+1025 - Philippines
+1026 - Qatar
+1027 - Singapore
+1029 - Syria
+1031 - Thailand
+1032 - United Arab Emirates
+1033 - Vietnam
+1034 - Yemen
+1036 - Tajikistan
+1040 - Algeria
+1041 - Angola
+1042 - Benin
+1044 - Burkina Faso
+1046 - Cabo Verde
+1050 - Congo DR
+1051 - Côte D'Ivoire
+1056 - Gabon
+1058 - Ghana
+1059 - Guinea
+1061 - Kenya
+1065 - Madagascar
+1067 - Mali
+1080 - Tanzania
+1081 - Togo
+1082 - Uganda
+1083 - Zambia
+1084 - Zimbabwe
+1087 - Congo
+1099 - Canada
+1104 - El Salvador
+1107 - Guatemala
+1108 - Haiti
+1113 - Panama
+1118 - Trinidad and Tobago
+1124 - Curacao
+1128 - Bolivia
+1129 - Venezuela
+1141 - New Zealand
+1164 - Israel
+1165 - Albania
+1166 - Andorra
+1167 - Armenia
+1168 - Azerbaijan
+1169 - Belarus
+1170 - Bosnia and Herzegovina
+1171 - Cyprus
+1172 - Estonia
+1173 - Faroe Islands
+1174 - Georgia
+1175 - Iceland
+1176 - Kazakhstan
+1177 - Liechtenstein
+1178 - Lithuania
+1179 - Luxembourg
+1180 - North Macedonia
+1181 - Malta
+1182 - Moldova
+1183 - San Marino
+1184 - Uzbekistan
+1195 - KRC Genk
+1196 - KAA Gent
+1197 - Standard Liège
+1200 - KV Mechelen
+1203 - GNK Dinamo Zagreb
+1207 - FC København
+1208 - FC Nordsjælland
+1212 - PAOK Thessaloniki
+1216 - FCSB
+1217 - CSKA Moskva
+1218 - Zenit St. Petersburg
+1219 - Aberdeen FC
+1220 - Dundee United
+1221 - Heart of Midlothian
+1222 - Hibernian FC
+1223 - FK Crvena Zvezda
+1230 - Gençlerbirliği SK
+1232 - Shakhtar Donetsk
+1236 - Argentinos Juniors
+1237 - Racing Club
+1238 - Estudiantes de la Plata
+1239 - Gimnasia La Plata
+1240 - CA Independiente
+1241 - Newell's Old Boys
+1242 - CA Rosario Central
+1243 - CA San Lorenzo
+1244 - CA Vélez Sarsfield
+1245 - Atlético Mineiro
+1246 - Botafogo
+1247 - SC Corinthians
+1248 - CR Flamengo
+1249 - Fluminense FC
+1250 - Grêmio
+1252 - SC Internacional
+1254 - Santos FC
+1255 - São Paulo FC
+1256 - CSD Colo Colo
+1257 - América de Cali
+1258 - Millonarios FC
+1260 - Club Cerro Porteño
+1261 - Olimpia Asunción
+1262 - Club Nacional
+1263 - CA Peñarol
+1264 - Club América
+1265 - Cruz Azul
+1327 - Queens Park Rangers
+1329 - Stade Brestois
+1330 - Stade de Reims
+1348 - Al Shabab Club
+1349 - Al Ahli SFC
+1350 - Al Ittihad Club
+1362 - Cesena FC
+1489 - Al Hilal SFC
+1528 - Valenciennes FC
+1550 - Serbia
+1551 - Montenegro
+1586 - RB Salzburg
+1589 - Hull City
+1600 - Spezia Calcio
+1695 - Wisła Kraków
+1702 - Malmö FF
+1706 - FC Basel 1893
+1733 - HJK Helsinki
+1746 - CFR Cluj
+1753 - Dinamo Moskva
+1756 - Legia Warszawa
+1760 - Bristol City
+1765 - Granada CF
+1778 - CF Monterrey
+1782 - Tigres UANL
+1804 - Vitória Sport Clube
+1832 - Bröndby IF
+1881 - Fagiano Okayama
+1902 - Al Ettifaq FC
+1907 - LDU Quito
+1909 - Swansea City
+1919 - US Sassuolo
+1922 - CA Huracán
+1924 - Gimnasia de Mendoza
+1925 - Estudiantes de Río Cuarto
+1926 - Club Atlético Tigre
+1927 - CA Banfield
+1929 - Club Atlético Lanús
+1930 - Athletico Paranaense
+1931 - Coritiba FC
+1933 - Goiás EC
+1935 - Clube Náutico
+1936 - Sport Recife
+1937 - EC Vitória
+1941 - Rubin Kazan
+1944 - CD Nacional
+1945 - Trabzonspor
+1948 - Aris Thessaloniki
+1950 - BSC Young Boys
+1974 - Sporting Braga
+1979 - Rio Ave FC
+1985 - Kilmarnock FC
+1986 - Motherwell FC
+1987 - St. Mirren FC
+1989 - Antalyaspor
+1995 - Istanbul Başakşehir FK
+1996 - Kayserispor
+2009 - Cercle Brugge
+2010 - RSC Charleroi
+2019 - Zulte Waregem
+2020 - Asteras Tripolis
+2024 - APO Levadiakos
+2025 - OFI Crete
+2067 - Aarhus GF
+2069 - FC Midtjylland
+2070 - Odense Boldklub
+2071 - Randers FC
+2078 - LASK Linz
+2081 - SK Sturm Graz
+2092 - FC RFS
+2126 - Lech Poznan
+2178 - APOEL Nicosia
+2185 - Omonia Nicosia
+2187 - Girona FC
+2188 - SD Huesca
+2191 - Universidad Católica
+2192 - Audax Italiano
+2193 - Atlético Nacional
+2195 - Boyacá Chicó FC
+2198 - Club Libertad
+2208 - CD Everton
+2209 - Universidad de Chile
+2210 - Independiente Medellín
+2215 - Universitario de Deportes
+2216 - Sporting Cristal
+2218 - Deportivo Táchira
+2229 - FK Rostov
+2283 - Bolívar La Paz
+2284 - Once Caldas
+2285 - Junior FC
+2287 - Club Alianza Lima
+2320 - Calcio Padova
+2360 - Universidad de Concepción
+2361 - Deportes Tolima
+2372 - Machida Zelvia
+2373 - V-Varen Nagasaki
+2375 - Ferencváros TC
+2380 - FC Arouca
+2383 - GD Estoril Praia
+2387 - Gil Vicente FC
+2388 - Moreirense FC
+2391 - CD Santa Clara
+2450 - América Mineiro
+2451 - Atlético Goianiense
+2452 - Avaí FC
+2453 - EC Bahia
+2454 - Ceará SC
+2459 - Red Bull Bragantino
+2460 - Criciúma EC
+2465 - AA Ponte Preta
+2468 - Vila Nova FC
+2469 - ML Default Latinamerica
+2502 - The Strongest
+2506 - Clube de Regatas Brasil
+2517 - SS Juve Stabia
+2525 - HNK Hajduk Split
+2536 - Club Atlético Belgrano
+2538 - Club Atlético Unión
+2541 - CD O'Higgins
+2543 - Deportes Concepción
+2544 - Deportes La Serena
+2545 - Huachipato FC
+2546 - Unión La Calera
+2548 - CD Palestino
+2553 - CD Cobresal
+2555 - Volos NPS
+2556 - Panetolikos FC
+2559 - Atromitos Athens
+2576 - Al Fateh SC
+2577 - Al Nassr FC
+2580 - Al Taawoun FC
+2614 - CD Tondela
+2616 - CD Mirandés
+2618 - FK Krasnodar
+2621 - Dundee FC
+2625 - Kasimpaşa SK
+2650 - Deportivo Cali
+2651 - Deportivo Pasto
+2652 - Cúcuta Deportivo
+2653 - Rionegro Águilas
+2654 - Internacional de Bogotá
+2657 - Independiente Santa Fe
+2658 - Barcelona SC
+2659 - Independiente Del Valle
+2696 - ML Default Asia
+2699 - CD Ñublense
+2707 - Coquimbo Unido
+2717 - CA Aldosivi
+2719 - Atlético Tucumán
+2722 - Defensa y Justicia
+2726 - Independiente Rivadavia
+2727 - Instituto AC Córdoba
+2730 - CA Sarmiento
+3095 - RAAL La Louvière
+3099 - FCV Dender
+4071 - AFC Bournemouth
+4092 - Qingdao West Coast
+4094 - Shanghai Port
+4108 - Chapecoense
+4115 - Tampines Rovers
+4123 - FC Metz
+4124 - FC Augsburg
+4126 - TSG 1899 Hoffenheim
+4137 - FC Köln
+4139 - FC St. Pauli
+4140 - FC Union Berlin
+4141 - US Avellino
+4143 - Krylya Sovetov Samara
+4145 - Deportivo Alavés
+4146 - SD Eibar
+4148 - Chicago Fire FC
+4151 - Columbus Crew
+4153 - FC Dallas
+4155 - Los Angeles Galaxy
+4156 - CF Montréal
+4157 - New England Revolution
+4158 - New York RB
+4160 - Portland Timbers
+4162 - San Jose Earthquakes
+4163 - Seattle Sounders
+4164 - Sporting Kansas City
+4166 - Vancouver Whitecaps
+4168 - Shandong Taishan
+4171 - Al Kuwait SC
+4180 - Brentford FC
+4183 - Coventry City
+4192 - Preston North End
+4194 - Sheffield United
+4200 - Amiens SC
+4201 - US Boulogne
+4206 - USL Dunkerque
+4211 - Paris FC
+4212 - Red Star FC
+4213 - RC Strasbourg Alsace
+4218 - Carrarese Calcio
+4219 - Como 1907
+4220 - US Cremonese
+4225 - AC Reggiana 1919
+4228 - FC Südtirol
+4229 - Venezia FC
+4230 - Virtus Entella
+4233 - US Catanzaro
+4234 - Frosinone Calcio
+4237 - US Lecce
+4241 - Pisa Sporting Club
+4247 - Burgos CF
+4252 - Cultural Leonesa
+4260 - Real Oviedo
+4272 - CD Leganés
+4276 - Sociedad B
+4302 - Albacete Balompié
+4308 - Cádiz CF
+4326 - FK Qarabağ
+4344 - Slovan Bratislava
+4347 - FC Sheriff Tiraspol
+4355 - Ludogorets Razgrad
+4365 - Portsmouth FC
+4370 - Grenoble Foot 38
+4372 - Rodez AF
+4379 - Mantova 1911
+4395 - CD Castellón
+4914 - AC Monza
+4941 - BG Pathum United
+4959 - Paysandu
+4965 - FC Lugano
+4971 - The Old Boys
+4995 - Central Córdoba SDE
+5009 - FC Heidenheim 1846
+5010 - RB Leipzig
+5028 - FC Famalicão
+5046 - Club Atlético Talleres
+5048 - Londrina EC
+5061 - New York City
+5062 - Orlando City
+5086 - Oxford United
+5099 - Pau FC
+5129 - World Selection
+5137 - EC Juventude
+5139 - Botafogo FC
+5142 - Cuiabá EC
+5143 - Fortaleza EC
+5145 - Clube do Remo
+5148 - Volta Redonda
+5171 - Henan FC
+5173 - Shanghai Shenhua
+5175 - Tianjin Jinmen Tiger
+5180 - Zhejiang FC
+5181 - Liaoning Tieren
+5184 - Shenzhen Peng City
+5185 - Yunnan Yukun
+5189 - Slavia Prague
+5191 - Royal Antwerp FC
+5194 - Sint-Truiden VV
+5196 - Akhmat Grozny
+5202 - Alanyaspor
+5203 - Göztepe SK
+5204 - Konyaspor
+5207 - Alianza FC
+5208 - Atlético Bucaramanga
+5217 - Oud-Heverlee Leuven
+5220 - Union Saint Gilloise
+5221 - KVC Westerlo
+5225 - Silkeborg IF
+5226 - Sønderjyske Fodbold
+5229 - FC Fredericia
+5235 - Vejle Boldklub
+5237 - Viborg FF
+5242 - Molde FK
+5253 - FK Bodø/Glimt
+5269 - Jagiellonia Bialystok
+5288 - Rakow Czestochowa
+5295 - Baltika Kaliningrad
+5296 - FC Sochi
+5300 - FC Pari Nizhny Novgorod
+5301 - FC Orenburg
+5317 - Falkirk FC
+5319 - Livingston FC
+5325 - IF Elfsborg
+5354 - Caykur Rizespor
+5356 - Gaziantep FK
+5361 - Samsunspor
+5366 - Club Deportivo Riestra
+5370 - Deportivo Pereira
+5371 - Fortaleza CEIF
+5373 - Llaneros FC
+5376 - Jaguares de Córdoba
+5433 - Operário PR
+5439 - Gibraltar
+5440 - Kosovo
+5454 - CA Platense
+5458 - SD Aucas
+5573 - Ferroviário
+5586 - Dalian Yingbo
+5633 - Casa Pia AC
+5644 - FC Andorra
+5652 - Fatih Karagümrük
+5657 - CA Barracas Central
+5685 - FC Annecy
+5736 - Atlanta United FC
+5737 - FC Cincinnati
+5738 - Inter Miami CF
+5739 - Nashville SC
+5740 - Austin FC
+5741 - Los Angeles FC
+5750 - Indonesia
+5751 - Kyrgyzstan
+5757 - Palestine
+5767 - Mirassol FC
+5768 - Grêmio Novorizontino
+5820 - Eyüpspor
+5821 - Kocaelispor
+5844 - Estrela da Amadora
+5845 - FC Alverca
+5895 - AD Ceuta FC
+5909 - São Bernardo FC
+5912 - Daejeon Hana Citizen
+5954 - Avs Futebol SAD
+5973 - Athletic Club
+5980 - Deportes Limache
+5987 - Somalia
+5988 - Laos
+6044 - Thep Xanh Nam Dinh FC
+6051 - Brunei Darussalam
+6052 - Timor-Leste
+6061 - Botswana
+6069 - Wrexham AFC
+9000 - Al Hazem SC
+9001 - Pafos FC
+9002 - Al Riyadh SC
+9003 - Damac FC
+9004 - NEOM SC
+9005 - Al Okhdood Club
+9006 - Al Najma SC
+9007 - Al Khaleej Club
+9008 - AE Larisa
+9010 - Al Kholood Club
+9012 - Al Qadsiah FC
+9014 - Al Fayha FC
+9015 - Dinamo Makhachkala
+9016 - Akron Tolyatti
+9019 - Panserraikos FC
+9020 - AE Kifisias
+9029 - El Ahly Cairo
+9030 - Wydad Casablanca
+9033 - Esperance Tunis
+65815 - Jeonbuk Hyundai Motors
+65817 - Pohang Steelers
+66871 - Al Ain FC
+66877 - Sepahan SC
+66882 - Al Rayyan SC
+66895 - Pakhtakor Tashkent
+67024 - Al Gharafa SC
+67029 - Buriram United
+67112 - Esteghlal FC
+67114 - Sydney FC
+68138 - Tractor FC
+68179 - Muangthong United FC
+69706 - Al Shorta SC
+69709 - Al Sadd SC
+69710 - Ulsan HD FC
+69714 - FC Nasaf Qarshi
+70481 - PERSIB Bandung
+70484 - Johor Darul Ta'zim
+70487 - Persepolis FC
+70490 - Al Wehdat SC
+70923 - Air Force Club
+70924 - Al Wasl FC
+70930 - True Bangkok United
+70937 - Port FC
+71134 - Lion City Sailors
+71135 - FC Istiqlol Dushanbe
+71212 - Sharjah FC
+71311 - Kaya FC-Iloilo
+71450 - Gwangju FC
+71574 - Mohun Bagan Super Giant
+71576 - Al Hussein SC
+71577 - Selangor FC

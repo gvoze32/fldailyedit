@@ -218,11 +218,43 @@ def cmd_run(args):
         teams_info = ef.get_all_team_info()
         club_ids = ef.get_club_team_ids()
 
-        player_name_to_id = {p.name: pid for pid, p in players.items()}
+        # Try to load official Smokepatch names to get full names instead of PES short names
+        sp_players_path = Path("data/FL2622wc_players.txt")
+        sp_teams_path = Path("data/FL262_teams.txt")
+        
+        sp_player_names = {}
+        if sp_players_path.exists():
+            with open(sp_players_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if "-" in line:
+                        parts = line.split("-", 1)
+                        if parts[0].strip().isdigit():
+                            sp_player_names[int(parts[0].strip())] = parts[1].strip()
+                            
+        sp_team_names = {}
+        if sp_teams_path.exists():
+            with open(sp_teams_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if "-" in line:
+                        parts = line.split("-", 1)
+                        if parts[0].strip().isdigit():
+                            sp_team_names[int(parts[0].strip())] = parts[1].strip()
+
+        # Build name dictionaries, preferring Smokepatch full names if available
+        player_name_to_id = {}
+        for pid, p in players.items():
+            name = sp_player_names.get(pid, p.name)
+            player_name_to_id[name] = pid
+            
+        team_name_to_id = {}
+        for tid, t in teams_info.items():
+            if tid in club_ids:
+                name = sp_team_names.get(tid, t.name)
+                team_name_to_id[name] = tid
+
         player_positions = {pid: p.position for pid, p in players.items()}
         player_nationalities = {pid: p.nationality for pid, p in players.items() if p.nationality}
         player_ages = {pid: p.age for pid, p in players.items() if p.age}
-        team_name_to_id = {t.name: tid for tid, t in teams_info.items() if tid in club_ids}
 
         print(f"  {len(player_name_to_id)} players, {len(team_name_to_id)} playable clubs (national teams excluded)")
 

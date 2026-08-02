@@ -994,11 +994,25 @@ class EditFile:
         # Extract the current 40-byte lineup array
         lineup = list(self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS])
         
-        # Remove the departed player (removed_idx) from the lineup to prevent duplicates,
-        # shifting everyone else up, and padding the end with 0xFF.
-        if removed_idx in lineup:
-            lineup.remove(removed_idx)
-            lineup.append(0xFF)
+        # Safe Game Plan Doctor: Remove the departed player and patch the hole
+        try:
+            pos_A = lineup.index(removed_idx)
+        except ValueError:
+            pos_A = -1
+            
+        if pos_A != -1:
+            if pos_A < 11:
+                # If departed was a Starter, promote the 1st Sub (index 11) to Starter.
+                # Then shift the rest of the bench/reserves left.
+                lineup[pos_A] = lineup[11]
+                for i in range(11, 39):
+                    lineup[i] = lineup[i+1]
+                lineup[39] = 0xFF
+            else:
+                # If departed was on the bench, just shift the bench left.
+                for i in range(pos_A, 39):
+                    lineup[i] = lineup[i+1]
+                lineup[39] = 0xFF
             
         # Re-map the replacement player's index to the new removed_idx hole
         for i in range(len(lineup)):
