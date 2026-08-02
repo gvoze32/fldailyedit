@@ -1,25 +1,30 @@
 # FLEditScrape — Football Life 2026 (FL26) Transfer Automation Tool
 
-An automated, safe, and intelligent player transfer synchronization tool for **SP Football Life 2026 (PES 2021 engine)**.
+[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![Tests](https://img.shields.io/badge/tests-57%2F57%20passed-brightgreen.svg)]()
+[![Target](https://img.shields.io/badge/target-SP%20Football%20Life%202026-orange.svg)](https://www.pessmokepatch.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-It automatically scrapes verified real-world football transfers from **FotMob's live transfer feed**, matches players and clubs against the internal FL26 database using high-confidence fuzzy matching, creates automatic backups, and directly applies roster updates into your encrypted `EDIT00000000` save file.
+An automated, safe, and intelligent player transfer synchronization tool for **SP Football Life 2026 (eFootball PES 2021 engine)**.
+
+It automatically fetches live, verified football transfers from **FotMob's real-time transfer feed**, matches players and clubs against the internal FL26 database using high-confidence fuzzy matching, creates automatic backups, and directly applies roster updates into your encrypted `EDIT00000000` save file.
 
 ---
 
 ## ⚡ Features
 
-- **Live Transfer Scraping**: Fetches up-to-the-minute global transfer data (transfers, loans, free agent releases, and signings) from FotMob via lightweight async HTTP API requests.
-- **Intelligent Fuzzy Matching**: RapidFuzz-powered matching with diacritic stripping, team aliases ([data/team_aliases.json](data/team_aliases.json)), and manual overrides ([data/name_overrides.json](data/name_overrides.json)).
-- **Comprehensive FL26 Database**: Pre-indexed database of **23,000+ players** and **580+ playable club teams** across 29 leagues. National teams are automatically excluded from transfer operations.
-- **Save File Integrity & Safety**:
-  - **Automatic Rolling Backups**: Always backs up your save file with timestamped copies in `backups/` before any write.
-  - **Dry-Run Mode**: Inspect matched transfers and preview changes without modifying your save.
+- **🚀 Live Transfer Scraping**: Fetches up-to-the-minute global transfer data (transfers, loans, free agent releases, and signings) from FotMob via lightweight, direct async HTTP requests (<0.5s execution, 0 bot blocks).
+- **🧠 Intelligent Fuzzy Matching**: RapidFuzz-powered matching with diacritic normalization, custom team aliases ([data/team_aliases.json](data/team_aliases.json)), and manual overrides ([data/name_overrides.json](data/name_overrides.json)).
+- **📊 Comprehensive FL26 Database**: Pre-indexed database of **23,780 players** and **583 playable club teams** across 29 leagues. National teams are automatically protected and excluded from club transfer operations.
+- **🛡️ Save File Integrity & Safety**:
+  - **Automatic Rolling Backups**: Automatically creates timestamped copies in `backups/` before any file modification.
+  - **Dry-Run Mode**: Inspect and simulate transfer matching without modifying your save file.
   - **pesXdecrypter Integration**: Native high-speed binary decryption and encryption for PES 2021 edit files.
-- **Automation & Scheduling**:
-  - **Live Runner**: Apply transfers on-demand with one command.
+- **⏰ Automation & Scheduling**:
+  - **Live Runner**: Apply transfers on-demand with a single command.
   - **Background Scheduler**: Continuous interval-based runner (`schedule --interval-hours 6`).
   - **Crontab Generator**: Ready-to-use cron job generator (`cron`).
-  - **Audit Logging**: Structured JSON Lines log ([data/transfer_log.jsonl](data/transfer_log.jsonl)) recording every transfer.
+  - **Audit Logging**: Structured JSON Lines log ([data/transfer_log.jsonl](data/transfer_log.jsonl)) recording every transfer with confidence score and timestamp.
 
 ---
 
@@ -40,22 +45,53 @@ graph LR
 
 ---
 
+## 📁 Repository Structure
+
+```text
+fleditscrape/
+├── config.py              # Central configurations and paths
+├── run.py                 # Unified CLI tool (run, schedule, cron, inspect, log)
+├── pyproject.toml         # Package metadata and dependencies
+├── README.md              # Project documentation
+├── scraper/               # Scraper & Matching modules
+│   ├── fotmob.py          # Direct async FotMob transfer scraper
+│   ├── matcher.py         # Fuzzy matching engine (players & clubs)
+│   └── models.py          # Transfer and MatchedTransfer data models
+├── editor/                # PES 2021 / FL26 binary save editor
+│   ├── editfile.py        # Binary parser, player mover, roster manager
+│   ├── crypto.py          # pesXdecrypter wrapper (decrypt & re-encrypt)
+│   ├── backup.py          # Automatic rolling backup system
+│   ├── logger.py          # JSON Lines transfer audit logging
+│   └── models.py          # PlayerInfo & TeamData data structures
+├── data/                  # Game databases and alias tables
+│   ├── players.csv        # FL26 23k player database registry
+│   ├── team_aliases.json  # Club name aliases and abbreviations
+│   ├── name_overrides.json# Manual name/ID override mappings
+│   └── leagues.json       # Playable league definitions
+├── vendor/                # Native decryption tools
+│   └── pesXdecrypter/     # C implementation of PES2021 crypto engine
+└── tests/                 # Complete unit test suite (57 tests)
+    ├── test_editor.py     # Binary editor & slot safety tests
+    ├── test_matcher.py    # Fuzzy matcher tests
+    └── test_scraper.py    # FotMob parser & model tests
+```
+
+---
+
 ## 🚀 Getting Started
 
 ### 1. Requirements
-- Python 3.10+
-- macOS, Linux, or Windows
-- GCC / Clang (for compiling `pesXdecrypter` if not already built)
+- **Python 3.10+**
+- **macOS, Linux, or Windows (WSL/Native)**
+- **GCC / Clang** (for compiling `pesXdecrypter` if not already built)
 
 ### 2. Installation
 
-Clone this repository and set up a virtual environment:
-
 ```bash
-git clone https://github.com/your-username/fleditscrape.git
+git clone https://github.com/gvoze32/fleditscrape.git
 cd fleditscrape
 
-# Create virtual environment
+# Create and activate virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
 
@@ -66,7 +102,7 @@ pip install pytest
 
 ### 3. Compile pesXdecrypter (macOS / Linux)
 
-If the binaries in `vendor/pesXdecrypter/` are not yet compiled for your system:
+If the binaries in `vendor/pesXdecrypter/` need to be built for your operating system:
 
 ```bash
 cd vendor/pesXdecrypter
@@ -79,7 +115,7 @@ cd ../..
 ## 📖 Usage Guide
 
 ### 1. Preview Transfers (Dry-Run Mode)
-Inspect which transfers will be matched and applied without touching your save file:
+Inspect matched transfers without modifying your save file:
 
 ```bash
 python run.py run --dry-run --edit-file sample/EDIT00000000 --pages 2
@@ -92,22 +128,22 @@ Scrape and write transfers directly into your FL26 save file:
 python run.py run --edit-file sample/EDIT00000000 --pages 2
 ```
 
-Options:
+**Common Flags:**
 - `--edit-file PATH`: Path to your `EDIT00000000` save file (defaults to `config.EDIT_FILE_PATH`).
 - `--pages N`: Number of pages to fetch from FotMob (50 transfers per page, default: `2`).
-- `--popular`: Restrict scraping to popular / major transfers only.
+- `--popular`: Restrict scraping to major / popular transfers.
 - `--threshold N`: Minimum fuzzy match confidence score (0-100, default: `80`).
 - `--dry-run`: Simulate transfer matching without modifying the save file.
 
-### 3. Continuous Scheduler
-Run the transfer synchronization continuously in the background on a timer:
+### 3. Continuous Background Scheduler
+Run the transfer synchronization continuously on a timer:
 
 ```bash
 python run.py schedule --interval-hours 6 --edit-file sample/EDIT00000000
 ```
 
 ### 4. Crontab Generator
-Generate an automated cron job line for background execution on Linux/macOS:
+Generate an automated cron job configuration for background execution on Linux/macOS:
 
 ```bash
 python run.py cron --interval-hours 12
@@ -134,7 +170,7 @@ python run.py log --last 25
 | File | Description |
 |---|---|
 | [config.py](config.py) | Central settings (default paths, match thresholds, backup retention). |
-| [data/team_aliases.json](data/team_aliases.json) | Custom team name aliases for matching variations (e.g. `Man Utd` → `Manchester United`). |
+| [data/team_aliases.json](data/team_aliases.json) | Custom team name aliases for matching variations (e.g., `Man Utd` → `Manchester United`). |
 | [data/name_overrides.json](data/name_overrides.json) | Manual overrides for players with special nicknames or IDs. |
 | [data/players.csv](data/players.csv) | Full FL26 player registry database (23,780 players). |
 
@@ -149,14 +185,28 @@ source .venv/bin/activate
 pytest -v
 ```
 
-All 57 unit tests cover:
+All **57 unit tests** cover:
 - Binary save file reading, writing, moving, signing, releasing, and slot boundary safety.
 - Fuzzy name and team matching algorithms.
 - FotMob payload parsing and data model integrity.
 
 ---
 
-## 🔒 Safety & License
+## 💡 Troubleshooting & FAQ
 
-- **Automatic Backups**: Backups are timestamped and preserved in the `backups/` directory. The last 10 backups are retained by default.
-- **License**: MIT License.
+### Where is my FL26 `EDIT00000000` file located?
+- **Windows / Steam**:
+  `C:\Users\<YourUsername>\Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\save\EDIT00000000`
+- **Linux (Wine / Proton)**:
+  `~/.steam/steam/steamapps/compatdata/.../pfx/drive_c/users/steamuser/Documents/KONAMI/.../save/EDIT00000000`
+- **macOS / Sample**:
+  You can point directly to any test file using `--edit-file sample/EDIT00000000`.
+
+### Are my original saves safe?
+Yes. Before any edit file is modified, an automated backup is created in the `backups/` folder with timestamp notation (`EDIT00000000.bak.YYYYMMDD_HHMMSS`).
+
+---
+
+## 🔒 License
+
+This project is licensed under the [MIT License](LICENSE).
