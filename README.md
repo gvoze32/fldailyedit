@@ -4,10 +4,9 @@
 [![Database](https://img.shields.io/badge/Base%20Database-SP%20Football%20Life%202026-blueviolet.svg)]()
 [![Tests](https://img.shields.io/badge/tests-73%2F73%20passed-brightgreen.svg)]()
 [![Daily Sync](https://img.shields.io/badge/Cloud%20Sync-Automated%20Daily-success.svg)]()
-[![Compatibility](https://img.shields.io/badge/compatibility-All%20Versions-orange.svg)](https://www.pessmokepatch.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-An automated, safe, and intelligent player transfer synchronization tool for **SP Football Life (All Versions)** and **eFootball PES 2021**.
+An automated, safe, and intelligent player transfer synchronization tool for **SP Football Life** and **eFootball PES 2021**.
 
 It automatically fetches live, verified football transfers from **FotMob's real-time transfer feed**, cross-verifies player positions, nationalities, ages, and squad rosters, handles squad limits with position-aware ability logic, auto-assigns conflict-free shirt numbers, protects tactical game plans, and writes updates directly into your `EDIT00000000` save file.
 
@@ -30,7 +29,7 @@ Pre-built and updated `EDIT00000000` save files and visual transfer report cards
 
 | Game | Save Directory (Windows) |
 |---|---|
-| **SP Football Life (All Versions)** | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\save\` |
+| **SP Football Life** | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\save\` |
 | **eFootball PES 2021 Vanilla** | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\<user_id>\save\` |
 
 > [!TIP]
