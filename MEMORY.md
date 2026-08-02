@@ -9,7 +9,7 @@
 ## 1. Project Goal
 
 Build an automated system (daily cron) that:
-1. Scrapes latest player transfer data from Transfermarkt
+1. Scrapes latest player transfer data from FotMob (direct async HTTP)
 2. Matches scraped player names to Player IDs in the Football Life 26 (FL26) database
 3. Decrypts the FL26 save file (`edit00000000`) using pesXdecrypter
 4. Modifies team-player associations in the binary data (move player IDs between teams)
@@ -193,7 +193,7 @@ but should be tested with an actual FL26 `edit00000000` file before relying on i
 Repo: https://github.com/kickoffsage/pes2021-transfer-tool
 
 ### What exists (partially working):
-- `fetch_latest_transfers.py` — scrapes Transfermarkt "latest transfers", uses rapidfuzz for fuzzy matching
+- `fetch_latest_transfers.py` — scrapes web transfer lists, uses rapidfuzz for fuzzy matching
 - `fetch_team_transfers.py` — scrapes specific team's transfer page
 - `src/crypt_utils.py` — subprocess wrapper around pesXdecrypter
 - `src/team_utils.py` — reads team IDs + names from binary (hardcoded offset jumps)
@@ -207,7 +207,7 @@ Repo: https://github.com/kickoffsage/pes2021-transfer-tool
 - Windows-only (hardcoded `.exe` paths)
 - Hardcoded offsets (won't work with FL26 if table sizes differ)
 - No pagination in scraper
-- No rate limiting (Transfermarkt blocks aggressively)
+- No rate limiting or retry handling
 - No error handling for edge cases (player not found, team full, etc.)
 - `team_utils.py` uses magic numbers: `f.seek(100, 1)` to skip to team name, `f.read(70)` for name — these correspond to: Team entry offset 0x068 for name (0x068 - 0x004 = 0x64 = 100 bytes after team ID), 70 bytes for name field. Correct for vanilla PES21 but not dynamically calculated.
 
@@ -235,7 +235,7 @@ Repo: https://github.com/the4chancup/4ccEditor
 
 ## 7. Fuzzy Matching Strategy
 
-Transfermarkt names vs FL26 database names will differ:
+FotMob names vs FL26 database names will differ:
 - Format: "K. Mbappé" vs "Kylian Mbappé"
 - Diacritics: "Müller" vs "Muller"
 - Order: "Cristiano Ronaldo" vs "Ronaldo, Cristiano"
@@ -263,8 +263,8 @@ fleditscrape/
 ├── pyproject.toml           # Python project + dependencies
 ├── scraper/
 │   ├── __init__.py
-│   ├── transfermarkt.py     # Scrape Transfermarkt (pagination, rate limit, retry)
-│   ├── matcher.py           # Fuzzy name matching engine
+│   ├── fotmob.py            # Direct async FotMob transfer scraper
+│   ├── matcher.py           # Fuzzy name matching engine (position-aware, bidirectional context)
 │   └── models.py            # Transfer / MatchedTransfer dataclasses
 ├── editor/
 │   ├── __init__.py
@@ -274,7 +274,7 @@ fleditscrape/
 │   ├── logger.py            # Structured transfer logging (JSONL)
 │   └── models.py            # TeamData / PlayerInfo dataclasses
 ├── data/
-│   ├── team_aliases.json    # Transfermarkt → FL26 team name mapping
+│   ├── team_aliases.json    # FotMob → FL26 team name mapping
 │   ├── name_overrides.json  # Player name manual overrides
 │   └── leagues.json         # League URLs to scrape
 ├── tests/
@@ -292,7 +292,7 @@ fleditscrape/
 ## 9. Build Order
 
 1. **Phase 1 — Scraper** (fully independent, no edit file needed)
-   - `scraper/models.py`, `scraper/transfermarkt.py`, `scraper/matcher.py`
+   - `scraper/models.py`, `scraper/fotmob.py`, `scraper/matcher.py`
    - `data/team_aliases.json`, `data/leagues.json`
    - Tests with saved HTML fixtures
 

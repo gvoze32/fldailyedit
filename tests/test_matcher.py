@@ -122,6 +122,22 @@ class TestPlayerMatching:
         assert pid == 3001
         assert conf == 100.0
 
+    def test_position_compatibility_gk_protection(self):
+        """A goalkeeper transfer should not match an outfield player of same name."""
+        m = NameMatcher()
+        m.load_player_db(
+            players={"David Raya": 7001, "David Raya Silva": 7002},
+            positions={7001: "GK", 7002: "CF"}
+        )
+        # Looking for GK should pick 7001
+        pid, name, conf = m.match_player("David Raya", position="GK")
+        assert pid == 7001
+
+        # Looking for ST should NOT pick GK 7001
+        pid, name, conf = m.match_player("David Raya", position="ST")
+        assert pid == 7002
+
+
 
 # --- Team matching tests ---
 

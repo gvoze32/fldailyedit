@@ -7,7 +7,7 @@ from typing import Optional
 
 @dataclass
 class Transfer:
-    """A single transfer scraped from Transfermarkt."""
+    """A single transfer scraped from FotMob."""
     player_name: str
     from_club: str
     to_club: str
@@ -16,9 +16,19 @@ class Transfer:
     fee: str = ""
     league: str = ""
     season: str = ""
+    position: str = ""  # e.g. "GK", "CB", "LB", "RB", "CM", "CAM", "LW", "RW", "ST", "CF"
+    is_loan: bool = False
+    is_contract_extension: bool = False
+    market_value: int = 0
+    from_club_id_fotmob: Optional[int] = None
+    to_club_id_fotmob: Optional[int] = None
+    from_club_full_name: str = ""
+    to_club_full_name: str = ""
 
     def __str__(self):
-        return f"{self.player_name}: {self.from_club} → {self.to_club} ({self.transfer_type})"
+        pos_badge = f" [{self.position}]" if self.position else ""
+        type_badge = f" ({self.transfer_type})"
+        return f"{self.player_name}{pos_badge}: {self.from_club} → {self.to_club}{type_badge}"
 
 
 @dataclass

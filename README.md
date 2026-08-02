@@ -1,24 +1,27 @@
 # FLEditScrape — Football Life & PES 2021 Transfer Tool
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-66%2F66%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-72%2F72%20passed-brightgreen.svg)]()
 [![Compatibility](https://img.shields.io/badge/compatibility-All%20Versions-orange.svg)](https://www.pessmokepatch.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 An automated, safe, and intelligent player transfer synchronization tool for **Football Life (All Versions)** and **eFootball PES 2021**.
 
-It automatically fetches live, verified football transfers from **FotMob's real-time transfer feed**, matches players and clubs using fuzzy matching, handles squad limits with position-aware ability logic, and writes updates directly into your `EDIT00000000` save file.
+It automatically fetches live, verified football transfers from **FotMob's real-time transfer feed**, cross-verifies player positions and squad rosters, handles squad limits with position-aware ability logic, and writes updates directly into your `EDIT00000000` save file.
 
 ---
 
 ## ⚡ Key Features
 
-- **🚀 Live Real-Time Scraping**: Direct async HTTP requests to FotMob for all latest transfers, loans, releases, and signings (<0.5s execution, 0 bot blocks).
-- **🔄 Loan = Transfer Treatment**: On-loan players are seamlessly transferred to ensure accurate current squads.
-- **🧠 Position-Aware Overflow & GK Protection**: When a team hits the 40-player limit, the tool automatically releases deep reserves with the lowest overall ability while **protecting Starting XI players** and **preserving at least 2 Goalkeepers per squad**.
+- **🚀 Live Real-Time Scraping**: Direct async HTTP stream from FotMob for all latest transfers, loans, releases, and signings (<0.5s execution, 0 bot blocks).
+- **🛡️ Position Compatibility Gate & GK Protection**: Hard positional guardrail preventing outfield players from being mistakenly matched to Goalkeepers (and vice-versa).
+- **👥 Bidirectional Squad Roster Verification**: Matches player candidates against active club rosters in the decrypted save file (`from_team` for departures, `to_team` for loan returns/arrivals), boosting confidence to 100%.
+- **🔄 Intelligent Loan & Loan Return Handling**: On-loan players are seamlessly transferred to new clubs, and players returning from loans (`end of loan` / `loan return`) are accurately sent back to their parent clubs.
+- **📋 Contract Extension Auto-Filter**: Automatically detects and skips contract renewals (`contractExtension: true`) to avoid redundant same-club roster operations.
+- **🧠 Position-Aware Overflow & Starting XI Protection**: When a team hits the 40-player limit, the tool automatically releases deep reserves with the lowest overall ability while **protecting Starting XI players** and **preserving at least 2 Goalkeepers per squad**.
 - **📊 23k+ Universal Database**: Pre-indexed database of **23,780 players** and **580+ club teams** across 29 leagues. National teams are safely protected.
 - **🤖 GitHub Actions Cloud Automation**: Automated daily sync in the cloud with downloadable updated save files via **GitHub Actions Artifacts**.
-- **🛡️ Safe & Reversible**: Automatic rolling backups before every modification, dry-run simulation mode, and structured JSONL audit logs.
+- **🛡️ Safe & Reversible**: Automatic rolling backups before every modification, dry-run simulation mode, and structured JSONL audit logs with position, fee, and market value metadata.
 
 ---
 
@@ -27,9 +30,9 @@ It automatically fetches live, verified football transfers from **FotMob's real-
 ```mermaid
 graph LR
     A[FotMob Live API] -->|Direct Async HTTP| B[Scraper Engine]
-    B -->|Transfer Records| C[Fuzzy Matcher RapidFuzz]
-    D[Game DB & CSV 23k Players] --> C
-    C -->|Matched Transfers| E[Safety Backup Engine]
+    B -->|Metadata: Pos, Loan, Fee, MV| C[Deep Matcher RapidFuzz]
+    D[Decrypted Save Roster & DB] --> C
+    C -->|Bidirectional Squad + Pos Gate| E[Safety Backup Engine]
     E -->|edit00000000 backup| F[pesXdecrypter Decrypt]
     F -->|data.dat| G[Binary EditFile Engine]
     G -->|Move / Sign / Smart Release| H[pesXdecrypter Encrypt]
@@ -55,7 +58,7 @@ fleditscrape/
 ├── README.md              # Project documentation
 ├── scraper/               # Scraper & Matching modules
 │   ├── fotmob.py          # Direct async FotMob transfer scraper
-│   ├── matcher.py         # Fuzzy matching engine (players & clubs)
+│   ├── matcher.py         # Position-aware fuzzy matcher & squad verification
 │   └── models.py          # Transfer and MatchedTransfer data models
 ├── editor/                # PES 2021 / Football Life binary save editor
 │   ├── editfile.py        # Binary parser, player mover, roster manager
@@ -70,7 +73,7 @@ fleditscrape/
 │   └── leagues.json       # Playable league definitions
 ├── vendor/                # Native decryption tools
 │   └── pesXdecrypter/     # C implementation of PES2021 crypto engine
-└── tests/                 # Complete unit test suite (66 tests)
+└── tests/                 # Complete unit test suite (72 tests)
 ```
 
 ---
@@ -155,7 +158,7 @@ Run the automated test suite:
 pytest -v
 ```
 
-All **66 unit tests** pass, covering binary parsing, roster slot shifting, loan transfers, goalkeeper protection, and fuzzy matching.
+All **72 unit tests** pass, covering binary parsing, roster slot shifting, loan transfers, goalkeeper protection, position compatibility gates, and fuzzy matching.
 
 ---
 

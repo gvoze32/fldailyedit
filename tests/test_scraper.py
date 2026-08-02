@@ -1,5 +1,5 @@
 """
-Tests for the Transfermarkt scraper — uses saved HTML fixtures to avoid hitting the live site.
+Tests for the FotMob scraper and transfer models.
 """
 import pytest
 from scraper.models import Transfer
@@ -95,22 +95,66 @@ class TestFotmobScraper:
 
         item = {
             "name": "Kylian Mbappé",
+            "position": {"label": "CF", "key": "forward_short"},
             "fromClub": "Paris Saint-Germain",
+            "fromClubFullName": "Paris Saint-Germain",
+            "fromClubId": 9843,
             "toClub": "Real Madrid",
+            "toClubFullName": "Real Madrid",
+            "toClubId": 8633,
             "transferType": {"text": "free transfer"},
             "fee": {"feeText": "Free"},
-            "marketValue": "€180m",
+            "marketValue": 180000000,
+            "onLoan": False,
+            "contractExtension": False,
             "transferDate": "2024-07-01",
         }
         scraper = FotmobScraper()
         t = scraper._parse_fotmob_item(item)
         assert t is not None
         assert t.player_name == "Kylian Mbappé"
+        assert t.position == "CF"
         assert t.from_club == "Paris Saint-Germain"
         assert t.to_club == "Real Madrid"
         assert t.transfer_type == "free transfer"
         assert t.fee == "Free"
         assert t.date == "2024-07-01"
+        assert t.is_loan is False
+        assert t.market_value == 180000000
+        assert t.from_club_id_fotmob == 9843
+
+    def test_parse_fotmob_item_loan(self):
+        from scraper.fotmob import FotmobScraper
+
+        item = {
+            "name": "Alejandro Garnacho",
+            "position": {"label": "LW"},
+            "fromClub": "Chelsea",
+            "toClub": "Aston Villa",
+            "onLoan": True,
+            "fee": {"feeText": "loan"},
+            "transferDate": "2026-08-01",
+        }
+        scraper = FotmobScraper()
+        t = scraper._parse_fotmob_item(item)
+        assert t is not None
+        assert t.is_loan is True
+        assert t.transfer_type == "loan"
+        assert t.position == "LW"
+
+    def test_parse_fotmob_contract_extension_ignored(self):
+        from scraper.fotmob import FotmobScraper
+
+        item = {
+            "name": "Bukayo Saka",
+            "fromClub": "Arsenal",
+            "toClub": "Arsenal",
+            "contractExtension": True,
+            "transferDate": "2026-08-01",
+        }
+        scraper = FotmobScraper()
+        t = scraper._parse_fotmob_item(item, ignore_extensions=True)
+        assert t is None
 
     def test_parse_fotmob_item_missing_name(self):
         from scraper.fotmob import FotmobScraper

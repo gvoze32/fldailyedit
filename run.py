@@ -11,7 +11,7 @@ Usage:
 
 Workflow:
     1. Load league config from data/leagues.json
-    2. Scrape transfers from Transfermarkt
+    2. Scrape live transfers from FotMob API
     3. Decrypt the edit file (pesXdecrypter)
     4. Read FL26 player/team database from decrypted data
     5. Match scraped names to FL26 IDs (fuzzy matching)
@@ -208,12 +208,13 @@ def cmd_run(args):
         club_ids = ef.get_club_team_ids()
 
         player_name_to_id = {p.name: pid for pid, p in players.items()}
+        player_positions = {pid: p.position for pid, p in players.items()}
         team_name_to_id = {t.name: tid for tid, t in teams_info.items() if tid in club_ids}
 
         print(f"  {len(player_name_to_id)} players, {len(team_name_to_id)} playable clubs (national teams excluded)")
 
         matcher = NameMatcher()
-        matcher.load_player_db(player_name_to_id)
+        matcher.load_player_db(player_name_to_id, positions=player_positions)
         matcher.load_team_db(team_name_to_id)
 
         # Build team_player_map for context-aware disambiguation
@@ -224,7 +225,7 @@ def cmd_run(args):
         }
 
         # ── Step 5: Match scraped names to FL26 IDs ──
-        print(f"\n🔍 Matching transfers (threshold={threshold}%)...")
+        print(f"\n🔍 Matching transfers with squad & position verification (threshold={threshold}%)...")
         matched = []
         for t in transfers:
             ftid, ftname, ftconf = matcher.match_team(t.from_club)
@@ -233,7 +234,9 @@ def cmd_run(args):
                 t.player_name,
                 threshold=threshold,
                 from_team_id=ftid,
+                to_team_id=ttid,
                 team_player_map=team_player_map,
+                position=t.position,
             )
 
             mt = MatchedTransfer(
@@ -283,6 +286,9 @@ def cmd_run(args):
                     confidence=m.min_confidence,
                     transfer_type=m.transfer.transfer_type,
                     dry_run=True,
+                    position=m.transfer.position,
+                    fee=m.transfer.fee,
+                    market_value=m.transfer.market_value,
                 )
             print(f"\nDry-run complete. {len(fully_matched)} transfers would be applied.")
             return
@@ -351,6 +357,10 @@ def cmd_run(args):
                     to_team_id=m.to_team_id or 0,
                     confidence=m.min_confidence,
                     transfer_type=m.transfer.transfer_type,
+                    dry_run=False,
+                    position=m.transfer.position,
+                    fee=m.transfer.fee,
+                    market_value=m.transfer.market_value,
                 )
             else:
                 failed += 1

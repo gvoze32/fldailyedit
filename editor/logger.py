@@ -21,6 +21,9 @@ def log_transfer(
     confidence: float = 0.0,
     transfer_type: str = "transfer",
     dry_run: bool = False,
+    position: str = "",
+    fee: str = "",
+    market_value: int = 0,
 ):
     """
     Append a transfer record to the JSONL log file.
@@ -37,6 +40,9 @@ def log_transfer(
         "to_team_id": to_team_id,
         "confidence": round(confidence, 1),
         "transfer_type": transfer_type,
+        "position": position,
+        "fee": fee,
+        "market_value": market_value,
         "dry_run": dry_run,
     }
 

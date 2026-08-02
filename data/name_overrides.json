@@ -1,5 +1,5 @@
 {
-    "_comment": "Map Transfermarkt player names to FL26 database names where fuzzy matching fails. Add entries as needed.",
+    "_comment": "Map scraped player names to FL26 database names where fuzzy matching fails. Add entries as needed.",
     "Neymar Jr": "Neymar",
     "Vinícius Júnior": "Vinicius Jr.",
     "Rodrygo": "Rodrygo Goes"

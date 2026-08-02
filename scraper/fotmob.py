@@ -154,8 +154,14 @@ class FotmobScraper:
 
         return transfers
 
-    def _parse_fotmob_item(self, item: dict) -> Optional[Transfer]:
+    def _parse_fotmob_item(self, item: dict, ignore_extensions: bool = True) -> Optional[Transfer]:
         """Parse a single raw FotMob transfer item into a Transfer dataclass."""
+        # Check for contract extension
+        is_extension = bool(item.get("contractExtension"))
+        if ignore_extensions and is_extension:
+            # Contract extensions are contract renewals at the same club, not transfers
+            return None
+
         player_name = (item.get("name") or "").strip()
         from_club = (item.get("fromClub") or "").strip()
         to_club = (item.get("toClub") or "").strip()
@@ -168,6 +174,17 @@ class FotmobScraper:
             from_club = "Free Agent"
         if not to_club or to_club.lower() in ("free agent", "without club", "unattached", "career break", "retired"):
             to_club = "Free Agent"
+
+        # Position extraction
+        pos_obj = item.get("position")
+        position = ""
+        if isinstance(pos_obj, dict):
+            position = (pos_obj.get("label") or "").strip().upper()
+        elif isinstance(pos_obj, str):
+            position = pos_obj.strip().upper()
+
+        # Loan detection
+        is_loan = bool(item.get("onLoan"))
 
         # Transfer type & fee
         fee_obj = item.get("fee")
@@ -183,14 +200,28 @@ class FotmobScraper:
             fee_text = fee_obj
 
         fee_lower = fee_text.lower()
-        if "loan" in fee_lower or "on loan" in fee_lower:
+        if "end of loan" in fee_lower or "return" in fee_lower or "back from loan" in fee_lower:
+            transfer_type = "end of loan"
+            is_loan = False
+        elif is_loan or "loan" in fee_lower or "on loan" in fee_lower:
             transfer_type = "loan"
+            is_loan = True
         elif "free" in fee_lower or from_club == "Free Agent" or to_club == "Free Agent":
             transfer_type = "free transfer"
         elif fee_text:
             transfer_type = "transfer"
 
         transfer_date = item.get("transferDate", "")
+        market_val = item.get("marketValue") or 0
+        try:
+            market_val = int(market_val)
+        except (ValueError, TypeError):
+            market_val = 0
+
+        from_club_id = item.get("fromClubId")
+        to_club_id = item.get("toClubId")
+        from_club_full = item.get("fromClubFullName") or from_club
+        to_club_full = item.get("toClubFullName") or to_club
 
         return Transfer(
             player_name=player_name,
@@ -201,6 +232,14 @@ class FotmobScraper:
             fee=fee_text,
             league="",
             season="",
+            position=position,
+            is_loan=is_loan,
+            is_contract_extension=is_extension,
+            market_value=market_val,
+            from_club_id_fotmob=from_club_id,
+            to_club_id_fotmob=to_club_id,
+            from_club_full_name=from_club_full,
+            to_club_full_name=to_club_full,
         )
 
     def fetch_transfers(
