@@ -86,97 +86,41 @@ class TestMatchedTransfer:
         assert "✗" in s
 
 
-class TestScraperParsing:
-    def test_parse_transfer_row_arrival(self):
-        from parsel import Selector
-        from scraper.transfermarkt import _parse_transfer_row
 
-        html = """
-        <tr>
-            <td class="hauptlink"><a class="spielprofil_tooltip" href="/player1">Kylian Mbappé</a></td>
-            <td><img class="tiny_wappen" title="Paris Saint-Germain" src="psg.png"/></td>
-            <td class="rechts"><a href="/fee">€180.00m</a></td>
-        </tr>
-        """
-        sel = Selector(text=html).css("tr")[0]
-        transfer = _parse_transfer_row(
-            row=sel,
-            club_name="Real Madrid",
-            table_idx=0,
-            league_name="La Liga",
-            season="2025",
-        )
-        assert transfer is not None
-        assert transfer.player_name == "Kylian Mbappé"
-        assert transfer.from_club == "Paris Saint-Germain"
-        assert transfer.to_club == "Real Madrid"
-        assert transfer.transfer_type == "transfer"
-        assert transfer.fee == "€180.00m"
-        assert transfer.league == "La Liga"
-        assert transfer.season == "2025"
 
-    def test_parse_transfer_row_departure_loan(self):
-        from parsel import Selector
-        from scraper.transfermarkt import _parse_transfer_row
 
-        html = """
-        <tr>
-            <td class="hauptlink"><a class="spielprofil_tooltip" href="/player2">Endrick</a></td>
-            <td><img class="tiny_wappen" title="Real Valladolid" src="valladolid.png"/></td>
-            <td>Loan fee: €1.00m</td>
-        </tr>
-        """
-        sel = Selector(text=html).css("tr")[0]
-        transfer = _parse_transfer_row(
-            row=sel,
-            club_name="Real Madrid",
-            table_idx=1,
-            league_name="La Liga",
-            season="2025",
-        )
-        assert transfer is not None
-        assert transfer.player_name == "Endrick"
-        assert transfer.from_club == "Real Madrid"
-        assert transfer.to_club == "Real Valladolid"
-        assert transfer.transfer_type == "loan"
+class TestFotmobScraper:
+    def test_parse_fotmob_item_transfer(self):
+        from scraper.fotmob import FotmobScraper
 
-    def test_parse_transfer_row_end_of_loan(self):
-        from parsel import Selector
-        from scraper.transfermarkt import _parse_transfer_row
+        item = {
+            "name": "Kylian Mbappé",
+            "fromClub": "Paris Saint-Germain",
+            "toClub": "Real Madrid",
+            "transferType": {"text": "free transfer"},
+            "fee": {"feeText": "Free"},
+            "marketValue": "€180m",
+            "transferDate": "2024-07-01",
+        }
+        scraper = FotmobScraper()
+        t = scraper._parse_fotmob_item(item)
+        assert t is not None
+        assert t.player_name == "Kylian Mbappé"
+        assert t.from_club == "Paris Saint-Germain"
+        assert t.to_club == "Real Madrid"
+        assert t.transfer_type == "free transfer"
+        assert t.fee == "Free"
+        assert t.date == "2024-07-01"
 
-        html = """
-        <tr>
-            <td class="hauptlink"><a href="/player3">Arda Güler</a></td>
-            <td class="zentriert"><img title="Fenerbahce" src="fb.png"/></td>
-            <td>End of loan</td>
-        </tr>
-        """
-        sel = Selector(text=html).css("tr")[0]
-        transfer = _parse_transfer_row(
-            row=sel,
-            club_name="Real Madrid",
-            table_idx=0,
-            league_name="La Liga",
-            season="2025",
-        )
-        assert transfer is not None
-        assert transfer.player_name == "Arda Güler"
-        assert transfer.from_club == "Fenerbahce"
-        assert transfer.to_club == "Real Madrid"
-        assert transfer.transfer_type == "end of loan"
+    def test_parse_fotmob_item_missing_name(self):
+        from scraper.fotmob import FotmobScraper
 
-    def test_parse_transfer_row_invalid(self):
-        from parsel import Selector
-        from scraper.transfermarkt import _parse_transfer_row
-
-        html = "<tr><td>No data here</td></tr>"
-        sel = Selector(text=html).css("tr")[0]
-        transfer = _parse_transfer_row(
-            row=sel,
-            club_name="Real Madrid",
-            table_idx=0,
-            league_name="La Liga",
-            season="2025",
-        )
-        assert transfer is None
+        item = {
+            "name": "",
+            "fromClub": "PSG",
+            "toClub": "Real Madrid",
+        }
+        scraper = FotmobScraper()
+        t = scraper._parse_fotmob_item(item)
+        assert t is None
 

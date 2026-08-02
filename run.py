@@ -22,7 +22,9 @@ Workflow:
 import argparse
 import json
 import logging
+import struct
 import sys
+import time
 from pathlib import Path
 
 import config
@@ -30,9 +32,11 @@ from editor import backup as backup_mod
 from editor import crypto
 from editor.editfile import EditFile
 from editor import logger as transfer_logger
+from scraper.fotmob import fetch_fotmob_transfers
 from scraper.matcher import NameMatcher
 from scraper.models import MatchedTransfer
-from scraper.transfermarkt import TransfermarktScraper, fetch_all_league_transfers
+
+logger = logging.getLogger(__name__)
 
 
 def setup_logging(verbose: bool = False):
@@ -82,15 +86,32 @@ def cmd_inspect(args):
         ef.load(data_dat)
         ef.print_summary()
 
-        print("\n--- Sample teams ---")
+        print("\n--- League Divisions in Save File ---")
         teams = ef.get_all_team_info()
-        for i, (tid, t) in enumerate(teams.items()):
-            if i >= 10:
-                print(f"  ... and {len(teams) - 10} more")
-                break
-            roster = ef.get_team_roster(tid)
-            size = roster.roster_size if roster else "?"
-            print(f"  {tid}: {t.name} ({size} players)")
+        entry_start = 0xA08650
+        entry_size = 0x1230
+        num_slots = entry_size // 4
+
+        clusters = []
+        current_cluster = []
+        for i in range(num_slots):
+            tid = struct.unpack_from("<I", ef._data, entry_start + i * 4)[0]
+            if tid != 0 and tid != 0xFFFF0300 and tid in teams:
+                current_cluster.append(teams[tid].name)
+            else:
+                if current_cluster:
+                    clusters.append(current_cluster)
+                    current_cluster = []
+        if current_cluster:
+            clusters.append(current_cluster)
+
+        for idx, cl in enumerate(clusters):
+            sample = ", ".join(cl[:3])
+            suffix = f" ... [{cl[-1]}]" if len(cl) > 3 else ""
+            print(f"  Division {idx+1:2d} ({len(cl):2d} teams): {sample}{suffix}")
+
+        print(f"\nTotal Clubs: {len([t for t in teams.values() if t.team_id > 100])}")
+        print(f"Total National Teams: {len([t for t in teams.values() if t.team_id <= 100])}")
 
     finally:
         crypto.cleanup_temp(temp_dir)
@@ -107,18 +128,25 @@ def cmd_run(args):
         print("Use --edit-file to specify the path, or set EDIT_FILE_PATH in config.py")
         sys.exit(1)
 
-    # ── Step 1: Load league config ──
-    filter_leagues = args.leagues.split(",") if args.leagues else None
-    leagues = load_leagues(filter_leagues)
-    if not leagues:
-        print("No leagues configured. Check data/leagues.json")
-        sys.exit(1)
-    print(f"Leagues: {', '.join(l['name'] for l in leagues)}")
+    # ── Step 1: Scrape live transfers from FotMob ──
+    pages = getattr(args, "pages", 2) or 2
+    popular_only = getattr(args, "popular", False) or False
 
-    # ── Step 2: Scrape transfers ──
-    print("\n📡 Scraping Transfermarkt...")
-    transfers = fetch_all_league_transfers(leagues)
-    print(f"Found {len(transfers)} transfers")
+    print(f"\n📡 Scraping live transfers from FotMob (pages=1..{pages}, popular={popular_only})...")
+    transfers = fetch_fotmob_transfers(max_pages=pages, popular_only=popular_only)
+    print(f"  FotMob found {len(transfers)} transfers")
+
+    # Deduplicate transfers by (player_name, from_club, to_club)
+    seen = set()
+    deduped_transfers = []
+    for t in transfers:
+        key = (t.player_name.lower().strip(), t.from_club.lower().strip(), t.to_club.lower().strip())
+        if key not in seen:
+            seen.add(key)
+            deduped_transfers.append(t)
+    transfers = deduped_transfers
+
+    print(f"\nTotal unique transfers to process: {len(transfers)}")
 
     if not transfers:
         print("No transfers found. Exiting.")
@@ -157,11 +185,12 @@ def cmd_run(args):
         print("\n📋 Reading FL26 database...")
         players = ef.get_all_players()
         teams_info = ef.get_all_team_info()
+        club_ids = ef.get_club_team_ids()
 
         player_name_to_id = {p.name: pid for pid, p in players.items()}
-        team_name_to_id = {t.name: tid for tid, t in teams_info.items()}
+        team_name_to_id = {t.name: tid for tid, t in teams_info.items() if tid in club_ids}
 
-        print(f"  {len(player_name_to_id)} players, {len(team_name_to_id)} teams")
+        print(f"  {len(player_name_to_id)} players, {len(team_name_to_id)} playable clubs (national teams excluded)")
 
         matcher = NameMatcher()
         matcher.load_player_db(player_name_to_id)
@@ -279,6 +308,48 @@ def cmd_log(args):
     transfer_logger.print_summary(last_n=args.last or 20)
 
 
+def cmd_schedule(args):
+    """Run transfers on a recurring interval."""
+    interval_sec = int(args.interval_hours * 3600)
+    print(f"⏰ Starting transfer automation scheduler (interval: every {args.interval_hours} hours)...")
+    print("Press Ctrl+C to stop.")
+
+    iteration = 1
+    while True:
+        print(f"\n--- [Scheduler Run #{iteration}] {time.strftime('%Y-%m-%d %H:%M:%S')} ---")
+        try:
+            cmd_run(args)
+        except Exception as e:
+            logger.error(f"Scheduler run #{iteration} failed: {e}", exc_info=True)
+            print(f"✗ Run #{iteration} encountered an error: {e}")
+
+        iteration += 1
+        print(f"\n💤 Sleeping for {args.interval_hours} hours until next run...")
+        try:
+            time.sleep(interval_sec)
+        except KeyboardInterrupt:
+            print("\nScheduler stopped by user.")
+            break
+
+
+def cmd_cron(args):
+    """Generate or install crontab entry for automated transfers."""
+    py_path = sys.executable
+    script_path = (Path(__file__).parent / "run.py").resolve()
+    cwd_path = Path(__file__).parent.resolve()
+    
+    interval_hours = args.interval_hours or 6
+    cron_expr = f"0 */{interval_hours} * * *"
+    cron_line = f"{cron_expr} cd {cwd_path} && {py_path} {script_path} run >> {config.DATA_DIR}/cron.log 2>&1"
+
+    print("\n📅 Automated Cron Configuration")
+    print("================================")
+    print(f"Schedule: Every {interval_hours} hours (`{cron_expr}`)")
+    print(f"\nCrontab entry:\n\n  {cron_line}\n")
+    print("To install automatically, run:")
+    print(f'  (crontab -l 2>/dev/null; echo "{cron_line}") | crontab -')
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="FL26 Transfer Automation Tool",
@@ -293,9 +364,25 @@ def main():
     p_run = sub.add_parser("run", help="Scrape + match + apply transfers")
     p_run.add_argument("--dry-run", action="store_true", help="Don't modify the edit file")
     p_run.add_argument("--edit-file", type=str, help="Path to edit00000000")
-    p_run.add_argument("--leagues", type=str, help="Comma-separated league names to scrape")
+    p_run.add_argument("--pages", type=int, default=2, help="Number of pages to scrape from FotMob (50 transfers/page, default: 2)")
+    p_run.add_argument("--popular", action="store_true", help="Only scrape popular/major transfers from FotMob")
     p_run.add_argument("--threshold", type=float, help="Fuzzy match confidence threshold (0-100)")
     p_run.set_defaults(func=cmd_run)
+
+    # schedule
+    p_sched = sub.add_parser("schedule", help="Run transfers continuously on a timer")
+    p_sched.add_argument("--interval-hours", type=float, default=6.0, help="Interval between runs in hours (default: 6.0)")
+    p_sched.add_argument("--dry-run", action="store_true", help="Don't modify the edit file")
+    p_sched.add_argument("--edit-file", type=str, help="Path to edit00000000")
+    p_sched.add_argument("--pages", type=int, default=2, help="Number of pages to scrape from FotMob (50 transfers/page, default: 2)")
+    p_sched.add_argument("--popular", action="store_true", help="Only scrape popular/major transfers from FotMob")
+    p_sched.add_argument("--threshold", type=float, help="Fuzzy match confidence threshold (0-100)")
+    p_sched.set_defaults(func=cmd_schedule)
+
+    # cron
+    p_cron = sub.add_parser("cron", help="Generate crontab line for automated scheduling")
+    p_cron.add_argument("--interval-hours", type=int, default=6, help="Interval in hours (default: 6)")
+    p_cron.set_defaults(func=cmd_cron)
 
     # inspect
     p_inspect = sub.add_parser("inspect", help="Inspect an edit file structure")
@@ -315,7 +402,8 @@ def main():
         args.command = "run"
         args.dry_run = "--dry-run" in sys.argv
         args.edit_file = None
-        args.leagues = None
+        args.pages = 2
+        args.popular = False
         args.threshold = None
         args.func = cmd_run
 

@@ -96,19 +96,22 @@ class NameMatcher:
         self._player_names = list(self._player_db.keys())
         logger.info(f"Loaded {len(self._player_db)} players into matcher")
 
-    def load_team_db(self, teams: dict[str, int]):
+    def load_team_db(self, teams: dict[str, int], clubs_only: bool = True):
         """
         Load the FL26 team database.
 
         Args:
             teams: {team_name: team_id}
+            clubs_only: If True, exclude national teams (team_id <= 100).
         """
         self._team_db.clear()
         for name, tid in teams.items():
+            if clubs_only and tid <= 100:
+                continue
             norm = _normalize(name)
             self._team_db[norm] = (name, tid)
         self._team_names = list(self._team_db.keys())
-        logger.info(f"Loaded {len(self._team_db)} teams into matcher")
+        logger.info(f"Loaded {len(self._team_db)} teams into matcher (clubs_only={clubs_only})")
 
     def match_player(
         self,

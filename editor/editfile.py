@@ -12,10 +12,12 @@ Reads the decrypted data.dat and provides functions to:
 All offsets are calculated from the header — nothing is hardcoded except entry sizes
 and field positions within entries, which are the same across PES20/21/FL26.
 """
+import csv
 import logging
 import struct
 from pathlib import Path
 
+import config
 from editor.models import PlayerInfo, TeamData, TeamInfo
 
 logger = logging.getLogger(__name__)
@@ -230,14 +232,35 @@ class EditFile:
         except Exception:
             return raw.decode("latin-1", errors="replace")
 
-    def get_all_players(self) -> dict[int, PlayerInfo]:
+    def get_all_players(self, csv_path: Path | None = None, include_base_db: bool = True) -> dict[int, PlayerInfo]:
         """
         Read all player entries (ID + name only).
+        First loads the global FL26 player database from CSV (if include_base_db is True),
+        then merges any custom/edited players found in the edit file.
 
         Returns:
             {player_id: PlayerInfo}
         """
-        players = {}
+        players: dict[int, PlayerInfo] = {}
+
+        # Step 1: Load base player database from CSV if available and requested
+        csv_file = csv_path or getattr(config, "PLAYERS_CSV_FILE", None)
+        if include_base_db and csv_file and Path(csv_file).exists():
+            try:
+                with open(csv_file, "r", encoding="utf-8-sig") as f:
+                    reader = csv.reader(f)
+                    header = next(reader, None)
+                    for row in reader:
+                        if len(row) >= 2 and row[0].strip().isdigit():
+                            pid = int(row[0].strip())
+                            pname = row[1].strip()
+                            players[pid] = PlayerInfo(player_id=pid, name=pname, print_name=pname)
+                logger.info(f"Loaded {len(players)} players from database CSV ({csv_file})")
+            except Exception as e:
+                logger.warning(f"Failed to load player database CSV: {e}")
+
+        # Step 2: Merge custom edited players from the edit file
+        edited_count = 0
         for i in range(self.player_count):
             entry_offset = self.player_start + i * PLAYER_TOTAL_SIZE
 
@@ -257,8 +280,11 @@ class EditFile:
                 name=name,
                 print_name=print_name,
             )
+            edited_count += 1
 
-        logger.info(f"Read {len(players)} players")
+        if edited_count > 0:
+            logger.info(f"Merged {edited_count} custom/edited players from save file")
+        logger.info(f"Total active players in database: {len(players)}")
         return players
 
     def get_all_team_info(self) -> dict[int, TeamInfo]:
@@ -288,6 +314,53 @@ class EditFile:
 
         logger.info(f"Read {len(teams)} teams")
         return teams
+
+    def get_league_divisions(self) -> list[list[int]]:
+        """
+        Read the 29 league division groupings from offset 0xA08650.
+
+        Returns:
+            List of lists of team IDs for each league division.
+        """
+        entry_start = 0xA08650
+        entry_size = 0x1230
+        num_slots = entry_size // 4
+        all_teams = self.get_all_team_info()
+
+        divisions: list[list[int]] = []
+        current_div: list[int] = []
+
+        for i in range(num_slots):
+            if entry_start + (i + 1) * 4 > len(self._data):
+                break
+            tid = struct.unpack_from("<I", self._data, entry_start + i * 4)[0]
+            if tid != 0 and tid != 0xFFFF0300 and tid in all_teams:
+                current_div.append(tid)
+            else:
+                if current_div:
+                    divisions.append(current_div)
+                    current_div = []
+        if current_div:
+            divisions.append(current_div)
+
+        return divisions
+
+    def get_club_team_ids(self) -> set[int]:
+        """
+        Get the set of all valid club team IDs in the game.
+        Excludes national teams.
+        """
+        all_teams = self.get_all_team_info()
+        league_divs = self.get_league_divisions()
+        club_ids = set()
+        for div in league_divs:
+            club_ids.update(div)
+
+        # Fallback: all teams with ID > 100 if divisions not found
+        if not club_ids:
+            club_ids = {tid for tid in all_teams if tid > 100}
+
+        return club_ids
 
     def get_team_roster(self, team_id: int) -> TeamData | None:
         """

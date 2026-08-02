@@ -18,6 +18,10 @@ venv/
 
 # Project
 backups/
+storage/
+*.log
+data/transfer_log.jsonl
+data/cron.log
 *.bak.*
 .pytest_cache/
 

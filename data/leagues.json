@@ -5,8 +5,18 @@
         "season": "2025"
     },
     {
+        "name": "Championship",
+        "url": "https://www.transfermarkt.co.uk/championship/transfers/wettbewerb/GB2",
+        "season": "2025"
+    },
+    {
         "name": "La Liga",
         "url": "https://www.transfermarkt.co.uk/la-liga/transfers/wettbewerb/ES1",
+        "season": "2025"
+    },
+    {
+        "name": "La Liga 2",
+        "url": "https://www.transfermarkt.co.uk/laliga2/transfers/wettbewerb/ES2",
         "season": "2025"
     },
     {
@@ -15,13 +25,28 @@
         "season": "2025"
     },
     {
+        "name": "Serie B",
+        "url": "https://www.transfermarkt.co.uk/serie-b/transfers/wettbewerb/IT2",
+        "season": "2025"
+    },
+    {
         "name": "Bundesliga",
         "url": "https://www.transfermarkt.co.uk/bundesliga/transfers/wettbewerb/L1",
         "season": "2025"
     },
     {
+        "name": "2. Bundesliga",
+        "url": "https://www.transfermarkt.co.uk/2-bundesliga/transfers/wettbewerb/L2",
+        "season": "2025"
+    },
+    {
         "name": "Ligue 1",
         "url": "https://www.transfermarkt.co.uk/ligue-1/transfers/wettbewerb/FR1",
+        "season": "2025"
+    },
+    {
+        "name": "Ligue 2",
+        "url": "https://www.transfermarkt.co.uk/ligue-2/transfers/wettbewerb/FR2",
         "season": "2025"
     },
     {
@@ -40,18 +65,48 @@
         "season": "2025"
     },
     {
-        "name": "Championship",
-        "url": "https://www.transfermarkt.co.uk/championship/transfers/wettbewerb/GB2",
-        "season": "2025"
-    },
-    {
         "name": "Süper Lig",
         "url": "https://www.transfermarkt.co.uk/super-lig/transfers/wettbewerb/TR1",
         "season": "2025"
     },
     {
+        "name": "Jupiler Pro League",
+        "url": "https://www.transfermarkt.co.uk/jupiler-pro-league/transfers/wettbewerb/BE1",
+        "season": "2025"
+    },
+    {
+        "name": "Scottish Premiership",
+        "url": "https://www.transfermarkt.co.uk/scottish-premiership/transfers/wettbewerb/SC1",
+        "season": "2025"
+    },
+    {
+        "name": "Superligaen",
+        "url": "https://www.transfermarkt.co.uk/superligaen/transfers/wettbewerb/DK1",
+        "season": "2025"
+    },
+    {
+        "name": "Super League 1",
+        "url": "https://www.transfermarkt.co.uk/super-league-1/transfers/wettbewerb/GR1",
+        "season": "2025"
+    },
+    {
+        "name": "Premier Liga",
+        "url": "https://www.transfermarkt.co.uk/premier-liga/transfers/wettbewerb/RU1",
+        "season": "2025"
+    },
+    {
         "name": "Major League Soccer",
         "url": "https://www.transfermarkt.co.uk/major-league-soccer/transfers/wettbewerb/MLS1",
+        "season": "2025"
+    },
+    {
+        "name": "Campeonato Brasileiro Série A",
+        "url": "https://www.transfermarkt.co.uk/campeonato-brasileiro-serie-a/transfers/wettbewerb/BRA1",
+        "season": "2025"
+    },
+    {
+        "name": "Liga Profesional de Fútbol",
+        "url": "https://www.transfermarkt.co.uk/liga-profesional-de-futbol/transfers/wettbewerb/AR1N",
         "season": "2025"
     }
 ]

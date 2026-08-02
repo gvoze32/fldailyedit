@@ -163,7 +163,7 @@ class TestReadPlayers:
         ef = EditFile()
         ef.load_bytes(data)
 
-        players = ef.get_all_players()
+        players = ef.get_all_players(include_base_db=False)
         assert len(players) == 3
         assert players[1001].name == "Lionel Messi"
         assert players[1002].name == "Cristiano Ronaldo"

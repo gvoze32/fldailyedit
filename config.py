@@ -22,17 +22,8 @@ BACKUP_DIR = PROJECT_ROOT / "backups"
 MAX_BACKUPS = 10  # auto-delete oldest beyond this
 
 # --- Scraper ---
-TRANSFERMARKT_BASE = "https://www.transfermarkt.co.uk"
-REQUEST_DELAY = (1.5, 3.0)  # random delay range in seconds between requests
-REQUEST_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Accept-Language": "en-US,en;q=0.9",
-}
-MAX_RETRIES = 3
+FOTMOB_TRANSFERS_URL = "https://www.fotmob.com/transfers"
+FOTMOB_API_TEMPLATE = "https://www.fotmob.com/api/data/transfers?orderBy=lastModified&page={page}&minFeeCurrency=EUR&popular={popular}"
 
 # --- Fuzzy matching ---
 MATCH_THRESHOLD_PLAYER = 80  # minimum confidence (0-100) for player name match
@@ -42,6 +33,7 @@ MATCH_THRESHOLD_TEAM = 75    # minimum confidence for team name match
 TEAM_ALIASES_FILE = DATA_DIR / "team_aliases.json"
 NAME_OVERRIDES_FILE = DATA_DIR / "name_overrides.json"
 LEAGUES_FILE = DATA_DIR / "leagues.json"
+PLAYERS_CSV_FILE = DATA_DIR / "players.csv"
 
 # --- Logging ---
 TRANSFER_LOG_FILE = DATA_DIR / "transfer_log.jsonl"
