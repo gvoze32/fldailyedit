@@ -407,9 +407,12 @@ class FotmobScraper:
         all_transfers: list[Transfer] = []
         timeout = aiohttp.ClientTimeout(total=15)
         
+        clubs_to_sweep = get_deep_sweep_clubs()
+        total_clubs = len(clubs_to_sweep)
+        
         async with aiohttp.ClientSession(headers=self.headers, timeout=timeout) as session:
-            for club_name, tid in MAJOR_GLOBAL_CLUBS.items():
-                logger.info(f"Sweeping {club_name} (ID: {tid})...")
+            for i, (club_name, tid) in enumerate(clubs_to_sweep.items(), 1):
+                logger.info(f"Sweeping {club_name} (ID: {tid}) [{i}/{total_clubs}]...")
                 try:
                     data = await self._fetch_club_data_async(session, tid)
                     if data:
@@ -431,56 +434,37 @@ class FotmobScraper:
 
 
 
-MAJOR_GLOBAL_CLUBS: dict[str, int] = {
-    # Premier League
-    "Arsenal": 9825, "Aston Villa": 10252, "Chelsea": 8455, "Liverpool": 8650, 
-    "Manchester City": 8456, "Manchester United": 10260, "Newcastle United": 10261, 
-    "Tottenham Hotspur": 8586, "Brighton": 10204, "West Ham": 8654,
-    "Everton": 8668, "Crystal Palace": 9826, "Fulham": 8701, 
-    "Brentford": 9937, "Nottingham Forest": 10203, "Bournemouth": 8678,
-    "Wolverhampton": 8602, "Leicester City": 8197, "Southampton": 8466,
-
-    # La Liga
-    "Real Madrid": 8633, "Barcelona": 8634, "Atletico Madrid": 9906, 
-    "Real Sociedad": 8560, "Villarreal": 10205, "Athletic Club": 8315, 
-    "Sevilla": 8302, "Girona": 9812, "Real Betis": 8603, "Valencia": 8284,
-    "Celta Vigo": 8581, "Osasuna": 8371, "Mallorca": 8661, "Getafe": 8305,
-
-    # Serie A
-    "Inter": 8636, "Juventus": 9885, "AC Milan": 8564, "Napoli": 9875, 
-    "AS Roma": 8686, "Lazio": 8543, "Atalanta": 8524, "Fiorentina": 8535,
-    "Bologna": 9857, "Torino": 9804, "Sassuolo": 7943, "Udinese": 8600, 
-    "Monza": 6504, "Genoa": 10233,
-
-    # Bundesliga
-    "Bayern München": 9823, "Borussia Dortmund": 9789, "Bayer Leverkusen": 8178, 
-    "RB Leipzig": 178475, "Eintracht Frankfurt": 9810, "VfB Stuttgart": 10269,
-    "Wolfsburg": 8721, "Borussia Mönchengladbach": 9788, "SC Freiburg": 8358, 
-    "Hoffenheim": 8226, "Werder Bremen": 8697,
-
-    # Ligue 1
-    "Paris Saint-Germain": 9847, "Marseille": 8588, "Monaco": 9829, 
-    "Lyon": 9748, "Lille": 8639, "Lens": 8583, "Rennes": 9851, 
-    "Nice": 9827, "Strasbourg": 9848, "Montpellier": 8228,
-
-    # Eredivisie & Portugal
-    "Ajax": 8593, "PSV": 8640, "Feyenoord": 10235, "AZ Alkmaar": 8277,
-    "Sporting CP": 9768, "Benfica": 9772, "Porto": 9773, "Braga": 10228,
-
-    # Rest of Europe (Turkey, Scotland, Belgium, etc)
-    "Galatasaray": 8637, "Fenerbahce": 8695, "Besiktas": 10188, "Trabzonspor": 10206,
-    "Celtic": 9925, "Rangers": 8548,
-    "Club Brugge": 8392, "Anderlecht": 8635, "Genk": 9987, "Union SG": 6722,
-    "Salzburg": 6333, "Dinamo Zagreb": 6777, "Red Star": 7443,
-    "Olympiacos": 8536, "Panathinaikos": 8537, "AEK Athens": 8585,
-    "Copenhagen": 8391, "Midtjylland": 8415,
-    "Shakhtar Donetsk": 6608, "Dynamo Kyiv": 8613,
-
-    # Americas & Saudi Arabia
-    "Flamengo": 10020, "Palmeiras": 10214, "River Plate": 10072, "Boca Juniors": 10077,
-    "Inter Miami": 1157146, "LA Galaxy": 8262,
-    "Al-Hilal": 8659, "Al-Nassr": 8660, "Al-Ittihad": 10243, "Al-Ahli": 8014,
-}
+def get_deep_sweep_clubs() -> dict[str, int]:
+    import json
+    from pathlib import Path
+    
+    clubs = {}
+    
+    # 1. Try to load data/major_clubs.json to override/prioritize
+    major_path = Path("data/major_clubs.json")
+    if major_path.exists():
+        try:
+            with open(major_path, "r", encoding="utf-8") as f:
+                major_teams = json.load(f)
+            clubs.update(major_teams)
+        except Exception as e:
+            logger.warning(f"Failed to load major_clubs.json: {e}")
+            
+    # 3. Load the rest of the teams from crawler
+    json_path = Path("data/fotmob_teams.json")
+    if json_path.exists():
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                teams = json.load(f)
+            for t in teams:
+                name = t.get("name") or t.get("slug", "Unknown")
+                # Do not overwrite if it already exists in priority clubs (preserves order)
+                if name not in clubs and t["fotmob_id"] not in clubs.values():
+                    clubs[name] = t["fotmob_id"]
+        except Exception as e:
+            logger.warning(f"Failed to load fotmob_teams.json: {e}")
+            
+    return clubs
 
 
 def merge_transfers(transfer_lists: list[list[Transfer]]) -> list[Transfer]:
@@ -560,9 +544,10 @@ def fetch_transfers_for_club_names(
         if clean.isdigit():
             team_ids.append(int(clean))
         else:
-            # Look up in MAJOR_GLOBAL_CLUBS
+            # Look up in available clubs
             matched_id = None
-            for club, cid in MAJOR_GLOBAL_CLUBS.items():
+            available_clubs = get_deep_sweep_clubs()
+            for club, cid in available_clubs.items():
                 if clean.lower() in club.lower() or club.lower() in clean.lower():
                     matched_id = cid
                     break
