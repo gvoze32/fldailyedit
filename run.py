@@ -153,21 +153,25 @@ def cmd_run(args):
     window = getattr(args, "window", "auto") or "auto"
     since_date = getattr(args, "since", None)
     club_filter = getattr(args, "club", None)
-    sweep_mode = getattr(args, "sweep", False) or getattr(args, "deep", False)
+    deep_mode = getattr(args, "deep", False)
 
     start_d, end_d = get_transfer_window_range(window)
     cutoff_info = f"since {since_date}" if since_date else f"window '{window}' (from {start_d})"
+    pages = 200
+    popular_only = False
 
     transfers_list = []
     if club_filter:
         clubs = [c.strip() for c in club_filter.split(",") if c.strip()]
         print(f"\n🎯 Scraping club-focused transfers for: {', '.join(clubs)} ({cutoff_info})...")
         transfers_list.append(fetch_transfers_for_club_names(clubs, since_date=since_date, window=window))
-    elif sweep_mode:
-        print(f"\n🌪️ Deep Sweep Mode: Scraping transfers and squad for 150+ Major Global Clubs ({cutoff_info})...")
+    elif deep_mode:
+        print(f"\n🌪️ Deep Mode: Scraping transfers and squad for 150+ Major Global Clubs ({cutoff_info})...")
         transfers_list.append(fetch_major_clubs_transfers_safely(since_date=since_date, window=window))
+        print(f"\n📡 Adding Live Global Feed to catch other minor leagues ({cutoff_info}, max_pages={pages})...")
+        transfers_list.append(fetch_fotmob_transfers(max_pages=pages, popular_only=popular_only, since_date=since_date, window=window))
     else:
-        print(f"\n📡 Scraping live transfers from FotMob ({cutoff_info}, max_pages={pages}, popular={popular_only})...")
+        print(f"\n⚡ Fast Mode: Scraping live transfers from FotMob ({cutoff_info}, max_pages={pages})...")
         transfers_list.append(fetch_fotmob_transfers(max_pages=pages, popular_only=popular_only, since_date=since_date, window=window))
 
     transfers = merge_transfers(transfers_list)
@@ -513,12 +517,9 @@ def main():
     p_run.add_argument("-o", "--output", type=str, help="Path to output updated edit00000000 (default: output/EDIT00000000)")
     p_run.add_argument("--in-place", action="store_true", help="Overwrite input edit file in-place instead of writing to output/")
     p_run.add_argument("--club", type=str, help="Comma-separated club names to focus scrape (e.g. 'Chelsea,Arsenal')")
-    p_run.add_argument("--deep", action="store_true", help="Alias for --sweep")
-    p_run.add_argument("--sweep", action="store_true", help="Deep sweep across 150+ Major Global Clubs directly")
+    p_run.add_argument("--deep", action="store_true", help="Deep sweep across 150+ Major Global Clubs directly")
     p_run.add_argument("--window", type=str, choices=["auto", "summer", "winter", "all"], default="auto", help="Transfer window (default: auto)")
     p_run.add_argument("--since", type=str, help="Scrape transfers since date (YYYY-MM-DD)")
-    p_run.add_argument("--pages", type=int, default=10, help="Maximum number of pages to scrape (50 transfers/page, default: 10)")
-    p_run.add_argument("--popular", action="store_true", help="Only scrape popular/major transfers from FotMob")
     p_run.add_argument("--threshold", type=float, help="Fuzzy match confidence threshold (0-100)")
     p_run.set_defaults(func=cmd_run)
 
@@ -530,12 +531,9 @@ def main():
     p_sched.add_argument("-o", "--output", type=str, help="Path to output updated edit00000000 (default: output/EDIT00000000)")
     p_sched.add_argument("--in-place", action="store_true", help="Overwrite input edit file in-place")
     p_sched.add_argument("--club", type=str, help="Comma-separated club names to focus scrape (e.g. 'Chelsea,Arsenal')")
-    p_sched.add_argument("--deep", action="store_true", help="Alias for --sweep")
-    p_sched.add_argument("--sweep", action="store_true", help="Deep sweep across 150+ Major Global Clubs directly")
+    p_sched.add_argument("--deep", action="store_true", help="Deep sweep across 150+ Major Global Clubs directly")
     p_sched.add_argument("--window", type=str, choices=["auto", "summer", "winter", "all"], default="auto", help="Transfer window (default: auto)")
     p_sched.add_argument("--since", type=str, help="Scrape transfers since date (YYYY-MM-DD)")
-    p_sched.add_argument("--pages", type=int, default=10, help="Maximum number of pages to scrape (50 transfers/page, default: 10)")
-    p_sched.add_argument("--popular", action="store_true", help="Only scrape popular/major transfers from FotMob")
     p_sched.add_argument("--threshold", type=float, help="Fuzzy match confidence threshold (0-100)")
     p_sched.set_defaults(func=cmd_schedule)
 

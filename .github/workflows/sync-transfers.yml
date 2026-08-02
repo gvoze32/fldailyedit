@@ -7,49 +7,28 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "Sync Mode: sweep (150+ clubs + squad sync), global (all leagues), deep, club (specific target)"
+        description: "Sync Mode (deep = Full Season 150+ Clubs, fast = Live Transfer Feed, club = Specific Club)"
         type: choice
         options:
-          - sweep
-          - global
           - deep
+          - fast
           - club
-        default: sweep
+        default: deep
         required: false
       club:
-        description: "Target Club(s) (only used if Mode=club, e.g. 'Chelsea, Real Madrid')"
+        description: "Target Club(s) (Only used if Mode is 'club', e.g. 'Chelsea, Persib')"
         type: string
         default: ""
         required: false
       window:
-        description: "Transfer Window to scrape"
+        description: "Transfer Window (all = Entire Season, auto = Current active window)"
         type: choice
         options:
+          - all
           - auto
           - summer
           - winter
-          - all
         default: all
-        required: false
-      since:
-        description: "Scrape transfers since date (YYYY-MM-DD, optional override)"
-        type: string
-        default: ""
-        required: false
-      dry_run:
-        description: "Dry Run (simulate only, do not alter save file)"
-        type: boolean
-        default: false
-        required: false
-      pages:
-        description: "Maximum number of FotMob pages to scrape (50 transfers per page)"
-        type: number
-        default: 40
-        required: false
-      popular:
-        description: "Only scrape popular / major transfers"
-        type: boolean
-        default: false
         required: false
 
 jobs:
@@ -83,39 +62,19 @@ jobs:
       - name: Run Transfer Sync
         id: run_sync
         run: |
-          DRY_RUN_FLAG=""
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            DRY_RUN_FLAG="--dry-run"
-          fi
-
-          POPULAR_FLAG=""
-          if [ "${{ github.event.inputs.popular }}" = "true" ]; then
-            POPULAR_FLAG="--popular"
-          fi
-
-          SINCE_FLAG=""
-          if [ -n "${{ github.event.inputs.since }}" ]; then
-            SINCE_FLAG="--since ${{ github.event.inputs.since }}"
-          fi
-
-          MODE_FLAG="--sweep"
-          if [ "${{ github.event.inputs.mode }}" = "deep" ]; then
-            MODE_FLAG="--deep"
-          elif [ "${{ github.event.inputs.mode }}" = "global" ]; then
+          MODE_FLAG="--deep"
+          if [ "${{ github.event.inputs.mode }}" = "fast" ]; then
             MODE_FLAG=""
           elif [ "${{ github.event.inputs.mode }}" = "club" ] && [ -n "${{ github.event.inputs.club }}" ]; then
             MODE_FLAG="--club '${{ github.event.inputs.club }}'"
           fi
 
           WINDOW="${{ github.event.inputs.window || 'all' }}"
-          PAGES="${{ github.event.inputs.pages || 40 }}"
+          PAGES="200"
 
           eval python run.py run \
             --window "$WINDOW" \
             --pages "$PAGES" \
-            $SINCE_FLAG \
-            $POPULAR_FLAG \
-            $DRY_RUN_FLAG \
             $MODE_FLAG \
             --edit-file sample/EDIT00000000 \
             --output output/EDIT00000000

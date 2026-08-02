@@ -41,7 +41,7 @@ Pre-built and updated `EDIT00000000` save files and visual transfer report cards
 ## ⚡ Key Features
 
 - **🚀 Live Real-Time Scraping**: Direct async HTTP stream from FotMob for all latest transfers, loans, releases, and signings (<0.5s execution, 0 bot blocks).
-- **🌪️ Deep Sweep Mode (Hybrid 150+ Clubs)**: Bypass FotMob Cloudflare blocks by sequentially deep-sweeping the profiles of over 150 of the biggest global clubs, retrieving 100% of full-season transfers.
+- **🌪️ Deep Mode (Hybrid 150+ Clubs)**: Bypass FotMob Cloudflare blocks by sequentially deep-sweeping the profiles of over 150 of the biggest global clubs, retrieving 100% of full-season transfers.
 - **🛡️ Formation & Game Plan Doctor**: Automatically safeguards team tactics. When a captain, free-kick taker, or corner specialist is transferred out, the Game Plan Doctor safely reassigns captaincy and set-piece roles to the highest-rated remaining active team member.
 - **🔢 Authentic Squad Sync**: Beyond just transfers, the script extracts real **Shirt Numbers** from FotMob squad lists and perfectly applies them in-game! Falls back to smart auto-assignment if the data is missing.
 - **🎯 Tri-Factor Disambiguation Gate**: Strict multi-parameter matching combining name similarity, position gate, nationality verification, and age checks (+6.0 boost for exact nationality match, age-range alignment).
@@ -123,12 +123,10 @@ python run.py run --edit-file /path/to/EDIT00000000 --in-place
 | `cron` | `python run.py cron --interval-hours 6` | Generate Linux/macOS crontab entry string. |
 
 **Parameter Flags for `run`:**
-- `--sweep`: Deep sweep across 150+ Major Global Clubs to extract full-season transfers and real squad shirt numbers.
+- `--deep`: **(Default in Actions)** Deep sweep across 150+ Major Global Clubs to extract full-season transfers and real squad shirt numbers.
 - `--club "Chelsea,Arsenal"`: Target specific club(s).
 - `--window {auto,summer,winter,all}`: Transfer window cutoff date (default: `auto`).
 - `--since YYYY-MM-DD`: Custom cutoff date (e.g. `--since 2026-06-01`).
-- `--pages N`: Maximum FotMob pages to scrape (50 transfers/page, default: `10`).
-- `--popular`: Scrape only high-profile / major club transfers.
 - `--threshold N`: Fuzzy match threshold score (0–100, default: `80`).
 - `--dry-run`: Simulation mode without writing changes to disk.
 
