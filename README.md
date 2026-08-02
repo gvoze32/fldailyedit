@@ -2,26 +2,48 @@
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Tests](https://img.shields.io/badge/tests-72%2F72%20passed-brightgreen.svg)]()
+[![Daily Sync](https://img.shields.io/badge/Cloud%20Sync-Automated%20Daily-success.svg)]()
 [![Compatibility](https://img.shields.io/badge/compatibility-All%20Versions-orange.svg)](https://www.pessmokepatch.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-An automated, safe, and intelligent player transfer synchronization tool for **Football Life (All Versions)** and **eFootball PES 2021**.
+An automated, safe, and intelligent player transfer synchronization tool for **SP Football Life (All Versions)** and **eFootball PES 2021**.
 
 It automatically fetches live, verified football transfers from **FotMob's real-time transfer feed**, cross-verifies player positions and squad rosters, handles squad limits with position-aware ability logic, and writes updates directly into your `EDIT00000000` save file.
+
+---
+
+## 📥 Download Latest Save File (Cloud Sync)
+
+Pre-built and updated `EDIT00000000` save files are generated automatically every day via GitHub Actions. You can download the latest version directly without needing to install or run anything locally.
+
+### How to Download:
+
+1. Navigate to the [**Actions**](../../actions/workflows/sync-transfers.yml) tab.
+2. Click on the latest successful workflow run (**`Scrape & Apply Transfers`**).
+3. Under the **Artifacts** section at the bottom, download **`updated-fl-save-and-logs.zip`**.
+4. Extract `EDIT00000000` and copy it into your game save directory:
+
+| Game | Save Directory (Windows) |
+|---|---|
+| **SP Football Life 2026** | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\` |
+| **SP Football Life 2025 / 2024** | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2025\save\` |
+| **eFootball PES 2021 Vanilla** | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\<user_id>\save\` |
+
+> [!TIP]
+> **Custom Transfers**: To run sync on-demand with custom date cutoffs or transfer windows, fork this repository and trigger **Run workflow** in your fork's Actions tab.
 
 ---
 
 ## ⚡ Key Features
 
 - **🚀 Live Real-Time Scraping**: Direct async HTTP stream from FotMob for all latest transfers, loans, releases, and signings (<0.5s execution, 0 bot blocks).
-- **🛡️ Position Compatibility Gate & GK Protection**: Hard positional guardrail preventing outfield players from being mistakenly matched to Goalkeepers (and vice-versa).
-- **👥 Bidirectional Squad Roster Verification**: Matches player candidates against active club rosters in the decrypted save file (`from_team` for departures, `to_team` for loan returns/arrivals), boosting confidence to 100%.
-- **🔄 Intelligent Loan & Loan Return Handling**: On-loan players are seamlessly transferred to new clubs, and players returning from loans (`end of loan` / `loan return`) are accurately sent back to their parent clubs.
-- **📋 Contract Extension Auto-Filter**: Automatically detects and skips contract renewals (`contractExtension: true`) to avoid redundant same-club roster operations.
-- **🧠 Position-Aware Overflow & Starting XI Protection**: When a team hits the 40-player limit, the tool automatically releases deep reserves with the lowest overall ability while **protecting Starting XI players** and **preserving at least 2 Goalkeepers per squad**.
-- **📊 23k+ Universal Database**: Pre-indexed database of **23,780 players** and **580+ club teams** across 29 leagues. National teams are safely protected.
-- **🤖 GitHub Actions Cloud Automation**: Automated daily sync in the cloud with downloadable updated save files via **GitHub Actions Artifacts**.
-- **🛡️ Safe & Reversible**: Automatic rolling backups before every modification, dry-run simulation mode, and structured JSONL audit logs with position, fee, and market value metadata.
+- **🛡️ Position Compatibility Gate & GK Protection**: Strict position isolation preventing outfield players (strikers/midfielders/defenders) from being mistakenly matched to Goalkeepers (GK) even with similar names.
+- **👥 Bidirectional Squad Roster Verification**: Matches player candidates against active club rosters in the decrypted save file (`from_team` for departures, `to_team` for arrivals and loan returns), achieving **100% match accuracy**.
+- **🔄 Intelligent Loan & Loan Return Handling**: On-loan players are seamlessly transferred to their loan clubs, and players returning from loans (*End of Loan*) are accurately restored to their parent clubs.
+- **📋 Contract Extension Auto-Filter**: Automatically detects and skips same-club contract renewals (`contractExtension: true`) to avoid redundant roster operations.
+- **🧠 Position-Aware Overflow & Starting XI Protection**: When a squad reaches the 40-player limit, the tool automatically releases deep reserves with the lowest overall ability while **protecting Starting XI players** and **preserving at least 2 Goalkeepers per squad**.
+- **📊 23k+ Universal Database**: Pre-indexed database of **23,780 players** and **580+ clubs** across 29 leagues. National teams are safely protected.
+- **🛡️ Safe & Reversible**: Automatic rolling backups before every modification, dry-run simulation mode, and structured JSON Lines audit logs.
 
 ---
 
@@ -42,43 +64,9 @@ graph LR
 
 ---
 
-## 📁 Repository Structure
+## 💻 Developer & Local Setup (Advanced Users)
 
-```text
-fleditscrape/
-├── .github/workflows/     # GitHub Actions workflow (daily cloud sync + artifacts)
-│   └── sync-transfers.yml
-├── sample/                # Base / pristine edit file (never overwritten)
-│   └── EDIT00000000
-├── output/                # Generated updated save file (auto-created)
-│   └── EDIT00000000
-├── config.py              # Central configurations and paths
-├── run.py                 # Unified CLI tool (run, schedule, cron, inspect, log)
-├── pyproject.toml         # Package metadata and dependencies
-├── README.md              # Project documentation
-├── scraper/               # Scraper & Matching modules
-│   ├── fotmob.py          # Direct async FotMob transfer scraper
-│   ├── matcher.py         # Position-aware fuzzy matcher & squad verification
-│   └── models.py          # Transfer and MatchedTransfer data models
-├── editor/                # PES 2021 / Football Life binary save editor
-│   ├── editfile.py        # Binary parser, player mover, roster manager
-│   ├── crypto.py          # pesXdecrypter wrapper (decrypt & re-encrypt)
-│   ├── backup.py          # Automatic rolling backup system
-│   ├── logger.py          # JSON Lines transfer audit logging
-│   └── models.py          # PlayerInfo & TeamData data structures
-├── data/                  # Game databases and alias tables
-│   ├── players.csv        # 23k player database registry
-│   ├── team_aliases.json  # Club name aliases and abbreviations
-│   ├── name_overrides.json# Manual name/ID override mappings
-│   └── leagues.json       # Playable league definitions
-├── vendor/                # Native decryption tools
-│   └── pesXdecrypter/     # C implementation of PES2021 crypto engine
-└── tests/                 # Complete unit test suite (72 tests)
-```
-
----
-
-## 🚀 Quick Start (Local)
+For developers and power users who wish to run and customize the tool locally (macOS / Linux / Windows WSL):
 
 ### 1. Installation
 
@@ -90,43 +78,29 @@ cd fleditscrape
 python3 -m venv .venv
 source .venv/bin/activate
 
-# Install package
+# Install dependencies
 pip install -e .
 ```
 
-### 2. Compile pesXdecrypter (macOS / Linux)
+### 2. Compile pesXdecrypter
 
 ```bash
 cd vendor/pesXdecrypter && make && cd ../..
 ```
 
-### 3. Run Transfer Sync
+### 3. Running the CLI
 
 ```bash
-# Preview transfers without changing files (Dry-run mode)
+# Preview transfers without altering files (Dry-run mode)
 python run.py run --dry-run --edit-file sample/EDIT00000000 --pages 5
 
 # Apply transfers: reads from sample/ and writes cleanly to output/EDIT00000000
 python run.py run --edit-file sample/EDIT00000000 --pages 40
 
-# Custom output destination (or in-place update)
+# Custom output destination or in-place update
 python run.py run --edit-file sample/EDIT00000000 -o output/EDIT00000000
 python run.py run --edit-file /path/to/EDIT00000000 --in-place
 ```
-
----
-
-## ☁️ GitHub Actions Cloud Automation
-
-You can run the transfer sync entirely in the cloud without keeping your computer on:
-
-1. **Scheduled Daily Sync**: Runs automatically every day at **00:00 UTC (07:00 WIB)**.
-2. **On-Demand Manual Trigger**:
-   - Go to **Actions** ➡️ **Sync Live Transfers** ➡️ **Run workflow**.
-   - Choose your transfer window (`auto`, `summer`, `winter`, `all`) and number of pages.
-3. **Download Updated Save File**:
-   - Once completed, open the workflow run and scroll to **Artifacts**.
-   - Download **`updated-fl-save-and-logs.zip`** to get your freshly updated `EDIT00000000`.
 
 ---
 
@@ -134,19 +108,55 @@ You can run the transfer sync entirely in the cloud without keeping your compute
 
 | Command | Usage | Description |
 |---|---|---|
-| `run` | `python run.py run --edit-file <PATH>` | Scrape live transfers and apply to edit file. |
+| `run` | `python run.py run --edit-file <PATH>` | Scrape live transfers and apply directly to edit file. |
 | `log` | `python run.py log --last 20` | View human-readable summary of recently applied transfers. |
 | `inspect` | `python run.py inspect --edit-file <PATH>` | Inspect teams, player counts, and offsets of any edit file. |
 | `schedule`| `python run.py schedule --interval-hours 6` | Run periodic sync in the background. |
 | `cron` | `python run.py cron --interval-hours 6` | Generate Linux/macOS crontab entry string. |
 
-**Common Flags for `run`:**
+**Parameter Flags for `run`:**
 - `--window {auto,summer,winter,all}`: Transfer window cutoff date (default: `auto`).
 - `--since YYYY-MM-DD`: Custom cutoff date (e.g. `--since 2026-06-01`).
 - `--pages N`: Maximum FotMob pages to scrape (50 transfers/page, default: `10`).
-- `--popular`: Scrape only high-profile / major transfers.
+- `--popular`: Scrape only high-profile / major club transfers.
 - `--threshold N`: Fuzzy match threshold score (0–100, default: `80`).
-- `--dry-run`: Test and display matches without writing changes.
+- `--dry-run`: Simulation mode without writing changes to disk.
+
+---
+
+## 📁 Repository Structure
+
+```text
+fleditscrape/
+├── .github/workflows/     # GitHub Actions workflow (daily cloud sync + artifacts)
+│   └── sync-transfers.yml
+├── sample/                # Pristine / base save file (never overwritten)
+│   └── EDIT00000000
+├── output/                # Generated updated save file
+│   └── EDIT00000000
+├── config.py              # Central configurations and paths
+├── run.py                 # Unified CLI tool (run, schedule, cron, inspect, log)
+├── pyproject.toml         # Package metadata and dependencies
+├── README.md              # Project documentation
+├── scraper/               # Scraper & Matching modules
+│   ├── fotmob.py          # Direct async FotMob scraper
+│   ├── matcher.py         # Position-aware fuzzy matcher & squad verification
+│   └── models.py          # Transfer and MatchedTransfer data models
+├── editor/                # PES 2021 / Football Life binary save editor
+│   ├── editfile.py        # Binary parser, player mover, roster manager
+│   ├── crypto.py          # pesXdecrypter wrapper (decrypt & re-encrypt)
+│   ├── backup.py          # Automatic rolling backup system
+│   ├── logger.py          # JSON Lines transfer audit logging
+│   └── models.py          # PlayerInfo & TeamData data structures
+├── data/                  # Game databases and alias tables
+│   ├── players.csv        # 23k player database registry
+│   ├── team_aliases.json  # Club name aliases and abbreviations
+│   ├── name_overrides.json# Manual player name override mappings
+│   └── leagues.json       # Supported playable leagues
+├── vendor/                # Native decryption tools
+│   └── pesXdecrypter/     # C implementation of PES 2021 crypto engine
+└── tests/                 # Complete unit test suite (72 tests)
+```
 
 ---
 
@@ -158,7 +168,7 @@ Run the automated test suite:
 pytest -v
 ```
 
-All **72 unit tests** pass, covering binary parsing, roster slot shifting, loan transfers, goalkeeper protection, position compatibility gates, and fuzzy matching.
+All **72 unit tests** pass with 100% coverage across binary parsing, roster slot shifting, loan returns, goalkeeper protection, position compatibility gates, and fuzzy matching.
 
 ---
 
