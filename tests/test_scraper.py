@@ -190,33 +190,33 @@ class TestTransferWindowLogic:
         assert start == date(2026, 1, 1)
         assert end == date(2026, 2, 28)
 
-    def test_window_range_auto_summer(self):
+    def test_window_range_auto_is_cumulative_during_summer(self):
         from datetime import date
         from scraper.fotmob import get_transfer_window_range
 
         ref = date(2026, 7, 1)
         start, end = get_transfer_window_range("auto", ref_date=ref)
-        assert start == date(2026, 6, 1)
-        assert end == date(2026, 9, 30)
+        assert start == date(2000, 1, 1)
+        assert end is None
 
-    def test_window_range_auto_winter(self):
+    def test_window_range_auto_is_cumulative_during_winter(self):
         from datetime import date
         from scraper.fotmob import get_transfer_window_range
 
         ref = date(2026, 2, 1)
         start, end = get_transfer_window_range("auto", ref_date=ref)
-        assert start == date(2026, 1, 1)
-        assert end == date(2026, 2, 28)
+        assert start == date(2000, 1, 1)
+        assert end is None
 
-    def test_window_range_auto_between_windows_is_bounded(self):
+    def test_window_range_auto_is_cumulative_between_windows(self):
         from datetime import date
         from scraper.fotmob import get_transfer_window_range
 
         assert get_transfer_window_range("auto", date(2026, 4, 10)) == (
-            date(2026, 1, 1), date(2026, 2, 28)
+            date(2000, 1, 1), None
         )
         assert get_transfer_window_range("auto", date(2026, 11, 10)) == (
-            date(2026, 6, 1), date(2026, 9, 30)
+            date(2000, 1, 1), None
         )
 
     def test_window_range_winter_handles_leap_year(self):
@@ -325,7 +325,6 @@ class TestScraperSafety:
         monkeypatch.setattr(fotmob.aiohttp, "ClientSession", FakeSession)
         transfers = asyncio.run(
             fotmob.FotmobScraper()._fetch_transfers_async(
-                max_pages=3,
                 since_date="2026-07-28",
             )
         )
@@ -333,6 +332,52 @@ class TestScraperSafety:
             "Current Page Deal",
             "Next Page Deal",
         ]
+
+    def test_automatic_pagination_stops_on_repeated_page(self, monkeypatch):
+        from scraper import fotmob
+
+        payload = {
+            "transfers": [{
+                "name": "Repeated Deal",
+                "fromClub": "A",
+                "toClub": "B",
+                "transferDate": "2026-08-01",
+            }]
+        }
+
+        class FakeResponse:
+            status = 200
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                return False
+
+            async def json(self, content_type=None):
+                return payload
+
+        class FakeSession:
+            calls = 0
+
+            def __init__(self, *_, **__):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                return False
+
+            def get(self, _):
+                type(self).calls += 1
+                return FakeResponse()
+
+        monkeypatch.setattr(fotmob.aiohttp, "ClientSession", FakeSession)
+        transfers = asyncio.run(fotmob.FotmobScraper()._fetch_transfers_async())
+
+        assert [transfer.player_name for transfer in transfers] == ["Repeated Deal"]
+        assert FakeSession.calls == 2
 
     def test_bounded_window_skips_undated_transfer(self):
         from datetime import date

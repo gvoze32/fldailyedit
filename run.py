@@ -374,7 +374,6 @@ def cmd_run(args):
         sys.exit(1)
 
     # ── Step 1: Scrape live transfers from FotMob ──
-    pages = getattr(args, "pages", 10) or 10
     popular_only = getattr(args, "popular", False) or False
     window = getattr(args, "window", "auto") or "auto"
     since_date = getattr(args, "since", None)
@@ -395,11 +394,11 @@ def cmd_run(args):
     elif deep_mode:
         print(f"\n🌪️ Deep Mode: Scraping transfers and squads for indexed clubs ({cutoff_info})...")
         transfers_list.append(fetch_major_clubs_transfers_safely(since_date=since_date, window=window))
-        print(f"\n📡 Adding Live Global Feed to catch other minor leagues ({cutoff_info}, max_pages={pages})...")
-        transfers_list.append(fetch_fotmob_transfers(max_pages=pages, popular_only=popular_only, since_date=since_date, window=window))
+        print(f"\n📡 Adding Live Global Feed to catch other minor leagues ({cutoff_info}, automatic pagination)...")
+        transfers_list.append(fetch_fotmob_transfers(popular_only=popular_only, since_date=since_date, window=window))
     else:
-        print(f"\n⚡ Fast Mode: Scraping live transfers from FotMob ({cutoff_info}, max_pages={pages})...")
-        transfers_list.append(fetch_fotmob_transfers(max_pages=pages, popular_only=popular_only, since_date=since_date, window=window))
+        print(f"\n⚡ Fast Mode: Scraping live transfers from FotMob ({cutoff_info}, automatic pagination)...")
+        transfers_list.append(fetch_fotmob_transfers(popular_only=popular_only, since_date=since_date, window=window))
 
     transfers = merge_transfers(transfers_list)
     # FotMob returns recent activity first. Apply historical moves oldest to
@@ -821,7 +820,6 @@ def main():
     p_run.add_argument("--window", type=str, choices=["auto", "summer", "winter", "all"], default="auto", help="Transfer window (default: auto)")
     p_run.add_argument("--since", type=_iso_date_arg, help="Scrape transfers since date (YYYY-MM-DD)")
     p_run.add_argument("--threshold", type=_percentage_arg, help="Fuzzy match confidence threshold (0-100)")
-    p_run.add_argument("--pages", type=_positive_int_arg, default=10, help="Maximum FotMob API pages (default: 10)")
     p_run.add_argument("--popular", action="store_true", help="Only request FotMob popular transfers")
     p_run.set_defaults(func=cmd_run)
 
@@ -837,7 +835,6 @@ def main():
     p_sched.add_argument("--window", type=str, choices=["auto", "summer", "winter", "all"], default="auto", help="Transfer window (default: auto)")
     p_sched.add_argument("--since", type=_iso_date_arg, help="Scrape transfers since date (YYYY-MM-DD)")
     p_sched.add_argument("--threshold", type=_percentage_arg, help="Fuzzy match confidence threshold (0-100)")
-    p_sched.add_argument("--pages", type=_positive_int_arg, default=10, help="Maximum FotMob API pages (default: 10)")
     p_sched.add_argument("--popular", action="store_true", help="Only request FotMob popular transfers")
     p_sched.set_defaults(func=cmd_schedule)
 

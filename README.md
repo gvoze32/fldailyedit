@@ -1,7 +1,7 @@
 # FLEditScrape — Football Life & PES 2021 Transfer Tool
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-114%2F114%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-115%2F115%20passed-brightgreen.svg)]()
 [![Daily Sync](https://img.shields.io/badge/Cloud%20Sync-Automated%20Daily-success.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -71,7 +71,7 @@ Pre-built and updated `EDIT00000000` save files and visual transfer report cards
 - **🎯 Tri-Factor Disambiguation Gate**: Strict multi-parameter matching combining name similarity, position gate, nationality verification, and age checks (+6.0 boost for exact nationality match, age-range alignment).
 - **👥 Source-First Squad Verification**: Resolves duplicate player names against the source roster first, then the destination only as an idempotent fallback. Ambiguous identities and below-threshold context matches are skipped.
 - **🚧 Fail-Closed Transfer Gate**: A move or release is applied only when the player's actual current club equals the matched source club. Stale events and source/current conflicts cannot move a player out of an unrelated team.
-- **📅 Bounded Window Filtering**: Automatic summer/winter ranges have explicit end dates, leap years are supported, invalid `--since` values fail, and undated events are excluded from bounded runs.
+- **📅 Cumulative Auto Replay**: Automatic mode scans every available FotMob page through today, while manual summer/winter ranges remain bounded and future-effective or undated events are excluded.
 - **📊 Visual HTML & Markdown Report Cards**: Automatically compiles clean, beautiful visual report tables with status badges, player positions, transfer fees, and confidence ratings into `transfer_summary.html` and GitHub Step Summaries.
 - **🔄 Intelligent Loan & Loan Return Handling**: On-loan players are seamlessly transferred to their loan clubs, and players returning from loans (*End of Loan*) are accurately restored to their parent clubs.
 - **📋 Contract Extension Auto-Filter**: Automatically detects and skips same-club contract renewals (`contractExtension: true`) to avoid redundant roster operations.
@@ -126,13 +126,13 @@ cd vendor/pesXdecrypter && make && cd ../..
 
 ```bash
 # Preview transfers without altering files (Dry-run mode)
-python run.py run --dry-run --edit-file base/EDIT00000000 --pages 5
+python run.py run --dry-run --edit-file base/EDIT00000000
 
 # Validate the repaired legacy base against known-good FL26 invariants
 python run.py validate --edit-file base/EDIT00000000
 
-# Auto-select the active or most recently completed transfer window
-python run.py run --edit-file base/EDIT00000000 --window auto --pages 100
+# Replay all available effective transfers through today
+python run.py run --edit-file base/EDIT00000000 --window auto
 
 # Repair the legacy base using multiple references, while preserving its
 # original promotion/division membership
@@ -162,16 +162,16 @@ python run.py run --edit-file /path/to/EDIT00000000 --in-place
 | `cron` | `python run.py cron --interval-hours 6` | Generate Linux/macOS crontab entry string. |
 
 **Parameter Flags for `run`:**
-- `--deep`: **(Default in Actions)** Deep fetch across all **635 currently indexed unique clubs** to extract window-scoped transfers and real squad shirt numbers.
+- `--deep`: **(Default in Actions)** Deep fetch across all **635 currently indexed unique clubs** to extract transfers and real squad shirt numbers.
 - `--club "Chelsea,Arsenal"`: Target specific club(s).
-- `--window auto`: Selects the current or most recently completed transfer
-  window from today's date: winter (Jan–Feb) or summer (Jun–Sep). New seasons
-  are detected automatically; no metadata or workflow edits are needed.
+- `--window auto`: Recommended. Replays all dated transfers available from
+  FotMob through today. Pagination continues until the feed is empty or repeats,
+  with an internal safety cap. New seasons need no metadata, page count, or
+  workflow edits.
 - `--window summer`: Most recent Jun 1–Sep 30 range.
 - `--window winter`: Jan 1–Feb 28/29 of the selected year.
-- `--window all`: No lower date cutoff (future-effective deals are still held
-  until their date). This is the widest option, but is slower and can replay
-  irrelevant history; it is not the recommended workflow setting.
+- `--window all`: Explicit unbounded-history mode. Usually unnecessary because
+  canonical `auto` already performs safe cumulative replay.
 - `--since YYYY-MM-DD`: Include every dated transfer on/after the cutoff. The
   value is a manual override; normal canonical runs do not need it. The upper
   bound is always today, so a pre-agreement is not applied until its FotMob
@@ -182,8 +182,8 @@ python run.py run --edit-file /path/to/EDIT00000000 --in-place
 The transfer-window countdown sites are useful for checking registration
 deadlines, which vary by league. They are not used as transaction feeds. Player
 moves continue to come from FotMob, while the canonical workflows use the base
-cutoff plus today's date so their result does not depend on a single league's
-opening or closing day.
+file plus cumulative effective transfer history through today, so their result
+does not depend on a single league's opening or closing day.
 
 ---
 
@@ -219,7 +219,7 @@ fleditscrape/
 │   └── leagues.json       # Supported playable leagues
 ├── vendor/                # Native decryption tools
 │   └── pesXdecrypter/     # C implementation of PES 2021 crypto engine
-└── tests/                 # Complete unit test suite (114 tests)
+└── tests/                 # Complete unit test suite (115 tests)
 ```
 
 ---
@@ -232,7 +232,7 @@ Run the automated test suite:
 pytest -v
 ```
 
-All **114 unit tests** pass across binary parsing, canonical path configuration, integrity repair/validation, automatic transfer-window selection, duplicate-name and source-roster priority, fail-closed roster decisions, bounded transfer ranges, future-effective transfer protection, CLI input validation, low-ID club handling, ambiguous-club safety, roster slot shifting, goalkeeper protection, position compatibility gates, and fuzzy matching.
+All **115 unit tests** pass across binary parsing, canonical path configuration, integrity repair/validation, cumulative auto replay and pagination, duplicate-name and source-roster priority, fail-closed roster decisions, bounded manual ranges, future-effective transfer protection, CLI input validation, low-ID club handling, ambiguous-club safety, roster slot shifting, goalkeeper protection, position compatibility gates, and fuzzy matching.
 
 ---
 

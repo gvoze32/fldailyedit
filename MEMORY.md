@@ -448,14 +448,14 @@ Canonical base decision:
 
 Final ingestion/mutation safety rules:
 
-- Automatic windows are bounded to Jan 1–Feb 28/29 or Jun 1–Sep 30. Between
-  windows, `auto` selects the most recently completed window; malformed
-  `since_date` values are rejected instead of silently disabling filtering.
-- `auto` depends only on today's date and window open/end boundaries, never on
-  base provenance or sidecar metadata. Daily workflows need no season-specific
-  edits. Global FotMob pages must all be scanned up to the configured limit
-  because the endpoint is sorted by `lastModified`, not by `transferDate`; an
-  old corrected record must not terminate pagination early.
+- Canonical `auto` cumulatively replays every available dated FotMob transfer
+  through today. It does not depend on transfer-window calendars, base
+  provenance, metadata, workflow dates, or a user-supplied page count.
+- Global FotMob pagination continues until an empty/repeated page, guarded by
+  an internal 250-page safety cap. The endpoint is sorted by `lastModified`,
+  not `transferDate`; an old corrected record must not terminate pagination.
+- Explicit `summer` and `winter` modes remain bounded manual filters;
+  malformed `since_date` values are rejected instead of disabling filtering.
 - Undated transactional events are excluded whenever a bounded date filter is
   active. Squad-number observations remain separate `squad_update` records.
 - Every resolved fetch range is capped at the current UTC date. Pre-agreements
@@ -471,7 +471,7 @@ Final ingestion/mutation safety rules:
 - Club/national-team classification must come from the league-membership block,
   not a numeric ID threshold. FL26 has playable clubs at IDs `<=100` (Manchester
   United is ID 100 in the supplied team database).
-- Current regression baseline: 114 tests passing; canonical base and output
+- Current regression baseline: 115 tests passing; canonical base and output
   both validate at 10,995,800 bytes, 749 rosters, 583 clubs, zero duplicate club
   registrations, and 747 checked game plans.
 

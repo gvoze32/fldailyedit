@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 FOTMOB_TRANSFERS_URL = "https://www.fotmob.com/transfers"
 FOTMOB_API_TEMPLATE = "https://www.fotmob.com/api/data/transfers?orderBy=lastModified&page={page}&minFeeCurrency=EUR&popular={popular}"
+AUTO_PAGE_LIMIT = 250
 
 DEFAULT_HEADERS = {
     "User-Agent": (
@@ -40,7 +41,7 @@ def get_transfer_window_range(
 
     - "summer": June 1 to Sept 30
     - "winter": Jan 1 to Feb 28/29
-    - "auto": Current or most recent active window based on ref_date
+    - "auto": Full effective transfer history available from FotMob
     - "all": No cutoff (start from 2000-01-01)
     """
     if ref_date is None:
@@ -62,15 +63,9 @@ def get_transfer_window_range(
     if w != "auto":
         raise ValueError(f"Unknown transfer window: {window!r}")
 
-    # Auto mode uses the current window while it is active, otherwise the
-    # most recently completed window.  Keeping both ends bounded prevents a
-    # stale event from a different window entering the mutation pipeline.
-    if ref_date.month <= 5:
-        year = ref_date.year
-        return date(year, 1, 1), date(year, 2, monthrange(year, 2)[1])
-
-    year = ref_date.year
-    return date(year, 6, 1), date(year, 9, 30)
+    # Canonical auto runs rebuild from an immutable base. Replay all effective
+    # history so changing seasons cannot drop transfers from earlier windows.
+    return date(2000, 1, 1), None
 
 
 def parse_iso_date(date_str: str) -> Optional[date]:
@@ -126,7 +121,7 @@ class FotmobScraper:
 
     async def _fetch_transfers_async(
         self,
-        max_pages: int = 10,
+        max_pages: Optional[int] = None,
         popular_only: bool = False,
         since_date: Optional[Union[str, date]] = None,
         window: str = "auto",
@@ -134,9 +129,10 @@ class FotmobScraper:
         """
         Fetch transfers asynchronously from FotMob API.
 
-        Every requested page is scanned and then filtered by date. The endpoint
-        is ordered by last modification, not necessarily by transfer date, so
-        seeing one old transfer is not a safe reason to stop pagination.
+        Pages are fetched until the feed is empty or repeats. The internal hard
+        limit prevents a broken endpoint from looping forever. The endpoint is
+        ordered by last modification, not transfer date, so an old item is not
+        a safe pagination stop signal.
         """
         transfers: list[Transfer] = []
         popular_param = "true" if popular_only else "false"
@@ -146,9 +142,11 @@ class FotmobScraper:
         if start_date:
             logger.info(f"Scraping FotMob transfers window: {start_date} to {end_date or 'latest'}")
 
+        page_limit = max_pages if max_pages is not None else AUTO_PAGE_LIMIT
+        seen_pages: set[str] = set()
         timeout = aiohttp.ClientTimeout(total=15)
         async with aiohttp.ClientSession(headers=self.headers, timeout=timeout) as session:
-            for page_num in range(1, max_pages + 1):
+            for page_num in range(1, page_limit + 1):
                 api_url = FOTMOB_API_TEMPLATE.format(page=page_num, popular=popular_param)
                 logger.debug(f"Fetching FotMob API page {page_num}: {api_url}")
 
@@ -166,6 +164,15 @@ class FotmobScraper:
                 if not raw_transfers:
                     logger.info(f"FotMob page {page_num} returned empty transfers list. Stopping.")
                     break
+
+                page_signature = repr(raw_transfers)
+                if page_signature in seen_pages:
+                    logger.warning(
+                        "FotMob page %s repeated an earlier page. Stopping pagination.",
+                        page_num,
+                    )
+                    break
+                seen_pages.add(page_signature)
 
                 logger.info(f"FotMob page {page_num} returned {len(raw_transfers)} items")
 
@@ -190,6 +197,11 @@ class FotmobScraper:
                             continue
 
                     transfers.append(t)
+            else:
+                logger.warning(
+                    "FotMob pagination reached internal safety limit (%s pages).",
+                    page_limit,
+                )
 
         return transfers
 
@@ -283,7 +295,7 @@ class FotmobScraper:
 
     def fetch_transfers(
         self,
-        max_pages: int = 10,
+        max_pages: Optional[int] = None,
         popular_only: bool = False,
         since_date: Optional[Union[str, date]] = None,
         window: str = "auto",
@@ -606,7 +618,7 @@ def merge_transfers(transfer_lists: list[list[Transfer]]) -> list[Transfer]:
 
 
 def fetch_fotmob_transfers(
-    max_pages: int = 10,
+    max_pages: Optional[int] = None,
     popular_only: bool = False,
     since_date: Optional[Union[str, date]] = None,
     window: str = "auto",
