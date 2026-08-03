@@ -118,19 +118,30 @@ Last Moderated by Moderator 03 Aug 2026 15:37:09
 """
 
 
+SORTITOUTSI_SUBMISSION_ONLY_MARKDOWN = """
+## [Recent Submissions](https://sortitoutsi.net/football-manager-data-update/submissions)
+
+ Enabled
+##### [Fast Player](https://sortitoutsi.net/football-manager-data-update/person/200)
+[03 Aug 2026 15:20:54](https://sortitoutsi.net/football-manager-data-update/submission/20)
+[Fast Player](https://sortitoutsi.net/football-manager-data-update/person/200) has been transferred to [Chelsea](https://sortitoutsi.net/football-manager-data-update/team/630 "Chelsea").
+[Proof (chelseafc.com)](https://www.chelseafc.com/fast-player-joins)
+"""
+
+
 TRANSFERMARKT_MARKDOWN = """
-| Player | Age | Nat. | Left | Joined | Fee |
-| --- | --- | --- | --- | --- | --- |
-| ![João Mário](https://img.example/537602.jpg)[João Mário](https://www.transfermarkt.com/joao-mario/profil/spieler/537602 "João Mário") Right-Back | 26 | Portugal | [Juventus](https://www.transfermarkt.com/juventus-turin/startseite/verein/506/saison_id/2026 "Juventus FC") | [Fiorentina](https://www.transfermarkt.com/ac-florenz/startseite/verein/430/saison_id/2026 "ACF Fiorentina") | [Loan fee: €1.80m](https://www.transfermarkt.com/jumplist/transfers/spieler/537602/transfer_id/6481933) |
-| [Péter Gulácsi](https://www.transfermarkt.com/peter-gulacsi/profil/spieler/57071 "Péter Gulácsi") Goalkeeper | 36 | Hungary | [Leipzig](https://www.transfermarkt.com/rasenballsport-leipzig/startseite/verein/23826/saison_id/2026 "RB Leipzig") | [Villarreal](https://www.transfermarkt.com/fc-villarreal/startseite/verein/1050/saison_id/2026 "Villarreal CF") | [€2.00m](https://www.transfermarkt.com/jumplist/transfers/spieler/57071/transfer_id/6481832) |
-| [Jordan Henderson](https://www.transfermarkt.com/jordan-henderson/profil/spieler/61651 "Jordan Henderson") Defensive Midfield | 36 | England | [Brentford](https://www.transfermarkt.com/fc-brentford/startseite/verein/1148/saison_id/2026 "Brentford FC") | [Chelsea](https://www.transfermarkt.com/fc-chelsea/startseite/verein/631/saison_id/2026 "Chelsea FC") | [free transfer](https://www.transfermarkt.com/jumplist/transfers/spieler/61651/transfer_id/6481567) |
+| Player | Age | Nat. | Left | Joined | Transfer date | Market value | Fee |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| ![João Mário](https://img.example/537602.jpg)[João Mário](https://www.transfermarkt.com/joao-mario/profil/spieler/537602 "João Mário") Right-Back | 26 | Portugal | [Juventus](https://www.transfermarkt.com/juventus-turin/startseite/verein/506/saison_id/2026 "Juventus FC") | [Fiorentina](https://www.transfermarkt.com/ac-florenz/startseite/verein/430/saison_id/2026 "ACF Fiorentina") | 03/08/2026 | €18.00m | [Loan fee: €1.80m](https://www.transfermarkt.com/jumplist/transfers/spieler/537602/transfer_id/6481933) |
+| [Péter Gulácsi](https://www.transfermarkt.com/peter-gulacsi/profil/spieler/57071 "Péter Gulácsi") Goalkeeper | 36 | Hungary | [Leipzig](https://www.transfermarkt.com/rasenballsport-leipzig/startseite/verein/23826/saison_id/2026 "RB Leipzig") | [Villarreal](https://www.transfermarkt.com/fc-villarreal/startseite/verein/1050/saison_id/2026 "Villarreal CF") | 03/08/2026 | €1.00m | [€2.00m](https://www.transfermarkt.com/jumplist/transfers/spieler/57071/transfer_id/6481832) |
+| [Jordan Henderson](https://www.transfermarkt.com/jordan-henderson/profil/spieler/61651 "Jordan Henderson") Defensive Midfield | 36 | England | [Brentford](https://www.transfermarkt.com/fc-brentford/startseite/verein/1148/saison_id/2026 "Brentford FC") | [Chelsea](https://www.transfermarkt.com/fc-chelsea/startseite/verein/631/saison_id/2026 "Chelsea FC") | 03/08/2026 | €3.50m | [free transfer](https://www.transfermarkt.com/jumplist/transfers/spieler/61651/transfer_id/6481567) |
 """
 
 
 TRANSFERMARKT_PAGE_2 = """
-| Player | Age | Nat. | Left | Joined | Fee |
-| --- | --- | --- | --- | --- | --- |
-| [Shawn Adewoye](https://www.transfermarkt.com/shawn-adewoye/profil/spieler/358021 "Shawn Adewoye") Centre-Back | 26 | Belgium | [Fortuna Sittard](https://www.transfermarkt.com/fortuna-sittard/startseite/verein/385/saison_id/2026 "Fortuna Sittard") | [Lommel SK](https://www.transfermarkt.com/lommel-sk/startseite/verein/5026/saison_id/2026 "Lommel SK") | [free transfer](https://www.transfermarkt.com/jumplist/transfers/spieler/358021/transfer_id/6481688) |
+| Player | Age | Nat. | Left | Joined | Transfer date | Market value | Fee |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| [Shawn Adewoye](https://www.transfermarkt.com/shawn-adewoye/profil/spieler/358021 "Shawn Adewoye") Centre-Back | 26 | Belgium | [Fortuna Sittard](https://www.transfermarkt.com/fortuna-sittard/startseite/verein/385/saison_id/2026 "Fortuna Sittard") | [Lommel SK](https://www.transfermarkt.com/lommel-sk/startseite/verein/5026/saison_id/2026 "Lommel SK") | 02/08/2026 | €600k | [free transfer](https://www.transfermarkt.com/jumplist/transfers/spieler/358021/transfer_id/6481688) |
 """
 
 
@@ -343,7 +354,28 @@ def test_sortitoutsi_parser_accepts_only_enabled_entries_with_proof():
     assert transfer.proof_urls == ("https://www.chelseafc.com/jordan-henderson-joins",)
 
 
-def test_transfermarkt_parser_extracts_routes_types_and_stable_ids():
+def test_sortitoutsi_submission_date_only_disables_roster_inference():
+    transfers = parse_sortitoutsi_markdown(
+        SORTITOUTSI_SUBMISSION_ONLY_MARKDOWN,
+        end_date=date(2026, 8, 3),
+    )
+
+    assert len(transfers) == 1
+    assert transfers[0].date == "2026-08-03"
+    assert transfers[0].verification_status == "enabled"
+    assert transfers[0].infer_from_current_roster is False
+
+
+def test_sortitoutsi_submission_date_only_cannot_create_event():
+    signals = parse_sortitoutsi_markdown(
+        SORTITOUTSI_SUBMISSION_ONLY_MARKDOWN,
+        end_date=date(2026, 8, 3),
+    )
+
+    assert reconcile_transfer_sources([], signals) == []
+
+
+def test_transfermarkt_detailed_parser_extracts_dated_verified_events():
     try:
         from scraper.transfermarkt import parse_transfermarkt_markdown
     except ModuleNotFoundError:
@@ -351,7 +383,9 @@ def test_transfermarkt_parser_extracts_routes_types_and_stable_ids():
 
     transfers = parse_transfermarkt_markdown(
         TRANSFERMARKT_MARKDOWN,
-        "https://www.transfermarkt.com/statistik/neuestetransfers",
+        "https://www.transfermarkt.com/transfers/neuestetransfers/statistik?plus=1",
+        start_date=date(2026, 8, 3),
+        end_date=date(2026, 8, 3),
     )
 
     assert [item.player_name for item in transfers] == [
@@ -363,9 +397,20 @@ def test_transfermarkt_parser_extracts_routes_types_and_stable_ids():
     assert (
         joao.from_club,
         joao.to_club,
+        joao.date,
         joao.transfer_type,
         joao.is_loan,
-    ) == ("Juventus FC", "ACF Fiorentina", "loan", True)
+        joao.market_value,
+        joao.verification_status,
+    ) == (
+        "Juventus FC",
+        "ACF Fiorentina",
+        "2026-08-03",
+        "loan",
+        True,
+        18_000_000,
+        "verified",
+    )
     assert (
         joao.player_id_transfermarkt,
         joao.from_club_id_transfermarkt,
@@ -373,45 +418,43 @@ def test_transfermarkt_parser_extracts_routes_types_and_stable_ids():
         joao.transfer_id_transfermarkt,
     ) == (537602, 506, 430, 6481933)
     assert joao.sources == ("transfermarkt",)
-    assert joao.date == ""
     assert joao.infer_from_current_roster is False
     assert peter.transfer_type == "transfer"
     assert jordan.transfer_type == "free transfer"
     assert jordan.source_urls[-1].endswith("/transfer_id/6481567")
 
 
-def test_transfermarkt_fetch_paginates_and_stops_on_repeated_page(monkeypatch):
+def test_transfermarkt_fetch_uses_detailed_pages_and_stops_below_cutoff(monkeypatch):
     from scraper import transfermarkt
-
-    if not hasattr(transfermarkt, "_fetch_transfermarkt_transfers_async"):
-        pytest.fail("Transfermarkt pagination is not implemented")
 
     requested = []
 
     async def fake_fetch(_session, reader_url):
         requested.append(reader_url)
-        if "page=2" in reader_url or "page=3" in reader_url:
-            return TRANSFERMARKT_PAGE_2
-        return TRANSFERMARKT_MARKDOWN
+        return TRANSFERMARKT_PAGE_2 if "page=2" in reader_url else TRANSFERMARKT_MARKDOWN
 
     monkeypatch.setattr(transfermarkt, "_fetch_text", fake_fetch)
     transfers = asyncio.run(
-        transfermarkt._fetch_transfermarkt_transfers_async(max_pages=4)
+        transfermarkt._fetch_transfermarkt_transfers_async(
+            max_pages=4,
+            since_date=date(2026, 8, 3),
+            ref_date=date(2026, 8, 4),
+        )
     )
 
     assert [item.transfer_id_transfermarkt for item in transfers] == [
         6481933,
         6481832,
         6481567,
-        6481688,
     ]
-    assert requested == [
-        "https://r.jina.ai/https://www.transfermarkt.com/statistik/neuestetransfers",
-        "https://r.jina.ai/https://www.transfermarkt.com/statistik/neuestetransfers?page=2",
-        "https://r.jina.ai/https://www.transfermarkt.com/statistik/neuestetransfers?page=3",
-    ]
-    assert transfers[-1].source_urls[0].endswith(
-        "/statistik/neuestetransfers?page=2"
+    base_url = (
+        "https://r.jina.ai/https://www.transfermarkt.com/transfers/"
+        "neuestetransfers/statistik?"
+        "land_id=0&verein_land_id=0&wettbewerb_id=alle&plus=1"
+    )
+    assert requested == [base_url, f"{base_url}&page=2"]
+    assert transfers[0].source_urls[0].endswith(
+        "wettbewerb_id=alle&plus=1"
     )
 
 
@@ -434,7 +477,7 @@ def test_reconciliation_enriches_complete_route_with_fast_signal():
     assert jordan.infer_from_current_roster is False
 
 
-def test_transfermarkt_only_enriches_one_existing_complete_route():
+def test_transfermarkt_dated_routes_merge_with_matching_wikipedia_event():
     from scraper.transfermarkt import parse_transfermarkt_markdown
 
     wikipedia = parse_wikipedia_transfer_html(
@@ -442,22 +485,18 @@ def test_transfermarkt_only_enriches_one_existing_complete_route():
         "List of English football transfers summer 2026",
         end_date=date(2026, 8, 3),
     )
-    corroborators = parse_transfermarkt_markdown(
+    transfermarkt = parse_transfermarkt_markdown(
         TRANSFERMARKT_MARKDOWN,
-        "https://www.transfermarkt.com/statistik/neuestetransfers",
+        "https://www.transfermarkt.com/transfers/neuestetransfers/statistik?plus=1",
     )
 
-    try:
-        reconciled = reconcile_transfer_sources(
-            [wikipedia],
-            corroborators=corroborators,
-        )
-    except TypeError:
-        pytest.fail("Transfermarkt corroboration is not implemented")
+    reconciled = reconcile_transfer_sources([wikipedia, transfermarkt])
 
     assert [item.player_name for item in reconciled] == [
         "Jordan Henderson",
         "Loan Player",
+        "João Mário",
+        "Péter Gulácsi",
     ]
     jordan = reconciled[0]
     assert jordan.date == "2026-08-03"
@@ -465,6 +504,32 @@ def test_transfermarkt_only_enriches_one_existing_complete_route():
     assert jordan.player_id_transfermarkt == 61651
     assert jordan.transfer_id_transfermarkt == 6481567
     assert jordan.infer_from_current_roster is False
+
+
+def test_free_transfer_merges_free_agent_and_previous_club_routes():
+    fotmob = Transfer(
+        "Jordan Henderson",
+        "Free Agent",
+        "Chelsea",
+        date="2026-08-03T17:16:20Z",
+        transfer_type="free transfer",
+    )
+    transfermarkt = Transfer(
+        "Jordan Henderson",
+        "Brentford FC",
+        "Chelsea FC",
+        date="2026-08-03",
+        transfer_type="free transfer",
+        sources=("transfermarkt",),
+        transfer_id_transfermarkt=6481567,
+    )
+
+    reconciled = reconcile_transfer_sources([[fotmob], [transfermarkt]])
+
+    assert len(reconciled) == 1
+    assert reconciled[0].sources == ("fotmob", "transfermarkt")
+    assert reconciled[0].transfer_id_transfermarkt == 6481567
+    assert reconciled[0].from_club == "Brentford FC"
 
 
 def _sortitoutsi_signal() -> Transfer:
@@ -535,6 +600,45 @@ def test_destination_only_signal_cannot_infer_source_for_unresolved_destination(
     assert matched.transfer.from_club == ""
 
 
+def test_run_pipeline_accepts_transfermarkt_dated_event_without_other_sources(
+    monkeypatch,
+):
+    import run
+
+    transfermarkt = Transfer(
+        "Jordan Henderson",
+        "Brentford FC",
+        "Chelsea FC",
+        date="2026-08-03",
+        sources=("transfermarkt",),
+        player_id_transfermarkt=61651,
+        from_club_id_transfermarkt=1148,
+        to_club_id_transfermarkt=631,
+        transfer_id_transfermarkt=6481567,
+    )
+    monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_: [])
+    monkeypatch.setattr(run, "fetch_wikipedia_transfers", lambda **_: [])
+    monkeypatch.setattr(run, "fetch_sortitoutsi_transfers", lambda **_: [])
+    monkeypatch.setattr(
+        run,
+        "fetch_transfermarkt_transfers",
+        lambda **_: [transfermarkt],
+    )
+
+    transfers = run._scrape_run_transfers(
+        SimpleNamespace(
+            popular=False,
+            window="summer",
+            since="2026-08-03",
+            club=None,
+            deep=False,
+            fotmob_only=False,
+        )
+    )
+
+    assert transfers == [transfermarkt]
+
+
 def test_run_pipeline_reconciles_supplemental_sources(monkeypatch):
     import run
 
@@ -553,6 +657,7 @@ def test_run_pipeline_reconciles_supplemental_sources(monkeypatch):
         "Jordan Henderson",
         "Brentford FC",
         "Chelsea FC",
+        date="2026-08-03",
         sources=("transfermarkt",),
         player_id_transfermarkt=61651,
         from_club_id_transfermarkt=1148,
@@ -565,7 +670,7 @@ def test_run_pipeline_reconciles_supplemental_sources(monkeypatch):
     monkeypatch.setattr(
         run,
         "fetch_transfermarkt_transfers",
-        lambda: [transfermarkt],
+        lambda **_: [transfermarkt],
         raising=False,
     )
 
@@ -584,8 +689,8 @@ def test_run_pipeline_reconciles_supplemental_sources(monkeypatch):
     assert transfers[0].sources == (
         "fotmob",
         "wikipedia",
-        "sortitoutsi",
         "transfermarkt",
+        "sortitoutsi",
     )
 
 
@@ -609,7 +714,7 @@ def test_run_pipeline_treats_undated_wikipedia_route_as_corroborator(monkeypatch
     monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_: [fotmob])
     monkeypatch.setattr(run, "fetch_wikipedia_transfers", lambda **_: [wikipedia])
     monkeypatch.setattr(run, "fetch_sortitoutsi_transfers", lambda **_: [])
-    monkeypatch.setattr(run, "fetch_transfermarkt_transfers", lambda: [])
+    monkeypatch.setattr(run, "fetch_transfermarkt_transfers", lambda **_: [])
 
     transfers = run._scrape_run_transfers(
         SimpleNamespace(

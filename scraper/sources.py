@@ -12,12 +12,24 @@ from scraper.models import Transfer
 
 
 logger = logging.getLogger(__name__)
+_NON_CLUB_LABELS = {
+    "",
+    "free agent",
+    "without club",
+    "unattached",
+    "career break",
+    "retired",
+}
 
 
 def _normalize(value: str) -> str:
     decomposed = unicodedata.normalize("NFKD", value or "")
     plain = "".join(char for char in decomposed if not unicodedata.combining(char))
     return " ".join(plain.casefold().replace(".", " ").split())
+
+
+def _is_non_club(value: str) -> bool:
+    return _normalize(value) in _NON_CLUB_LABELS
 
 
 def _same_or_adjacent_date(left: str, right: str) -> bool:
@@ -53,6 +65,12 @@ def _same_source(left: Transfer, right: Transfer) -> bool:
     )
 
 
+def _compatible_source(left: Transfer, right: Transfer) -> bool:
+    return _same_source(left, right) or (
+        left.transfer_type == right.transfer_type == "free transfer"
+    )
+
+
 def _compatible_event_type(left: Transfer, right: Transfer) -> bool:
     if left.transfer_type == right.transfer_type:
         return True
@@ -65,6 +83,15 @@ def _merge_provenance(target: Transfer, source: Transfer) -> None:
         dict.fromkeys((*target.source_urls, *source.source_urls))
     )
     target.proof_urls = tuple(dict.fromkeys((*target.proof_urls, *source.proof_urls)))
+    target_source = target.from_club_full_name or target.from_club
+    source_source = source.from_club_full_name or source.from_club
+    if (
+        target.transfer_type == source.transfer_type == "free transfer"
+        and _is_non_club(target_source)
+        and not _is_non_club(source_source)
+    ):
+        target.from_club = source.from_club
+        target.from_club_full_name = source_source
     if target.player_id_sortitoutsi is None:
         target.player_id_sortitoutsi = source.player_id_sortitoutsi
     for attr in (
@@ -75,12 +102,33 @@ def _merge_provenance(target: Transfer, source: Transfer) -> None:
     ):
         if getattr(target, attr) is None:
             setattr(target, attr, getattr(source, attr))
-    for attr in ("position", "fee", "nationality", "age"):
+    for attr in ("position", "fee", "nationality", "age", "market_value"):
         if not getattr(target, attr) and getattr(source, attr):
             setattr(target, attr, getattr(source, attr))
     if target.transfer_type == "transfer" and source.transfer_type != "transfer":
         target.transfer_type = source.transfer_type
         target.is_loan = source.is_loan
+
+
+def _merge_verified_batches(
+    verified_batches: list[list[Transfer]],
+) -> list[Transfer]:
+    merged: list[Transfer] = []
+    for transfer in merge_transfers(verified_batches):
+        candidates = [
+            existing
+            for existing in merged
+            if _normalize(existing.player_name) == _normalize(transfer.player_name)
+            and _compatible_source(existing, transfer)
+            and _same_destination(existing, transfer)
+            and _same_or_adjacent_date(existing.date, transfer.date)
+            and _compatible_event_type(existing, transfer)
+        ]
+        if len(candidates) == 1:
+            _merge_provenance(candidates[0], transfer)
+        else:
+            merged.append(transfer)
+    return merged
 
 
 def reconcile_transfer_sources(
@@ -91,14 +139,15 @@ def reconcile_transfer_sources(
     """
     Merge complete routes, then reconcile destination-only community signals.
 
-    A uniquely corroborated Sortitoutsi signal enriches an existing event. An
-    unmatched enabled signal is retained, but it carries an explicit request
-    for fail-closed source inference from the current FL26 roster.
+    A unique Sortitoutsi signal enriches an existing event. An unmatched signal
+    is retained for fail-closed current-roster inference only when its adapter
+    found an explicit effective date; submission-date-only signals are ignored.
     """
-    verified = merge_transfers(verified_batches)
+    verified = _merge_verified_batches(verified_batches)
     inferred_signals = 0
     corroborated_signals = 0
     ambiguous_signals = 0
+    ignored_signals = 0
     corroborated_routes = 0
     ignored_routes = 0
 
@@ -114,9 +163,11 @@ def reconcile_transfer_sources(
         if len(candidates) == 1:
             _merge_provenance(candidates[0], signal)
             corroborated_signals += 1
-        elif not candidates:
+        elif not candidates and signal.infer_from_current_roster:
             verified.append(signal)
             inferred_signals += 1
+        elif not candidates:
+            ignored_signals += 1
         else:
             ambiguous_signals += 1
             logger.warning(
@@ -150,10 +201,12 @@ def reconcile_transfer_sources(
 
     logger.info(
         "Cross-source reconciliation: %s fast signals corroborated, "
-        "%s roster-inference candidates, %s ambiguous signals ignored, "
-        "%s complete routes corroborated, %s route corroborators ignored",
+        "%s roster-inference candidates, %s submission-only signals ignored, "
+        "%s ambiguous signals ignored, %s complete routes corroborated, "
+        "%s route corroborators ignored",
         corroborated_signals,
         inferred_signals,
+        ignored_signals,
         ambiguous_signals,
         corroborated_routes,
         ignored_routes,

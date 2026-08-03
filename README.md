@@ -8,8 +8,9 @@
 An automated, safe, and intelligent player transfer synchronization tool for **SP Football Life** and **eFootball PES 2021**.
 
 It reconciles **FotMob**, confirmed **Wikipedia** transfer lists, moderated
-**Sortitoutsi** submissions, and recent **Transfermarkt** routes, verifies player
-identity against the current FL26 catalog and the save's actual roster state,
+**Sortitoutsi** submissions, and verified dated **Transfermarkt** detailed
+routes, then checks player identity against the current FL26 catalog and the
+save's actual roster state,
 handles stale loan chains, assigns conflict-free shirt numbers, protects tactical
 game plans, and writes validated updates into your `EDIT00000000` save file.
 
@@ -68,15 +69,15 @@ Pre-built and updated `EDIT00000000` save files and visual transfer report cards
 
 ## ⚡ Key Features
 
-- **🚀 Four Complementary Sources**: FotMob supplies global history and squad metadata. Wikipedia dynamically reads every men's page in each selected seasonal category: explicit dated tables provide confirmed events, while undated club `In`/`Out` lists provide route corroboration. Enabled Sortitoutsi submissions add fast destination signals with proof links, and Transfermarkt adds recent complete routes with stable player, club, and transfer IDs.
-- **🤝 Provenance-Aware Reconciliation**: Duplicate events are merged across sources without losing IDs, citations, effective dates, or proof URLs. Undated Wikipedia club-list and Transfermarkt records only enrich one unique existing route and never trigger roster mutations independently.
+- **🚀 Four Complementary Sources**: FotMob supplies global history and squad metadata. Wikipedia dynamically reads every men's page in each selected seasonal category: explicit dated tables provide confirmed events, while undated club `In`/`Out` lists provide route corroboration. Enabled Sortitoutsi submissions add fast destination signals with proof links. Transfermarkt's detailed table adds verified dated events with stable player, club, and transfer IDs.
+- **🤝 Provenance-Aware Reconciliation**: Duplicate events are merged across sources without losing IDs, citations, effective dates, or proof URLs. Undated Wikipedia club lists and submission-date-only Sortitoutsi signals only enrich one unique event. A Transfermarkt detailed record is independent only with a complete route and valid non-future transfer date.
 - **🌪️ Deep Mode (504 One-to-One Clubs)**: Sequentially fetches each FotMob identity that maps unambiguously to one PES club, including squad metadata absent from the global feed.
 - **🛡️ Formation & Game Plan Doctor**: Preserves the active lineup mapping when roster slots are compacted. Roles belonging to a departing player are reset to the game's automatic/default selection.
 - **🔢 Authentic Squad Sync**: The script extracts real **Shirt Numbers** from FotMob squad lists and applies conflict-free updates in-game. A number already owned by another squad member is safely skipped without cancelling unrelated transfers.
 - **🎯 Roster-Aware Identity Gate**: Matches the current 29.5k FL26 player catalog, then resolves duplicate names against source/destination roster context. Position, nationality, and age evidence is used only when it is genuinely present.
 - **👥 Source-First Squad Verification**: Resolves duplicate player names against the source roster first, then the destination only as an idempotent fallback. Ambiguous identities and below-threshold context matches are skipped.
 - **🪪 Stable Player Identity**: Persists FotMob `playerId` ↔ PES player-ID evidence per output save and audits Transfermarkt player, club, and transfer IDs, so renamed players can be recovered while conflicting histories are rejected.
-- **🚧 Fail-Closed Transfer Gate**: A move or release is applied only when the player's actual current club equals the matched source club. A destination-only Sortitoutsi signal requires `Enabled` status, a proof URL, an exact player match, one unique current FL26 roster, and a valid destination; otherwise it is skipped.
+- **🚧 Fail-Closed Transfer Gate**: A move or release is applied only when the player's actual current club equals the matched source club. A destination-only Sortitoutsi signal can independently infer its source only with `Enabled` status, a proof URL, an explicit effective date, an exact player match, one unique current FL26 roster, and a valid destination; submission-date-only signals cannot create events.
 - **📅 Cumulative Auto Replay**: Automatic mode scans every available FotMob page through today, while manual summer/winter ranges remain bounded and future-effective or undated events are excluded.
 - **📊 Visual HTML & Markdown Report Cards**: Separates real club transfers from shirt-number-only changes, with responsive tables, accurate metrics, confidence ratings, and a concise GitHub Step Summary.
 - **🔄 Intelligent Loan & Loan Return Handling**: On-loan players are seamlessly transferred to their loan clubs, and players returning from loans (*End of Loan*) are accurately restored to their parent clubs.
@@ -94,7 +95,7 @@ graph LR
     A[FotMob Live API] --> B[Source Reconciler]
     W[Wikipedia API] --> B
     S[Sortitoutsi Enabled Signals] --> B
-    T[Transfermarkt via Jina] -->|Corroboration only| B
+    T[Transfermarkt Detailed via Jina] -->|Verified dated events| B
     B -->|Route + Provenance + Metadata| C[Deep Matcher RapidFuzz]
     D[Decrypted Save Roster & DB] --> C
     C -->|Bidirectional Squad + Pos Gate| E[Safety Backup Engine]
@@ -238,7 +239,7 @@ fleditscrape/
 │   ├── fotmob.py          # Direct async FotMob scraper
 │   ├── wikipedia.py       # Global men's seasonal event and route corroborator
 │   ├── sortitoutsi.py     # Enabled community-signal adapter
-│   ├── transfermarkt.py   # Undated complete-route corroborator via Jina Reader
+│   ├── transfermarkt.py   # Verified dated detailed-table adapter via Jina Reader
 │   ├── sources.py         # Cross-source provenance reconciliation
 │   ├── matcher.py         # Position-aware fuzzy matcher & squad verification
 │   └── models.py          # Transfer and MatchedTransfer data models

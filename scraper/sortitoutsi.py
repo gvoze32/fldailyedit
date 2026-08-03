@@ -61,7 +61,7 @@ def _effective_date(block: str) -> date | None:
         parsed = _parse_human_date(start_match.group(1))
         if parsed:
             return parsed
-    return _submission_date(block)
+    return None
 
 
 def _submission_date(block: str) -> date | None:
@@ -108,7 +108,8 @@ def parse_sortitoutsi_markdown(
             # not safe enough for an automated roster mutation.
             continue
 
-        event_date = _effective_date(block) or _submission_date(block)
+        effective_date = _effective_date(block)
+        event_date = effective_date or _submission_date(block)
         if event_date is None:
             continue
         if start_date and event_date < start_date:
@@ -149,7 +150,7 @@ def parse_sortitoutsi_markdown(
                 proof_urls=(proof_match.group(1),),
                 player_id_sortitoutsi=int(player_id_text),
                 verification_status="enabled",
-                infer_from_current_roster=True,
+                infer_from_current_roster=effective_date is not None,
             )
         )
     return transfers

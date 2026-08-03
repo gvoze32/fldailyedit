@@ -1029,11 +1029,13 @@ def _scrape_run_transfers(args):
         fast_signals = fetch_sortitoutsi_transfers(since_date=since_date)
         print(f"  Sortitoutsi found {len(fast_signals)} enabled signals")
 
-        print("\n🔎 Adding Transfermarkt route corroborators...")
-        transfermarkt_corroborators = fetch_transfermarkt_transfers()
-        corroborators.extend(transfermarkt_corroborators)
+        print("\n🔎 Adding verified Transfermarkt detailed transfers...")
+        transfermarkt_events = fetch_transfermarkt_transfers(
+            since_date=since_date or start_date
+        )
+        transfer_batches.append(transfermarkt_events)
         print(
-            f"  Transfermarkt found {len(transfermarkt_corroborators)} recent complete routes"
+            f"  Transfermarkt found {len(transfermarkt_events)} dated transfers"
         )
 
     transfers = (
