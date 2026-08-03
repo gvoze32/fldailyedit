@@ -652,6 +652,16 @@ class EditFile:
         best_slot, best_pid = min(active_slots, key=candidate_sort_key)
         return best_slot, best_pid
 
+    def get_player_shirt_number(self, team_id: int, player_id: int) -> int | None:
+        """Return a player's current shirt number, or None when not registered."""
+        roster = self.get_team_roster(team_id)
+        if roster is None:
+            return None
+        idx = roster.player_index(player_id)
+        if idx == -1 or idx >= len(roster.shirt_numbers):
+            return None
+        return roster.shirt_numbers[idx]
+
     def update_player_shirt_number(self, team_id: int, player_id: int, shirt_number: int) -> bool:
         """Update a player's shirt number directly without transferring."""
         if not 1 <= shirt_number <= 999:

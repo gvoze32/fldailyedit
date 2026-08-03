@@ -476,6 +476,14 @@ class TestReleaseAndAddPlayer:
         assert roster.player_ids[0] == 1001
         assert roster.player_ids[1] == 1003  # compacted from slot 2
 
+    def test_get_player_shirt_number(self):
+        ef = EditFile()
+        ef.load_bytes(self._build_test_data())
+
+        assert ef.get_player_shirt_number(101, 1002) == 10
+        assert ef.get_player_shirt_number(101, 9999) is None
+        assert ef.get_player_shirt_number(999, 1002) is None
+
     def test_release_player_not_found(self):
         data = self._build_test_data()
         ef = EditFile()

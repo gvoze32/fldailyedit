@@ -3,6 +3,7 @@ Transfer logging — structured JSONL output for audit trail and rollback.
 """
 import json
 import logging
+from html import escape
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,9 +25,12 @@ def log_transfer(
     position: str = "",
     fee: str = "",
     market_value: int = 0,
+    previous_shirt_number: int | None = None,
+    shirt_number: int | None = None,
+    roster_action: str = "",
 ):
     """
-    Append a transfer record to the JSONL log file.
+    Append a transfer or shirt-number audit record to the JSONL log file.
 
     Each line is a self-contained JSON object for easy parsing.
     """
@@ -44,6 +48,9 @@ def log_transfer(
         "fee": fee,
         "market_value": market_value,
         "dry_run": dry_run,
+        "previous_shirt_number": previous_shirt_number,
+        "shirt_number": shirt_number,
+        "roster_action": roster_action,
     }
 
     log_file = config.TRANSFER_LOG_FILE
@@ -53,10 +60,16 @@ def log_transfer(
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     action = "DRY-RUN" if dry_run else "APPLIED"
-    logger.info(
-        f"[{action}] {player_name} (id={player_id}): "
-        f"{from_team} → {to_team} (conf={confidence:.0f}%)"
-    )
+    if transfer_type == "shirt_number_update":
+        logger.info(
+            f"[{action}] {player_name} (id={player_id}) at {to_team}: "
+            f"#{previous_shirt_number} → #{shirt_number} (conf={confidence:.0f}%)"
+        )
+    else:
+        logger.info(
+            f"[{action}] {player_name} (id={player_id}): "
+            f"{from_team} → {to_team} (conf={confidence:.0f}%)"
+        )
 
 
 def read_log() -> list[dict]:
@@ -85,219 +98,254 @@ def print_summary(last_n: int = 20):
         return
 
     recent = entries[-last_n:]
-    print(f"Last {len(recent)} transfers (of {len(entries)} total):")
+    print(f"Last {len(recent)} save changes (of {len(entries)} total):")
     print("-" * 70)
 
     for e in recent:
         dry = " [DRY-RUN]" if e.get("dry_run") else ""
         ts = e.get("timestamp", "")[:19].replace("T", " ")
-        print(
-            f"  {ts}  {e['player_name']}: "
-            f"{e['from_team']} → {e['to_team']} "
-            f"(conf={e.get('confidence', 0):.0f}%){dry}"
+        if _is_shirt_number_update(e):
+            print(
+                f"  {ts}  {e['player_name']} at {e['to_team']}: "
+                f"#{e.get('previous_shirt_number', '?')} → "
+                f"#{e.get('shirt_number', '?')} "
+                f"(conf={e.get('confidence', 0):.0f}%){dry}"
+            )
+        else:
+            print(
+                f"  {ts}  {e['player_name']}: "
+                f"{e['from_team']} → {e['to_team']} "
+                f"(conf={e.get('confidence', 0):.0f}%){dry}"
+            )
+
+
+_SHIRT_UPDATE_TYPES = {"shirt_number_update", "squad_update"}
+
+
+def _is_shirt_number_update(entry: dict) -> bool:
+    """Recognize current and legacy shirt-number audit records."""
+    return str(entry.get("transfer_type", "")) in _SHIRT_UPDATE_TYPES
+
+
+def _report_metrics(entries: list[dict]) -> dict[str, int]:
+    transfer_entries = [e for e in entries if not _is_shirt_number_update(e)]
+    shirt_entries = [e for e in entries if _is_shirt_number_update(e)]
+    loans = sum(
+        1
+        for e in transfer_entries
+        if "loan" in str(e.get("transfer_type", "")).lower()
+    )
+    return {
+        "total_changes": len(entries),
+        "transfers": len(transfer_entries),
+        "permanent": len(transfer_entries) - loans,
+        "loans": loans,
+        "shirt_updates": len(shirt_entries),
+        "dry_run": sum(1 for e in entries if e.get("dry_run")),
+        "moves": sum(1 for e in transfer_entries if e.get("roster_action") == "move"),
+        "signings": sum(1 for e in transfer_entries if e.get("roster_action") == "add"),
+        "releases": sum(1 for e in transfer_entries if e.get("roster_action") == "release"),
+    }
+
+
+def _markdown_cell(value) -> str:
+    return str(value if value not in (None, "") else "-").replace("|", "\\|").replace("\n", " ")
+
+
+def generate_markdown_report(
+    entries: list[dict],
+    title: str = "Football Life Live Sync Report",
+    include_table: bool = True,
+) -> str:
+    """Generate a clear report with transfers and shirt changes separated."""
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    if not entries:
+        return (
+            f"## ⚽ {title}\n\n"
+            f"**Generated:** `{now_str}`\n\n"
+            "> No save changes were needed in this run.\n"
         )
 
-
-def generate_markdown_report(entries: list[dict], title: str = "Football Life Live Transfer Sync Report", include_table: bool = True) -> str:
-    """Generate a clean, structured GitHub Markdown report card from transfer log entries."""
-    if not entries:
-        return f"## 📊 {title}\n\n*No transfers recorded in this sync run.*"
-
-    total = len(entries)
-    applied = sum(1 for e in entries if not e.get("dry_run"))
-    dry = sum(1 for e in entries if e.get("dry_run"))
-    loans = sum(1 for e in entries if "loan" in str(e.get("transfer_type", "")).lower())
-    perm = total - loans
-
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
+    metrics = _report_metrics(entries)
+    transfers = [e for e in entries if not _is_shirt_number_update(e)]
+    shirts = [e for e in entries if _is_shirt_number_update(e)]
     md = [
         f"## ⚽ {title}",
         f"**Generated:** `{now_str}`",
         "",
-        "### 📈 Quick Metrics",
-        f"- **Total Transfers:** `{total}`",
-        f"- **Applied to Save:** `{applied}` {'✅' if applied > 0 else 'ℹ️'}",
-        f"- **Dry-Run Validated:** `{dry}`",
-        f"- **Permanent Transfers:** `{perm}` | **Loans / Loan Returns:** `{loans}`",
+        "### Run overview",
+        "",
+        "| Save changes | Club transfers | Permanent | Loans / returns | Shirt numbers | Dry-run |",
+        "|---:|---:|---:|---:|---:|---:|",
+        (
+            f"| **{metrics['total_changes']}** | **{metrics['transfers']}** | "
+            f"{metrics['permanent']} | {metrics['loans']} | "
+            f"**{metrics['shirt_updates']}** | {metrics['dry_run']} |"
+        ),
+        "",
+        "> Shirt-number updates only change kit numbers. They never move a player between clubs.",
+        (
+            f"> Roster actions: {metrics['moves']} direct moves · "
+            f"{metrics['signings']} signings · {metrics['releases']} releases."
+        ),
         "",
     ]
 
-    if include_table:
+    if include_table and transfers:
         md.extend([
-            "### 📋 Transfer Details",
-            "| Status | Player | Pos | From Club | To Club | Fee / Type | Conf |",
-            "| :---: | :--- | :---: | :--- | :--- | :--- | :---: |",
+            f"### Club transfers ({len(transfers)})",
+            "",
+            "| Status | Player | Pos | From | To | Deal | Match |",
+            "|:---:|---|:---:|---|---|---|---:|",
         ])
+        for entry in transfers:
+            status = "🧪 Dry-run" if entry.get("dry_run") else "✅ Applied"
+            md.append(
+                f"| {status} | **{_markdown_cell(entry.get('player_name', 'Unknown'))}** "
+                f"| `{_markdown_cell(entry.get('position'))}` "
+                f"| {_markdown_cell(entry.get('from_team'))} "
+                f"| {_markdown_cell(entry.get('to_team'))} "
+                f"| {_markdown_cell(entry.get('fee') or entry.get('transfer_type', 'transfer'))} "
+                f"| {entry.get('confidence', 0):.0f}% |"
+            )
+        md.append("")
 
-    if include_table:
-        for e in entries:
-            status = "🧪 Dry-Run" if e.get("dry_run") else "✅ Applied"
-            pname = f"**{e.get('player_name', 'Unknown')}**"
-            pos = e.get("position", "-") or "-"
-            from_c = e.get("from_team", "-")
-            to_c = e.get("to_team", "-")
-            fee_type = e.get("fee") or e.get("transfer_type", "transfer")
-            conf = f"{e.get('confidence', 0):.0f}%"
-
-            md.append(f"| {status} | {pname} | `{pos}` | {from_c} | {to_c} | {fee_type} | {conf} |")
+    if include_table and shirts:
+        md.extend([
+            f"### Shirt-number changes ({len(shirts)})",
+            "",
+            "| Status | Player | Club | Previous | New | Match |",
+            "|:---:|---|---|---:|---:|---:|",
+        ])
+        for entry in shirts:
+            status = "🧪 Dry-run" if entry.get("dry_run") else "🔢 Updated"
+            old_number = _markdown_cell(entry.get("previous_shirt_number"))
+            new_number = _markdown_cell(entry.get("shirt_number"))
+            md.append(
+                f"| {status} | **{_markdown_cell(entry.get('player_name', 'Unknown'))}** "
+                f"| {_markdown_cell(entry.get('to_team'))} | #{old_number} | #{new_number} "
+                f"| {entry.get('confidence', 0):.0f}% |"
+            )
+        md.append("")
 
     return "\n".join(md) + "\n"
 
 
-def generate_html_report(entries: list[dict], title: str = "Football Life Live Transfer Sync Report") -> str:
-    """Generate a modern, standalone dark-mode HTML report card."""
-    md_content = generate_markdown_report(entries, title)
+def generate_html_report(
+    entries: list[dict],
+    title: str = "Football Life Live Sync Report",
+) -> str:
+    """Generate a responsive matchday-style HTML report."""
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    total = len(entries)
-    applied = sum(1 for e in entries if not e.get("dry_run"))
+    metrics = _report_metrics(entries)
+    transfers = [e for e in entries if not _is_shirt_number_update(e)]
+    shirts = [e for e in entries if _is_shirt_number_update(e)]
 
-    rows_html = []
-    for e in entries:
-        status_badge = (
-            '<span class="badge badge-dry">Dry-Run</span>'
-            if e.get("dry_run")
-            else '<span class="badge badge-applied">Applied</span>'
-        )
-        pos = e.get("position", "-") or "-"
-        fee = e.get("fee") or e.get("transfer_type", "transfer")
-        conf = f"{e.get('confidence', 0):.0f}%"
-        rows_html.append(
-            f"<tr>"
-            f"<td>{status_badge}</td>"
-            f"<td><strong>{e.get('player_name')}</strong></td>"
-            f"<td><span class='pos'>{pos}</span></td>"
-            f"<td>{e.get('from_team')}</td>"
-            f"<td>{e.get('to_team')}</td>"
-            f"<td>{fee}</td>"
-            f"<td>{conf}</td>"
-            f"</tr>"
-        )
+    def value(raw, fallback="-") -> str:
+        return escape(str(raw if raw not in (None, "") else fallback))
 
-    table_body = "\n".join(rows_html)
+    def badge(entry: dict, shirt: bool = False) -> str:
+        if entry.get("dry_run"):
+            return '<span class="badge badge-dry">Dry-run</span>'
+        if shirt:
+            return '<span class="badge badge-number">Number changed</span>'
+        return '<span class="badge badge-applied">Transfer applied</span>'
+
+    transfer_rows = "".join(
+        "<tr>"
+        f"<td>{badge(entry)}</td>"
+        f"<td><strong>{value(entry.get('player_name'), 'Unknown')}</strong></td>"
+        f"<td><span class='position'>{value(entry.get('position'))}</span></td>"
+        f"<td>{value(entry.get('from_team'))}</td>"
+        f"<td>{value(entry.get('to_team'))}</td>"
+        f"<td>{value(entry.get('fee') or entry.get('transfer_type'), 'Transfer')}</td>"
+        f"<td class='numeric'>{entry.get('confidence', 0):.0f}%</td>"
+        "</tr>"
+        for entry in transfers
+    )
+    shirt_rows = "".join(
+        "<tr>"
+        f"<td>{badge(entry, shirt=True)}</td>"
+        f"<td><strong>{value(entry.get('player_name'), 'Unknown')}</strong></td>"
+        f"<td>{value(entry.get('to_team'))}</td>"
+        f"<td class='shirt old'>#{value(entry.get('previous_shirt_number'))}</td>"
+        f"<td class='shirt new'>#{value(entry.get('shirt_number'))}</td>"
+        f"<td class='numeric'>{entry.get('confidence', 0):.0f}%</td>"
+        "</tr>"
+        for entry in shirts
+    )
+
+    transfer_section = (
+        f"""<section class="report-section">
+        <div class="section-heading"><div><h2>Club transfers</h2><p>Players moved, signed, or released.</p></div><span class="count">{len(transfers)}</span></div>
+        <div class="table-wrap" role="region" aria-label="Club transfer details" tabindex="0"><table><thead><tr><th>Status</th><th>Player</th><th>Pos</th><th>From</th><th>To</th><th>Deal</th><th>Match</th></tr></thead><tbody>{transfer_rows}</tbody></table></div>
+      </section>"""
+        if transfers
+        else ""
+    )
+    shirt_section = (
+        f"""<section class="report-section number-section">
+        <div class="section-heading"><div><h2>Shirt-number changes</h2><p>Kit numbers only. No club movement.</p></div><span class="count">{len(shirts)}</span></div>
+        <div class="table-wrap" role="region" aria-label="Shirt-number change details" tabindex="0"><table><thead><tr><th>Status</th><th>Player</th><th>Club</th><th>Previous</th><th>New</th><th>Match</th></tr></thead><tbody>{shirt_rows}</tbody></table></div>
+      </section>"""
+        if shirts
+        else ""
+    )
+    empty_state = (
+        '<section class="empty"><strong>Everything already current.</strong><p>No save changes were needed in this run.</p></section>'
+        if not entries
+        else ""
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{title}</title>
+<meta name="color-scheme" content="dark">
+<title>{escape(title)}</title>
 <style>
-  :root {{
-    --bg: #0f172a;
-    --card-bg: #1e293b;
-    --text: #f8fafc;
-    --text-muted: #94a3b8;
-    --primary: #38bdf8;
-    --accent: #22c55e;
-    --border: #334155;
-  }}
-  body {{
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    padding: 2rem;
-    margin: 0;
-  }}
-  .container {{
-    max-width: 1000px;
-    margin: 0 auto;
-  }}
-  .header {{
-    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-    border: 1px solid var(--border);
-    padding: 1.5rem 2rem;
-    border-radius: 12px;
-    margin-bottom: 2rem;
-  }}
-  .stats-grid {{
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 1rem;
-    margin-bottom: 2rem;
-  }}
-  .stat-card {{
-    background: var(--card-bg);
-    border: 1px solid var(--border);
-    padding: 1.25rem;
-    border-radius: 8px;
-    text-align: center;
-  }}
-  .stat-num {{
-    font-size: 2rem;
-    font-weight: 700;
-    color: var(--primary);
-  }}
-  table {{
-    width: 100%;
-    border-collapse: collapse;
-    background: var(--card-bg);
-    border-radius: 8px;
-    overflow: hidden;
-    border: 1px solid var(--border);
-  }}
-  th, td {{
-    padding: 0.85rem 1rem;
-    text-align: left;
-    border-bottom: 1px solid var(--border);
-  }}
-  th {{
-    background: #182234;
-    color: var(--text-muted);
-    font-size: 0.85rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }}
-  .badge {{
-    display: inline-block;
-    padding: 0.2rem 0.6rem;
-    border-radius: 9999px;
-    font-size: 0.75rem;
-    font-weight: 600;
-  }}
-  .badge-applied {{ background: #14532d; color: #4ade80; }}
-  .badge-dry {{ background: #713f12; color: #facc15; }}
-  .pos {{
-    background: #334155;
-    padding: 0.15rem 0.45rem;
-    border-radius: 4px;
-    font-family: monospace;
-  }}
+  :root {{ --ink:#f5f7f2; --muted:#a9b3aa; --pitch:#07130e; --surface:#101d17; --surface-2:#16261e; --line:#2a3c31; --lime:#b8f34a; --cyan:#62d9ff; --amber:#ffd166; --green:#70e19a; }}
+  * {{ box-sizing:border-box; }}
+  body {{ margin:0; padding:clamp(1rem,3vw,3rem); background:radial-gradient(circle at 85% -10%,#1a3928 0,transparent 34rem),var(--pitch); color:var(--ink); font:15px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }}
+  .shell {{ width:min(1180px,100%); margin:auto; }}
+  .masthead {{ position:relative; overflow:hidden; padding:clamp(1.5rem,4vw,3rem); background:#0d1b14; border:1px solid var(--line); border-radius:16px; box-shadow:0 22px 60px rgba(0,0,0,.28); }}
+  .masthead::after {{ content:""; position:absolute; inset:auto -8% -70% auto; width:24rem; aspect-ratio:1; border:1px solid rgba(184,243,74,.24); border-radius:50%; box-shadow:0 16px 48px rgba(0,0,0,.22); }}
+  .kicker {{ margin:0 0 .55rem; color:var(--lime); font-size:.78rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }}
+  h1 {{ max-width:18ch; margin:0; font-size:clamp(2rem,5vw,4.5rem); line-height:.98; letter-spacing:-.035em; text-wrap:balance; }}
+  .generated {{ margin:1rem 0 0; color:var(--muted); }}
+  .summary {{ display:grid; grid-template-columns:1.4fr repeat(3,1fr); margin:1.25rem 0 2.5rem; border:1px solid var(--line); border-radius:14px; overflow:hidden; background:var(--surface); }}
+  .metric {{ min-width:0; padding:1.15rem 1.3rem; border-right:1px solid var(--line); }} .metric:last-child {{ border-right:0; }}
+  .metric strong {{ display:block; color:var(--lime); font-size:clamp(1.7rem,3vw,2.45rem); line-height:1; letter-spacing:-.03em; }}
+  .metric span {{ display:block; margin-top:.45rem; color:var(--muted); font-size:.82rem; }}
+  .action-line {{ margin:-1.3rem 0 2.5rem; color:var(--muted); text-align:right; font-size:.86rem; }} .action-line strong {{ color:var(--ink); }}
+  .report-section {{ margin-top:1.5rem; background:var(--surface); border:1px solid var(--line); border-radius:16px; overflow:hidden; box-shadow:0 16px 44px rgba(0,0,0,.18); }}
+  .section-heading {{ display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:1.25rem 1.4rem; background:var(--surface-2); }}
+  .section-heading h2 {{ margin:0; font-size:1.18rem; letter-spacing:-.015em; }} .section-heading p {{ margin:.2rem 0 0; color:var(--muted); font-size:.86rem; }}
+  .count {{ min-width:2.3rem; padding:.28rem .65rem; border-radius:999px; background:var(--lime); color:#132008; text-align:center; font-weight:850; }}
+  .table-wrap {{ overflow-x:auto; }} table {{ width:100%; min-width:780px; border-collapse:collapse; }}
+  .table-wrap:focus-visible {{ outline:2px solid var(--cyan); outline-offset:-2px; }}
+  th,td {{ padding:.88rem 1rem; text-align:left; border-bottom:1px solid var(--line); }} th {{ color:var(--muted); font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; }} tbody tr:last-child td {{ border-bottom:0; }} tbody tr:hover {{ background:#18291f; }}
+  .badge {{ display:inline-flex; align-items:center; white-space:nowrap; padding:.24rem .58rem; border-radius:999px; font-size:.72rem; font-weight:750; }}
+  .badge-applied {{ color:#baf8ce; background:#174b2c; }} .badge-number {{ color:#c9f3ff; background:#124354; }} .badge-dry {{ color:#ffe5a3; background:#55400e; }}
+  .position {{ color:var(--amber); font-weight:750; }} .numeric,.shirt {{ font-variant-numeric:tabular-nums; }} .shirt {{ font-size:1.05rem; font-weight:800; }} .shirt.old {{ color:var(--muted); }} .shirt.new {{ color:var(--cyan); }}
+  .empty {{ padding:3rem; text-align:center; background:var(--surface); border:1px solid var(--line); border-radius:16px; }} .empty strong {{ font-size:1.3rem; }} .empty p {{ margin:.35rem 0 0; color:var(--muted); }}
+  @media (max-width:760px) {{ body {{ padding:1rem; }} .summary {{ grid-template-columns:1fr 1fr; }} .metric:nth-child(2) {{ border-right:0; }} .metric:nth-child(-n+2) {{ border-bottom:1px solid var(--line); }} .action-line {{ margin-top:-1.5rem; text-align:left; }} h1 {{ font-size:2.4rem; }} }}
+  @media (prefers-reduced-motion:no-preference) {{ tbody tr {{ transition:background-color .16s ease-out; }} }}
 </style>
 </head>
 <body>
-<div class="container">
-  <div class="header">
-    <h1>⚽ {title}</h1>
-    <p style="color: var(--text-muted); margin: 0;">Generated: {now_str}</p>
-  </div>
-  <div class="stats-grid">
-    <div class="stat-card">
-      <div class="stat-num">{total}</div>
-      <div style="color: var(--text-muted)">Total Transfers</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-num" style="color: var(--accent);">{applied}</div>
-      <div style="color: var(--text-muted)">Applied to Save</div>
-    </div>
-  </div>
-  <table>
-    <thead>
-      <tr>
-        <th>Status</th>
-        <th>Player</th>
-        <th>Pos</th>
-        <th>From</th>
-        <th>To</th>
-        <th>Fee / Type</th>
-        <th>Confidence</th>
-      </tr>
-    </thead>
-    <tbody>
-      {table_body}
-    </tbody>
-  </table>
-</div>
+  <main class="shell">
+    <header class="masthead"><p class="kicker">FL26 · verified sync</p><h1>{escape(title)}</h1><p class="generated">Generated {now_str} · {metrics['total_changes']} save changes</p></header>
+    <section class="summary" aria-label="Run summary">
+      <div class="metric"><strong>{metrics['transfers']}</strong><span>Club transfers</span></div>
+      <div class="metric"><strong>{metrics['permanent']}</strong><span>Permanent moves</span></div>
+      <div class="metric"><strong>{metrics['loans']}</strong><span>Loans / returns</span></div>
+      <div class="metric"><strong>{metrics['shirt_updates']}</strong><span>Shirt numbers changed</span></div>
+    </section>
+    <p class="action-line">Roster actions · <strong>{metrics['moves']}</strong> direct moves · <strong>{metrics['signings']}</strong> signings · <strong>{metrics['releases']}</strong> releases</p>
+    {transfer_section}{shirt_section}{empty_state}
+  </main>
 </body>
 </html>
 """
@@ -340,4 +388,3 @@ def save_reports(
                 logger.info(f"Appended short markdown report to $GITHUB_STEP_SUMMARY")
             except Exception as e:
                 logger.warning(f"Could not write to $GITHUB_STEP_SUMMARY: {e}")
-

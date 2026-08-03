@@ -457,7 +457,8 @@ Final ingestion/mutation safety rules:
 - Explicit `summer` and `winter` modes remain bounded manual filters;
   malformed `since_date` values are rejected instead of disabling filtering.
 - Undated transactional events are excluded whenever a bounded date filter is
-  active. Squad-number observations remain separate `squad_update` records.
+  active. Shirt-number observations remain separate `shirt_number_update`
+  records and are never reported as club transfers.
 - Every resolved fetch range is capped at the current UTC date. Pre-agreements
   may be visible in a source before registration opens, but must not mutate the
   game roster until FotMob's effective `transferDate` is reached.
@@ -471,7 +472,11 @@ Final ingestion/mutation safety rules:
 - Club/national-team classification must come from the league-membership block,
   not a numeric ID threshold. FL26 has playable clubs at IDs `<=100` (Manchester
   United is ID 100 in the supplied team database).
-- Current regression baseline: 115 tests passing; canonical base and output
+- Deep mode names shirt-only observations `shirt_number_update`, logs them only
+  when the number really changes, deduplicates each player/club observation,
+  and reports them separately from club transfers in HTML, Markdown, and GitHub
+  Step Summary.
+- Current regression baseline: 121 tests passing; canonical base and output
   both validate at 10,995,800 bytes, 749 rosters, 583 clubs, zero duplicate club
   registrations, and 747 checked game plans.
 

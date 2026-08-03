@@ -88,6 +88,8 @@ class MatchedTransfer:
 
     @property
     def action_type(self) -> str:
+        if self.transfer.transfer_type == "shirt_number_update":
+            return "shirt_number_update"
         if self.is_club_transfer:
             return "transfer"
         elif self.is_release:
@@ -114,4 +116,3 @@ class MatchedTransfer:
             f"conf={self.player_confidence:.0f}%): "
             f"{self.transfer.from_club} → {self.transfer.to_club}{action}"
         )
-

@@ -48,10 +48,10 @@ logger = logging.getLogger(__name__)
 
 
 def _transfer_sort_key(transfer):
-    """Apply dated transfers chronologically and current-squad updates last."""
+    """Apply dated transfers chronologically and shirt-number updates last."""
     parsed_date = parse_iso_date(transfer.date)
     return (
-        transfer.transfer_type == "squad_update",
+        transfer.transfer_type == "shirt_number_update",
         parsed_date is None,
         parsed_date or parse_iso_date("2000-01-01"),
     )
@@ -64,7 +64,7 @@ def _decide_roster_action(
     transfer_type: str,
 ) -> str:
     """Choose a fail-closed roster mutation from the verified current state."""
-    if transfer_type == "squad_update":
+    if transfer_type == "shirt_number_update":
         return "shirt_update" if to_team_id is not None and current_team_id == to_team_id else "skip"
 
     if from_team_id is not None and to_team_id is not None:
@@ -89,6 +89,41 @@ def _decide_roster_action(
         return "skip"
 
     return "skip"
+
+
+def _dedupe_shirt_number_matches(
+    matches: list[MatchedTransfer],
+) -> tuple[list[MatchedTransfer], int]:
+    """Keep one fail-closed shirt-number observation per player and club."""
+    regular: list[MatchedTransfer] = []
+    groups: dict[tuple[int, int], list[MatchedTransfer]] = {}
+
+    for match in matches:
+        if (
+            match.transfer.transfer_type != "shirt_number_update"
+            or match.player_id is None
+            or match.to_team_id is None
+        ):
+            regular.append(match)
+            continue
+        groups.setdefault((match.player_id, match.to_team_id), []).append(match)
+
+    skipped = 0
+    for group in groups.values():
+        ranked = sorted(group, key=lambda item: item.min_confidence, reverse=True)
+        winner = ranked[0]
+        conflicting = [
+            item
+            for item in ranked[1:]
+            if item.transfer.shirt_number != winner.transfer.shirt_number
+        ]
+        if conflicting and winner.min_confidence - conflicting[0].min_confidence < 3.0:
+            skipped += len(group)
+            continue
+        regular.append(winner)
+        skipped += len(group) - 1
+
+    return regular, skipped
 
 
 def _iso_date_arg(value: str) -> str:
@@ -549,13 +584,38 @@ def cmd_run(args):
             )
             matched.append(mt)
 
-        club_transfers = [m for m in matched if m.is_club_transfer]
-        releases = [m for m in matched if m.is_release]
-        signings = [m for m in matched if m.is_sign]
+        matched, duplicate_shirt_matches = _dedupe_shirt_number_matches(matched)
+        if duplicate_shirt_matches:
+            print(
+                f"  ⚠ Skipped {duplicate_shirt_matches} duplicate or ambiguous "
+                "shirt-number matches"
+            )
+
+        shirt_matches = [
+            m for m in matched
+            if m.transfer.transfer_type == "shirt_number_update" and m.is_fully_matched
+        ]
+        club_transfers = [
+            m for m in matched
+            if m.transfer.transfer_type != "shirt_number_update" and m.is_club_transfer
+        ]
+        releases = [
+            m for m in matched
+            if m.transfer.transfer_type != "shirt_number_update" and m.is_release
+        ]
+        signings = [
+            m for m in matched
+            if m.transfer.transfer_type != "shirt_number_update" and m.is_sign
+        ]
         fully_matched = [m for m in matched if m.is_fully_matched]
         partial = [m for m in matched if not m.is_fully_matched]
 
-        print(f"  ✓ Fully actionable: {len(fully_matched)} (Club Transfers: {len(club_transfers)}, Departures to Free Agent: {len(releases)}, Signings: {len(signings)})")
+        print(
+            f"  ✓ Fully actionable: {len(fully_matched)} "
+            f"(Club Transfers: {len(club_transfers)}, "
+            f"Departures: {len(releases)}, Signings: {len(signings)}, "
+            f"Shirt Number Checks: {len(shirt_matches)})"
+        )
         print(f"  ✗ Unmatched: {len(partial)}")
 
         if partial:
@@ -601,6 +661,14 @@ def cmd_run(args):
                     print(f"  ALREADY CURRENT: {m}")
                     continue
 
+                if action == "shirt_update":
+                    current_shirt = ef.get_player_shirt_number(
+                        m.to_team_id, m.player_id
+                    )
+                    if current_shirt == m.transfer.shirt_number:
+                        already_current += 1
+                        continue
+
                 would_apply += 1
                 print(f"  WOULD {action.upper()}: {m}")
             print(
@@ -615,8 +683,10 @@ def cmd_run(args):
         backup_path = backup_mod.create_backup(edit_path)
         print(f"  Backup: {backup_path}")
 
-        print(f"\n⚡ Applying {len(fully_matched)} transfers with Smart Shirt Numbers & Game Plan Doctor...")
+        print(f"\n⚡ Applying verified transfers and shirt-number changes...")
         applied = 0
+        transfer_applied = 0
+        shirt_numbers_applied = 0
         unchanged = 0
         failed = 0
         original_data = bytes(ef._data)
@@ -656,8 +726,13 @@ def cmd_run(args):
 
             ok = False
             pref_shirt = t.shirt_number
+            previous_shirt = None
             if action == "shirt_update":
                 if pref_shirt is None:
+                    unchanged += 1
+                    continue
+                previous_shirt = ef.get_player_shirt_number(to_tid, pid)
+                if previous_shirt == pref_shirt:
                     unchanged += 1
                     continue
                 ok = ef.update_player_shirt_number(to_tid, pid, pref_shirt)
@@ -681,7 +756,11 @@ def cmd_run(args):
 
             if ok:
                 applied += 1
-                pending_logs.append(m)
+                if action == "shirt_update":
+                    shirt_numbers_applied += 1
+                else:
+                    transfer_applied += 1
+                pending_logs.append((m, previous_shirt, action))
                 run_records.append({
                     "player_name": m.matched_player_name or m.transfer.player_name,
                     "from_team": m.matched_from_team or m.transfer.from_club,
@@ -691,12 +770,19 @@ def cmd_run(args):
                     "transfer_type": m.transfer.transfer_type,
                     "confidence": m.min_confidence,
                     "dry_run": False,
+                    "previous_shirt_number": previous_shirt,
+                    "shirt_number": pref_shirt if action == "shirt_update" else None,
+                    "roster_action": action,
                 })
             else:
                 failed += 1
                 print(f"  ✗ Failed: {m.matched_player_name or m.transfer.player_name} ({m.action_type})")
 
-        print(f"\n  Applied: {applied}, Already current: {unchanged}, Failed/skipped: {failed}")
+        print(
+            f"\n  Transfers applied: {transfer_applied}, "
+            f"shirt numbers changed: {shirt_numbers_applied}, "
+            f"already current: {unchanged}, failed/skipped: {failed}"
+        )
 
         post_integrity = ef.validate_integrity()
         if not post_integrity["valid"]:
@@ -719,7 +805,7 @@ def cmd_run(args):
 
         # Persist audit entries only after the binary passed validation and
         # verified encryption round-trip.
-        for m in pending_logs:
+        for m, previous_shirt, action in pending_logs:
             transfer_logger.log_transfer(
                 player_name=m.matched_player_name or m.transfer.player_name,
                 player_id=m.player_id,
@@ -733,12 +819,22 @@ def cmd_run(args):
                 position=m.transfer.position,
                 fee=m.transfer.fee,
                 market_value=m.transfer.market_value,
+                previous_shirt_number=previous_shirt,
+                shirt_number=(
+                    m.transfer.shirt_number
+                    if m.transfer.transfer_type == "shirt_number_update"
+                    else None
+                ),
+                roster_action=action,
             )
 
         # Save visual reports
         transfer_logger.save_reports(run_records)
 
-        print(f"\n✅ Done! {applied} transfers applied successfully.")
+        print(
+            f"\n✅ Done! {transfer_applied} transfers applied; "
+            f"{shirt_numbers_applied} shirt numbers changed."
+        )
         if output_path.resolve() != edit_path.resolve():
             print(f"   Input (base/pristine):   {edit_path}")
             print(f"   Output (updated save):   {output_path}")

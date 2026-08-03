@@ -428,7 +428,7 @@ class FotmobScraper:
                     player_name=name,
                     from_club=team_name,
                     to_club=team_name,
-                    transfer_type="squad_update",
+                    transfer_type="shirt_number_update",
                     shirt_number=shirt_number,
                     position=position,
                     to_club_id_fotmob=team_id,
@@ -598,7 +598,9 @@ def merge_transfers(transfer_lists: list[list[Transfer]]) -> list[Transfer]:
                 from_key,
                 to_key,
                 (t.date or "").split("T")[0],
-                "squad_update" if t.transfer_type == "squad_update" else "transfer_event",
+                "shirt_number_update"
+                if t.transfer_type == "shirt_number_update"
+                else "transfer_event",
             )
 
             if key not in seen:

@@ -1,7 +1,7 @@
 # FLEditScrape — Football Life & PES 2021 Transfer Tool
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-115%2F115%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-121%2F121%20passed-brightgreen.svg)]()
 [![Daily Sync](https://img.shields.io/badge/Cloud%20Sync-Automated%20Daily-success.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -72,7 +72,7 @@ Pre-built and updated `EDIT00000000` save files and visual transfer report cards
 - **👥 Source-First Squad Verification**: Resolves duplicate player names against the source roster first, then the destination only as an idempotent fallback. Ambiguous identities and below-threshold context matches are skipped.
 - **🚧 Fail-Closed Transfer Gate**: A move or release is applied only when the player's actual current club equals the matched source club. Stale events and source/current conflicts cannot move a player out of an unrelated team.
 - **📅 Cumulative Auto Replay**: Automatic mode scans every available FotMob page through today, while manual summer/winter ranges remain bounded and future-effective or undated events are excluded.
-- **📊 Visual HTML & Markdown Report Cards**: Automatically compiles clean, beautiful visual report tables with status badges, player positions, transfer fees, and confidence ratings into `transfer_summary.html` and GitHub Step Summaries.
+- **📊 Visual HTML & Markdown Report Cards**: Separates real club transfers from shirt-number-only changes, with responsive tables, accurate metrics, confidence ratings, and a concise GitHub Step Summary.
 - **🔄 Intelligent Loan & Loan Return Handling**: On-loan players are seamlessly transferred to their loan clubs, and players returning from loans (*End of Loan*) are accurately restored to their parent clubs.
 - **📋 Contract Extension Auto-Filter**: Automatically detects and skips same-club contract renewals (`contractExtension: true`) to avoid redundant roster operations.
 - **🧠 Position-Aware Overflow & Starting XI Protection**: When a squad reaches the 40-player limit, the tool automatically releases deep reserves with the lowest overall ability while **protecting Starting XI players** and **preserving at least 2 Goalkeepers per squad**.
@@ -219,7 +219,7 @@ fleditscrape/
 │   └── leagues.json       # Supported playable leagues
 ├── vendor/                # Native decryption tools
 │   └── pesXdecrypter/     # C implementation of PES 2021 crypto engine
-└── tests/                 # Complete unit test suite (115 tests)
+└── tests/                 # Complete unit test suite (121 tests)
 ```
 
 ---
@@ -232,7 +232,7 @@ Run the automated test suite:
 pytest -v
 ```
 
-All **115 unit tests** pass across binary parsing, canonical path configuration, integrity repair/validation, cumulative auto replay and pagination, duplicate-name and source-roster priority, fail-closed roster decisions, bounded manual ranges, future-effective transfer protection, CLI input validation, low-ID club handling, ambiguous-club safety, roster slot shifting, goalkeeper protection, position compatibility gates, and fuzzy matching.
+All **121 unit tests** pass across binary parsing, canonical path configuration, integrity repair/validation, cumulative auto replay and pagination, report separation, duplicate shirt-number observations, duplicate-name and source-roster priority, fail-closed roster decisions, bounded manual ranges, future-effective transfer protection, CLI input validation, low-ID club handling, ambiguous-club safety, roster slot shifting, goalkeeper protection, position compatibility gates, and fuzzy matching.
 
 ---
 
