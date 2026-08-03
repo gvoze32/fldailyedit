@@ -42,7 +42,7 @@ bound populated-entry iteration, and validate both against the actual file size.
 
 ## 3. Edit File Binary Structure (from implyingrigged.info wiki)
 
-Source: `implyingrigged-info-wiki-Pro-Evolution-Soccer-2021-Edit-file.txt` in project root.
+Source: <https://implyingrigged.info/wiki/Pro_Evolution_Soccer_2021/Edit_file>
 Note: "beginning of the file" = what pesXdecrypter exports as `data.dat`.
 Same structure applies to PES 2020.
 
@@ -101,13 +101,14 @@ manager_start    = team_start + 750 * 588           # = 0x958DA4
 competition_start= manager_start + 1300 * 88        # = 0x974C84
 stadium_start    = competition_start + 65 * 760     # = 0x980D7C
 unknown_start    = stadium_start + 65 * 188         # = 0x983D38
-team_player_start= unknown_start + 2500 * 132       # = 0x9D4648
-game_plan_start  = team_player_start + 750 * 284    # = 0xA08650
-# Note: competition entry section (0x1230 bytes) sits between team_player and game_plan
+team_player_start      = unknown_start + 2500 * 132       # = 0x9D4648
+competition_entry_start = team_player_start + 750 * 284  # = 0xA08650
+game_plan_start        = competition_entry_start + 0x1230 # = 0xA09880
 ```
 
-**FL26 note:** If SmokePatch expanded the database (more player/team slots), these MAX
-values will be different. Validate by checking `ef.validate_offsets()` against an actual file.
+**FL26 note:** These capacities and offsets were verified against multiple FL26
+Update 2.2 saves. A future layout revision must be detected by validation rather
+than inferred from header counts.
 
 ### 3.3 Team-Player Table Entry Structure (0x11C = 284 bytes per entry)
 
@@ -163,6 +164,11 @@ Entry size: 628 (0x274) bytes.
 become stale.** The game plan should be updated to reflect new index positions.
 The kickoffsage reference code handles this via `update_tactics_for_team()`.
 
+The live wiki also labels `0x209..0x20B` as free-kick roles, but those bytes
+overlap the documented 40-byte lineup (`0x1E4..0x20B`). Actual FL26 saves show
+them behaving as lineup tail bytes, so this project deliberately does not parse
+or rewrite them as independent role fields.
+
 ---
 
 ## 4. pesXdecrypter — Decrypt/Encrypt Tool
@@ -183,8 +189,8 @@ encrypter21 <input_directory> <output_file>    # encrypt
 1. Compile from C source with CMake + clang (recommended, no Windows deps in core lib)
 2. Use Wine
 
-**FL26 compatibility:** Needs verification — FL26 may use the same encryption as PES21 (likely),
-but should be tested with an actual FL26 `edit00000000` file before relying on it.
+**FL26 compatibility:** Verified by decrypt → encrypt → decrypt round trips on
+multiple actual FL26 Update 2.2 saves.
 
 ---
 
@@ -200,9 +206,9 @@ Repo: https://github.com/kickoffsage/pes2021-transfer-tool
 - `src/transfer_utils.py` — add/remove player from team (replace-with-last-non-zero approach)
 - `src/csv_utils.py` — CSV I/O for player/team data
 
-### What's broken/missing:
+### What was broken/missing in that reference project:
 - **All files truncated on GitHub** — code cuts off mid-function (corrupted commits)
-- No backup system
+- No backup system (this repository now has rolling backups)
 - No logging/audit
 - Windows-only (hardcoded `.exe` paths)
 - Hardcoded offsets (won't work with FL26 if table sizes differ)
@@ -211,12 +217,9 @@ Repo: https://github.com/kickoffsage/pes2021-transfer-tool
 - No error handling for edge cases (player not found, team full, etc.)
 - `team_utils.py` uses magic numbers: `f.seek(100, 1)` to skip to team name, `f.read(70)` for name — these correspond to: Team entry offset 0x068 for name (0x068 - 0x004 = 0x64 = 100 bytes after team ID), 70 bytes for name field. Correct for vanilla PES21 but not dynamically calculated.
 
-### Dependencies (from pyproject.toml):
-- Python ^3.13
-- beautifulsoup4 ^4.12.3
-- requests ^2.32.3
-- rapidfuzz ^3.10.1
-- pytest (dev)
+Those dependencies describe the historical reference project, not this one.
+FLEditScrape's runtime dependencies are `aiohttp` and `rapidfuzz`; `pytest` is
+the development dependency.
 
 ---
 
@@ -256,7 +259,7 @@ FotMob names vs FL26 database names will differ:
 
 ---
 
-## 8. Project Structure (Planned)
+## 8. Current Project Structure
 
 ```
 fleditscrape/
@@ -272,61 +275,40 @@ fleditscrape/
 ├── editor/
 │   ├── __init__.py
 │   ├── crypto.py            # pesXdecrypter subprocess wrapper
-│   ├── editfile.py          # Binary edit file reader/writer (dynamic offsets)
+│   ├── editfile.py          # Binary edit file reader/writer + validation
 │   ├── backup.py            # Timestamped backup management
+│   ├── player_catalog.py    # Current FL26 catalog + roster coverage gate
+│   ├── locking.py           # Per-output cross-process lock
 │   ├── logger.py            # Structured transfer logging (JSONL)
 │   └── models.py            # TeamData / PlayerInfo dataclasses
 ├── data/
 │   ├── team_aliases.json    # FotMob → FL26 team name mapping
 │   ├── name_overrides.json  # Player name manual overrides
-│   └── leagues.json         # League URLs to scrape
-├── tests/
-│   ├── test_scraper.py
-│   ├── test_matcher.py
-│   ├── test_editor.py
-│   ├── test_run_logic.py
-│   └── fixtures/            # Saved HTML + mock binaries for tests
+│   ├── FL2622wc_players.txt # Canonical Update 2.2 player-name reference
+│   └── players.csv          # Roster-only legacy-ID fallback
+├── tests/                   # Unit, regression, and pipeline tests
 ├── vendor/
 │   └── pesXdecrypter/       # Compiled decrypter/encrypter binary
-└── implyingrigged-info-wiki-Pro-Evolution-Soccer-2021-Edit-file.txt  # Wiki reference
+└── MEMORY.md                 # Architecture notes; binary layout links to the live wiki
 ```
 
 ---
 
-## 9. Build Order
+## 9. Operational State
 
-1. **Phase 1 — Scraper** (fully independent, no edit file needed)
-   - `scraper/models.py`, `scraper/fotmob.py`, `scraper/matcher.py`
-   - `data/team_aliases.json`, `data/leagues.json`
-   - Tests with saved HTML fixtures
-
-2. **Phase 2 — Editor** (needs a base FL26 edit file + pesXdecrypter)
-   - `editor/models.py`, `editor/crypto.py`, `editor/editfile.py`, `editor/backup.py`
-   - Dynamic offset calculation from header
-   - Tests with mock binary data
-
-3. **Phase 3 — Integration**
-   - `run.py` full pipeline
-   - `editor/logger.py`
-   - `--dry-run` mode
-
-4. **Phase 4 — Automation**
-   - Cron/scheduler setup
-   - Error notification
+- The canonical input is `base/EDIT00000000`; successful default runs continue
+  from `output/EDIT00000000` unless `--from-base` is explicit.
+- FotMob is the transfer source. There is no legacy per-league scrape config.
+- Loans, permanent transfers, releases, signings, and shirt-number observations
+  use one chronological roster planner.
+- A process lock prevents two runs from targeting the same output concurrently.
+- The canonical name catalog is coverage-checked against every rostered ID.
+- Overflow auto-release remains unavailable until complete roster position and
+  OVR metadata is supplied and validated.
 
 ---
 
-## 10. Open Questions (For User)
-
-1. Where is the FL26 `edit00000000` file located on disk?
-2. Which leagues to track? (Top 5 EU? All FL26 leagues? Configurable list?)
-3. Is pesXdecrypter already compiled, or need setup?
-4. Include loans or only permanent transfers?
-5. Transfer window scope: current only, or catch-up on past?
-
----
-
-## 11. Key Technical Constants
+## 10. Key Technical Constants
 
 ```python
 # Entry sizes (bytes)
@@ -372,7 +354,7 @@ PLAYER_PRINT_NAME_OFFSET = 0x73  # 61 bytes null-terminated
 
 ---
 
-## 12. Vanilla PES21 Verification Values
+## 11. Vanilla PES21 Verification Values
 
 Use these to verify offset calculations against a known-good vanilla file:
 
@@ -389,7 +371,7 @@ FL database would require a separately validated layout version.
 
 ---
 
-## 13. FL26 Known-Good Validation (2026-08-03)
+## 12. FL26 Known-Good Validation (2026-08-03)
 
 Three independently sourced Football Life 2026 `EDIT00000000` files in
 `reference/` were treated as known-good and compared after decryption.
@@ -443,8 +425,8 @@ Canonical base decision:
 - It includes 500+ transfers, rating/position changes, auto lineups, squad
   numbers, manager updates, loan returns, and promotions/relegations for the
   four first/second-division pairs listed above.
-- Runtime defaults, workflows, and validation utilities must use `base/` as the
-  single canonical input directory.
+- The first default run uses `base/`; later default/scheduled runs continue from
+  the last verified output. `--from-base` explicitly requests a clean rebuild.
 
 Final ingestion/mutation safety rules:
 
@@ -463,7 +445,15 @@ Final ingestion/mutation safety rules:
   may be visible in a source before registration opens, but must not mutate the
   game roster until FotMob's effective `transferDate` is reached.
 - Manual club filters prefer normalized exact names and accept a substring only
-  when it resolves uniquely; ambiguous club filters are skipped.
+  when it resolves uniquely; any unresolved requested club aborts that focused
+  scrape instead of silently producing a partial result.
+- FotMob club IDs are reduced to a conservative one-ID-per-PES-club allowlist.
+  Manual major-club mappings win over similarly named women, youth, reserve, or
+  duplicate sitemap teams; ID-less fuzzy club matches require at least 98%.
+- FotMob `playerId` values are retained through deduplication and persisted in
+  the per-save JSONL audit history. A unique historical FotMob-to-PES mapping
+  can recover a renamed player; conflicting mappings or a disagreement with a
+  current name/roster match are rejected without mutation.
 - A transfer mutates the roster only if the player's actual current club equals
   the matched source. Signings require the player to be unregistered, releases
   require the expected source, already-applied events are no-ops, and any other
@@ -476,9 +466,17 @@ Final ingestion/mutation safety rules:
   when the number really changes, deduplicates each player/club observation,
   and reports them separately from club transfers in HTML, Markdown, and GitHub
   Step Summary.
-- Current regression baseline: 121 tests passing; canonical base and output
-  both validate at 10,995,800 bytes, 749 rosters, 583 clubs, zero duplicate club
-  registrations, and 747 checked game plans.
+- Canonical base and output validate at 10,995,800 bytes, 749 rosters, 583
+  clubs, zero duplicate club registrations, and 747 checked game plans.
+- `data/FL2622wc_players.txt` is the authoritative current player-name catalog
+  (29,502 IDs). `players.csv` is consulted only for rostered IDs absent from
+  that reference; stale unrostered CSV players are not imported.
+- Catalog construction must prove 100% coverage of roster IDs before matching.
+  The verified canonical output needs one legacy roster fallback and has no
+  missing roster identity.
+- Name-only catalogs must not pretend to supply position, nationality, age, or
+  OVR. Overflow auto-release fails closed until position and OVR coverage is
+  complete for every rostered player.
 
 Persistent agent preferences:
 

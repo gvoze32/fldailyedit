@@ -97,6 +97,7 @@ class TestFotmobScraper:
 
         item = {
             "name": "Kylian Mbappé",
+            "playerId": 174119,
             "position": {"label": "CF", "key": "forward_short"},
             "fromClub": "Paris Saint-Germain",
             "fromClubFullName": "Paris Saint-Germain",
@@ -124,6 +125,7 @@ class TestFotmobScraper:
         assert t.is_loan is False
         assert t.market_value == 180000000
         assert t.from_club_id_fotmob == 9843
+        assert t.player_id_fotmob == 174119
 
     def test_parse_fotmob_item_loan(self):
         from scraper.fotmob import FotmobScraper
@@ -261,6 +263,97 @@ class TestTransferWindowLogic:
 
 
 class TestScraperSafety:
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            ["not", "an", "object"],
+            {"transfers": {"unexpected": "object"}},
+            {"transfers": [{"unexpected": "schema"}]},
+        ],
+    )
+    def test_global_feed_rejects_schema_drift(self, monkeypatch, payload):
+        from scraper import fotmob
+
+        class FakeResponse:
+            status = 200
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                return False
+
+            async def json(self, content_type=None):
+                return payload
+
+        class FakeSession:
+            def __init__(self, *_, **__):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                return False
+
+            def get(self, _):
+                return FakeResponse()
+
+        monkeypatch.setattr(fotmob.aiohttp, "ClientSession", FakeSession)
+        with pytest.raises(fotmob.IncompleteScrapeError):
+            asyncio.run(fotmob.FotmobScraper()._fetch_transfers_async())
+
+    def test_global_feed_failure_rejects_partial_results(self, monkeypatch):
+        from scraper import fotmob
+
+        pages = [
+            {
+                "status": 200,
+                "payload": {
+                    "transfers": [{
+                        "name": "Partial Deal",
+                        "fromClub": "A",
+                        "toClub": "B",
+                        "transferDate": "2026-08-01",
+                    }]
+                },
+            },
+            {"status": 503, "payload": {}},
+        ]
+
+        class FakeResponse:
+            def __init__(self, page):
+                self.status = page["status"]
+                self.payload = page["payload"]
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                return False
+
+            async def json(self, content_type=None):
+                return self.payload
+
+        class FakeSession:
+            def __init__(self, *_, **__):
+                self.page = 0
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                return False
+
+            def get(self, _):
+                response = FakeResponse(pages[self.page])
+                self.page += 1
+                return response
+
+        monkeypatch.setattr(fotmob.aiohttp, "ClientSession", FakeSession)
+        with pytest.raises(fotmob.IncompleteScrapeError, match="page 2"):
+            asyncio.run(fotmob.FotmobScraper()._fetch_transfers_async())
+
     def test_global_feed_does_not_stop_on_old_item_in_last_modified_order(self, monkeypatch):
         from scraper import fotmob
 
@@ -411,7 +504,12 @@ class TestScraperSafety:
                 "squad": [{
                     "members": [
                         {"name": "Broken", "shirtNumber": "not-a-number"},
-                        {"name": "Valid", "shirtNumber": "17", "role": None},
+                        {
+                            "id": "invalid-player-id",
+                            "name": "Valid",
+                            "shirtNumber": "17",
+                            "role": None,
+                        },
                     ]
                 }]
             }
@@ -421,6 +519,7 @@ class TestScraperSafety:
         assert results[0].player_name == "Valid"
         assert results[0].shirt_number == 17
         assert results[0].to_club == "Example FC"
+        assert results[0].player_id_fotmob is None
 
     def test_club_target_resolution_rejects_ambiguous_substring(self):
         from scraper.fotmob import _resolve_club_targets
@@ -428,6 +527,17 @@ class TestScraperSafety:
         available = {"Manchester United": 1, "Manchester City": 2, "Arsenal": 3}
         assert _resolve_club_targets(["Arsenal"], available) == [("Arsenal", 3)]
         assert _resolve_club_targets(["Manchester"], available) == []
+
+    def test_focused_scrape_rejects_any_unresolved_club(self, monkeypatch):
+        from scraper import fotmob
+
+        monkeypatch.setattr(
+            fotmob,
+            "get_deep_clubs",
+            lambda: {"Manchester United": 1, "Manchester City": 2},
+        )
+        with pytest.raises(fotmob.IncompleteScrapeError, match="every requested club"):
+            fotmob.fetch_transfers_for_club_names(["Manchester"])
 
     def test_merge_normalizes_diacritics_and_enriches_duplicate(self):
         from scraper.fotmob import merge_transfers
@@ -445,3 +555,83 @@ class TestScraperSafety:
         assert len(merged) == 1
         assert merged[0].position == "CF"
         assert merged[0].market_value == 180_000_000
+        assert merged[0].date == "2026-07-01T10:00:00Z"
+
+    def test_merge_preserves_distinct_same_day_lifecycle_events(self):
+        from scraper.fotmob import merge_transfers
+
+        returned = Transfer(
+            "Player",
+            "Loan Club",
+            "Parent Club",
+            date="2026-07-01",
+            transfer_type="end of loan",
+        )
+        loaned_again = Transfer(
+            "Player",
+            "Loan Club",
+            "Parent Club",
+            date="2026-07-01T12:00:00Z",
+            transfer_type="loan",
+            is_loan=True,
+        )
+
+        assert len(merge_transfers([[returned], [loaned_again]])) == 2
+
+    def test_merge_reconciles_club_id_and_name_only_duplicates(self):
+        from scraper.fotmob import merge_transfers
+
+        with_ids = Transfer(
+            "Player",
+            "PSG",
+            "Juventus",
+            date="2026-08-02T18:40:10Z",
+            from_club_id_fotmob=9847,
+            to_club_id_fotmob=9885,
+            from_club_full_name="Paris Saint-Germain",
+        )
+        names_only = Transfer(
+            "Player",
+            "Paris Saint-Germain",
+            "Juventus",
+            date="2026-08-02T18:40:10Z",
+            transfer_type="loan",
+            is_loan=True,
+        )
+
+        merged = merge_transfers([[with_ids], [names_only]])
+
+        assert len(merged) == 1
+        assert merged[0].transfer_type == "loan"
+        assert merged[0].is_loan is True
+
+    def test_merge_keeps_same_name_players_with_different_fotmob_ids(self):
+        from scraper.fotmob import merge_transfers
+
+        first = Transfer(
+            "Alex Smith", "Club A", "Club B", date="2026-07-01", player_id_fotmob=101
+        )
+        second = Transfer(
+            "Alex Smith", "Club A", "Club B", date="2026-07-01", player_id_fotmob=202
+        )
+
+        assert len(merge_transfers([[first], [second]])) == 2
+
+    def test_merge_enriches_name_only_duplicate_with_unique_player_id(self):
+        from scraper.fotmob import merge_transfers
+
+        identified = Transfer(
+            "Randal Kolo Muani",
+            "PSG",
+            "Juventus",
+            date="2026-08-02",
+            player_id_fotmob=823274,
+        )
+        names_only = Transfer(
+            "Randal Kolo Muani", "PSG", "Juventus", date="2026-08-02"
+        )
+
+        merged = merge_transfers([[names_only], [identified]])
+
+        assert len(merged) == 1
+        assert merged[0].player_id_fotmob == 823274

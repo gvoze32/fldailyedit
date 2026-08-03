@@ -1,751 +1,2334 @@
 [
-  "Ireland",
-  "Northern Ireland",
-  "Scotland",
-  "Wales",
-  "England",
-  "Portugal",
-  "Spain",
-  "France",
-  "Belgium",
-  "Netherlands",
-  "Switzerland",
-  "Italy",
-  "Czech Republic",
-  "Germany",
-  "Denmark",
-  "Norway",
-  "Sweden",
-  "Finland",
-  "Poland",
-  "Slovakia",
-  "Austria",
-  "Hungary",
-  "Slovenia",
-  "Croatia",
-  "Romania",
-  "Bulgaria",
-  "Greece",
-  "Turkey",
-  "Ukraine",
-  "Russia",
-  "Morocco",
-  "Tunisia",
-  "Egypt",
-  "Nigeria",
-  "Cameroon",
-  "South Africa",
-  "Senegal",
-  "United States",
-  "Mexico",
-  "Jamaica",
-  "Costa Rica",
-  "Honduras",
-  "Colombia",
-  "Brazil",
-  "Peru",
-  "Chile",
-  "Paraguay",
-  "Uruguay",
-  "Argentina",
-  "Ecuador",
-  "Japan",
-  "South Korea",
-  "China",
-  "Iran",
-  "Saudi Arabia",
-  "Australia",
-  "Latvia",
-  "Manchester United",
-  "Arsenal FC",
-  "Chelsea FC",
-  "Liverpool FC",
-  "Leeds United",
-  "West Ham United",
-  "Newcastle United",
-  "Aston Villa FC",
-  "FC Barcelona",
-  "Real Madrid CF",
-  "Valencia CF",
-  "Deportivo La Coruña",
-  "AS Monaco",
-  "Olympique Marseille",
-  "Paris Saint-Germain",
-  "Ajax Amsterdam",
-  "Feyenoord Rotterdam",
-  "PSV Eindhoven",
-  "Inter Milan",
-  "Juventus FC",
-  "AC Milan",
-  "SS Lazio",
-  "Parma Calcio",
-  "ACF Fiorentina",
-  "AS Roma",
-  "Borussia Dortmund",
-  "Bayern München",
-  "Bayer 04 Leverkusen",
-  "Hamburger SV",
-  "Galatasaray SK",
-  "Celtic FC",
-  "Rangers FC",
-  "Olympiakos Piraeus",
-  "Dynamo Kyiv",
-  "Spartak Moskva",
-  "Vasco da Gama",
-  "SE Palmeiras",
-  "CA River Plate",
-  "CA Boca Juniors",
-  "-",
-  "Kashima Antlers",
-  "Urawa Red Diamonds",
-  "JEF United Chiba",
-  "Kashiwa Reysol",
-  "FC Tokyo",
-  "Tokyo Verdy",
-  "Yokohama F. Marinos",
-  "Shimizu S-Pulse",
-  "Nagoya Grampus",
-  "Kyoto Sanga",
-  "Gamba Osaka",
-  "Vissel Kobe",
-  "Sanfrecce Hiroshima",
-  "Mito Hollyhock",
-  "Kawasaki Frontale",
-  "Yokohama FC",
-  "Shonan Bellmare",
-  "Albirex Niigata",
-  "Cerezo Osaka",
-  "Avispa Fukuoka",
-  "Atlético Madrid",
-  "Manchester City",
-  "RSC Anderlecht",
-  "AC Sparta Prague",
-  "Blackburn Rovers",
-  "Everton FC",
-  "Fulham FC",
-  "Tottenham Hotspur",
-  "AJ Auxerre",
-  "Olympique Lyonnais",
-  "RC Lens",
-  "SV Werder Bremen",
-  "Bologna FC",
-  "Udinese Calcio",
-  "SL Benfica",
-  "FC Porto",
-  "Sporting CP",
-  "Real Betis",
-  "Celta de Vigo",
-  "Real Sociedad",
-  "Fenerbahçe SK",
-  "Panathinaikos FC",
-  "Zalgiris Vilnius",
-  "Ceres Negros",
-  "Birmingham City",
-  "Charlton Athletic",
-  "Leicester City",
-  "Middlesbrough FC",
-  "Southampton FC",
-  "Wolverhampton Wanderers",
-  "SC Bastia",
-  "EA Guingamp",
-  "Le Mans FC",
-  "LOSC Lille",
-  "Montpellier HSC",
-  "FC Nantes",
-  "OGC Nice",
-  "Stade Rennais FC",
-  "FC Sochaux-Montbéliard",
-  "Toulouse FC",
-  "Borussia Mönchengladbach",
-  "Eintracht Frankfurt",
-  "SC Freiburg",
-  "VfB Stuttgart",
-  "VfL Wolfsburg",
-  "Atalanta BC",
-  "FC Empoli",
-  "Modena FC",
-  "Palermo FC",
-  "UC Sampdoria",
-  "AZ Alkmaar",
-  "FC Groningen",
-  "SC Heerenveen",
-  "NAC Breda",
-  "NEC Nijmegen",
-  "FC Twente",
-  "FC Utrecht",
-  "FC Volendam",
-  "PEC Zwolle",
-  "Athletic Bilbao",
-  "RCD Espanyol",
-  "Málaga CF",
-  "RCD Mallorca",
-  "CA Osasuna",
-  "Racing Santander",
-  "Sevilla FC",
-  "Real Valladolid",
-  "Villarreal CF",
-  "Real Zaragoza",
-  "Club Brugge KV",
-  "AEK Athens",
-  "Lokomotiv Moskva",
-  "FK Partizan",
-  "Beşiktaş JK",
-  "Cruzeiro EC",
-  "Beijing Guoan",
-  "Qingdao Hainiu",
-  "Chongqing Tonglianglong",
-  "Wuhan Three Towns",
-  "Chengdu Rongcheng",
-  "SSC Bari",
-  "Cagliari Calcio",
-  "Genoa CFC",
-  "SSC Napoli",
-  "Delfino Pescara",
-  "Torino FC",
-  "Hellas Verona",
-  "Excelsior Rotterdam",
-  "Fortuna Sittard",
-  "Go Ahead Eagles",
-  "Heracles Almelo",
-  "Sparta Rotterdam",
-  "SC Telstar",
-  "UD Almería",
-  "Córdoba CF",
-  "Elche CF",
-  "Getafe CF",
-  "Sporting Gijón",
-  "UD Las Palmas",
-  "Levante UD",
-  "Rayo Vallecano",
-  "Brighton & Hove Albion",
-  "Burnley FC",
-  "Crystal Palace FC",
-  "Derby County",
-  "Ipswich Town",
-  "Millwall FC",
-  "Norwich City",
-  "Nottingham Forest",
-  "Sheffield Wednesday",
-  "Stoke City",
-  "Sunderland AFC",
-  "Watford FC",
-  "West Bromwich Albion",
-  "Angers SCO",
-  "Stade Malherbe Caen",
-  "Clermont Foot",
-  "Stade Lavallois",
-  "AC Le Havre",
-  "FC Lorient",
-  "AS Nancy Lorraine",
-  "AS Saint-Étienne",
-  "ESTAC Troyes",
-  "FSV Mainz 05",
-  "Zamora FC",
-  " Rainmakers Classics",
-  " Fireblast Classics",
-  " Warmstorm Classics",
-  " Powerball Classics",
-  " Wildcats Classics",
-  " Screambeem Classics",
-  " Meanmachine Classics",
-  " Predators Classics",
-  " Thunderstrike Classics",
-  " Monsters Classics",
-  "Afghanistan",
-  "Bahrain",
-  "Bangladesh",
-  "Cambodia",
-  "Hong Kong",
-  "India",
-  "Iraq",
-  "Jordan",
-  "North Korea",
-  "Kuwait",
-  "Lebanon",
-  "Malaysia",
-  "Myanmar",
-  "Nepal",
-  "Oman",
-  "Pakistan",
-  "Philippines",
-  "Qatar",
-  "Singapore",
-  "Syria",
-  "Thailand",
-  "United Arab Emirates",
-  "Vietnam",
-  "Yemen",
-  "Tajikistan",
-  "Algeria",
-  "Angola",
-  "Benin",
-  "Burkina Faso",
-  "Cabo Verde",
-  "Congo DR",
-  "Côte D'Ivoire",
-  "Gabon",
-  "Ghana",
-  "Guinea",
-  "Kenya",
-  "Madagascar",
-  "Mali",
-  "Tanzania",
-  "Togo",
-  "Uganda",
-  "Zambia",
-  "Zimbabwe",
-  "Congo",
-  "Canada",
-  "El Salvador",
-  "Guatemala",
-  "Haiti",
-  "Panama",
-  "Trinidad and Tobago",
-  "Curacao",
-  "Bolivia",
-  "Venezuela",
-  "New Zealand",
-  "Israel",
-  "Albania",
-  "Andorra",
-  "Armenia",
-  "Azerbaijan",
-  "Belarus",
-  "Bosnia and Herzegovina",
-  "Cyprus",
-  "Estonia",
-  "Faroe Islands",
-  "Georgia",
-  "Iceland",
-  "Kazakhstan",
-  "Liechtenstein",
-  "Lithuania",
-  "Luxembourg",
-  "North Macedonia",
-  "Malta",
-  "Moldova",
-  "San Marino",
-  "Uzbekistan",
-  "KRC Genk",
-  "KAA Gent",
-  "Standard Liège",
-  "KV Mechelen",
-  "GNK Dinamo Zagreb",
-  "FC København",
-  "FC Nordsjælland",
-  "PAOK Thessaloniki",
-  "FCSB",
-  "CSKA Moskva",
-  "Zenit St. Petersburg",
-  "Aberdeen FC",
-  "Dundee United",
-  "Heart of Midlothian",
-  "Hibernian FC",
-  "FK Crvena Zvezda",
-  "Gençlerbirliği SK",
-  "Shakhtar Donetsk",
-  "Argentinos Juniors",
-  "Racing Club",
-  "Estudiantes de la Plata",
-  "Gimnasia La Plata",
-  "CA Independiente",
-  "Newell's Old Boys",
-  "CA Rosario Central",
-  "CA San Lorenzo",
-  "CA Vélez Sarsfield",
-  "Atlético Mineiro",
-  "Botafogo",
-  "SC Corinthians",
-  "CR Flamengo",
-  "Fluminense FC",
-  "Grêmio",
-  "SC Internacional",
-  "Santos FC",
-  "São Paulo FC",
-  "CSD Colo Colo",
-  "América de Cali",
-  "Millonarios FC",
-  "Club Cerro Porteño",
-  "Olimpia Asunción",
-  "Club Nacional",
-  "CA Peñarol",
-  "Club América",
-  "Cruz Azul",
-  "Queens Park Rangers",
-  "Stade Brestois",
-  "Stade de Reims",
-  "Al Shabab Club",
-  "Al Ahli SFC",
-  "Al Ittihad Club",
-  "Cesena FC",
-  "Al Hilal SFC",
-  "Valenciennes FC",
-  "Serbia",
-  "Montenegro",
-  "RB Salzburg",
-  "Hull City",
-  "Spezia Calcio",
-  "Wisła Kraków",
-  "Malmö FF",
-  "FC Basel 1893",
-  "HJK Helsinki",
-  "CFR Cluj",
-  "Dinamo Moskva",
-  "Legia Warszawa",
-  "Bristol City",
-  "Granada CF",
-  "CF Monterrey",
-  "Tigres UANL",
-  "Vitória Sport Clube",
-  "Bröndby IF",
-  "Fagiano Okayama",
-  "Al Ettifaq FC",
-  "LDU Quito",
-  "Swansea City",
-  "US Sassuolo",
-  "CA Huracán",
-  "Gimnasia de Mendoza",
-  "Estudiantes de Río Cuarto",
-  "Club Atlético Tigre",
-  "CA Banfield",
-  "Club Atlético Lanús",
-  "Athletico Paranaense",
-  "Coritiba FC",
-  "Goiás EC",
-  "Clube Náutico",
-  "Sport Recife",
-  "EC Vitória",
-  "Rubin Kazan",
-  "CD Nacional",
-  "Trabzonspor",
-  "Aris Thessaloniki",
-  "BSC Young Boys",
-  "Sporting Braga",
-  "Rio Ave FC",
-  "Kilmarnock FC",
-  "Motherwell FC",
-  "St. Mirren FC",
-  "Antalyaspor",
-  "Istanbul Başakşehir FK",
-  "Kayserispor",
-  "Cercle Brugge",
-  "RSC Charleroi",
-  "Zulte Waregem",
-  "Asteras Tripolis",
-  "APO Levadiakos",
-  "OFI Crete",
-  "Aarhus GF",
-  "FC Midtjylland",
-  "Odense Boldklub",
-  "Randers FC",
-  "LASK Linz",
-  "SK Sturm Graz",
-  "FC RFS",
-  "Lech Poznan",
-  "APOEL Nicosia",
-  "Omonia Nicosia",
-  "Girona FC",
-  "SD Huesca",
-  "Universidad Católica",
-  "Audax Italiano",
-  "Atlético Nacional",
-  "Boyacá Chicó FC",
-  "Club Libertad",
-  "CD Everton",
-  "Universidad de Chile",
-  "Independiente Medellín",
-  "Universitario de Deportes",
-  "Sporting Cristal",
-  "Deportivo Táchira",
-  "FK Rostov",
-  "Bolívar La Paz",
-  "Once Caldas",
-  "Junior FC",
-  "Club Alianza Lima",
-  "Calcio Padova",
-  "Universidad de Concepción",
-  "Deportes Tolima",
-  "Machida Zelvia",
-  "V-Varen Nagasaki",
-  "Ferencváros TC",
-  "FC Arouca",
-  "GD Estoril Praia",
-  "Gil Vicente FC",
-  "Moreirense FC",
-  "CD Santa Clara",
-  "América Mineiro",
-  "Atlético Goianiense",
-  "Avaí FC",
-  "EC Bahia",
-  "Ceará SC",
-  "Red Bull Bragantino",
-  "Criciúma EC",
-  "AA Ponte Preta",
-  "Vila Nova FC",
-  "-",
-  "The Strongest",
-  "Clube de Regatas Brasil",
-  "SS Juve Stabia",
-  "HNK Hajduk Split",
-  "Club Atlético Belgrano",
-  "Club Atlético Unión",
-  "CD O'Higgins",
-  "Deportes Concepción",
-  "Deportes La Serena",
-  "Huachipato FC",
-  "Unión La Calera",
-  "CD Palestino",
-  "CD Cobresal",
-  "Volos NPS",
-  "Panetolikos FC",
-  "Atromitos Athens",
-  "Al Fateh SC",
-  "Al Nassr FC",
-  "Al Taawoun FC",
-  "CD Tondela",
-  "CD Mirandés",
-  "FK Krasnodar",
-  "Dundee FC",
-  "Kasimpaşa SK",
-  "Deportivo Cali",
-  "Deportivo Pasto",
-  "Cúcuta Deportivo",
-  "Rionegro Águilas",
-  "Internacional de Bogotá",
-  "Independiente Santa Fe",
-  "Barcelona SC",
-  "Independiente Del Valle",
-  "-",
-  "CD Ñublense",
-  "Coquimbo Unido",
-  "CA Aldosivi",
-  "Atlético Tucumán",
-  "Defensa y Justicia",
-  "Independiente Rivadavia",
-  "Instituto AC Córdoba",
-  "CA Sarmiento",
-  "RAAL La Louvière",
-  "FCV Dender",
-  "AFC Bournemouth",
-  "Qingdao West Coast",
-  "Shanghai Port",
-  "Chapecoense",
-  "Tampines Rovers",
-  "FC Metz",
-  "FC Augsburg",
-  "TSG 1899 Hoffenheim",
-  "FC Köln",
-  "FC St. Pauli",
-  "FC Union Berlin",
-  "US Avellino",
-  "Krylya Sovetov Samara",
-  "Deportivo Alavés",
-  "SD Eibar",
-  "Chicago Fire FC",
-  "Columbus Crew",
-  "FC Dallas",
-  "Los Angeles Galaxy",
-  "CF Montréal",
-  "New England Revolution",
-  "New York RB",
-  "Portland Timbers",
-  "San Jose Earthquakes",
-  "Seattle Sounders",
-  "Sporting Kansas City",
-  "Vancouver Whitecaps",
-  "Shandong Taishan",
-  "Al Kuwait SC",
-  "Brentford FC",
-  "Coventry City",
-  "Preston North End",
-  "Sheffield United",
-  "Amiens SC",
-  "US Boulogne",
-  "USL Dunkerque",
-  "Paris FC",
-  "Red Star FC",
-  "RC Strasbourg Alsace",
-  "Carrarese Calcio",
-  "Como 1907",
-  "US Cremonese",
-  "AC Reggiana 1919",
-  "FC Südtirol",
-  "Venezia FC",
-  "Virtus Entella",
-  "US Catanzaro",
-  "Frosinone Calcio",
-  "US Lecce",
-  "Pisa Sporting Club",
-  "Burgos CF",
-  "Cultural Leonesa",
-  "Real Oviedo",
-  "CD Leganés",
-  "Sociedad B",
-  "Albacete Balompié",
-  "Cádiz CF",
-  "FK Qarabağ",
-  "Slovan Bratislava",
-  "FC Sheriff Tiraspol",
-  "Ludogorets Razgrad",
-  "Portsmouth FC",
-  "Grenoble Foot 38",
-  "Rodez AF",
-  "Mantova 1911",
-  "CD Castellón",
-  "AC Monza",
-  "BG Pathum United",
-  "Paysandu",
-  "FC Lugano",
-  "The Old Boys",
-  "Central Córdoba SDE",
-  "FC Heidenheim 1846",
-  "RB Leipzig",
-  "FC Famalicão",
-  "Club Atlético Talleres",
-  "Londrina EC",
-  "New York City",
-  "Orlando City",
-  "Oxford United",
-  "Pau FC",
-  "World Selection",
-  "EC Juventude",
-  "Botafogo FC",
-  "Cuiabá EC",
-  "Fortaleza EC",
-  "Clube do Remo",
-  "Volta Redonda",
-  "Henan FC",
-  "Shanghai Shenhua",
-  "Tianjin Jinmen Tiger",
-  "Zhejiang FC",
-  "Liaoning Tieren",
-  "Shenzhen Peng City",
-  "Yunnan Yukun",
-  "Slavia Prague",
-  "Royal Antwerp FC",
-  "Sint-Truiden VV",
-  "Akhmat Grozny",
-  "Alanyaspor",
-  "Göztepe SK",
-  "Konyaspor",
-  "Alianza FC",
-  "Atlético Bucaramanga",
-  "Oud-Heverlee Leuven",
-  "Union Saint Gilloise",
-  "KVC Westerlo",
-  "Silkeborg IF",
-  "Sønderjyske Fodbold",
-  "FC Fredericia",
-  "Vejle Boldklub",
-  "Viborg FF",
-  "Molde FK",
-  "FK Bodø/Glimt",
-  "Jagiellonia Bialystok",
-  "Rakow Czestochowa",
-  "Baltika Kaliningrad",
-  "FC Sochi",
-  "FC Pari Nizhny Novgorod",
-  "FC Orenburg",
-  "Falkirk FC",
-  "Livingston FC",
-  "IF Elfsborg",
-  "Caykur Rizespor",
-  "Gaziantep FK",
-  "Samsunspor",
-  "Club Deportivo Riestra",
-  "Deportivo Pereira",
-  "Fortaleza CEIF",
-  "Llaneros FC",
-  "Jaguares de Córdoba",
-  "Operário PR",
-  "Gibraltar",
-  "Kosovo",
-  "CA Platense",
-  "SD Aucas",
-  "Ferroviário",
-  "Dalian Yingbo",
-  "Casa Pia AC",
-  "FC Andorra",
-  "Fatih Karagümrük",
-  "CA Barracas Central",
-  "FC Annecy",
-  "Atlanta United FC",
-  "FC Cincinnati",
-  "Inter Miami CF",
-  "Nashville SC",
-  "Austin FC",
-  "Los Angeles FC",
-  "Indonesia",
-  "Kyrgyzstan",
-  "Palestine",
-  "Mirassol FC",
-  "Grêmio Novorizontino",
-  "Eyüpspor",
-  "Kocaelispor",
-  "Estrela da Amadora",
-  "FC Alverca",
-  "AD Ceuta FC",
-  "São Bernardo FC",
-  "Daejeon Hana Citizen",
-  "Avs Futebol SAD",
-  "Athletic Club",
-  "Deportes Limache",
-  "Somalia",
-  "Laos",
-  "Thep Xanh Nam Dinh FC",
-  "Brunei Darussalam",
-  "Timor-Leste",
-  "Botswana",
-  "Wrexham AFC",
-  "Al Hazem SC",
-  "Pafos FC",
-  "Al Riyadh SC",
-  "Damac FC",
-  "NEOM SC",
-  "Al Okhdood Club",
-  "Al Najma SC",
-  "Al Khaleej Club",
-  "AE Larisa",
-  "Al Kholood Club",
-  "Al Qadsiah FC",
-  "Al Fayha FC",
-  "Dinamo Makhachkala",
-  "Akron Tolyatti",
-  "Panserraikos FC",
-  "AE Kifisias",
-  "El Ahly Cairo",
-  "Wydad Casablanca",
-  "Esperance Tunis",
-  "Jeonbuk Hyundai Motors",
-  "Pohang Steelers",
-  "Al Ain FC",
-  "Sepahan SC",
-  "Al Rayyan SC",
-  "Pakhtakor Tashkent",
-  "Al Gharafa SC",
-  "Buriram United",
-  "Esteghlal FC",
-  "Sydney FC",
-  "Tractor FC",
-  "Muangthong United FC",
-  "Al Shorta SC",
-  "Al Sadd SC",
-  "Ulsan HD FC",
-  "FC Nasaf Qarshi",
-  "PERSIB Bandung",
-  "Johor Darul Ta'zim",
-  "Persepolis FC",
-  "Al Wehdat SC",
-  "Air Force Club",
-  "Al Wasl FC",
-  "True Bangkok United",
-  "Port FC",
-  "Lion City Sailors",
-  "FC Istiqlol Dushanbe",
-  "Sharjah FC",
-  "Kaya FC-Iloilo",
-  "Gwangju FC",
-  "Mohun Bagan Super Giant",
-  "Al Hussein SC",
-  "Selangor FC"
+  {
+    "pes_team_id": 100,
+    "name": "Manchester United"
+  },
+  {
+    "pes_team_id": 101,
+    "name": "Arsenal FC"
+  },
+  {
+    "pes_team_id": 102,
+    "name": "Chelsea FC"
+  },
+  {
+    "pes_team_id": 103,
+    "name": "Liverpool FC"
+  },
+  {
+    "pes_team_id": 104,
+    "name": "Leeds United"
+  },
+  {
+    "pes_team_id": 105,
+    "name": "West Ham United"
+  },
+  {
+    "pes_team_id": 106,
+    "name": "Newcastle United"
+  },
+  {
+    "pes_team_id": 107,
+    "name": "Aston Villa FC"
+  },
+  {
+    "pes_team_id": 108,
+    "name": "FC Barcelona"
+  },
+  {
+    "pes_team_id": 109,
+    "name": "Real Madrid CF"
+  },
+  {
+    "pes_team_id": 110,
+    "name": "Valencia CF"
+  },
+  {
+    "pes_team_id": 111,
+    "name": "Deportivo La Coruña"
+  },
+  {
+    "pes_team_id": 112,
+    "name": "AS Monaco"
+  },
+  {
+    "pes_team_id": 113,
+    "name": "Olympique Marseille"
+  },
+  {
+    "pes_team_id": 114,
+    "name": "Paris Saint-Germain"
+  },
+  {
+    "pes_team_id": 116,
+    "name": "Ajax Amsterdam"
+  },
+  {
+    "pes_team_id": 117,
+    "name": "Feyenoord Rotterdam"
+  },
+  {
+    "pes_team_id": 118,
+    "name": "PSV Eindhoven"
+  },
+  {
+    "pes_team_id": 119,
+    "name": "Inter Milan"
+  },
+  {
+    "pes_team_id": 120,
+    "name": "Juventus FC"
+  },
+  {
+    "pes_team_id": 121,
+    "name": "AC Milan"
+  },
+  {
+    "pes_team_id": 122,
+    "name": "SS Lazio"
+  },
+  {
+    "pes_team_id": 123,
+    "name": "Parma Calcio"
+  },
+  {
+    "pes_team_id": 124,
+    "name": "ACF Fiorentina"
+  },
+  {
+    "pes_team_id": 125,
+    "name": "AS Roma"
+  },
+  {
+    "pes_team_id": 126,
+    "name": "Borussia Dortmund"
+  },
+  {
+    "pes_team_id": 127,
+    "name": "Bayern München"
+  },
+  {
+    "pes_team_id": 128,
+    "name": "Bayer 04 Leverkusen"
+  },
+  {
+    "pes_team_id": 129,
+    "name": "Hamburger SV"
+  },
+  {
+    "pes_team_id": 130,
+    "name": "Galatasaray SK"
+  },
+  {
+    "pes_team_id": 131,
+    "name": "Celtic FC"
+  },
+  {
+    "pes_team_id": 132,
+    "name": "Rangers FC"
+  },
+  {
+    "pes_team_id": 133,
+    "name": "Olympiakos Piraeus"
+  },
+  {
+    "pes_team_id": 134,
+    "name": "Dynamo Kyiv"
+  },
+  {
+    "pes_team_id": 135,
+    "name": "Spartak Moskva"
+  },
+  {
+    "pes_team_id": 136,
+    "name": "Vasco da Gama"
+  },
+  {
+    "pes_team_id": 137,
+    "name": "SE Palmeiras"
+  },
+  {
+    "pes_team_id": 138,
+    "name": "CA River Plate"
+  },
+  {
+    "pes_team_id": 139,
+    "name": "CA Boca Juniors"
+  },
+  {
+    "pes_team_id": 146,
+    "name": "Kashima Antlers"
+  },
+  {
+    "pes_team_id": 147,
+    "name": "Urawa Red Diamonds"
+  },
+  {
+    "pes_team_id": 148,
+    "name": "JEF United Chiba"
+  },
+  {
+    "pes_team_id": 149,
+    "name": "Kashiwa Reysol"
+  },
+  {
+    "pes_team_id": 150,
+    "name": "FC Tokyo"
+  },
+  {
+    "pes_team_id": 151,
+    "name": "Tokyo Verdy"
+  },
+  {
+    "pes_team_id": 152,
+    "name": "Yokohama F. Marinos"
+  },
+  {
+    "pes_team_id": 153,
+    "name": "Shimizu S-Pulse"
+  },
+  {
+    "pes_team_id": 155,
+    "name": "Nagoya Grampus"
+  },
+  {
+    "pes_team_id": 156,
+    "name": "Kyoto Sanga"
+  },
+  {
+    "pes_team_id": 157,
+    "name": "Gamba Osaka"
+  },
+  {
+    "pes_team_id": 158,
+    "name": "Vissel Kobe"
+  },
+  {
+    "pes_team_id": 159,
+    "name": "Sanfrecce Hiroshima"
+  },
+  {
+    "pes_team_id": 161,
+    "name": "Mito Hollyhock"
+  },
+  {
+    "pes_team_id": 163,
+    "name": "Kawasaki Frontale"
+  },
+  {
+    "pes_team_id": 168,
+    "name": "Cerezo Osaka"
+  },
+  {
+    "pes_team_id": 169,
+    "name": "Avispa Fukuoka"
+  },
+  {
+    "pes_team_id": 172,
+    "name": "Atlético Madrid"
+  },
+  {
+    "pes_team_id": 173,
+    "name": "Manchester City"
+  },
+  {
+    "pes_team_id": 174,
+    "name": "RSC Anderlecht"
+  },
+  {
+    "pes_team_id": 175,
+    "name": "AC Sparta Prague"
+  },
+  {
+    "pes_team_id": 176,
+    "name": "Blackburn Rovers"
+  },
+  {
+    "pes_team_id": 177,
+    "name": "Everton FC"
+  },
+  {
+    "pes_team_id": 178,
+    "name": "Fulham FC"
+  },
+  {
+    "pes_team_id": 179,
+    "name": "Tottenham Hotspur"
+  },
+  {
+    "pes_team_id": 180,
+    "name": "AJ Auxerre"
+  },
+  {
+    "pes_team_id": 181,
+    "name": "Olympique Lyonnais"
+  },
+  {
+    "pes_team_id": 182,
+    "name": "RC Lens"
+  },
+  {
+    "pes_team_id": 185,
+    "name": "SV Werder Bremen"
+  },
+  {
+    "pes_team_id": 186,
+    "name": "Bologna FC"
+  },
+  {
+    "pes_team_id": 190,
+    "name": "Udinese Calcio"
+  },
+  {
+    "pes_team_id": 191,
+    "name": "SL Benfica"
+  },
+  {
+    "pes_team_id": 192,
+    "name": "FC Porto"
+  },
+  {
+    "pes_team_id": 193,
+    "name": "Sporting CP"
+  },
+  {
+    "pes_team_id": 194,
+    "name": "Real Betis"
+  },
+  {
+    "pes_team_id": 195,
+    "name": "Celta de Vigo"
+  },
+  {
+    "pes_team_id": 196,
+    "name": "Real Sociedad"
+  },
+  {
+    "pes_team_id": 197,
+    "name": "Fenerbahçe SK"
+  },
+  {
+    "pes_team_id": 198,
+    "name": "Panathinaikos FC"
+  },
+  {
+    "pes_team_id": 199,
+    "name": "Zalgiris Vilnius"
+  },
+  {
+    "pes_team_id": 200,
+    "name": "Ceres Negros"
+  },
+  {
+    "pes_team_id": 201,
+    "name": "Birmingham City"
+  },
+  {
+    "pes_team_id": 203,
+    "name": "Charlton Athletic"
+  },
+  {
+    "pes_team_id": 204,
+    "name": "Leicester City"
+  },
+  {
+    "pes_team_id": 205,
+    "name": "Middlesbrough FC"
+  },
+  {
+    "pes_team_id": 207,
+    "name": "Southampton FC"
+  },
+  {
+    "pes_team_id": 208,
+    "name": "Wolverhampton Wanderers"
+  },
+  {
+    "pes_team_id": 210,
+    "name": "SC Bastia"
+  },
+  {
+    "pes_team_id": 211,
+    "name": "EA Guingamp"
+  },
+  {
+    "pes_team_id": 212,
+    "name": "Le Mans FC"
+  },
+  {
+    "pes_team_id": 213,
+    "name": "LOSC Lille"
+  },
+  {
+    "pes_team_id": 215,
+    "name": "Montpellier HSC"
+  },
+  {
+    "pes_team_id": 216,
+    "name": "FC Nantes"
+  },
+  {
+    "pes_team_id": 217,
+    "name": "OGC Nice"
+  },
+  {
+    "pes_team_id": 218,
+    "name": "Stade Rennais FC"
+  },
+  {
+    "pes_team_id": 219,
+    "name": "FC Sochaux-Montbéliard"
+  },
+  {
+    "pes_team_id": 221,
+    "name": "Toulouse FC"
+  },
+  {
+    "pes_team_id": 225,
+    "name": "Borussia Mönchengladbach"
+  },
+  {
+    "pes_team_id": 226,
+    "name": "Eintracht Frankfurt"
+  },
+  {
+    "pes_team_id": 227,
+    "name": "SC Freiburg"
+  },
+  {
+    "pes_team_id": 231,
+    "name": "VfB Stuttgart"
+  },
+  {
+    "pes_team_id": 232,
+    "name": "VfL Wolfsburg"
+  },
+  {
+    "pes_team_id": 234,
+    "name": "Atalanta BC"
+  },
+  {
+    "pes_team_id": 235,
+    "name": "FC Empoli"
+  },
+  {
+    "pes_team_id": 237,
+    "name": "Modena FC"
+  },
+  {
+    "pes_team_id": 238,
+    "name": "Palermo FC"
+  },
+  {
+    "pes_team_id": 240,
+    "name": "UC Sampdoria"
+  },
+  {
+    "pes_team_id": 242,
+    "name": "AZ Alkmaar"
+  },
+  {
+    "pes_team_id": 244,
+    "name": "FC Groningen"
+  },
+  {
+    "pes_team_id": 245,
+    "name": "SC Heerenveen"
+  },
+  {
+    "pes_team_id": 246,
+    "name": "NAC Breda"
+  },
+  {
+    "pes_team_id": 247,
+    "name": "NEC Nijmegen"
+  },
+  {
+    "pes_team_id": 250,
+    "name": "FC Twente"
+  },
+  {
+    "pes_team_id": 251,
+    "name": "FC Utrecht"
+  },
+  {
+    "pes_team_id": 253,
+    "name": "FC Volendam"
+  },
+  {
+    "pes_team_id": 256,
+    "name": "PEC Zwolle"
+  },
+  {
+    "pes_team_id": 258,
+    "name": "Athletic Bilbao"
+  },
+  {
+    "pes_team_id": 259,
+    "name": "RCD Espanyol"
+  },
+  {
+    "pes_team_id": 260,
+    "name": "Málaga CF"
+  },
+  {
+    "pes_team_id": 261,
+    "name": "RCD Mallorca"
+  },
+  {
+    "pes_team_id": 263,
+    "name": "CA Osasuna"
+  },
+  {
+    "pes_team_id": 264,
+    "name": "Racing Santander"
+  },
+  {
+    "pes_team_id": 265,
+    "name": "Sevilla FC"
+  },
+  {
+    "pes_team_id": 266,
+    "name": "Real Valladolid"
+  },
+  {
+    "pes_team_id": 267,
+    "name": "Villarreal CF"
+  },
+  {
+    "pes_team_id": 268,
+    "name": "Real Zaragoza"
+  },
+  {
+    "pes_team_id": 269,
+    "name": "Club Brugge KV"
+  },
+  {
+    "pes_team_id": 270,
+    "name": "AEK Athens"
+  },
+  {
+    "pes_team_id": 271,
+    "name": "Lokomotiv Moskva"
+  },
+  {
+    "pes_team_id": 272,
+    "name": "FK Partizan"
+  },
+  {
+    "pes_team_id": 273,
+    "name": "Beşiktaş JK"
+  },
+  {
+    "pes_team_id": 274,
+    "name": "Cruzeiro EC"
+  },
+  {
+    "pes_team_id": 295,
+    "name": "Beijing Guoan"
+  },
+  {
+    "pes_team_id": 297,
+    "name": "Qingdao Hainiu"
+  },
+  {
+    "pes_team_id": 302,
+    "name": "Chongqing Tonglianglong"
+  },
+  {
+    "pes_team_id": 304,
+    "name": "Wuhan Three Towns"
+  },
+  {
+    "pes_team_id": 314,
+    "name": "Chengdu Rongcheng"
+  },
+  {
+    "pes_team_id": 319,
+    "name": "SSC Bari"
+  },
+  {
+    "pes_team_id": 320,
+    "name": "Cagliari Calcio"
+  },
+  {
+    "pes_team_id": 323,
+    "name": "Genoa CFC"
+  },
+  {
+    "pes_team_id": 327,
+    "name": "SSC Napoli"
+  },
+  {
+    "pes_team_id": 328,
+    "name": "Delfino Pescara"
+  },
+  {
+    "pes_team_id": 333,
+    "name": "Torino FC"
+  },
+  {
+    "pes_team_id": 336,
+    "name": "Hellas Verona"
+  },
+  {
+    "pes_team_id": 344,
+    "name": "Excelsior Rotterdam"
+  },
+  {
+    "pes_team_id": 345,
+    "name": "Fortuna Sittard"
+  },
+  {
+    "pes_team_id": 346,
+    "name": "Go Ahead Eagles"
+  },
+  {
+    "pes_team_id": 349,
+    "name": "Heracles Almelo"
+  },
+  {
+    "pes_team_id": 351,
+    "name": "Sparta Rotterdam"
+  },
+  {
+    "pes_team_id": 352,
+    "name": "SC Telstar"
+  },
+  {
+    "pes_team_id": 357,
+    "name": "UD Almería"
+  },
+  {
+    "pes_team_id": 359,
+    "name": "Córdoba CF"
+  },
+  {
+    "pes_team_id": 361,
+    "name": "Elche CF"
+  },
+  {
+    "pes_team_id": 362,
+    "name": "Getafe CF"
+  },
+  {
+    "pes_team_id": 363,
+    "name": "Sporting Gijón"
+  },
+  {
+    "pes_team_id": 364,
+    "name": "UD Las Palmas"
+  },
+  {
+    "pes_team_id": 366,
+    "name": "Levante UD"
+  },
+  {
+    "pes_team_id": 370,
+    "name": "Rayo Vallecano"
+  },
+  {
+    "pes_team_id": 377,
+    "name": "Brighton & Hove Albion"
+  },
+  {
+    "pes_team_id": 378,
+    "name": "Burnley FC"
+  },
+  {
+    "pes_team_id": 382,
+    "name": "Crystal Palace FC"
+  },
+  {
+    "pes_team_id": 383,
+    "name": "Derby County"
+  },
+  {
+    "pes_team_id": 386,
+    "name": "Ipswich Town"
+  },
+  {
+    "pes_team_id": 387,
+    "name": "Millwall FC"
+  },
+  {
+    "pes_team_id": 388,
+    "name": "Norwich City"
+  },
+  {
+    "pes_team_id": 389,
+    "name": "Nottingham Forest"
+  },
+  {
+    "pes_team_id": 394,
+    "name": "Sheffield Wednesday"
+  },
+  {
+    "pes_team_id": 395,
+    "name": "Stoke City"
+  },
+  {
+    "pes_team_id": 396,
+    "name": "Sunderland AFC"
+  },
+  {
+    "pes_team_id": 398,
+    "name": "Watford FC"
+  },
+  {
+    "pes_team_id": 399,
+    "name": "West Bromwich Albion"
+  },
+  {
+    "pes_team_id": 403,
+    "name": "Angers SCO"
+  },
+  {
+    "pes_team_id": 405,
+    "name": "Stade Malherbe Caen"
+  },
+  {
+    "pes_team_id": 407,
+    "name": "Clermont Foot"
+  },
+  {
+    "pes_team_id": 412,
+    "name": "Stade Lavallois"
+  },
+  {
+    "pes_team_id": 413,
+    "name": "AC Le Havre"
+  },
+  {
+    "pes_team_id": 414,
+    "name": "FC Lorient"
+  },
+  {
+    "pes_team_id": 415,
+    "name": "AS Nancy Lorraine"
+  },
+  {
+    "pes_team_id": 418,
+    "name": "AS Saint-Étienne"
+  },
+  {
+    "pes_team_id": 420,
+    "name": "ESTAC Troyes"
+  },
+  {
+    "pes_team_id": 436,
+    "name": "FSV Mainz 05"
+  },
+  {
+    "pes_team_id": 899,
+    "name": "Zamora FC"
+  },
+  {
+    "pes_team_id": 1195,
+    "name": "KRC Genk"
+  },
+  {
+    "pes_team_id": 1196,
+    "name": "KAA Gent"
+  },
+  {
+    "pes_team_id": 1197,
+    "name": "Standard Liège"
+  },
+  {
+    "pes_team_id": 1200,
+    "name": "KV Mechelen"
+  },
+  {
+    "pes_team_id": 1203,
+    "name": "GNK Dinamo Zagreb"
+  },
+  {
+    "pes_team_id": 1207,
+    "name": "FC København"
+  },
+  {
+    "pes_team_id": 1208,
+    "name": "FC Nordsjælland"
+  },
+  {
+    "pes_team_id": 1212,
+    "name": "PAOK Thessaloniki"
+  },
+  {
+    "pes_team_id": 1216,
+    "name": "FCSB"
+  },
+  {
+    "pes_team_id": 1217,
+    "name": "CSKA Moskva"
+  },
+  {
+    "pes_team_id": 1218,
+    "name": "Zenit St. Petersburg"
+  },
+  {
+    "pes_team_id": 1219,
+    "name": "Aberdeen FC"
+  },
+  {
+    "pes_team_id": 1220,
+    "name": "Dundee United"
+  },
+  {
+    "pes_team_id": 1221,
+    "name": "Heart of Midlothian"
+  },
+  {
+    "pes_team_id": 1222,
+    "name": "Hibernian FC"
+  },
+  {
+    "pes_team_id": 1223,
+    "name": "FK Crvena Zvezda"
+  },
+  {
+    "pes_team_id": 1230,
+    "name": "Gençlerbirliği SK"
+  },
+  {
+    "pes_team_id": 1232,
+    "name": "Shakhtar Donetsk"
+  },
+  {
+    "pes_team_id": 1236,
+    "name": "Argentinos Juniors"
+  },
+  {
+    "pes_team_id": 1237,
+    "name": "Racing Club"
+  },
+  {
+    "pes_team_id": 1238,
+    "name": "Estudiantes de la Plata"
+  },
+  {
+    "pes_team_id": 1239,
+    "name": "Gimnasia La Plata"
+  },
+  {
+    "pes_team_id": 1240,
+    "name": "CA Independiente"
+  },
+  {
+    "pes_team_id": 1241,
+    "name": "Newell's Old Boys"
+  },
+  {
+    "pes_team_id": 1242,
+    "name": "CA Rosario Central"
+  },
+  {
+    "pes_team_id": 1243,
+    "name": "CA San Lorenzo"
+  },
+  {
+    "pes_team_id": 1244,
+    "name": "CA Vélez Sarsfield"
+  },
+  {
+    "pes_team_id": 1245,
+    "name": "Atlético Mineiro"
+  },
+  {
+    "pes_team_id": 1246,
+    "name": "Botafogo"
+  },
+  {
+    "pes_team_id": 1247,
+    "name": "SC Corinthians"
+  },
+  {
+    "pes_team_id": 1248,
+    "name": "CR Flamengo"
+  },
+  {
+    "pes_team_id": 1249,
+    "name": "Fluminense FC"
+  },
+  {
+    "pes_team_id": 1250,
+    "name": "Grêmio"
+  },
+  {
+    "pes_team_id": 1252,
+    "name": "SC Internacional"
+  },
+  {
+    "pes_team_id": 1254,
+    "name": "Santos FC"
+  },
+  {
+    "pes_team_id": 1255,
+    "name": "São Paulo FC"
+  },
+  {
+    "pes_team_id": 1256,
+    "name": "CSD Colo Colo"
+  },
+  {
+    "pes_team_id": 1257,
+    "name": "América de Cali"
+  },
+  {
+    "pes_team_id": 1258,
+    "name": "Millonarios FC"
+  },
+  {
+    "pes_team_id": 1260,
+    "name": "Club Cerro Porteño"
+  },
+  {
+    "pes_team_id": 1261,
+    "name": "Olimpia Asunción"
+  },
+  {
+    "pes_team_id": 1262,
+    "name": "Club Nacional"
+  },
+  {
+    "pes_team_id": 1263,
+    "name": "CA Peñarol"
+  },
+  {
+    "pes_team_id": 1264,
+    "name": "Club América"
+  },
+  {
+    "pes_team_id": 1265,
+    "name": "Cruz Azul"
+  },
+  {
+    "pes_team_id": 1327,
+    "name": "Queens Park Rangers"
+  },
+  {
+    "pes_team_id": 1329,
+    "name": "Stade Brestois"
+  },
+  {
+    "pes_team_id": 1330,
+    "name": "Stade de Reims"
+  },
+  {
+    "pes_team_id": 1348,
+    "name": "Al Shabab Club"
+  },
+  {
+    "pes_team_id": 1349,
+    "name": "Al Ahli SFC"
+  },
+  {
+    "pes_team_id": 1350,
+    "name": "Al Ittihad Club"
+  },
+  {
+    "pes_team_id": 1362,
+    "name": "Cesena FC"
+  },
+  {
+    "pes_team_id": 1489,
+    "name": "Al Hilal SFC"
+  },
+  {
+    "pes_team_id": 1528,
+    "name": "Valenciennes FC"
+  },
+  {
+    "pes_team_id": 1586,
+    "name": "RB Salzburg"
+  },
+  {
+    "pes_team_id": 1589,
+    "name": "Hull City"
+  },
+  {
+    "pes_team_id": 1600,
+    "name": "Spezia Calcio"
+  },
+  {
+    "pes_team_id": 1695,
+    "name": "Wisła Kraków"
+  },
+  {
+    "pes_team_id": 1702,
+    "name": "Malmö FF"
+  },
+  {
+    "pes_team_id": 1706,
+    "name": "FC Basel 1893"
+  },
+  {
+    "pes_team_id": 1733,
+    "name": "HJK Helsinki"
+  },
+  {
+    "pes_team_id": 1746,
+    "name": "CFR Cluj"
+  },
+  {
+    "pes_team_id": 1753,
+    "name": "Dinamo Moskva"
+  },
+  {
+    "pes_team_id": 1756,
+    "name": "Legia Warszawa"
+  },
+  {
+    "pes_team_id": 1760,
+    "name": "Bristol City"
+  },
+  {
+    "pes_team_id": 1765,
+    "name": "Granada CF"
+  },
+  {
+    "pes_team_id": 1778,
+    "name": "CF Monterrey"
+  },
+  {
+    "pes_team_id": 1782,
+    "name": "Tigres UANL"
+  },
+  {
+    "pes_team_id": 1804,
+    "name": "Vitória Sport Clube"
+  },
+  {
+    "pes_team_id": 1832,
+    "name": "Bröndby IF"
+  },
+  {
+    "pes_team_id": 1881,
+    "name": "Fagiano Okayama"
+  },
+  {
+    "pes_team_id": 1902,
+    "name": "Al Ettifaq FC"
+  },
+  {
+    "pes_team_id": 1907,
+    "name": "LDU Quito"
+  },
+  {
+    "pes_team_id": 1909,
+    "name": "Swansea City"
+  },
+  {
+    "pes_team_id": 1919,
+    "name": "US Sassuolo"
+  },
+  {
+    "pes_team_id": 1922,
+    "name": "CA Huracán"
+  },
+  {
+    "pes_team_id": 1924,
+    "name": "Gimnasia de Mendoza"
+  },
+  {
+    "pes_team_id": 1925,
+    "name": "Estudiantes de Río Cuarto"
+  },
+  {
+    "pes_team_id": 1926,
+    "name": "Club Atlético Tigre"
+  },
+  {
+    "pes_team_id": 1927,
+    "name": "CA Banfield"
+  },
+  {
+    "pes_team_id": 1929,
+    "name": "Club Atlético Lanús"
+  },
+  {
+    "pes_team_id": 1930,
+    "name": "Athletico Paranaense"
+  },
+  {
+    "pes_team_id": 1931,
+    "name": "Coritiba FC"
+  },
+  {
+    "pes_team_id": 1933,
+    "name": "Goiás EC"
+  },
+  {
+    "pes_team_id": 1935,
+    "name": "Clube Náutico"
+  },
+  {
+    "pes_team_id": 1936,
+    "name": "Sport Recife"
+  },
+  {
+    "pes_team_id": 1937,
+    "name": "EC Vitória"
+  },
+  {
+    "pes_team_id": 1941,
+    "name": "Rubin Kazan"
+  },
+  {
+    "pes_team_id": 1944,
+    "name": "CD Nacional"
+  },
+  {
+    "pes_team_id": 1945,
+    "name": "Trabzonspor"
+  },
+  {
+    "pes_team_id": 1948,
+    "name": "Aris Thessaloniki"
+  },
+  {
+    "pes_team_id": 1950,
+    "name": "BSC Young Boys"
+  },
+  {
+    "pes_team_id": 1974,
+    "name": "Sporting Braga"
+  },
+  {
+    "pes_team_id": 1979,
+    "name": "Rio Ave FC"
+  },
+  {
+    "pes_team_id": 1985,
+    "name": "Kilmarnock FC"
+  },
+  {
+    "pes_team_id": 1986,
+    "name": "Motherwell FC"
+  },
+  {
+    "pes_team_id": 1987,
+    "name": "St. Mirren FC"
+  },
+  {
+    "pes_team_id": 1989,
+    "name": "Antalyaspor"
+  },
+  {
+    "pes_team_id": 1995,
+    "name": "Istanbul Başakşehir FK"
+  },
+  {
+    "pes_team_id": 1996,
+    "name": "Kayserispor"
+  },
+  {
+    "pes_team_id": 2009,
+    "name": "Cercle Brugge"
+  },
+  {
+    "pes_team_id": 2010,
+    "name": "RSC Charleroi"
+  },
+  {
+    "pes_team_id": 2019,
+    "name": "Zulte Waregem"
+  },
+  {
+    "pes_team_id": 2020,
+    "name": "Asteras Tripolis"
+  },
+  {
+    "pes_team_id": 2024,
+    "name": "APO Levadiakos"
+  },
+  {
+    "pes_team_id": 2025,
+    "name": "OFI Crete"
+  },
+  {
+    "pes_team_id": 2067,
+    "name": "Aarhus GF"
+  },
+  {
+    "pes_team_id": 2069,
+    "name": "FC Midtjylland"
+  },
+  {
+    "pes_team_id": 2070,
+    "name": "Odense Boldklub"
+  },
+  {
+    "pes_team_id": 2071,
+    "name": "Randers FC"
+  },
+  {
+    "pes_team_id": 2078,
+    "name": "LASK Linz"
+  },
+  {
+    "pes_team_id": 2081,
+    "name": "SK Sturm Graz"
+  },
+  {
+    "pes_team_id": 2092,
+    "name": "FC RFS"
+  },
+  {
+    "pes_team_id": 2126,
+    "name": "Lech Poznan"
+  },
+  {
+    "pes_team_id": 2178,
+    "name": "APOEL Nicosia"
+  },
+  {
+    "pes_team_id": 2185,
+    "name": "Omonia Nicosia"
+  },
+  {
+    "pes_team_id": 2187,
+    "name": "Girona FC"
+  },
+  {
+    "pes_team_id": 2188,
+    "name": "SD Huesca"
+  },
+  {
+    "pes_team_id": 2191,
+    "name": "Universidad Católica"
+  },
+  {
+    "pes_team_id": 2192,
+    "name": "Audax Italiano"
+  },
+  {
+    "pes_team_id": 2193,
+    "name": "Atlético Nacional"
+  },
+  {
+    "pes_team_id": 2195,
+    "name": "Boyacá Chicó FC"
+  },
+  {
+    "pes_team_id": 2198,
+    "name": "Club Libertad"
+  },
+  {
+    "pes_team_id": 2208,
+    "name": "CD Everton"
+  },
+  {
+    "pes_team_id": 2209,
+    "name": "Universidad de Chile"
+  },
+  {
+    "pes_team_id": 2210,
+    "name": "Independiente Medellín"
+  },
+  {
+    "pes_team_id": 2215,
+    "name": "Universitario de Deportes"
+  },
+  {
+    "pes_team_id": 2216,
+    "name": "Sporting Cristal"
+  },
+  {
+    "pes_team_id": 2218,
+    "name": "Deportivo Táchira"
+  },
+  {
+    "pes_team_id": 2229,
+    "name": "FK Rostov"
+  },
+  {
+    "pes_team_id": 2283,
+    "name": "Bolívar La Paz"
+  },
+  {
+    "pes_team_id": 2284,
+    "name": "Once Caldas"
+  },
+  {
+    "pes_team_id": 2285,
+    "name": "Junior FC"
+  },
+  {
+    "pes_team_id": 2287,
+    "name": "Club Alianza Lima"
+  },
+  {
+    "pes_team_id": 2320,
+    "name": "Calcio Padova"
+  },
+  {
+    "pes_team_id": 2360,
+    "name": "Universidad de Concepción"
+  },
+  {
+    "pes_team_id": 2361,
+    "name": "Deportes Tolima"
+  },
+  {
+    "pes_team_id": 2372,
+    "name": "Machida Zelvia"
+  },
+  {
+    "pes_team_id": 2373,
+    "name": "V-Varen Nagasaki"
+  },
+  {
+    "pes_team_id": 2375,
+    "name": "Ferencváros TC"
+  },
+  {
+    "pes_team_id": 2380,
+    "name": "FC Arouca"
+  },
+  {
+    "pes_team_id": 2383,
+    "name": "GD Estoril Praia"
+  },
+  {
+    "pes_team_id": 2387,
+    "name": "Gil Vicente FC"
+  },
+  {
+    "pes_team_id": 2388,
+    "name": "Moreirense FC"
+  },
+  {
+    "pes_team_id": 2391,
+    "name": "CD Santa Clara"
+  },
+  {
+    "pes_team_id": 2450,
+    "name": "América Mineiro"
+  },
+  {
+    "pes_team_id": 2451,
+    "name": "Atlético Goianiense"
+  },
+  {
+    "pes_team_id": 2452,
+    "name": "Avaí FC"
+  },
+  {
+    "pes_team_id": 2453,
+    "name": "EC Bahia"
+  },
+  {
+    "pes_team_id": 2454,
+    "name": "Ceará SC"
+  },
+  {
+    "pes_team_id": 2459,
+    "name": "Red Bull Bragantino"
+  },
+  {
+    "pes_team_id": 2460,
+    "name": "Criciúma EC"
+  },
+  {
+    "pes_team_id": 2465,
+    "name": "AA Ponte Preta"
+  },
+  {
+    "pes_team_id": 2468,
+    "name": "Vila Nova FC"
+  },
+  {
+    "pes_team_id": 2502,
+    "name": "The Strongest"
+  },
+  {
+    "pes_team_id": 2506,
+    "name": "Clube de Regatas Brasil"
+  },
+  {
+    "pes_team_id": 2517,
+    "name": "SS Juve Stabia"
+  },
+  {
+    "pes_team_id": 2525,
+    "name": "HNK Hajduk Split"
+  },
+  {
+    "pes_team_id": 2536,
+    "name": "Club Atlético Belgrano"
+  },
+  {
+    "pes_team_id": 2538,
+    "name": "Club Atlético Unión"
+  },
+  {
+    "pes_team_id": 2541,
+    "name": "CD O'Higgins"
+  },
+  {
+    "pes_team_id": 2543,
+    "name": "Deportes Concepción"
+  },
+  {
+    "pes_team_id": 2544,
+    "name": "Deportes La Serena"
+  },
+  {
+    "pes_team_id": 2545,
+    "name": "Huachipato FC"
+  },
+  {
+    "pes_team_id": 2546,
+    "name": "Unión La Calera"
+  },
+  {
+    "pes_team_id": 2548,
+    "name": "CD Palestino"
+  },
+  {
+    "pes_team_id": 2553,
+    "name": "CD Cobresal"
+  },
+  {
+    "pes_team_id": 2555,
+    "name": "Volos NPS"
+  },
+  {
+    "pes_team_id": 2556,
+    "name": "Panetolikos FC"
+  },
+  {
+    "pes_team_id": 2559,
+    "name": "Atromitos Athens"
+  },
+  {
+    "pes_team_id": 2576,
+    "name": "Al Fateh SC"
+  },
+  {
+    "pes_team_id": 2577,
+    "name": "Al Nassr FC"
+  },
+  {
+    "pes_team_id": 2580,
+    "name": "Al Taawoun FC"
+  },
+  {
+    "pes_team_id": 2614,
+    "name": "CD Tondela"
+  },
+  {
+    "pes_team_id": 2616,
+    "name": "CD Mirandés"
+  },
+  {
+    "pes_team_id": 2618,
+    "name": "FK Krasnodar"
+  },
+  {
+    "pes_team_id": 2621,
+    "name": "Dundee FC"
+  },
+  {
+    "pes_team_id": 2625,
+    "name": "Kasimpaşa SK"
+  },
+  {
+    "pes_team_id": 2650,
+    "name": "Deportivo Cali"
+  },
+  {
+    "pes_team_id": 2651,
+    "name": "Deportivo Pasto"
+  },
+  {
+    "pes_team_id": 2652,
+    "name": "Cúcuta Deportivo"
+  },
+  {
+    "pes_team_id": 2653,
+    "name": "Rionegro Águilas"
+  },
+  {
+    "pes_team_id": 2654,
+    "name": "Internacional de Bogotá"
+  },
+  {
+    "pes_team_id": 2657,
+    "name": "Independiente Santa Fe"
+  },
+  {
+    "pes_team_id": 2658,
+    "name": "Barcelona SC"
+  },
+  {
+    "pes_team_id": 2659,
+    "name": "Independiente Del Valle"
+  },
+  {
+    "pes_team_id": 2699,
+    "name": "CD Ñublense"
+  },
+  {
+    "pes_team_id": 2707,
+    "name": "Coquimbo Unido"
+  },
+  {
+    "pes_team_id": 2717,
+    "name": "CA Aldosivi"
+  },
+  {
+    "pes_team_id": 2719,
+    "name": "Atlético Tucumán"
+  },
+  {
+    "pes_team_id": 2722,
+    "name": "Defensa y Justicia"
+  },
+  {
+    "pes_team_id": 2726,
+    "name": "Independiente Rivadavia"
+  },
+  {
+    "pes_team_id": 2727,
+    "name": "Instituto AC Córdoba"
+  },
+  {
+    "pes_team_id": 2730,
+    "name": "CA Sarmiento"
+  },
+  {
+    "pes_team_id": 3095,
+    "name": "RAAL La Louvière"
+  },
+  {
+    "pes_team_id": 3099,
+    "name": "FCV Dender"
+  },
+  {
+    "pes_team_id": 4071,
+    "name": "AFC Bournemouth"
+  },
+  {
+    "pes_team_id": 4092,
+    "name": "Qingdao West Coast"
+  },
+  {
+    "pes_team_id": 4094,
+    "name": "Shanghai Port"
+  },
+  {
+    "pes_team_id": 4108,
+    "name": "Chapecoense"
+  },
+  {
+    "pes_team_id": 4115,
+    "name": "Tampines Rovers"
+  },
+  {
+    "pes_team_id": 4123,
+    "name": "FC Metz"
+  },
+  {
+    "pes_team_id": 4124,
+    "name": "FC Augsburg"
+  },
+  {
+    "pes_team_id": 4126,
+    "name": "TSG 1899 Hoffenheim"
+  },
+  {
+    "pes_team_id": 4137,
+    "name": "FC Köln"
+  },
+  {
+    "pes_team_id": 4139,
+    "name": "FC St. Pauli"
+  },
+  {
+    "pes_team_id": 4140,
+    "name": "FC Union Berlin"
+  },
+  {
+    "pes_team_id": 4141,
+    "name": "US Avellino"
+  },
+  {
+    "pes_team_id": 4143,
+    "name": "Krylya Sovetov Samara"
+  },
+  {
+    "pes_team_id": 4145,
+    "name": "Deportivo Alavés"
+  },
+  {
+    "pes_team_id": 4146,
+    "name": "SD Eibar"
+  },
+  {
+    "pes_team_id": 4148,
+    "name": "Chicago Fire FC"
+  },
+  {
+    "pes_team_id": 4151,
+    "name": "Columbus Crew"
+  },
+  {
+    "pes_team_id": 4153,
+    "name": "FC Dallas"
+  },
+  {
+    "pes_team_id": 4155,
+    "name": "Los Angeles Galaxy"
+  },
+  {
+    "pes_team_id": 4156,
+    "name": "CF Montréal"
+  },
+  {
+    "pes_team_id": 4157,
+    "name": "New England Revolution"
+  },
+  {
+    "pes_team_id": 4158,
+    "name": "New York RB"
+  },
+  {
+    "pes_team_id": 4160,
+    "name": "Portland Timbers"
+  },
+  {
+    "pes_team_id": 4162,
+    "name": "San Jose Earthquakes"
+  },
+  {
+    "pes_team_id": 4163,
+    "name": "Seattle Sounders"
+  },
+  {
+    "pes_team_id": 4164,
+    "name": "Sporting Kansas City"
+  },
+  {
+    "pes_team_id": 4166,
+    "name": "Vancouver Whitecaps"
+  },
+  {
+    "pes_team_id": 4168,
+    "name": "Shandong Taishan"
+  },
+  {
+    "pes_team_id": 4171,
+    "name": "Al Kuwait SC"
+  },
+  {
+    "pes_team_id": 4180,
+    "name": "Brentford FC"
+  },
+  {
+    "pes_team_id": 4183,
+    "name": "Coventry City"
+  },
+  {
+    "pes_team_id": 4192,
+    "name": "Preston North End"
+  },
+  {
+    "pes_team_id": 4194,
+    "name": "Sheffield United"
+  },
+  {
+    "pes_team_id": 4200,
+    "name": "Amiens SC"
+  },
+  {
+    "pes_team_id": 4201,
+    "name": "US Boulogne"
+  },
+  {
+    "pes_team_id": 4206,
+    "name": "USL Dunkerque"
+  },
+  {
+    "pes_team_id": 4211,
+    "name": "Paris FC"
+  },
+  {
+    "pes_team_id": 4212,
+    "name": "Red Star FC"
+  },
+  {
+    "pes_team_id": 4213,
+    "name": "RC Strasbourg Alsace"
+  },
+  {
+    "pes_team_id": 4218,
+    "name": "Carrarese Calcio"
+  },
+  {
+    "pes_team_id": 4219,
+    "name": "Como 1907"
+  },
+  {
+    "pes_team_id": 4220,
+    "name": "US Cremonese"
+  },
+  {
+    "pes_team_id": 4225,
+    "name": "AC Reggiana 1919"
+  },
+  {
+    "pes_team_id": 4228,
+    "name": "FC Südtirol"
+  },
+  {
+    "pes_team_id": 4229,
+    "name": "Venezia FC"
+  },
+  {
+    "pes_team_id": 4230,
+    "name": "Virtus Entella"
+  },
+  {
+    "pes_team_id": 4233,
+    "name": "US Catanzaro"
+  },
+  {
+    "pes_team_id": 4234,
+    "name": "Frosinone Calcio"
+  },
+  {
+    "pes_team_id": 4237,
+    "name": "US Lecce"
+  },
+  {
+    "pes_team_id": 4241,
+    "name": "Pisa Sporting Club"
+  },
+  {
+    "pes_team_id": 4247,
+    "name": "Burgos CF"
+  },
+  {
+    "pes_team_id": 4252,
+    "name": "Cultural Leonesa"
+  },
+  {
+    "pes_team_id": 4260,
+    "name": "Real Oviedo"
+  },
+  {
+    "pes_team_id": 4272,
+    "name": "CD Leganés"
+  },
+  {
+    "pes_team_id": 4276,
+    "name": "Sociedad B"
+  },
+  {
+    "pes_team_id": 4302,
+    "name": "Albacete Balompié"
+  },
+  {
+    "pes_team_id": 4308,
+    "name": "Cádiz CF"
+  },
+  {
+    "pes_team_id": 4326,
+    "name": "FK Qarabağ"
+  },
+  {
+    "pes_team_id": 4344,
+    "name": "Slovan Bratislava"
+  },
+  {
+    "pes_team_id": 4347,
+    "name": "FC Sheriff Tiraspol"
+  },
+  {
+    "pes_team_id": 4355,
+    "name": "Ludogorets Razgrad"
+  },
+  {
+    "pes_team_id": 4365,
+    "name": "Portsmouth FC"
+  },
+  {
+    "pes_team_id": 4370,
+    "name": "Grenoble Foot 38"
+  },
+  {
+    "pes_team_id": 4372,
+    "name": "Rodez AF"
+  },
+  {
+    "pes_team_id": 4379,
+    "name": "Mantova 1911"
+  },
+  {
+    "pes_team_id": 4395,
+    "name": "CD Castellón"
+  },
+  {
+    "pes_team_id": 4914,
+    "name": "AC Monza"
+  },
+  {
+    "pes_team_id": 4941,
+    "name": "BG Pathum United"
+  },
+  {
+    "pes_team_id": 4965,
+    "name": "FC Lugano"
+  },
+  {
+    "pes_team_id": 4995,
+    "name": "Central Córdoba SDE"
+  },
+  {
+    "pes_team_id": 5009,
+    "name": "FC Heidenheim 1846"
+  },
+  {
+    "pes_team_id": 5010,
+    "name": "RB Leipzig"
+  },
+  {
+    "pes_team_id": 5028,
+    "name": "FC Famalicão"
+  },
+  {
+    "pes_team_id": 5046,
+    "name": "Club Atlético Talleres"
+  },
+  {
+    "pes_team_id": 5048,
+    "name": "Londrina EC"
+  },
+  {
+    "pes_team_id": 5061,
+    "name": "New York City"
+  },
+  {
+    "pes_team_id": 5062,
+    "name": "Orlando City"
+  },
+  {
+    "pes_team_id": 5086,
+    "name": "Oxford United"
+  },
+  {
+    "pes_team_id": 5099,
+    "name": "Pau FC"
+  },
+  {
+    "pes_team_id": 5137,
+    "name": "EC Juventude"
+  },
+  {
+    "pes_team_id": 5139,
+    "name": "Botafogo FC"
+  },
+  {
+    "pes_team_id": 5142,
+    "name": "Cuiabá EC"
+  },
+  {
+    "pes_team_id": 5143,
+    "name": "Fortaleza EC"
+  },
+  {
+    "pes_team_id": 5145,
+    "name": "Clube do Remo"
+  },
+  {
+    "pes_team_id": 5171,
+    "name": "Henan FC"
+  },
+  {
+    "pes_team_id": 5173,
+    "name": "Shanghai Shenhua"
+  },
+  {
+    "pes_team_id": 5175,
+    "name": "Tianjin Jinmen Tiger"
+  },
+  {
+    "pes_team_id": 5180,
+    "name": "Zhejiang FC"
+  },
+  {
+    "pes_team_id": 5181,
+    "name": "Liaoning Tieren"
+  },
+  {
+    "pes_team_id": 5184,
+    "name": "Shenzhen Peng City"
+  },
+  {
+    "pes_team_id": 5185,
+    "name": "Yunnan Yukun"
+  },
+  {
+    "pes_team_id": 5189,
+    "name": "Slavia Prague"
+  },
+  {
+    "pes_team_id": 5191,
+    "name": "Royal Antwerp FC"
+  },
+  {
+    "pes_team_id": 5194,
+    "name": "Sint-Truiden VV"
+  },
+  {
+    "pes_team_id": 5196,
+    "name": "Akhmat Grozny"
+  },
+  {
+    "pes_team_id": 5202,
+    "name": "Alanyaspor"
+  },
+  {
+    "pes_team_id": 5203,
+    "name": "Göztepe SK"
+  },
+  {
+    "pes_team_id": 5204,
+    "name": "Konyaspor"
+  },
+  {
+    "pes_team_id": 5207,
+    "name": "Alianza FC"
+  },
+  {
+    "pes_team_id": 5208,
+    "name": "Atlético Bucaramanga"
+  },
+  {
+    "pes_team_id": 5217,
+    "name": "Oud-Heverlee Leuven"
+  },
+  {
+    "pes_team_id": 5220,
+    "name": "Union Saint Gilloise"
+  },
+  {
+    "pes_team_id": 5221,
+    "name": "KVC Westerlo"
+  },
+  {
+    "pes_team_id": 5225,
+    "name": "Silkeborg IF"
+  },
+  {
+    "pes_team_id": 5226,
+    "name": "Sønderjyske Fodbold"
+  },
+  {
+    "pes_team_id": 5229,
+    "name": "FC Fredericia"
+  },
+  {
+    "pes_team_id": 5235,
+    "name": "Vejle Boldklub"
+  },
+  {
+    "pes_team_id": 5237,
+    "name": "Viborg FF"
+  },
+  {
+    "pes_team_id": 5242,
+    "name": "Molde FK"
+  },
+  {
+    "pes_team_id": 5253,
+    "name": "FK Bodø/Glimt"
+  },
+  {
+    "pes_team_id": 5269,
+    "name": "Jagiellonia Bialystok"
+  },
+  {
+    "pes_team_id": 5288,
+    "name": "Rakow Czestochowa"
+  },
+  {
+    "pes_team_id": 5295,
+    "name": "Baltika Kaliningrad"
+  },
+  {
+    "pes_team_id": 5296,
+    "name": "FC Sochi"
+  },
+  {
+    "pes_team_id": 5300,
+    "name": "FC Pari Nizhny Novgorod"
+  },
+  {
+    "pes_team_id": 5301,
+    "name": "FC Orenburg"
+  },
+  {
+    "pes_team_id": 5317,
+    "name": "Falkirk FC"
+  },
+  {
+    "pes_team_id": 5319,
+    "name": "Livingston FC"
+  },
+  {
+    "pes_team_id": 5325,
+    "name": "IF Elfsborg"
+  },
+  {
+    "pes_team_id": 5354,
+    "name": "Caykur Rizespor"
+  },
+  {
+    "pes_team_id": 5356,
+    "name": "Gaziantep FK"
+  },
+  {
+    "pes_team_id": 5361,
+    "name": "Samsunspor"
+  },
+  {
+    "pes_team_id": 5366,
+    "name": "Club Deportivo Riestra"
+  },
+  {
+    "pes_team_id": 5370,
+    "name": "Deportivo Pereira"
+  },
+  {
+    "pes_team_id": 5371,
+    "name": "Fortaleza CEIF"
+  },
+  {
+    "pes_team_id": 5373,
+    "name": "Llaneros FC"
+  },
+  {
+    "pes_team_id": 5376,
+    "name": "Jaguares de Córdoba"
+  },
+  {
+    "pes_team_id": 5433,
+    "name": "Operário PR"
+  },
+  {
+    "pes_team_id": 5454,
+    "name": "CA Platense"
+  },
+  {
+    "pes_team_id": 5458,
+    "name": "SD Aucas"
+  },
+  {
+    "pes_team_id": 5586,
+    "name": "Dalian Yingbo"
+  },
+  {
+    "pes_team_id": 5633,
+    "name": "Casa Pia AC"
+  },
+  {
+    "pes_team_id": 5644,
+    "name": "FC Andorra"
+  },
+  {
+    "pes_team_id": 5652,
+    "name": "Fatih Karagümrük"
+  },
+  {
+    "pes_team_id": 5657,
+    "name": "CA Barracas Central"
+  },
+  {
+    "pes_team_id": 5685,
+    "name": "FC Annecy"
+  },
+  {
+    "pes_team_id": 5736,
+    "name": "Atlanta United FC"
+  },
+  {
+    "pes_team_id": 5737,
+    "name": "FC Cincinnati"
+  },
+  {
+    "pes_team_id": 5738,
+    "name": "Inter Miami CF"
+  },
+  {
+    "pes_team_id": 5739,
+    "name": "Nashville SC"
+  },
+  {
+    "pes_team_id": 5740,
+    "name": "Austin FC"
+  },
+  {
+    "pes_team_id": 5741,
+    "name": "Los Angeles FC"
+  },
+  {
+    "pes_team_id": 5767,
+    "name": "Mirassol FC"
+  },
+  {
+    "pes_team_id": 5768,
+    "name": "Grêmio Novorizontino"
+  },
+  {
+    "pes_team_id": 5820,
+    "name": "Eyüpspor"
+  },
+  {
+    "pes_team_id": 5821,
+    "name": "Kocaelispor"
+  },
+  {
+    "pes_team_id": 5844,
+    "name": "Estrela da Amadora"
+  },
+  {
+    "pes_team_id": 5845,
+    "name": "FC Alverca"
+  },
+  {
+    "pes_team_id": 5895,
+    "name": "AD Ceuta FC"
+  },
+  {
+    "pes_team_id": 5909,
+    "name": "São Bernardo FC"
+  },
+  {
+    "pes_team_id": 5912,
+    "name": "Daejeon Hana Citizen"
+  },
+  {
+    "pes_team_id": 5954,
+    "name": "Avs Futebol SAD"
+  },
+  {
+    "pes_team_id": 5973,
+    "name": "Athletic Club"
+  },
+  {
+    "pes_team_id": 5980,
+    "name": "Deportes Limache"
+  },
+  {
+    "pes_team_id": 6044,
+    "name": "Thep Xanh Nam Dinh FC"
+  },
+  {
+    "pes_team_id": 6069,
+    "name": "Wrexham AFC"
+  },
+  {
+    "pes_team_id": 9000,
+    "name": "Al Hazem SC"
+  },
+  {
+    "pes_team_id": 9001,
+    "name": "Pafos FC"
+  },
+  {
+    "pes_team_id": 9002,
+    "name": "Al Riyadh SC"
+  },
+  {
+    "pes_team_id": 9003,
+    "name": "Damac FC"
+  },
+  {
+    "pes_team_id": 9004,
+    "name": "NEOM SC"
+  },
+  {
+    "pes_team_id": 9005,
+    "name": "Al Okhdood Club"
+  },
+  {
+    "pes_team_id": 9006,
+    "name": "Al Najma SC"
+  },
+  {
+    "pes_team_id": 9007,
+    "name": "Al Khaleej Club"
+  },
+  {
+    "pes_team_id": 9008,
+    "name": "AE Larisa"
+  },
+  {
+    "pes_team_id": 9010,
+    "name": "Al Kholood Club"
+  },
+  {
+    "pes_team_id": 9012,
+    "name": "Al Qadsiah FC"
+  },
+  {
+    "pes_team_id": 9014,
+    "name": "Al Fayha FC"
+  },
+  {
+    "pes_team_id": 9015,
+    "name": "Dinamo Makhachkala"
+  },
+  {
+    "pes_team_id": 9016,
+    "name": "Akron Tolyatti"
+  },
+  {
+    "pes_team_id": 9019,
+    "name": "Panserraikos FC"
+  },
+  {
+    "pes_team_id": 9020,
+    "name": "AE Kifisias"
+  },
+  {
+    "pes_team_id": 9029,
+    "name": "El Ahly Cairo"
+  },
+  {
+    "pes_team_id": 9033,
+    "name": "Esperance Tunis"
+  },
+  {
+    "pes_team_id": 65815,
+    "name": "Jeonbuk Hyundai Motors"
+  },
+  {
+    "pes_team_id": 65817,
+    "name": "Pohang Steelers"
+  },
+  {
+    "pes_team_id": 66871,
+    "name": "Al Ain FC"
+  },
+  {
+    "pes_team_id": 66877,
+    "name": "Sepahan SC"
+  },
+  {
+    "pes_team_id": 66882,
+    "name": "Al Rayyan SC"
+  },
+  {
+    "pes_team_id": 66895,
+    "name": "Pakhtakor Tashkent"
+  },
+  {
+    "pes_team_id": 67024,
+    "name": "Al Gharafa SC"
+  },
+  {
+    "pes_team_id": 67029,
+    "name": "Buriram United"
+  },
+  {
+    "pes_team_id": 67112,
+    "name": "Esteghlal FC"
+  },
+  {
+    "pes_team_id": 67114,
+    "name": "Sydney FC"
+  },
+  {
+    "pes_team_id": 68138,
+    "name": "Tractor FC"
+  },
+  {
+    "pes_team_id": 68179,
+    "name": "Muangthong United FC"
+  },
+  {
+    "pes_team_id": 69706,
+    "name": "Al Shorta SC"
+  },
+  {
+    "pes_team_id": 69709,
+    "name": "Al Sadd SC"
+  },
+  {
+    "pes_team_id": 69710,
+    "name": "Ulsan HD FC"
+  },
+  {
+    "pes_team_id": 69714,
+    "name": "FC Nasaf Qarshi"
+  },
+  {
+    "pes_team_id": 70481,
+    "name": "PERSIB Bandung"
+  },
+  {
+    "pes_team_id": 70484,
+    "name": "Johor Darul Ta'zim"
+  },
+  {
+    "pes_team_id": 70487,
+    "name": "Persepolis FC"
+  },
+  {
+    "pes_team_id": 70490,
+    "name": "Al Wehdat SC"
+  },
+  {
+    "pes_team_id": 70923,
+    "name": "Air Force Club"
+  },
+  {
+    "pes_team_id": 70924,
+    "name": "Al Wasl FC"
+  },
+  {
+    "pes_team_id": 70930,
+    "name": "True Bangkok United"
+  },
+  {
+    "pes_team_id": 70937,
+    "name": "Port FC"
+  },
+  {
+    "pes_team_id": 71134,
+    "name": "Lion City Sailors"
+  },
+  {
+    "pes_team_id": 71135,
+    "name": "FC Istiqlol Dushanbe"
+  },
+  {
+    "pes_team_id": 71212,
+    "name": "Sharjah FC"
+  },
+  {
+    "pes_team_id": 71311,
+    "name": "Kaya FC-Iloilo"
+  },
+  {
+    "pes_team_id": 71450,
+    "name": "Gwangju FC"
+  },
+  {
+    "pes_team_id": 71574,
+    "name": "Mohun Bagan Super Giant"
+  },
+  {
+    "pes_team_id": 71576,
+    "name": "Al Hussein SC"
+  },
+  {
+    "pes_team_id": 71577,
+    "name": "Selangor FC"
+  }
 ]

@@ -1,13 +1,16 @@
 # FLEditScrape — Football Life & PES 2021 Transfer Tool
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-121%2F121%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)]()
 [![Daily Sync](https://img.shields.io/badge/Cloud%20Sync-Automated%20Daily-success.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 An automated, safe, and intelligent player transfer synchronization tool for **SP Football Life** and **eFootball PES 2021**.
 
-It automatically fetches live, verified football transfers from **FotMob's real-time transfer feed**, cross-verifies player positions, nationalities, ages, and squad rosters, handles squad limits with position-aware ability logic, auto-assigns conflict-free shirt numbers, protects tactical game plans, and writes updates directly into your `EDIT00000000` save file.
+It fetches live football transfers from **FotMob**, verifies player identity against
+the current FL26 catalog and the save's actual roster state, handles stale loan
+chains, assigns conflict-free shirt numbers, protects tactical game plans, and
+writes validated updates into your `EDIT00000000` save file.
 
 > [!NOTE]
 > **Current Base Database: SP Football Life 2026**
@@ -65,19 +68,20 @@ Pre-built and updated `EDIT00000000` save files and visual transfer report cards
 ## ⚡ Key Features
 
 - **🚀 Live Real-Time Scraping**: Direct async HTTP stream from FotMob for all latest transfers, loans, releases, and signings (<0.5s execution, 0 bot blocks).
-- **🌪️ Deep Mode (635 Indexed Clubs)**: Sequentially fetches every unique club currently present in the repository's validated FotMob indexes, including squad metadata that is absent from the global feed.
+- **🌪️ Deep Mode (504 One-to-One Clubs)**: Sequentially fetches each FotMob identity that maps unambiguously to one PES club, including squad metadata absent from the global feed.
 - **🛡️ Formation & Game Plan Doctor**: Preserves the active lineup mapping when roster slots are compacted. Roles belonging to a departing player are reset to the game's automatic/default selection.
 - **🔢 Authentic Squad Sync**: Beyond just transfers, the script extracts real **Shirt Numbers** from FotMob squad lists and perfectly applies them in-game! Falls back to smart auto-assignment if the data is missing.
-- **🎯 Tri-Factor Disambiguation Gate**: Strict multi-parameter matching combining name similarity, position gate, nationality verification, and age checks (+6.0 boost for exact nationality match, age-range alignment).
+- **🎯 Roster-Aware Identity Gate**: Matches the current 29.5k FL26 player catalog, then resolves duplicate names against source/destination roster context. Position, nationality, and age evidence is used only when it is genuinely present.
 - **👥 Source-First Squad Verification**: Resolves duplicate player names against the source roster first, then the destination only as an idempotent fallback. Ambiguous identities and below-threshold context matches are skipped.
+- **🪪 Stable Player Identity**: Persists FotMob `playerId` ↔ PES player-ID evidence per output save, so renamed players can be recovered while conflicting histories are rejected.
 - **🚧 Fail-Closed Transfer Gate**: A move or release is applied only when the player's actual current club equals the matched source club. Stale events and source/current conflicts cannot move a player out of an unrelated team.
 - **📅 Cumulative Auto Replay**: Automatic mode scans every available FotMob page through today, while manual summer/winter ranges remain bounded and future-effective or undated events are excluded.
 - **📊 Visual HTML & Markdown Report Cards**: Separates real club transfers from shirt-number-only changes, with responsive tables, accurate metrics, confidence ratings, and a concise GitHub Step Summary.
 - **🔄 Intelligent Loan & Loan Return Handling**: On-loan players are seamlessly transferred to their loan clubs, and players returning from loans (*End of Loan*) are accurately restored to their parent clubs.
 - **📋 Contract Extension Auto-Filter**: Automatically detects and skips same-club contract renewals (`contractExtension: true`) to avoid redundant roster operations.
-- **🧠 Position-Aware Overflow & Starting XI Protection**: When a squad reaches the 40-player limit, the tool automatically releases deep reserves with the lowest overall ability while **protecting Starting XI players** and **preserving at least 2 Goalkeepers per squad**.
-- **📊 23k+ Universal Database**: Pre-indexed database of **23,780 players** and **580+ clubs** across 29 leagues. National teams are safely protected.
-- **🛡️ Safe & Reversible**: Automatic rolling backups, pre/post-edit integrity checks, atomic verified encryption, dry-run simulation mode, and structured JSON Lines audit logs.
+- **🧠 Fail-Closed Squad Limits**: A full 40-player squad is skipped by default. The optional overflow-release mode is rejected unless complete position and OVR metadata exists for every rostered player, preventing arbitrary releases from a name-only catalog.
+- **📊 Current FL26 Catalog**: The Update 2.2 reference contains **29,502 players**; a roster-only legacy fallback covers exceptional IDs without reintroducing thousands of stale free agents. Every roster ID must resolve or the run aborts.
+- **🛡️ Safe & Reversible**: Automatic rolling backups, pre/post-edit integrity checks, atomic verified encryption, per-output process locking, dry-run simulation mode, and structured JSON Lines audit logs.
 
 ---
 
@@ -132,7 +136,10 @@ python run.py run --dry-run --edit-file base/EDIT00000000
 python run.py validate --edit-file base/EDIT00000000
 
 # Replay all available effective transfers through today
-python run.py run --edit-file base/EDIT00000000 --window auto
+python run.py run --window auto
+
+# Explicit full rebuild from the canonical base
+python run.py run --from-base --window auto
 
 # Repair the legacy base using multiple references, while preserving its
 # original promotion/division membership
@@ -162,7 +169,7 @@ python run.py run --edit-file /path/to/EDIT00000000 --in-place
 | `cron` | `python run.py cron --interval-hours 6` | Generate Linux/macOS crontab entry string. |
 
 **Parameter Flags for `run`:**
-- `--deep`: **(Default in Actions)** Deep fetch across all **635 currently indexed unique clubs** to extract transfers and real squad shirt numbers.
+- `--deep`: **(Default in Actions)** Deep fetch across all **504 currently validated one-to-one clubs** to extract transfers and real squad shirt numbers.
 - `--club "Chelsea,Arsenal"`: Target specific club(s).
 - `--window auto`: Recommended. Replays all dated transfers available from
   FotMob through today. Pagination continues until the feed is empty or repeats,
@@ -178,12 +185,26 @@ python run.py run --edit-file /path/to/EDIT00000000 --in-place
   effective transfer date arrives.
 - `--threshold N`: Fuzzy match threshold score (0–100, default: `80`).
 - `--dry-run`: Simulation mode without writing changes to disk.
+- `--from-base`: Explicitly rebuild from `base/EDIT00000000`. Without this
+  flag, a default run continues from an existing successful output so older
+  transfers cannot disappear on a later scheduled run.
+- `--allow-overflow-release`: Opt in to releasing the displayed lowest-priority
+  player when a destination roster is already full. This currently fails closed
+  because the bundled name catalog has no complete position/OVR metadata. Without
+  this flag, the transfer is safely skipped.
+
+Any HTTP/API failure before a complete FotMob snapshot is read aborts the run;
+partial scrape results are never written to the edit file. Dry-run and real-run
+share the same chronological roster planner, including loan-chain history from
+previous successful runs. Loan history is isolated per output save, and the
+scheduler survives a fail-closed iteration instead of terminating permanently.
 
 The transfer-window countdown sites are useful for checking registration
 deadlines, which vary by league. They are not used as transaction feeds. Player
-moves continue to come from FotMob, while the canonical workflows use the base
-file plus cumulative effective transfer history through today, so their result
-does not depend on a single league's opening or closing day.
+moves continue to come from FotMob. The first default run starts from the base;
+later runs continue from the last verified output while still reading cumulative
+effective transfer history, so their result does not depend on a single league's
+opening or closing day.
 
 ---
 
@@ -208,18 +229,20 @@ fleditscrape/
 │   └── models.py          # Transfer and MatchedTransfer data models
 ├── editor/                # PES 2021 / Football Life binary save editor
 │   ├── editfile.py        # Binary parser, player mover, roster manager
+│   ├── player_catalog.py  # Versioned FL26 identity catalog + coverage proof
+│   ├── locking.py         # Cross-process output lock
 │   ├── crypto.py          # pesXdecrypter wrapper (decrypt & re-encrypt)
 │   ├── backup.py          # Automatic rolling backup system
 │   ├── logger.py          # JSON Lines transfer audit logging
 │   └── models.py          # PlayerInfo & TeamData data structures
 ├── data/                  # Game databases and alias tables
-│   ├── players.csv        # 23k player database registry
+│   ├── FL2622wc_players.txt # Canonical FL26 Update 2.2 player names
+│   ├── players.csv        # Roster-only fallback for exceptional legacy IDs
 │   ├── team_aliases.json  # Club name aliases and abbreviations
-│   ├── name_overrides.json# Manual player name override mappings
-│   └── leagues.json       # Supported playable leagues
+│   └── name_overrides.json# Manual player name override mappings
 ├── vendor/                # Native decryption tools
 │   └── pesXdecrypter/     # C implementation of PES 2021 crypto engine
-└── tests/                 # Complete unit test suite (121 tests)
+└── tests/                 # Complete regression and integration test suite
 ```
 
 ---
@@ -232,7 +255,12 @@ Run the automated test suite:
 pytest -v
 ```
 
-All **121 unit tests** pass across binary parsing, canonical path configuration, integrity repair/validation, cumulative auto replay and pagination, report separation, duplicate shirt-number observations, duplicate-name and source-roster priority, fail-closed roster decisions, bounded manual ranges, future-effective transfer protection, CLI input validation, low-ID club handling, ambiguous-club safety, roster slot shifting, goalkeeper protection, position compatibility gates, and fuzzy matching.
+The suite covers binary parsing, canonical path configuration, integrity
+repair/validation, complete-scrape enforcement, cumulative replay and
+pagination, stateful roster planning, loan-chain history, canonical club
+deduplication, overflow authorization, report separation, roster slot shifting,
+goalkeeper protection, catalog coverage, process locking, position compatibility
+gates, and fuzzy matching.
 
 ---
 

@@ -303,8 +303,8 @@ class NameMatcher:
         age: Optional[int] = None,
     ) -> float:
         """
-        Calculate a composite fuzzy score for player names with Tri-Factor verification
-        (Name match + Positional compatibility + Nationality/Age alignment).
+        Calculate a composite fuzzy score with optional position, nationality,
+        and age evidence when those fields are actually available.
         """
         # Position Compatibility Gate
         if position and candidate_pid and self._player_positions:
@@ -339,7 +339,7 @@ class NameMatcher:
             if pes_pos and _get_pos_category(position) == _get_pos_category(pes_pos):
                 base_score = min(100.0, base_score + 2.0)
 
-        # Tri-Factor Nationality verification
+        # Optional nationality evidence
         if nationality and candidate_pid and self._player_nationalities:
             db_nat = self._player_nationalities.get(candidate_pid, "")
             if db_nat:
@@ -348,7 +348,7 @@ class NameMatcher:
                 if norm_scraped_nat in norm_db_nat or norm_db_nat in norm_scraped_nat:
                     base_score = min(100.0, base_score + 6.0)
 
-        # Tri-Factor Age verification
+        # Optional age evidence
         if age and age > 0 and candidate_pid and self._player_ages:
             db_age = self._player_ages.get(candidate_pid, 0)
             if db_age > 0:

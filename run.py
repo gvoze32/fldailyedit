@@ -10,35 +10,39 @@ Usage:
     python run.py log                                 # Show recent transfer log
 
 Workflow:
-    1. Load league config from data/leagues.json
-    2. Scrape live transfers from FotMob API
-    3. Decrypt the edit file (pesXdecrypter)
-    4. Read FL26 player/team database from decrypted data
-    5. Match scraped names to FL26 IDs (fuzzy matching)
-    6. Apply transfers (move player IDs between teams)
-    7. Re-encrypt and save
-    8. Log everything
+    1. Scrape live transfers from FotMob API
+    2. Decrypt and validate the edit file (pesXdecrypter)
+    3. Load the current FL26 catalog and roster state
+    4. Match identities and plan safe roster actions
+    5. Apply the batch, validate, re-encrypt, and log it
 """
 import argparse
+import hashlib
 import json
 import logging
+import shlex
 import struct
 import sys
 import time
 from collections import Counter
-from datetime import date
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import config
 from editor import backup as backup_mod
 from editor import crypto
-from editor.editfile import EditFile
+from editor.editfile import COMPETITION_SECTION_SIZE, EditFile
 from editor import logger as transfer_logger
+from editor.locking import EditFileLock, EditLockError
+from editor.player_catalog import PlayerCatalogError, load_id_name_text
 from scraper.fotmob import (
+    IncompleteScrapeError,
     fetch_fotmob_transfers,
     get_transfer_window_range,
     merge_transfers,
     parse_iso_date,
+    parse_iso_datetime,
     fetch_transfers_for_club_names,
     fetch_major_clubs_transfers_safely,
 )
@@ -46,16 +50,345 @@ from scraper.matcher import NameMatcher
 from scraper.models import MatchedTransfer
 
 logger = logging.getLogger(__name__)
+UNRESOLVED_TEAM_ID = -1
+_NON_CLUB_LABELS = {"", "free agent", "without club", "unattached", "career break", "retired"}
+
+
+@dataclass
+class PlannedRosterAction:
+    match: MatchedTransfer
+    action: str
+    current_team_id: int | None
+    reason: str = ""
+    overflow_player_id: int | None = None
+
+
+def _optional_positive_int(value) -> int | None:
+    """Parse an identifier from external/history data and reject sentinel values."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _resolve_run_paths(args) -> tuple[Path, Path]:
+    """Resolve an incremental input and output without discarding prior runs."""
+    explicit_input = Path(args.edit_file) if getattr(args, "edit_file", None) else None
+    output_arg = getattr(args, "output", None)
+    in_place = bool(getattr(args, "in_place", False))
+    from_base = bool(getattr(args, "from_base", False))
+
+    if output_arg:
+        output_path = Path(output_arg)
+    elif in_place:
+        output_path = explicit_input or config.EDIT_FILE_PATH
+    else:
+        output_path = config.OUTPUT_FILE_PATH
+
+    if explicit_input is not None:
+        edit_path = explicit_input
+    elif from_base or in_place:
+        edit_path = config.EDIT_FILE_PATH
+    elif output_path.exists():
+        # Continue from the last successful output. Re-reading the pristine base
+        # on every scheduled run would silently undo transfers that aged out of
+        # the current scrape window.
+        edit_path = output_path
+    else:
+        edit_path = config.EDIT_FILE_PATH
+
+    return edit_path, output_path
+
+
+def _sha256_file(path: Path) -> str:
+    """Return a stable digest without loading a large EDIT file into memory."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _competition_section_bounds(edit_file: EditFile) -> tuple[int, int]:
+    """Return the league-membership section without overlapping game plans."""
+    start = edit_file.competition_entry_start
+    return start, start + COMPETITION_SECTION_SIZE
+
+
+def _load_represented_fotmob_club_ids() -> set[int]:
+    """Load the generated one-to-one FotMob ↔ PES club identity index."""
+    validated_path = config.DATA_DIR / "fotmob_teams_validated.json"
+    try:
+        validated_payload = json.loads(validated_path.read_text(encoding="utf-8"))
+        if not isinstance(validated_payload, list):
+            raise ValueError(f"{validated_path} must contain a JSON array")
+    except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        raise IncompleteScrapeError(
+            f"Could not load FotMob/PES club identity data: {exc}"
+        ) from exc
+
+    represented_ids: set[int] = set()
+    represented_pes_ids: set[int] = set()
+    for item in validated_payload:
+        if (
+            not isinstance(item, dict)
+            or "fotmob_id" not in item
+            or "pes_team_id" not in item
+        ):
+            raise IncompleteScrapeError(
+                f"Malformed club identity entry in {validated_path}"
+            )
+        try:
+            fotmob_id = int(item["fotmob_id"])
+            pes_team_id = int(item["pes_team_id"])
+        except (TypeError, ValueError) as exc:
+            raise IncompleteScrapeError(
+                f"Non-numeric club identity in {validated_path}: {exc}"
+            ) from exc
+        if fotmob_id in represented_ids or pes_team_id in represented_pes_ids:
+            raise IncompleteScrapeError(
+                f"Club identity index is not one-to-one at FotMob {fotmob_id} / "
+                f"PES {pes_team_id}"
+            )
+        represented_ids.add(fotmob_id)
+        represented_pes_ids.add(pes_team_id)
+
+    if not represented_ids:
+        raise IncompleteScrapeError("Represented FotMob club ID allowlist is empty")
+    return represented_ids
 
 
 def _transfer_sort_key(transfer):
     """Apply dated transfers chronologically and shirt-number updates last."""
-    parsed_date = parse_iso_date(transfer.date)
+    parsed_date = parse_iso_datetime(transfer.date)
     return (
         transfer.transfer_type == "shirt_number_update",
         parsed_date is None,
-        parsed_date or parse_iso_date("2000-01-01"),
+        parsed_date or parse_iso_datetime("2000-01-01"),
     )
+
+
+def _match_transfer_team(
+    matcher: NameMatcher,
+    short_name: str,
+    full_name: str = "",
+    fotmob_id: int | str | None = None,
+    validated_fotmob_ids: set[int] | None = None,
+) -> tuple[int | None, str, float]:
+    """Match all available club names and reject conflicting identities."""
+    raw_names = [full_name or "", short_name or ""]
+    if any(name.strip().casefold() in _NON_CLUB_LABELS for name in raw_names if name.strip()):
+        return None, "", 100.0
+
+    id_is_validated: bool | None = None
+    if fotmob_id is not None and validated_fotmob_ids is not None:
+        try:
+            id_is_validated = int(fotmob_id) in validated_fotmob_ids
+        except (TypeError, ValueError):
+            return UNRESOLVED_TEAM_ID, "", 0.0
+
+    names: list[str] = []
+    for value in (full_name, short_name):
+        clean = (value or "").strip()
+        if clean and clean.casefold() not in {name.casefold() for name in names}:
+            names.append(clean)
+
+    results = [matcher.match_team(name) for name in names]
+    matched_ids = {team_id for team_id, _, _ in results if team_id is not None}
+    if len(matched_ids) > 1:
+        logger.warning(
+            "Conflicting club identities for %s: %s",
+            names,
+            sorted(matched_ids),
+        )
+        return UNRESOLVED_TEAM_ID, "", max(
+            (confidence for _, _, confidence in results), default=0.0
+        )
+    if matched_ids:
+        team_id = next(iter(matched_ids))
+        best_result = max(
+            (result for result in results if result[0] == team_id),
+            key=lambda result: result[2],
+        )
+        if id_is_validated is False:
+            if best_result[2] >= 98.0:
+                logger.warning(
+                    "FotMob club %s (%s) strongly matches PES but its ID is not "
+                    "validated; skipping mutations until the identity index is fixed",
+                    full_name or short_name,
+                    fotmob_id,
+                )
+                return UNRESOLVED_TEAM_ID, "", best_result[2]
+            # A weakly similar, non-allowlisted ID is treated as a club that is
+            # genuinely absent from PES, enabling a safe release/signing.
+            return None, "", best_result[2]
+        if fotmob_id is None and best_result[2] < 98.0:
+            logger.warning(
+                "Rejecting ID-less fuzzy club match for %s at %.1f%%",
+                full_name or short_name,
+                best_result[2],
+            )
+            return UNRESOLVED_TEAM_ID, "", best_result[2]
+        return best_result
+    best_unresolved_confidence = max(
+        (confidence for _, _, confidence in results), default=0.0
+    )
+    if id_is_validated is True or best_unresolved_confidence >= 98.0:
+        return UNRESOLVED_TEAM_ID, "", best_unresolved_confidence
+    return None, "", best_unresolved_confidence
+
+
+def _match_transfers_statefully(
+    transfers,
+    matcher: NameMatcher,
+    threshold: float,
+    team_player_map: dict[int, list[int]],
+    club_ids: set[int],
+    historical_entries: list[dict] | None = None,
+    validated_fotmob_ids: set[int] | None = None,
+) -> list[MatchedTransfer]:
+    """Match chronologically while advancing a virtual roster context."""
+    virtual_rosters = {
+        team_id: list(player_ids)
+        for team_id, player_ids in team_player_map.items()
+    }
+    loaned_by_parent: dict[int, set[int]] = {}
+    fotmob_identity_candidates: dict[int, set[int]] = {}
+    fotmob_identity_names: dict[int, str] = {}
+
+    history = sorted(
+        historical_entries or [],
+        key=lambda entry: parse_iso_datetime(
+            str(entry.get("transfer_date") or entry.get("timestamp") or "")
+        ) or parse_iso_datetime("2000-01-01"),
+    )
+    for entry in history:
+        player_id = _optional_positive_int(entry.get("player_id"))
+        fotmob_player_id = _optional_positive_int(entry.get("fotmob_player_id"))
+        if player_id and fotmob_player_id:
+            fotmob_identity_candidates.setdefault(fotmob_player_id, set()).add(
+                player_id
+            )
+            if entry.get("player_name"):
+                fotmob_identity_names[fotmob_player_id] = str(entry["player_name"])
+        source = _optional_positive_int(entry.get("from_team_id"))
+        if not player_id or not source:
+            continue
+        if str(entry.get("transfer_type", "")).lower() == "loan":
+            loaned_by_parent.setdefault(source, set()).add(player_id)
+        else:
+            loaned_by_parent.get(source, set()).discard(player_id)
+
+    fotmob_to_pes = {
+        fotmob_player_id: next(iter(player_ids))
+        for fotmob_player_id, player_ids in fotmob_identity_candidates.items()
+        if len(player_ids) == 1
+    }
+
+    matched: list[MatchedTransfer] = []
+    for transfer in transfers:
+        ftid, ftname, ftconf = _match_transfer_team(
+            matcher,
+            transfer.from_club,
+            transfer.from_club_full_name,
+            transfer.from_club_id_fotmob,
+            validated_fotmob_ids,
+        )
+        ttid, ttname, ttconf = _match_transfer_team(
+            matcher,
+            transfer.to_club,
+            transfer.to_club_full_name,
+            transfer.to_club_id_fotmob,
+            validated_fotmob_ids,
+        )
+
+        context_map = virtual_rosters
+        parent_loaned = loaned_by_parent.get(ftid, set()) if ftid is not None else set()
+        if ftid is not None and parent_loaned:
+            context_map = dict(virtual_rosters)
+            context_map[ftid] = list(
+                dict.fromkeys(virtual_rosters.get(ftid, []) + list(parent_loaned))
+            )
+
+        pid, pname, pconf = matcher.match_player(
+            transfer.player_name,
+            threshold=threshold,
+            from_team_id=ftid,
+            to_team_id=ttid,
+            team_player_map=context_map,
+            position=transfer.position,
+            nationality=transfer.nationality,
+            age=transfer.age,
+        )
+        fotmob_player_id = _optional_positive_int(transfer.player_id_fotmob)
+        known_pid = fotmob_to_pes.get(fotmob_player_id) if fotmob_player_id else None
+        if known_pid is not None and pid is None:
+            pid = known_pid
+            pname = fotmob_identity_names.get(
+                fotmob_player_id, transfer.player_name
+            )
+            pconf = 100.0
+        elif known_pid is not None and pid != known_pid:
+            logger.warning(
+                "FotMob player %s conflicts with PES history (%s vs %s); skipping",
+                transfer.player_id_fotmob,
+                known_pid,
+                pid,
+            )
+            pid, pname = None, ""
+
+        if pid is not None and fotmob_player_id is not None:
+            existing_pid = fotmob_to_pes.get(fotmob_player_id)
+            if existing_pid is None:
+                fotmob_to_pes[fotmob_player_id] = pid
+                fotmob_identity_names[fotmob_player_id] = pname or transfer.player_name
+        match = MatchedTransfer(
+            transfer=transfer,
+            player_id=pid,
+            from_team_id=ftid,
+            to_team_id=ttid,
+            player_confidence=pconf,
+            from_team_confidence=ftconf,
+            to_team_confidence=ttconf,
+            matched_player_name=pname,
+            matched_from_team=ftname,
+            matched_to_team=ttname,
+        )
+        matched.append(match)
+
+        if pid is None or transfer.transfer_type == "shirt_number_update":
+            continue
+
+        current_clubs = [
+            team_id
+            for team_id, roster in virtual_rosters.items()
+            if team_id in club_ids and pid in roster
+        ]
+        current_team_id = current_clubs[0] if len(current_clubs) == 1 else None
+        can_move_from_parent = (
+            ftid is not None
+            and pid in loaned_by_parent.get(ftid, set())
+            and current_team_id is not None
+        )
+
+        if ftid is not None and ttid is not None and (
+            current_team_id == ftid or can_move_from_parent
+        ):
+            virtual_rosters[current_team_id].remove(pid)
+            if pid not in virtual_rosters.setdefault(ttid, []):
+                virtual_rosters[ttid].append(pid)
+        elif ftid is None and ttid is not None and current_team_id is None:
+            virtual_rosters.setdefault(ttid, []).append(pid)
+        elif ftid is not None and ttid is None and current_team_id == ftid:
+            virtual_rosters[ftid].remove(pid)
+
+        if ftid is not None and (transfer.is_loan or transfer.transfer_type == "loan"):
+            loaned_by_parent.setdefault(ftid, set()).add(pid)
+        elif ftid is not None:
+            loaned_by_parent.get(ftid, set()).discard(pid)
+
+    return matched
 
 
 def _decide_roster_action(
@@ -98,6 +431,7 @@ def _decide_roster_action(
 
 def _build_superseded_loan_sources(
     matches: list[MatchedTransfer],
+    historical_entries: list[dict] | None = None,
 ) -> dict[int, frozenset[int]]:
     """Authorize newer parent-club moves from an earlier loan destination.
 
@@ -107,12 +441,29 @@ def _build_superseded_loan_sources(
     its source. Only a strictly earlier, fully matched loan from that same
     parent club can authorize the stale loan club as the actual move source.
     """
-    prior_loans: dict[int, list[tuple[int, int, date]]] = {}
+    prior_loans: dict[int, list[tuple[int, int, datetime]]] = {}
     allowed_sources: dict[int, frozenset[int]] = {}
+
+    for entry in historical_entries or []:
+        if str(entry.get("transfer_type", "")).lower() != "loan":
+            continue
+        try:
+            player_id = int(entry.get("player_id") or 0)
+            parent_team_id = int(entry.get("from_team_id") or 0)
+            loan_team_id = int(entry.get("to_team_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        transfer_date = parse_iso_datetime(
+            str(entry.get("transfer_date") or entry.get("timestamp") or "")
+        )
+        if player_id and parent_team_id and loan_team_id and transfer_date:
+            prior_loans.setdefault(player_id, []).append(
+                (parent_team_id, loan_team_id, transfer_date)
+            )
 
     for match in matches:
         player_id = match.player_id
-        transfer_date = parse_iso_date(match.transfer.date)
+        transfer_date = parse_iso_datetime(match.transfer.date)
         if (
             player_id is not None
             and match.from_team_id is not None
@@ -126,7 +477,7 @@ def _build_superseded_loan_sources(
 
     for match in matches:
         player_id = match.player_id
-        transfer_date = parse_iso_date(match.transfer.date)
+        transfer_date = parse_iso_datetime(match.transfer.date)
         if (
             player_id is not None
             and match.from_team_id is not None
@@ -144,6 +495,114 @@ def _build_superseded_loan_sources(
             )
 
     return allowed_sources
+
+
+def _plan_roster_actions(
+    matches: list[MatchedTransfer],
+    all_rosters: dict,
+    club_ids: set[int],
+    edit_file: EditFile,
+    superseded_loan_sources: dict[int, frozenset[int]],
+    allow_overflow_release: bool = False,
+) -> list[PlannedRosterAction]:
+    """Build one chronological roster plan and simulate every accepted action."""
+    rosters = {
+        team_id: list(roster.player_ids)
+        for team_id, roster in all_rosters.items()
+        if team_id in club_ids
+    }
+    player_clubs: dict[int, set[int]] = {}
+    for team_id, player_ids in rosters.items():
+        for player_id in player_ids:
+            if player_id:
+                player_clubs.setdefault(player_id, set()).add(team_id)
+
+    planned: list[PlannedRosterAction] = []
+    transferred_in_plan: set[int] = set()
+
+    def remove_from_roster(team_id: int, player_id: int) -> None:
+        roster = rosters[team_id]
+        player_index = roster.index(player_id)
+        last_index = max(index for index, value in enumerate(roster) if value)
+        roster[player_index] = roster[last_index]
+        roster[last_index] = 0
+        player_clubs.get(player_id, set()).discard(team_id)
+
+    def add_to_roster(team_id: int, player_id: int) -> None:
+        roster = rosters[team_id]
+        roster[roster.index(0)] = player_id
+        player_clubs.setdefault(player_id, set()).add(team_id)
+
+    for match in matches:
+        player_id = match.player_id
+        if player_id is None:
+            planned.append(
+                PlannedRosterAction(match, "skip", None, "player_not_matched")
+            )
+            continue
+
+        current_clubs = sorted(player_clubs.get(player_id, set()))
+        if len(current_clubs) > 1:
+            planned.append(
+                PlannedRosterAction(
+                    match,
+                    "skip",
+                    None,
+                    f"duplicate_registration:{current_clubs}",
+                )
+            )
+            continue
+
+        current_team_id = current_clubs[0] if current_clubs else None
+        action = _decide_roster_action(
+            current_team_id,
+            match.from_team_id,
+            match.to_team_id,
+            match.transfer.transfer_type,
+            superseded_loan_sources.get(id(match), frozenset()),
+        )
+        item = PlannedRosterAction(match, action, current_team_id)
+
+        if action in {"move", "add"}:
+            destination = match.to_team_id
+            if destination is None or destination not in rosters:
+                item.action = "skip"
+                item.reason = "destination_roster_missing"
+            elif 0 not in rosters[destination]:
+                if not allow_overflow_release:
+                    item.action = "skip"
+                    item.reason = "destination_roster_full"
+                else:
+                    _, overflow_player_id = edit_file.find_overflow_release_candidate(
+                        destination,
+                        exclude_player_id=player_id,
+                        roster_player_ids=rosters[destination],
+                        protected_player_ids=transferred_in_plan,
+                    )
+                    if not overflow_player_id:
+                        item.action = "skip"
+                        item.reason = "no_safe_overflow_candidate"
+                    else:
+                        item.overflow_player_id = overflow_player_id
+                        remove_from_roster(destination, overflow_player_id)
+
+        if item.action == "move":
+            if current_team_id is None or current_team_id not in rosters:
+                item.action = "skip"
+                item.reason = "source_roster_missing"
+            else:
+                remove_from_roster(current_team_id, player_id)
+                add_to_roster(match.to_team_id, player_id)
+                transferred_in_plan.add(player_id)
+        elif item.action == "add":
+            add_to_roster(match.to_team_id, player_id)
+            transferred_in_plan.add(player_id)
+        elif item.action == "release" and current_team_id is not None:
+            remove_from_roster(current_team_id, player_id)
+
+        planned.append(item)
+
+    return planned
 
 
 def _dedupe_shirt_number_matches(
@@ -227,18 +686,6 @@ def setup_logging(verbose: bool = False):
     )
 
 
-def load_leagues(filter_names: list[str] | None = None) -> list[dict]:
-    """Load league config from JSON, optionally filtering by name."""
-    with open(config.LEAGUES_FILE, "r") as f:
-        leagues = json.load(f)
-
-    if filter_names:
-        filter_lower = [n.lower().strip() for n in filter_names]
-        leagues = [l for l in leagues if l["name"].lower() in filter_lower]
-
-    return leagues
-
-
 def cmd_inspect(args):
     """Inspect an edit file — show structure, counts, offsets."""
     edit_path = Path(args.edit_file)
@@ -276,8 +723,8 @@ def cmd_inspect(args):
 
         print("\n--- League Divisions in Save File ---")
         teams = ef.get_all_team_info()
-        entry_start = 0xA08650
-        entry_size = 0x1230
+        entry_start, entry_end = _competition_section_bounds(ef)
+        entry_size = entry_end - entry_start
         num_slots = entry_size // 4
 
         clusters = []
@@ -342,8 +789,7 @@ def cmd_repair(args):
     try:
         ef = EditFile(base_temp / "data.dat")
         ef.load()
-        league_block_start = ef.game_plan_start
-        league_block_end = league_block_start + 0x1230
+        league_block_start, league_block_end = _competition_section_bounds(ef)
         original_league_block = bytes(ef._data[league_block_start:league_block_end])
 
         references: list[EditFile] = []
@@ -376,6 +822,7 @@ def cmd_repair(args):
         repaired_duplicates = 0
         released_to_free_agent = 0
         players = ef.get_all_players()
+        ef._player_cache = players
         for player_id, current_teams in sorted(duplicates.items()):
             votes: list[int | None] = []
             for reference in references:
@@ -441,74 +888,275 @@ def cmd_repair(args):
         crypto.cleanup_temp(base_temp)
 
 
+def _scrape_run_transfers(args):
+    """Fetch, merge, order, and preview transfers for one pipeline run."""
+    popular_only = bool(getattr(args, "popular", False))
+    window = getattr(args, "window", "auto") or "auto"
+    since_date = getattr(args, "since", None)
+    club_filter = getattr(args, "club", None)
+    deep_mode = bool(getattr(args, "deep", False))
+
+    start_date, end_date = get_transfer_window_range(window)
+    cutoff_info = (
+        f"since {since_date}"
+        if since_date
+        else f"window '{window}' ({start_date} to {end_date or 'latest'})"
+    )
+    transfer_batches = []
+    if club_filter:
+        clubs = [club.strip() for club in club_filter.split(",") if club.strip()]
+        print(
+            f"\n🎯 Scraping club-focused transfers for: {', '.join(clubs)} "
+            f"({cutoff_info})..."
+        )
+        transfer_batches.append(
+            fetch_transfers_for_club_names(
+                clubs, since_date=since_date, window=window
+            )
+        )
+    elif deep_mode:
+        print(
+            "\n🌪️ Deep Mode: Scraping transfers and squads for indexed clubs "
+            f"({cutoff_info})..."
+        )
+        transfer_batches.append(
+            fetch_major_clubs_transfers_safely(
+                since_date=since_date, window=window
+            )
+        )
+        print(
+            "\n📡 Adding Live Global Feed to catch other minor leagues "
+            f"({cutoff_info}, automatic pagination)..."
+        )
+        transfer_batches.append(
+            fetch_fotmob_transfers(
+                popular_only=popular_only,
+                since_date=since_date,
+                window=window,
+            )
+        )
+    else:
+        print(
+            f"\n⚡ Fast Mode: Scraping live transfers from FotMob "
+            f"({cutoff_info}, automatic pagination)..."
+        )
+        transfer_batches.append(
+            fetch_fotmob_transfers(
+                popular_only=popular_only,
+                since_date=since_date,
+                window=window,
+            )
+        )
+
+    transfers = merge_transfers(transfer_batches)
+    # Apply historical moves oldest-to-newest. Current squad shirt-number
+    # updates intentionally run last.
+    transfers.sort(key=_transfer_sort_key)
+    print(f"  FotMob found {len(transfers)} total unique verified transfers")
+    print(f"\nTotal unique transfers to process: {len(transfers)}")
+    for transfer in transfers[:5]:
+        print(f"  {transfer}")
+    if len(transfers) > 5:
+        print(f"  ... and {len(transfers) - 5} more")
+    return transfers
+
+
+def _load_match_database(edit_file: EditFile):
+    """Build roster-aware player and club indexes from one validated save."""
+    print("\n📋 Reading FL26 database...")
+    players = edit_file.get_all_players()
+    edit_file._player_cache = players
+    teams_info = edit_file.get_all_team_info()
+    club_ids = edit_file.get_club_team_ids()
+    current_team_names = load_id_name_text(
+        config.CURRENT_TEAMS_FILE,
+        label="team",
+        minimum_entries=700,
+    )
+
+    team_name_to_id = {
+        current_team_names.get(team_id, team.name): team_id
+        for team_id, team in teams_info.items()
+        if team_id in club_ids
+    }
+    matcher = NameMatcher()
+    matcher.load_player_db(
+        [(player.name, player_id) for player_id, player in players.items()],
+        positions={
+            player_id: player.position
+            for player_id, player in players.items()
+            if player.position
+        },
+        nationalities={
+            player_id: player.nationality
+            for player_id, player in players.items()
+            if player.nationality
+        },
+        ages={
+            player_id: player.age
+            for player_id, player in players.items()
+            if player.age
+        },
+    )
+    # The save's league memberships already filter national teams. Numeric
+    # club-ID heuristics are invalid for FL26 (some real clubs have low IDs).
+    matcher.load_team_db(team_name_to_id, clubs_only=False)
+
+    all_rosters = edit_file.get_all_rosters()
+    team_player_map = {
+        team_id: roster.roster for team_id, roster in all_rosters.items()
+    }
+    print(
+        f"  {len(players)} players, {len(team_name_to_id)} playable clubs "
+        "(national teams excluded)"
+    )
+    return matcher, all_rosters, team_player_map, club_ids
+
+
+def _match_and_plan_transfers(
+    transfers,
+    matcher,
+    threshold,
+    team_player_map,
+    all_rosters,
+    club_ids,
+    edit_file,
+    output_path,
+    *,
+    allow_overflow_release,
+):
+    """Match scraped identities, classify them, and create safe roster actions."""
+    catalog_report = getattr(edit_file, "player_catalog_report", None)
+    if allow_overflow_release and (
+        catalog_report is None
+        or not catalog_report.has_complete_overflow_metadata
+    ):
+        raise PlayerCatalogError(
+            "--allow-overflow-release requires complete player position and OVR "
+            "metadata; the current FL26 name catalog does not provide it"
+        )
+
+    print(
+        "\n🔍 Matching transfers with roster-aware identity verification "
+        f"(threshold={threshold}%)..."
+    )
+    save_scope = str(output_path.resolve())
+    historical_entries = transfer_logger.read_log(
+        save_scope=save_scope,
+        include_legacy=(output_path.resolve() == config.OUTPUT_FILE_PATH.resolve()),
+    )
+    matched = _match_transfers_statefully(
+        transfers,
+        matcher,
+        threshold,
+        team_player_map,
+        club_ids,
+        historical_entries=historical_entries,
+        validated_fotmob_ids=_load_represented_fotmob_club_ids(),
+    )
+    matched, duplicate_shirt_matches = _dedupe_shirt_number_matches(matched)
+    superseded_loan_sources = _build_superseded_loan_sources(
+        matched,
+        historical_entries=historical_entries,
+    )
+    if duplicate_shirt_matches:
+        print(
+            f"  ⚠ Skipped {duplicate_shirt_matches} duplicate or ambiguous "
+            "shirt-number matches"
+        )
+
+    non_shirt = [
+        match
+        for match in matched
+        if match.transfer.transfer_type != "shirt_number_update"
+    ]
+    fully_matched = [match for match in matched if match.is_fully_matched]
+    partial = [match for match in matched if not match.is_fully_matched]
+    roster_plan = _plan_roster_actions(
+        fully_matched,
+        all_rosters,
+        club_ids,
+        edit_file,
+        superseded_loan_sources,
+        allow_overflow_release=allow_overflow_release,
+    )
+    print(
+        f"  ✓ Fully actionable: {len(fully_matched)} "
+        f"(Club Transfers: {sum(match.is_club_transfer for match in non_shirt)}, "
+        f"Departures: {sum(match.is_release for match in non_shirt)}, "
+        f"Signings: {sum(match.is_sign for match in non_shirt)}, "
+        "Shirt Number Checks: "
+        f"{sum(match.transfer.transfer_type == 'shirt_number_update' and match.is_fully_matched for match in matched)})"
+    )
+    print(f"  ✗ Unmatched: {len(partial)}")
+    if partial:
+        print("\n  Unmatched transfers (preview):")
+        for match in partial[:10]:
+            print(f"    {match}")
+    return roster_plan, fully_matched, save_scope
+
+
+def _print_dry_run(edit_file: EditFile, roster_plan) -> None:
+    """Render planned actions without mutating or writing the EDIT file."""
+    print("\n🔍 DRY-RUN — checking each match against the current roster:")
+    would_apply = 0
+    already_current = 0
+    safety_skipped = 0
+    for planned_action in roster_plan:
+        match = planned_action.match
+        action = planned_action.action
+        if action == "skip":
+            safety_skipped += 1
+            print(
+                f"  SAFETY SKIP ({planned_action.reason or 'state_mismatch'}, "
+                f"current={planned_action.current_team_id}, source={match.from_team_id}, "
+                f"destination={match.to_team_id}): {match}"
+            )
+            continue
+        if action == "noop" or (
+            action == "shirt_update" and match.transfer.shirt_number is None
+        ):
+            already_current += 1
+            print(f"  ALREADY CURRENT: {match}")
+            continue
+        if action == "shirt_update" and edit_file.get_player_shirt_number(
+            match.to_team_id, match.player_id
+        ) == match.transfer.shirt_number:
+            already_current += 1
+            continue
+
+        would_apply += 1
+        if planned_action.overflow_player_id is not None:
+            print(
+                "  WOULD AUTO-RELEASE: player "
+                f"{planned_action.overflow_player_id} from team {match.to_team_id}"
+            )
+        print(f"  WOULD {action.upper()}: {match}")
+    print(
+        f"\nDry-run complete. Would apply: {would_apply}, "
+        f"already current: {already_current}, safety-skipped: {safety_skipped}. "
+        "No files were written."
+    )
+
+
 def cmd_run(args):
     """Main pipeline — scrape, match, apply transfers."""
     dry_run = args.dry_run
-    edit_path = Path(args.edit_file) if args.edit_file else config.EDIT_FILE_PATH
+    edit_path, output_path = _resolve_run_paths(args)
     threshold = args.threshold or config.MATCH_THRESHOLD_PLAYER
-
-    output_arg = getattr(args, "output", None)
-    in_place = getattr(args, "in_place", False)
-
-    if output_arg:
-        output_path = Path(output_arg)
-    elif in_place:
-        output_path = edit_path
-    else:
-        # Default behavior: write to output/EDIT00000000 to preserve base/ input
-        output_path = config.OUTPUT_FILE_PATH
 
     if not dry_run and not edit_path.exists():
         print(f"Edit file not found: {edit_path}")
         print("Use --edit-file to specify the path, or set EDIT_FILE_PATH in config.py")
         sys.exit(1)
 
-    # ── Step 1: Scrape live transfers from FotMob ──
-    popular_only = getattr(args, "popular", False) or False
-    window = getattr(args, "window", "auto") or "auto"
-    since_date = getattr(args, "since", None)
-    club_filter = getattr(args, "club", None)
-    deep_mode = getattr(args, "deep", False)
-
-    start_d, end_d = get_transfer_window_range(window)
-    cutoff_info = (
-        f"since {since_date}"
-        if since_date
-        else f"window '{window}' ({start_d} to {end_d or 'latest'})"
-    )
-    transfers_list = []
-    if club_filter:
-        clubs = [c.strip() for c in club_filter.split(",") if c.strip()]
-        print(f"\n🎯 Scraping club-focused transfers for: {', '.join(clubs)} ({cutoff_info})...")
-        transfers_list.append(fetch_transfers_for_club_names(clubs, since_date=since_date, window=window))
-    elif deep_mode:
-        print(f"\n🌪️ Deep Mode: Scraping transfers and squads for indexed clubs ({cutoff_info})...")
-        transfers_list.append(fetch_major_clubs_transfers_safely(since_date=since_date, window=window))
-        print(f"\n📡 Adding Live Global Feed to catch other minor leagues ({cutoff_info}, automatic pagination)...")
-        transfers_list.append(fetch_fotmob_transfers(popular_only=popular_only, since_date=since_date, window=window))
-    else:
-        print(f"\n⚡ Fast Mode: Scraping live transfers from FotMob ({cutoff_info}, automatic pagination)...")
-        transfers_list.append(fetch_fotmob_transfers(popular_only=popular_only, since_date=since_date, window=window))
-
-    transfers = merge_transfers(transfers_list)
-    # FotMob returns recent activity first. Apply historical moves oldest to
-    # newest so the final roster reflects the latest destination. Current
-    # squad shirt-number updates intentionally run last.
-    transfers.sort(key=_transfer_sort_key)
-    print(f"  FotMob found {len(transfers)} total unique verified transfers")
-
-    print(f"\nTotal unique transfers to process: {len(transfers)}")
+    allow_overflow_release = getattr(args, "allow_overflow_release", False)
+    transfers = _scrape_run_transfers(args)
 
     if not transfers:
         print("No transfers found. Exiting.")
         return
 
-    for t in transfers[:5]:
-        print(f"  {t}")
-    if len(transfers) > 5:
-        print(f"  ... and {len(transfers) - 5} more")
-
-    # ── Step 3: Decrypt and load edit file ──
     if dry_run and not edit_path.exists():
         print("\n⚠ Dry-run mode without edit file — showing scraped data only.")
         print(f"\nAll {len(transfers)} transfers:")
@@ -516,10 +1164,26 @@ def cmd_run(args):
             print(f"  {t}")
         return
 
+    output_lock = EditFileLock(output_path)
+    output_lock.acquire()
+    try:
+        input_digest = _sha256_file(edit_path)
+        same_input_output = output_path.resolve() == edit_path.resolve()
+        output_existed = output_path.exists()
+        output_digest = (
+            input_digest
+            if same_input_output
+            else _sha256_file(output_path) if output_existed else None
+        )
+    except Exception:
+        output_lock.release()
+        raise
+
     print(f"\n🔓 Decrypting {edit_path}...")
     try:
         temp_dir = crypto.decrypt(edit_path)
     except Exception as e:
+        output_lock.release()
         print(f"Decryption failed: {e}")
         sys.exit(1)
 
@@ -543,196 +1207,26 @@ def cmd_run(args):
             print("Use a known-good Football Life 2026 EDIT00000000 as --edit-file.")
             sys.exit(2)
 
-        # ── Step 4: Build name databases ──
-        print("\n📋 Reading FL26 database...")
-        players = ef.get_all_players()
-        teams_info = ef.get_all_team_info()
-        club_ids = ef.get_club_team_ids()
-
-        # Try to load official Smokepatch names to get full names instead of PES short names
-        sp_players_path = Path("data/FL2622wc_players.txt")
-        sp_teams_path = Path("data/FL262_teams.txt")
-        
-        sp_player_names = {}
-        if sp_players_path.exists():
-            with open(sp_players_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    if "-" in line:
-                        parts = line.split("-", 1)
-                        if parts[0].strip().isdigit():
-                            sp_player_names[int(parts[0].strip())] = parts[1].strip()
-                            
-        sp_team_names = {}
-        if sp_teams_path.exists():
-            with open(sp_teams_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    if "-" in line:
-                        parts = line.split("-", 1)
-                        if parts[0].strip().isdigit():
-                            sp_team_names[int(parts[0].strip())] = parts[1].strip()
-
-        # Build name dictionaries, preferring Smokepatch full names if available
-        player_records = []
-        for pid, p in players.items():
-            name = sp_player_names.get(pid, p.name)
-            player_records.append((name, pid))
-            
-        team_name_to_id = {}
-        for tid, t in teams_info.items():
-            if tid in club_ids:
-                name = sp_team_names.get(tid, t.name)
-                team_name_to_id[name] = tid
-
-        player_positions = {pid: p.position for pid, p in players.items()}
-        player_nationalities = {pid: p.nationality for pid, p in players.items() if p.nationality}
-        player_ages = {pid: p.age for pid, p in players.items() if p.age}
-
-        print(f"  {len(player_records)} players, {len(team_name_to_id)} playable clubs (national teams excluded)")
-
-        matcher = NameMatcher()
-        matcher.load_player_db(
-            player_records,
-            positions=player_positions,
-            nationalities=player_nationalities,
-            ages=player_ages,
+        matcher, all_rosters, team_player_map, club_ids = _load_match_database(ef)
+        roster_plan, fully_matched, save_scope = _match_and_plan_transfers(
+            transfers,
+            matcher,
+            threshold,
+            team_player_map,
+            all_rosters,
+            club_ids,
+            ef,
+            output_path,
+            allow_overflow_release=allow_overflow_release,
         )
-        # team_name_to_id is already filtered through the save's league
-        # memberships. Do not apply the legacy ID<=100 heuristic: FL26 has
-        # real clubs in that numeric range (for example Manchester United).
-        matcher.load_team_db(team_name_to_id, clubs_only=False)
-
-        # Build team_player_map for context-aware disambiguation
-        all_rosters = ef.get_all_rosters()
-        team_player_map = {
-            tid: roster.roster
-            for tid, roster in all_rosters.items()
-        }
-
-        # ── Step 5: Match scraped names to FL26 IDs ──
-        print(f"\n🔍 Matching transfers with Tri-Factor verification (threshold={threshold}%)...")
-        matched = []
-        for t in transfers:
-            ftid, ftname, ftconf = matcher.match_team(t.from_club)
-            ttid, ttname, ttconf = matcher.match_team(t.to_club)
-            pid, pname, pconf = matcher.match_player(
-                t.player_name,
-                threshold=threshold,
-                from_team_id=ftid,
-                to_team_id=ttid,
-                team_player_map=team_player_map,
-                position=t.position,
-                nationality=t.nationality,
-                age=t.age,
-            )
-
-            mt = MatchedTransfer(
-                transfer=t,
-                player_id=pid,
-                from_team_id=ftid,
-                to_team_id=ttid,
-                player_confidence=pconf,
-                from_team_confidence=ftconf,
-                to_team_confidence=ttconf,
-                matched_player_name=pname,
-                matched_from_team=ftname,
-                matched_to_team=ttname,
-            )
-            matched.append(mt)
-
-        matched, duplicate_shirt_matches = _dedupe_shirt_number_matches(matched)
-        superseded_loan_sources = _build_superseded_loan_sources(matched)
-        if duplicate_shirt_matches:
-            print(
-                f"  ⚠ Skipped {duplicate_shirt_matches} duplicate or ambiguous "
-                "shirt-number matches"
-            )
-
-        shirt_matches = [
-            m for m in matched
-            if m.transfer.transfer_type == "shirt_number_update" and m.is_fully_matched
-        ]
-        club_transfers = [
-            m for m in matched
-            if m.transfer.transfer_type != "shirt_number_update" and m.is_club_transfer
-        ]
-        releases = [
-            m for m in matched
-            if m.transfer.transfer_type != "shirt_number_update" and m.is_release
-        ]
-        signings = [
-            m for m in matched
-            if m.transfer.transfer_type != "shirt_number_update" and m.is_sign
-        ]
-        fully_matched = [m for m in matched if m.is_fully_matched]
-        partial = [m for m in matched if not m.is_fully_matched]
-
-        print(
-            f"  ✓ Fully actionable: {len(fully_matched)} "
-            f"(Club Transfers: {len(club_transfers)}, "
-            f"Departures: {len(releases)}, Signings: {len(signings)}, "
-            f"Shirt Number Checks: {len(shirt_matches)})"
-        )
-        print(f"  ✗ Unmatched: {len(partial)}")
-
-        if partial:
-            print("\n  Unmatched transfers (preview):")
-            for m in partial[:10]:
-                print(f"    {m}")
 
         if not fully_matched:
             print("\nNo fully matched transfers to apply. Exiting.")
             return
 
-        # ── Step 6: Apply transfers ──
         run_records = []
         if dry_run:
-            print("\n🔍 DRY-RUN — checking each match against the current roster:")
-            would_apply = 0
-            already_current = 0
-            safety_skipped = 0
-            for m in fully_matched:
-                current_clubs = ef.find_player_teams(m.player_id, club_only=True)
-                if len(current_clubs) > 1:
-                    safety_skipped += 1
-                    print(f"  SAFETY SKIP (duplicate registration): {m}")
-                    continue
-                current_tid = current_clubs[0] if current_clubs else None
-                action = _decide_roster_action(
-                    current_tid,
-                    m.from_team_id,
-                    m.to_team_id,
-                    m.transfer.transfer_type,
-                    superseded_loan_sources.get(id(m), frozenset()),
-                )
-                if action == "skip":
-                    safety_skipped += 1
-                    print(
-                        f"  SAFETY SKIP (current={current_tid}, "
-                        f"source={m.from_team_id}, destination={m.to_team_id}): {m}"
-                    )
-                    continue
-                if action == "noop" or (
-                    action == "shirt_update" and m.transfer.shirt_number is None
-                ):
-                    already_current += 1
-                    print(f"  ALREADY CURRENT: {m}")
-                    continue
-
-                if action == "shirt_update":
-                    current_shirt = ef.get_player_shirt_number(
-                        m.to_team_id, m.player_id
-                    )
-                    if current_shirt == m.transfer.shirt_number:
-                        already_current += 1
-                        continue
-
-                would_apply += 1
-                print(f"  WOULD {action.upper()}: {m}")
-            print(
-                f"\nDry-run complete. Would apply: {would_apply}, "
-                f"already current: {already_current}, safety-skipped: {safety_skipped}. "
-                "No files were written."
-            )
+            _print_dry_run(ef, roster_plan)
             return
 
         # Create backup before modifying
@@ -749,33 +1243,22 @@ def cmd_run(args):
         original_data = bytes(ef._data)
         pending_logs = []
 
-        for m in fully_matched:
+        for planned_action in roster_plan:
+            m = planned_action.match
             pid = m.player_id
             to_tid = m.to_team_id
             t = m.transfer
             
-            # Auto-create player if missing (placeholder)
             if pid is None:
                 continue
                 
-            current_clubs = ef.find_player_teams(pid, club_only=True)
-            if len(current_clubs) > 1:
-                failed += 1
-                print(f"  ✗ Skipped {m.matched_player_name or t.player_name}: player is in multiple clubs {current_clubs}")
-                continue
-            current_tid = current_clubs[0] if current_clubs else None
-            action = _decide_roster_action(
-                current_tid,
-                m.from_team_id,
-                to_tid,
-                t.transfer_type,
-                superseded_loan_sources.get(id(m), frozenset()),
-            )
+            action = planned_action.action
+            current_tid = planned_action.current_team_id
             if action == "skip":
                 failed += 1
                 print(
                     f"  ✗ Safety skip {m.matched_player_name or t.player_name}: "
-                    f"current={current_tid}, expected source={m.from_team_id}, destination={to_tid}"
+                    f"{planned_action.reason or 'state mismatch'}"
                 )
                 continue
             if action == "noop":
@@ -801,6 +1284,7 @@ def cmd_run(args):
                     to_tid,
                     shirt_number=pref_shirt,
                     position=t.position,
+                    allow_overflow_release=allow_overflow_release,
                 )
             elif action == "add":
                 ok = ef.add_player(
@@ -808,6 +1292,7 @@ def cmd_run(args):
                     to_tid,
                     shirt_number=pref_shirt,
                     position=t.position,
+                    allow_overflow_release=allow_overflow_release,
                 )
             elif action == "release":
                 ok = ef.release_player(pid, m.from_team_id)
@@ -833,8 +1318,12 @@ def cmd_run(args):
                     "roster_action": action,
                 })
             else:
-                failed += 1
-                print(f"  ✗ Failed: {m.matched_player_name or m.transfer.player_name} ({m.action_type})")
+                ef._data = bytearray(original_data)
+                print(
+                    f"  ✗ Failed: {m.matched_player_name or m.transfer.player_name} "
+                    f"({m.action_type}); entire batch rolled back"
+                )
+                sys.exit(2)
 
         print(
             f"\n  Transfers applied: {transfer_applied}, "
@@ -852,6 +1341,25 @@ def cmd_run(args):
             if remaining > 0:
                 print(f"  ... and {remaining} more errors")
             sys.exit(2)
+
+        if _sha256_file(edit_path) != input_digest:
+            ef._data = bytearray(original_data)
+            print(
+                "\n❌ Input EDIT file changed while this run was processing; "
+                "stale output was not written."
+            )
+            sys.exit(2)
+        if not same_input_output:
+            output_changed = output_path.exists() != output_existed
+            if output_existed and output_path.exists():
+                output_changed = _sha256_file(output_path) != output_digest
+            if output_changed:
+                ef._data = bytearray(original_data)
+                print(
+                    "\n❌ Output EDIT file changed while this run was processing; "
+                    "concurrent output was preserved."
+                )
+                sys.exit(2)
 
         # Save modified data.dat
         ef.save(data_dat)
@@ -877,6 +1385,7 @@ def cmd_run(args):
                 position=m.transfer.position,
                 fee=m.transfer.fee,
                 market_value=m.transfer.market_value,
+                transfer_date=m.transfer.date,
                 previous_shirt_number=previous_shirt,
                 shirt_number=(
                     m.transfer.shirt_number
@@ -884,6 +1393,8 @@ def cmd_run(args):
                     else None
                 ),
                 roster_action=action,
+                save_scope=save_scope,
+                fotmob_player_id=m.transfer.player_id_fotmob,
             )
 
         # Save visual reports
@@ -904,6 +1415,7 @@ def cmd_run(args):
 
     finally:
         crypto.cleanup_temp(temp_dir)
+        output_lock.release()
 
 
 def cmd_log(args):
@@ -922,6 +1434,13 @@ def cmd_schedule(args):
         print(f"\n--- [Scheduler Run #{iteration}] {time.strftime('%Y-%m-%d %H:%M:%S')} ---")
         try:
             cmd_run(args)
+        except SystemExit as e:
+            # cmd_run uses non-zero SystemExit for fail-closed operational
+            # aborts. A scheduler must record that run and try again later.
+            if e.code in (None, 0):
+                raise
+            logger.error("Scheduler run #%s aborted with exit code %s", iteration, e.code)
+            print(f"✗ Run #{iteration} aborted safely (exit code {e.code})")
         except Exception as e:
             logger.error(f"Scheduler run #{iteration} failed: {e}", exc_info=True)
             print(f"✗ Run #{iteration} encountered an error: {e}")
@@ -943,7 +1462,11 @@ def cmd_cron(args):
     
     interval_hours = args.interval_hours or 6
     cron_expr = f"0 */{interval_hours} * * *"
-    cron_line = f"{cron_expr} cd {cwd_path} && {py_path} {script_path} run >> {config.DATA_DIR}/cron.log 2>&1"
+    cron_line = (
+        f"{cron_expr} cd {shlex.quote(str(cwd_path))} && "
+        f"{shlex.quote(str(py_path))} {shlex.quote(str(script_path))} run >> "
+        f"{shlex.quote(str(config.DATA_DIR / 'cron.log'))} 2>&1"
+    )
 
     print("\n📅 Automated Cron Configuration")
     print("================================")
@@ -966,30 +1489,54 @@ def main():
     # run (default)
     p_run = sub.add_parser("run", help="Scrape + match + apply transfers")
     p_run.add_argument("--dry-run", action="store_true", help="Don't modify the edit file")
-    p_run.add_argument("--edit-file", type=str, help="Path to input EDIT00000000 (default: base/EDIT00000000)")
-    p_run.add_argument("-o", "--output", type=str, help="Path to output updated edit00000000 (default: output/EDIT00000000)")
-    p_run.add_argument("--in-place", action="store_true", help="Overwrite input edit file in-place instead of writing to output/")
+    run_source = p_run.add_mutually_exclusive_group()
+    run_source.add_argument("--edit-file", type=str, help="Path to input EDIT00000000")
+    run_source.add_argument(
+        "--from-base",
+        action="store_true",
+        help="Rebuild from base/EDIT00000000 instead of continuing from an existing output",
+    )
+    run_target = p_run.add_mutually_exclusive_group()
+    run_target.add_argument("-o", "--output", type=str, help="Path to output updated edit00000000 (default: output/EDIT00000000)")
+    run_target.add_argument("--in-place", action="store_true", help="Overwrite input edit file in-place instead of writing to output/")
     p_run.add_argument("--club", type=str, help="Comma-separated club names to focus scrape (e.g. 'Chelsea,Arsenal')")
     p_run.add_argument("--deep", action="store_true", help="Deep fetch across all locally indexed FotMob clubs")
     p_run.add_argument("--window", type=str, choices=["auto", "summer", "winter", "all"], default="auto", help="Transfer window (default: auto)")
     p_run.add_argument("--since", type=_iso_date_arg, help="Scrape transfers since date (YYYY-MM-DD)")
     p_run.add_argument("--threshold", type=_percentage_arg, help="Fuzzy match confidence threshold (0-100)")
     p_run.add_argument("--popular", action="store_true", help="Only request FotMob popular transfers")
+    p_run.add_argument(
+        "--allow-overflow-release",
+        action="store_true",
+        help="Allow releasing a displayed overflow candidate when a roster is full",
+    )
     p_run.set_defaults(func=cmd_run)
 
     # schedule
     p_sched = sub.add_parser("schedule", help="Run transfers continuously on a timer")
     p_sched.add_argument("--interval-hours", type=_positive_float_arg, default=6.0, help="Interval between runs in hours (default: 6.0)")
     p_sched.add_argument("--dry-run", action="store_true", help="Don't modify the edit file")
-    p_sched.add_argument("--edit-file", type=str, help="Path to input edit00000000")
-    p_sched.add_argument("-o", "--output", type=str, help="Path to output updated edit00000000 (default: output/EDIT00000000)")
-    p_sched.add_argument("--in-place", action="store_true", help="Overwrite input edit file in-place")
+    schedule_source = p_sched.add_mutually_exclusive_group()
+    schedule_source.add_argument("--edit-file", type=str, help="Path to input edit00000000")
+    schedule_source.add_argument(
+        "--from-base",
+        action="store_true",
+        help="Rebuild from base/EDIT00000000 on every scheduled run",
+    )
+    schedule_target = p_sched.add_mutually_exclusive_group()
+    schedule_target.add_argument("-o", "--output", type=str, help="Path to output updated edit00000000 (default: output/EDIT00000000)")
+    schedule_target.add_argument("--in-place", action="store_true", help="Overwrite input edit file in-place")
     p_sched.add_argument("--club", type=str, help="Comma-separated club names to focus scrape (e.g. 'Chelsea,Arsenal')")
     p_sched.add_argument("--deep", action="store_true", help="Deep fetch across all locally indexed FotMob clubs")
     p_sched.add_argument("--window", type=str, choices=["auto", "summer", "winter", "all"], default="auto", help="Transfer window (default: auto)")
     p_sched.add_argument("--since", type=_iso_date_arg, help="Scrape transfers since date (YYYY-MM-DD)")
     p_sched.add_argument("--threshold", type=_percentage_arg, help="Fuzzy match confidence threshold (0-100)")
     p_sched.add_argument("--popular", action="store_true", help="Only request FotMob popular transfers")
+    p_sched.add_argument(
+        "--allow-overflow-release",
+        action="store_true",
+        help="Allow releasing a displayed overflow candidate when a roster is full",
+    )
     p_sched.set_defaults(func=cmd_schedule)
 
     # cron
@@ -1041,7 +1588,17 @@ def main():
     setup_logging(args.verbose)
 
     if hasattr(args, "func"):
-        args.func(args)
+        try:
+            args.func(args)
+        except IncompleteScrapeError as exc:
+            print(f"\n❌ Scrape incomplete; no roster changes were written: {exc}")
+            raise SystemExit(2) from exc
+        except PlayerCatalogError as exc:
+            print(f"\n❌ Player catalog invalid; no roster changes were written: {exc}")
+            raise SystemExit(2) from exc
+        except EditLockError as exc:
+            print(f"\n❌ Concurrent run rejected: {exc}")
+            raise SystemExit(2) from exc
     else:
         parser.print_help()
 

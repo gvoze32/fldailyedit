@@ -27,6 +27,7 @@ class Transfer:
     nationality: str = ""
     age: int = 0
     shirt_number: Optional[int] = None
+    player_id_fotmob: Optional[int] = None
 
     def __str__(self):
         pos_badge = f" [{self.position}]" if self.position else ""
@@ -55,6 +56,14 @@ class MatchedTransfer:
     matched_to_team: str = ""
 
     @property
+    def _has_valid_from_team(self) -> bool:
+        return self.from_team_id is not None and self.from_team_id >= 0
+
+    @property
+    def _has_valid_to_team(self) -> bool:
+        return self.to_team_id is not None and self.to_team_id >= 0
+
+    @property
     def is_fully_matched(self) -> bool:
         """True if player and at least one valid transfer action can be taken."""
         return self.is_club_transfer or self.is_release or self.is_sign
@@ -64,8 +73,8 @@ class MatchedTransfer:
         """Both source and destination clubs are known in FL26 database."""
         return (
             self.player_id is not None
-            and self.from_team_id is not None
-            and self.to_team_id is not None
+            and self._has_valid_from_team
+            and self._has_valid_to_team
         )
 
     @property
@@ -73,7 +82,7 @@ class MatchedTransfer:
         """Player exists in source team, but destination is Free Agent or unrepresented club."""
         return (
             self.player_id is not None
-            and self.from_team_id is not None
+            and self._has_valid_from_team
             and self.to_team_id is None
         )
 
@@ -83,7 +92,7 @@ class MatchedTransfer:
         return (
             self.player_id is not None
             and self.from_team_id is None
-            and self.to_team_id is not None
+            and self._has_valid_to_team
         )
 
     @property
@@ -102,9 +111,9 @@ class MatchedTransfer:
     def min_confidence(self) -> float:
         """Lowest confidence score among matched components."""
         confs = [self.player_confidence]
-        if self.from_team_id is not None:
+        if self._has_valid_from_team:
             confs.append(self.from_team_confidence)
-        if self.to_team_id is not None:
+        if self._has_valid_to_team:
             confs.append(self.to_team_confidence)
         return min(confs) if confs else 0.0
 

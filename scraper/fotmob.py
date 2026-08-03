@@ -8,11 +8,13 @@ detection and date filtering.
 import asyncio
 from calendar import monthrange
 from datetime import date, datetime, timezone
+import json
 import logging
 import unicodedata
 from typing import Optional, Union
 import aiohttp
 
+import config
 from scraper.models import Transfer
 
 logger = logging.getLogger(__name__)
@@ -30,6 +32,10 @@ DEFAULT_HEADERS = {
     "Accept": "application/json, text/plain, */*",
     "Referer": "https://www.fotmob.com/transfers",
 }
+
+
+class IncompleteScrapeError(RuntimeError):
+    """Raised when a transfer source fails before a complete snapshot is read."""
 
 
 def get_transfer_window_range(
@@ -63,8 +69,8 @@ def get_transfer_window_range(
     if w != "auto":
         raise ValueError(f"Unknown transfer window: {window!r}")
 
-    # Canonical auto runs rebuild from an immutable base. Replay all effective
-    # history so changing seasons cannot drop transfers from earlier windows.
+    # Replay all effective history so a clean rebuild and an incremental run
+    # observe the same lifecycle chain across changing transfer windows.
     return date(2000, 1, 1), None
 
 
@@ -77,6 +83,32 @@ def parse_iso_date(date_str: str) -> Optional[date]:
         return datetime.strptime(clean_str, "%Y-%m-%d").date()
     except Exception:
         return None
+
+
+def parse_iso_datetime(date_str: str) -> Optional[datetime]:
+    """Parse an ISO date/timestamp while preserving same-day event order."""
+    if not date_str:
+        return None
+    try:
+        value = date_str.strip().replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        parsed_date = parse_iso_date(date_str)
+        if parsed_date is None:
+            return None
+        return datetime.combine(parsed_date, datetime.min.time(), tzinfo=timezone.utc)
+
+
+def _optional_positive_int(value) -> Optional[int]:
+    """Normalize an external identifier without letting malformed API data abort a scrape."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _resolve_date_range(
@@ -153,14 +185,26 @@ class FotmobScraper:
                 try:
                     async with session.get(api_url) as resp:
                         if resp.status != 200:
-                            logger.warning(f"FotMob page {page_num} returned HTTP {resp.status}")
-                            break
+                            raise IncompleteScrapeError(
+                                f"FotMob page {page_num} returned HTTP {resp.status}"
+                            )
                         data = await resp.json(content_type=None)
+                except IncompleteScrapeError:
+                    raise
                 except Exception as e:
-                    logger.error(f"Failed to fetch FotMob page {page_num}: {e}")
-                    break
+                    raise IncompleteScrapeError(
+                        f"Failed to fetch FotMob page {page_num}: {e}"
+                    ) from e
 
+                if not isinstance(data, dict):
+                    raise IncompleteScrapeError(
+                        f"FotMob page {page_num} returned a non-object JSON payload"
+                    )
                 raw_transfers = data.get("transfers", [])
+                if not isinstance(raw_transfers, list):
+                    raise IncompleteScrapeError(
+                        f"FotMob page {page_num} returned an invalid transfers field"
+                    )
                 if not raw_transfers:
                     logger.info(f"FotMob page {page_num} returned empty transfers list. Stopping.")
                     break
@@ -176,10 +220,21 @@ class FotmobScraper:
 
                 logger.info(f"FotMob page {page_num} returned {len(raw_transfers)} items")
 
+                eligible_items = 0
+                parsed_items = 0
+                malformed_items = 0
                 for item in raw_transfers:
+                    if not isinstance(item, dict):
+                        malformed_items += 1
+                        continue
+                    if item.get("contractExtension"):
+                        continue
+                    eligible_items += 1
                     t = self._parse_fotmob_item(item)
                     if not t:
+                        malformed_items += 1
                         continue
+                    parsed_items += 1
 
                     item_date = parse_iso_date(t.date)
                     if (start_date or end_date) and item_date is None:
@@ -197,10 +252,21 @@ class FotmobScraper:
                             continue
 
                     transfers.append(t)
+
+                if eligible_items and parsed_items == 0:
+                    raise IncompleteScrapeError(
+                        f"FotMob page {page_num} contained {eligible_items} transfer "
+                        "items but none matched the expected schema"
+                    )
+                if malformed_items > max(5, len(raw_transfers) // 2):
+                    raise IncompleteScrapeError(
+                        f"FotMob page {page_num} was mostly malformed "
+                        f"({malformed_items}/{len(raw_transfers)} items)"
+                    )
             else:
-                logger.warning(
-                    "FotMob pagination reached internal safety limit (%s pages).",
-                    page_limit,
+                raise IncompleteScrapeError(
+                    f"FotMob pagination reached safety limit ({page_limit} pages) "
+                    "before an empty or repeated page"
                 )
 
         return transfers
@@ -271,6 +337,7 @@ class FotmobScraper:
 
         from_club_id = item.get("fromClubId")
         to_club_id = item.get("toClubId")
+        player_id_fotmob = _optional_positive_int(item.get("playerId"))
         from_club_full = item.get("fromClubFullName") or from_club
         to_club_full = item.get("toClubFullName") or to_club
 
@@ -291,6 +358,7 @@ class FotmobScraper:
             to_club_id_fotmob=to_club_id,
             from_club_full_name=from_club_full,
             to_club_full_name=to_club_full,
+            player_id_fotmob=player_id_fotmob,
         )
 
     def fetch_transfers(
@@ -314,17 +382,27 @@ class FotmobScraper:
         self,
         session: aiohttp.ClientSession,
         team_id: int,
-    ) -> Optional[dict]:
+    ) -> dict:
         """Fetch raw team data JSON from FotMob API."""
         url = f"https://www.fotmob.com/api/data/teams?id={team_id}"
         try:
             async with session.get(url) as resp:
-                if resp.status == 200:
-                    return await resp.json(content_type=None)
-                logger.warning(f"FotMob team API {team_id} returned HTTP {resp.status}")
+                if resp.status != 200:
+                    raise IncompleteScrapeError(
+                        f"FotMob team API {team_id} returned HTTP {resp.status}"
+                    )
+                data = await resp.json(content_type=None)
+                if not isinstance(data, dict):
+                    raise IncompleteScrapeError(
+                        f"FotMob team API {team_id} returned a non-object JSON payload"
+                    )
+                return data
+        except IncompleteScrapeError:
+            raise
         except Exception as e:
-            logger.error(f"Error fetching FotMob team {team_id}: {e}")
-        return None
+            raise IncompleteScrapeError(
+                f"Error fetching FotMob team {team_id}: {e}"
+            ) from e
 
     async def fetch_club_transfers_async(
         self,
@@ -338,9 +416,6 @@ class FotmobScraper:
         timeout = aiohttp.ClientTimeout(total=15)
         async with aiohttp.ClientSession(headers=self.headers, timeout=timeout) as session:
             data = await self._fetch_club_data_async(session, team_id)
-            if not data:
-                return []
-
             return self._extract_transfers_from_team_data(data, start_date, end_date)
 
     def _extract_transfers_from_team_data(
@@ -424,6 +499,7 @@ class FotmobScraper:
 
                 role = member.get("role")
                 position = role.get("fallback", "") if isinstance(role, dict) else ""
+                player_id_fotmob = _optional_positive_int(member.get("id"))
                 results.append(Transfer(
                     player_name=name,
                     from_club=team_name,
@@ -433,24 +509,10 @@ class FotmobScraper:
                     position=position,
                     to_club_id_fotmob=team_id,
                     from_club_id_fotmob=team_id,
+                    player_id_fotmob=player_id_fotmob,
                 ))
 
         return results
-
-    async def _fetch_club_manager_async(self, team_id: int) -> Optional[str]:
-        """Fetch current head coach/manager name for a club."""
-        timeout = aiohttp.ClientTimeout(total=15)
-        async with aiohttp.ClientSession(headers=self.headers, timeout=timeout) as session:
-            data = await self._fetch_club_data_async(session, team_id)
-            if not data:
-                return None
-
-            coach_hist = data.get("overview", {}).get("coachHistory", [])
-            if coach_hist and isinstance(coach_hist, list):
-                latest = coach_hist[-1]
-                if isinstance(latest, dict) and latest.get("name"):
-                    return latest["name"].strip()
-        return None
 
     async def fetch_major_clubs_transfers_safely_async(
         self,
@@ -465,22 +527,26 @@ class FotmobScraper:
         
         deep_clubs = get_deep_clubs()
         total_clubs = len(deep_clubs)
+        if total_clubs == 0:
+            raise IncompleteScrapeError("Deep-club index is empty")
         
         async with aiohttp.ClientSession(headers=self.headers, timeout=timeout) as session:
             for i, (club_name, tid) in enumerate(deep_clubs.items(), 1):
                 logger.info(f"Deep fetching {club_name} (ID: {tid}) [{i}/{total_clubs}]...")
                 try:
                     data = await self._fetch_club_data_async(session, tid)
-                    if data:
-                        # 1. Extract Transfers
-                        club_transfers = self._extract_transfers_from_team_data(data, start_date, end_date)
-                        all_transfers.extend(club_transfers)
-                        
-                        # 2. Extract Squad (Shirt Numbers)
-                        club_squad = self._extract_squad_from_team_data(data, tid, club_name)
-                        all_transfers.extend(club_squad)
-                except Exception as e:
-                    logger.warning(f"Failed to deep fetch {club_name}: {e}")
+                except IncompleteScrapeError as e:
+                    raise IncompleteScrapeError(
+                        f"Deep scrape incomplete at {club_name} ({tid}): {e}"
+                    ) from e
+
+                # 1. Extract Transfers
+                club_transfers = self._extract_transfers_from_team_data(data, start_date, end_date)
+                all_transfers.extend(club_transfers)
+
+                # 2. Extract Squad (Shirt Numbers)
+                club_squad = self._extract_squad_from_team_data(data, tid, club_name)
+                all_transfers.extend(club_squad)
                 
                 # Sleep to prevent Cloudflare ban
                 await asyncio.sleep(0.5)
@@ -491,34 +557,45 @@ class FotmobScraper:
 
 
 def get_deep_clubs() -> dict[str, int]:
-    import json
-    from pathlib import Path
-    
-    clubs = {}
+    """Load deep-scrape clubs from project-relative, validated data files."""
+    clubs: dict[str, int] = {}
     
     # 1. Try to load data/major_clubs.json to override/prioritize
-    major_path = Path("data/major_clubs.json")
+    major_path = config.DATA_DIR / "major_clubs.json"
     if major_path.exists():
         try:
             with open(major_path, "r", encoding="utf-8") as f:
                 major_teams = json.load(f)
-            clubs.update(major_teams)
+            if not isinstance(major_teams, dict):
+                raise ValueError("expected a JSON object")
+            parsed_major = {
+                str(name): int(team_id)
+                for name, team_id in major_teams.items()
+            }
+            clubs.update(parsed_major)
         except Exception as e:
-            logger.warning(f"Failed to load major_clubs.json: {e}")
+            raise IncompleteScrapeError(f"Failed to load {major_path}: {e}") from e
             
     # 2. Try to load the validated FotMob teams (filtered by PES overlap)
-    json_path = Path("data/fotmob_teams_validated.json")
+    json_path = config.DATA_DIR / "fotmob_teams_validated.json"
     if json_path.exists():
         try:
             with open(json_path, "r", encoding="utf-8") as f:
                 teams = json.load(f)
+            if not isinstance(teams, list):
+                raise ValueError("expected a JSON array")
+            parsed_teams: list[tuple[str, int]] = []
             for t in teams:
+                if not isinstance(t, dict) or "fotmob_id" not in t:
+                    raise ValueError("team entry is missing fotmob_id")
                 name = t.get("name") or t.get("slug", "Unknown")
+                parsed_teams.append((str(name), int(t["fotmob_id"])))
+            for name, team_id in parsed_teams:
                 # Do not overwrite if it already exists in priority clubs (preserves order)
-                if name not in clubs and t["fotmob_id"] not in clubs.values():
-                    clubs[name] = t["fotmob_id"]
+                if name not in clubs and team_id not in clubs.values():
+                    clubs[name] = team_id
         except Exception as e:
-            logger.warning(f"Failed to load fotmob_teams.json: {e}")
+            raise IncompleteScrapeError(f"Failed to load {json_path}: {e}") from e
             
     return clubs
 
@@ -579,42 +656,111 @@ def merge_transfers(transfer_lists: list[list[Transfer]]) -> list[Transfer]:
     Merge multiple transfer lists and deduplicate by player, from_club, to_club, and date.
     Preserves richer metadata when duplicate entries exist.
     """
-    seen: dict[tuple[str, str, str, str, str], Transfer] = {}
+    all_transfers = [transfer for group in transfer_lists for transfer in group]
+    player_ids_by_name: dict[str, set[int]] = {}
+    for transfer in all_transfers:
+        if transfer.player_id_fotmob is not None:
+            player_ids_by_name.setdefault(
+                _normalize_key_text(transfer.player_name), set()
+            ).add(int(transfer.player_id_fotmob))
+    canonical_player_ids = {
+        name: next(iter(player_ids))
+        for name, player_ids in player_ids_by_name.items()
+        if len(player_ids) == 1
+    }
+    club_ids_by_name: dict[str, set[int]] = {}
+    for transfer in all_transfers:
+        for club_id, short_name, full_name in (
+            (
+                transfer.from_club_id_fotmob,
+                transfer.from_club,
+                transfer.from_club_full_name,
+            ),
+            (
+                transfer.to_club_id_fotmob,
+                transfer.to_club,
+                transfer.to_club_full_name,
+            ),
+        ):
+            if club_id is None:
+                continue
+            for club_name in (short_name, full_name):
+                normalized = _normalize_key_text(club_name)
+                if normalized:
+                    club_ids_by_name.setdefault(normalized, set()).add(club_id)
 
-    for t_list in transfer_lists:
-        for t in t_list:
-            from_key = (
-                f"id:{t.from_club_id_fotmob}"
-                if t.from_club_id_fotmob is not None
-                else _normalize_key_text(t.from_club)
-            )
-            to_key = (
-                f"id:{t.to_club_id_fotmob}"
-                if t.to_club_id_fotmob is not None
-                else _normalize_key_text(t.to_club)
-            )
-            key = (
-                _normalize_key_text(t.player_name),
-                from_key,
-                to_key,
-                (t.date or "").split("T")[0],
-                "shirt_number_update"
-                if t.transfer_type == "shirt_number_update"
-                else "transfer_event",
-            )
+    canonical_club_ids = {
+        name: next(iter(ids))
+        for name, ids in club_ids_by_name.items()
+        if len(ids) == 1
+    }
 
-            if key not in seen:
-                seen[key] = t
-            else:
-                existing = seen[key]
-                # Upgrade every missing field from the richer duplicate.
-                for attr in (
-                    "position", "fee", "shirt_number", "nationality", "age",
-                    "market_value", "from_club_id_fotmob", "to_club_id_fotmob",
-                    "from_club_full_name", "to_club_full_name",
-                ):
-                    if not getattr(existing, attr) and getattr(t, attr):
-                        setattr(existing, attr, getattr(t, attr))
+    def club_key(club_id: int | None, short_name: str, full_name: str) -> str:
+        if club_id is not None:
+            return f"id:{club_id}"
+        for club_name in (full_name, short_name):
+            normalized = _normalize_key_text(club_name)
+            inferred_id = canonical_club_ids.get(normalized)
+            if inferred_id is not None:
+                return f"id:{inferred_id}"
+        return f"name:{_normalize_key_text(full_name or short_name)}"
+
+    def player_key(transfer: Transfer) -> str:
+        if transfer.player_id_fotmob is not None:
+            return f"id:{int(transfer.player_id_fotmob)}"
+        normalized = _normalize_key_text(transfer.player_name)
+        inferred_id = canonical_player_ids.get(normalized)
+        return f"id:{inferred_id}" if inferred_id is not None else f"name:{normalized}"
+
+    seen: dict[tuple[str, ...], Transfer] = {}
+
+    for t in all_transfers:
+        from_key = club_key(
+            t.from_club_id_fotmob, t.from_club, t.from_club_full_name
+        )
+        to_key = club_key(
+            t.to_club_id_fotmob, t.to_club, t.to_club_full_name
+        )
+        key = (
+            player_key(t),
+            from_key,
+            to_key,
+            (t.date or "").split("T")[0],
+            "shirt_number_update"
+            if t.transfer_type == "shirt_number_update"
+            else "transfer_event",
+        )
+
+        existing = seen.get(key)
+        if (
+            existing is not None
+            and existing.transfer_type != t.transfer_type
+            and existing.transfer_type != "transfer"
+            and t.transfer_type != "transfer"
+        ):
+            # Two explicitly different lifecycle events can legitimately share
+            # a player, route, and effective date. Do not collapse (for example)
+            # an end-of-loan and a new loan into one record.
+            key = (*key, t.transfer_type)
+            existing = seen.get(key)
+
+        if existing is None:
+            seen[key] = t
+        else:
+            # Upgrade every missing field from the richer duplicate.
+            for attr in (
+                "position", "fee", "shirt_number", "nationality", "age",
+                "market_value", "from_club_id_fotmob", "to_club_id_fotmob",
+                "from_club_full_name", "to_club_full_name",
+                "player_id_fotmob",
+            ):
+                if not getattr(existing, attr) and getattr(t, attr):
+                    setattr(existing, attr, getattr(t, attr))
+            if "T" not in (existing.date or "") and "T" in (t.date or ""):
+                existing.date = t.date
+            if existing.transfer_type == "transfer" and t.transfer_type != "transfer":
+                existing.transfer_type = t.transfer_type
+                existing.is_loan = t.is_loan
 
     return list(seen.values())
 
@@ -655,10 +801,13 @@ def fetch_transfers_for_club_names(
     window: str = "auto",
 ) -> list[Transfer]:
     """Fetch transfers for specific club names or FotMob IDs."""
+    requested = {name.strip().casefold() for name in club_names if name.strip()}
     targets = _resolve_club_targets(club_names, get_deep_clubs())
-    if not targets:
-        logger.warning("No valid club IDs found to fetch")
-        return []
+    if not targets or len(targets) < len(requested):
+        resolved = ", ".join(name for name, _ in targets) or "none"
+        raise IncompleteScrapeError(
+            f"Could not resolve every requested club safely (resolved: {resolved})"
+        )
 
     scraper = FotmobScraper()
     start_date, end_date = _resolve_date_range(since_date, window)

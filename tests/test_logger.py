@@ -1,6 +1,11 @@
 """Report regression tests."""
 
-from editor.logger import generate_html_report, generate_markdown_report
+from editor.logger import (
+    generate_html_report,
+    generate_markdown_report,
+    log_transfer,
+    read_log,
+)
 
 
 def _entries():
@@ -54,3 +59,25 @@ def test_html_report_has_distinct_sections_and_escapes_values():
     assert "Kit numbers only. No club movement." in report
     assert "Player &lt;script&gt;" in report
     assert "Player <script>" not in report
+
+
+def test_transfer_history_is_scoped_per_output_save(monkeypatch, tmp_path):
+    import config
+
+    monkeypatch.setattr(config, "TRANSFER_LOG_FILE", tmp_path / "transfers.jsonl")
+    common = {
+        "player_name": "Player",
+        "player_id": 10,
+        "from_team": "A",
+        "from_team_id": 1,
+        "to_team": "B",
+        "to_team_id": 2,
+    }
+    log_transfer(**common, save_scope="save-a", fotmob_player_id=777)
+    log_transfer(**common, save_scope="save-b")
+    log_transfer(**common)
+
+    assert len(read_log(save_scope="save-a")) == 1
+    assert len(read_log(save_scope="save-a", include_legacy=True)) == 2
+    assert len(read_log()) == 3
+    assert read_log(save_scope="save-a")[0]["fotmob_player_id"] == 777

@@ -4,6 +4,7 @@ Backup management for edit files.
 Creates timestamped backups before any modifications.
 Auto-cleans old backups beyond the configured limit.
 """
+import hashlib
 import logging
 import shutil
 from datetime import datetime
@@ -12,6 +13,14 @@ from pathlib import Path
 import config
 
 logger = logging.getLogger(__name__)
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def create_backup(edit_file_path: Path) -> Path:
@@ -34,7 +43,7 @@ def create_backup(edit_file_path: Path) -> Path:
     backup_dir = config.BACKUP_DIR
     backup_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     backup_name = f"{edit_file_path.name}.bak.{timestamp}"
     backup_path = backup_dir / backup_name
 
@@ -43,11 +52,11 @@ def create_backup(edit_file_path: Path) -> Path:
     # Verify backup
     orig_size = edit_file_path.stat().st_size
     backup_size = backup_path.stat().st_size
-    if orig_size != backup_size:
+    if orig_size != backup_size or _sha256(edit_file_path) != _sha256(backup_path):
         logger.error(
-            f"Backup size mismatch! Original: {orig_size}, Backup: {backup_size}"
+            f"Backup verification mismatch! Original: {orig_size}, Backup: {backup_size}"
         )
-        raise RuntimeError("Backup verification failed — sizes don't match")
+        raise RuntimeError("Backup verification failed — content does not match")
 
     logger.info(f"Backup created: {backup_path} ({backup_size:,} bytes)")
 

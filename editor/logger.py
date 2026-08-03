@@ -25,9 +25,12 @@ def log_transfer(
     position: str = "",
     fee: str = "",
     market_value: int = 0,
+    transfer_date: str = "",
     previous_shirt_number: int | None = None,
     shirt_number: int | None = None,
     roster_action: str = "",
+    save_scope: str = "",
+    fotmob_player_id: int | None = None,
 ):
     """
     Append a transfer or shirt-number audit record to the JSONL log file.
@@ -47,10 +50,13 @@ def log_transfer(
         "position": position,
         "fee": fee,
         "market_value": market_value,
+        "transfer_date": transfer_date,
         "dry_run": dry_run,
         "previous_shirt_number": previous_shirt_number,
         "shirt_number": shirt_number,
         "roster_action": roster_action,
+        "save_scope": save_scope,
+        "fotmob_player_id": fotmob_player_id,
     }
 
     log_file = config.TRANSFER_LOG_FILE
@@ -72,8 +78,12 @@ def log_transfer(
         )
 
 
-def read_log() -> list[dict]:
-    """Read all transfer log entries."""
+def read_log(
+    save_scope: str | None = None,
+    *,
+    include_legacy: bool = False,
+) -> list[dict]:
+    """Read transfer records, optionally isolated to one output save."""
     log_file = config.TRANSFER_LOG_FILE
     if not log_file.exists():
         return []
@@ -84,7 +94,13 @@ def read_log() -> list[dict]:
             line = line.strip()
             if line:
                 try:
-                    entries.append(json.loads(line))
+                    entry = json.loads(line)
+                    if save_scope is None:
+                        entries.append(entry)
+                    elif entry.get("save_scope") == save_scope:
+                        entries.append(entry)
+                    elif include_legacy and not entry.get("save_scope"):
+                        entries.append(entry)
                 except json.JSONDecodeError:
                     continue
     return entries

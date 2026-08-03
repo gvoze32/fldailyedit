@@ -1,18 +1,26 @@
 """Regression tests for fail-closed roster mutation decisions."""
 
 import argparse
+import json
 
 import pytest
 
 from run import (
     _build_superseded_loan_sources,
+    _competition_section_bounds,
     _decide_roster_action,
     _dedupe_shirt_number_matches,
     _iso_date_arg,
+    _match_transfer_team,
+    _match_transfers_statefully,
+    _load_represented_fotmob_club_ids,
     _percentage_arg,
+    _plan_roster_actions,
     _positive_int_arg,
+    _resolve_run_paths,
 )
 from scraper.models import MatchedTransfer, Transfer
+from editor.models import TeamData
 
 
 @pytest.mark.parametrize(
@@ -117,6 +125,232 @@ def test_unrelated_stale_roster_remains_fail_closed():
     ) == "skip"
 
 
+def test_historical_loan_log_can_reconcile_a_later_run():
+    psg, tottenham, juventus = 114, 179, 120
+    permanent = _club_match(
+        source=psg,
+        destination=juventus,
+        date="2026-08-02T18:40:10Z",
+    )
+    history = [{
+        "player_id": 115254,
+        "from_team_id": psg,
+        "to_team_id": tottenham,
+        "transfer_type": "loan",
+        "transfer_date": "2025-09-01T19:27:00Z",
+    }]
+
+    allowed = _build_superseded_loan_sources(
+        [permanent], historical_entries=history
+    )
+
+    assert allowed[id(permanent)] == frozenset({tottenham})
+
+
+def test_roster_plan_simulates_chained_moves_chronologically():
+    psg, tottenham, juventus = 114, 179, 120
+    loan = _club_match(
+        source=psg,
+        destination=tottenham,
+        date="2025-09-01T19:27:00Z",
+        transfer_type="loan",
+        is_loan=True,
+    )
+    permanent = _club_match(
+        source=psg,
+        destination=juventus,
+        date="2026-08-02T18:40:10Z",
+    )
+    rosters = {
+        psg: TeamData(psg, [115254] + [0] * 39),
+        tottenham: TeamData(tottenham),
+        juventus: TeamData(juventus),
+    }
+    superseded = _build_superseded_loan_sources([loan, permanent])
+
+    plan = _plan_roster_actions(
+        [loan, permanent], rosters, set(rosters), object(), superseded
+    )
+
+    assert [(item.action, item.current_team_id) for item in plan] == [
+        ("move", psg),
+        ("move", tottenham),
+    ]
+
+
+def test_roster_plan_requires_explicit_overflow_permission():
+    source, destination = 10, 20
+    transfer = _club_match(
+        source=source,
+        destination=destination,
+        date="2026-08-02",
+    )
+    rosters = {
+        source: TeamData(source, [115254] + [0] * 39),
+        destination: TeamData(destination, list(range(1000, 1040))),
+    }
+
+    class FakeEditFile:
+        def find_overflow_release_candidate(self, *_, **__):
+            return 30, 1030
+
+    blocked = _plan_roster_actions(
+        [transfer], rosters, set(rosters), FakeEditFile(), {}
+    )
+    allowed = _plan_roster_actions(
+        [transfer],
+        rosters,
+        set(rosters),
+        FakeEditFile(),
+        {},
+        allow_overflow_release=True,
+    )
+
+    assert (blocked[0].action, blocked[0].reason) == (
+        "skip",
+        "destination_roster_full",
+    )
+    assert allowed[0].action == "move"
+    assert allowed[0].overflow_player_id == 1030
+
+
+def test_same_day_transfers_sort_by_timestamp():
+    from run import _transfer_sort_key
+
+    later = Transfer("Player", "B", "C", date="2026-08-02T18:00:00Z")
+    earlier = Transfer("Player", "A", "B", date="2026-08-02T09:00:00Z")
+
+    assert sorted([later, earlier], key=_transfer_sort_key) == [earlier, later]
+
+
+def test_team_matching_uses_full_name_and_rejects_conflicts():
+    class FakeMatcher:
+        def match_team(self, name):
+            return {
+                "Paris Saint-Germain": (114, "Paris Saint-Germain", 100.0),
+                "PSG": (114, "Paris Saint-Germain", 100.0),
+                "Conflicting short": (999, "Wrong Club", 100.0),
+                "Similar Club": (114, "Paris Saint-Germain", 90.0),
+                "Ambiguous Club": (None, "", 98.0),
+            }.get(name, (None, "", 0.0))
+
+    matcher = FakeMatcher()
+    assert _match_transfer_team(matcher, "PSG", "Paris Saint-Germain") == (
+        114,
+        "Paris Saint-Germain",
+        100.0,
+    )
+    assert _match_transfer_team(
+        matcher, "Conflicting short", "Paris Saint-Germain"
+    )[0] == -1
+    assert _match_transfer_team(
+        matcher,
+        "PSG",
+        "Paris Saint-Germain",
+        fotmob_id=9847,
+        validated_fotmob_ids={1234},
+    ) == (-1, "", 100.0)
+    assert _match_transfer_team(matcher, "Similar Club")[0] == -1
+    assert _match_transfer_team(matcher, "Ambiguous Club")[0] == -1
+    assert _match_transfer_team(
+        matcher,
+        "Free Agent",
+        "Free Agent",
+        fotmob_id=2,
+        validated_fotmob_ids={1234},
+    ) == (None, "", 100.0)
+
+    unresolved = MatchedTransfer(
+        transfer=Transfer("Player", "A", "B"),
+        player_id=1,
+        from_team_id=10,
+        to_team_id=-1,
+    )
+    assert unresolved.is_fully_matched is False
+
+
+def test_stateful_matching_keeps_identity_across_loan_chain():
+    from scraper.matcher import NameMatcher
+
+    matcher = NameMatcher()
+    matcher.load_player_db([("Patrick", 3001), ("Patrick", 3002)])
+    matcher.load_team_db({"Parent FC": 10, "Loan FC": 20, "Next FC": 30})
+    transfers = [
+        Transfer(
+            "Patrick",
+            "Parent FC",
+            "Loan FC",
+            date="2025-09-01T10:00:00Z",
+            transfer_type="loan",
+            is_loan=True,
+        ),
+        Transfer(
+            "Patrick",
+            "Parent FC",
+            "Next FC",
+            date="2026-08-02T10:00:00Z",
+        ),
+    ]
+
+    matched = _match_transfers_statefully(
+        transfers,
+        matcher,
+        80,
+        {10: [3001], 20: [], 30: [], 40: [3002]},
+        {10, 20, 30, 40},
+    )
+
+    assert [item.player_id for item in matched] == [3001, 3001]
+
+
+def test_stateful_matching_recovers_renamed_player_from_fotmob_history():
+    from scraper.matcher import NameMatcher
+
+    matcher = NameMatcher()
+    matcher.load_player_db([("Legacy Database Name", 3001)])
+    matcher.load_team_db({"Old FC": 10, "New FC": 20})
+    transfer = Transfer(
+        "Completely New Public Name",
+        "Old FC",
+        "New FC",
+        player_id_fotmob=777,
+    )
+    history = [{
+        "player_id": 3001,
+        "from_team_id": "malformed-but-identity-still-valid",
+        "fotmob_player_id": 777,
+        "player_name": "Legacy Database Name",
+    }]
+
+    matched = _match_transfers_statefully(
+        [transfer], matcher, 80, {10: [3001], 20: []}, {10, 20}, history
+    )
+
+    assert matched[0].player_id == 3001
+    assert matched[0].player_confidence == 100.0
+
+
+def test_stateful_matching_rejects_conflicting_fotmob_history():
+    from scraper.matcher import NameMatcher
+
+    matcher = NameMatcher()
+    matcher.load_player_db([("First Player", 3001), ("Second Player", 3002)])
+    matcher.load_team_db({"Old FC": 10, "New FC": 20})
+    transfer = Transfer(
+        "Unknown Alias", "Old FC", "New FC", player_id_fotmob=777
+    )
+    history = [
+        {"player_id": 3001, "fotmob_player_id": 777},
+        {"player_id": 3002, "fotmob_player_id": 777},
+    ]
+
+    matched = _match_transfers_statefully(
+        [transfer], matcher, 80, {10: [3001], 20: [3002]}, {10, 20}, history
+    )
+
+    assert matched[0].player_id is None
+
+
 def test_cli_date_validation_is_strict():
     assert _iso_date_arg("2026-08-03") == "2026-08-03"
     with pytest.raises(argparse.ArgumentTypeError):
@@ -172,3 +406,56 @@ def test_ambiguous_shirt_numbers_fail_closed():
 
     assert matches == []
     assert skipped == 2
+
+
+def test_default_run_continues_from_existing_output(monkeypatch, tmp_path):
+    import config
+
+    base = tmp_path / "base" / "EDIT00000000"
+    output = tmp_path / "output" / "EDIT00000000"
+    base.parent.mkdir()
+    output.parent.mkdir()
+    base.write_bytes(b"base")
+    monkeypatch.setattr(config, "EDIT_FILE_PATH", base)
+    monkeypatch.setattr(config, "OUTPUT_FILE_PATH", output)
+    args = argparse.Namespace(
+        edit_file=None,
+        output=None,
+        in_place=False,
+        from_base=False,
+    )
+
+    assert _resolve_run_paths(args) == (base, output)
+    output.write_bytes(b"updated")
+    assert _resolve_run_paths(args) == (output, output)
+
+    args.from_base = True
+    assert _resolve_run_paths(args) == (base, output)
+
+
+def test_competition_section_ends_where_game_plans_begin():
+    fake_edit = type(
+        "FakeEdit", (), {"competition_entry_start": 0xA08650, "game_plan_start": 0xA09880}
+    )()
+
+    start, end = _competition_section_bounds(fake_edit)
+
+    assert start == 0xA08650
+    assert end == fake_edit.game_plan_start
+
+
+def test_runtime_club_identity_index_must_be_one_to_one(monkeypatch, tmp_path):
+    import config
+    from scraper.fotmob import IncompleteScrapeError
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    (tmp_path / "fotmob_teams_validated.json").write_text(
+        json.dumps([
+            {"fotmob_id": 10, "pes_team_id": 1},
+            {"fotmob_id": 11, "pes_team_id": 1},
+        ]),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(IncompleteScrapeError, match="not one-to-one"):
+        _load_represented_fotmob_club_ids()

@@ -10,7 +10,7 @@ from editor.editfile import (
     EditFile,
     HEADER_SIZE, PLAYER_TOTAL_SIZE, TEAM_ENTRY_SIZE, MANAGER_ENTRY_SIZE,
     COMPETITION_ENTRY_SIZE, STADIUM_ENTRY_SIZE, UNKNOWN_ENTRY_SIZE,
-    TEAM_PLAYER_ENTRY_SIZE, GAME_PLAN_ENTRY_SIZE,
+    TEAM_PLAYER_ENTRY_SIZE, COMPETITION_SECTION_SIZE, GAME_PLAN_ENTRY_SIZE,
     MAX_PLAYERS, MAX_TEAMS, MAX_MANAGERS, MAX_COMPETITIONS,
     MAX_STADIUMS, MAX_UNKNOWN, MAX_TEAM_PLAYER, MAX_GAME_PLANS,
     HDR_PLAYER_COUNT, HDR_TEAM_COUNT, HDR_MANAGER_COUNT,
@@ -68,6 +68,12 @@ def _build_mock_data(
             name_bytes = name.encode("utf-8")[:60]
             player_block[offset + PE_PLAYER_NAME:offset + PE_PLAYER_NAME + len(name_bytes)] = name_bytes
 
+    if team_entries is None and team_player_entries:
+        team_entries = [
+            (tid, f"Team {tid}")
+            for tid, _pids, _shirts in team_player_entries[:num_teams]
+        ]
+
     team_block = bytearray(MAX_TEAMS * TEAM_ENTRY_SIZE)
     if team_entries:
         for i, (tid, name) in enumerate(team_entries):
@@ -92,7 +98,7 @@ def _build_mock_data(
                 struct.pack_into("<H", tp_block, offset + TP_SHIRT_NUMBERS + j * 2, sn)
 
     # Competition entry section (flat 4656 bytes) + Game plan block
-    comp_entry_section = bytearray(0x1230)
+    comp_entry_section = bytearray(COMPETITION_SECTION_SIZE)
     gp_block = bytearray(MAX_GAME_PLANS * GAME_PLAN_ENTRY_SIZE)
     if team_player_entries:
         for i, (tid, _pids, _shirts) in enumerate(team_player_entries[:num_game_plans]):
@@ -188,7 +194,7 @@ class TestEditFileHeader:
         ))
         ef = EditFile()
         ef.load_bytes(data)
-        game_plan_base = ef.game_plan_start + 0x1230
+        game_plan_base = ef.game_plan_start
         data[game_plan_base + GP_CAPTAIN] = 39  # captain references an empty slot
         ef.load_bytes(data)
 
@@ -208,7 +214,7 @@ class TestEditFileHeader:
         ))
         ef = EditFile()
         ef.load_bytes(data)
-        game_plan_base = ef.game_plan_start + 0x1230
+        game_plan_base = ef.game_plan_start
         lineup = game_plan_base + GP_LINEUP
         ef._data[lineup:lineup + 4] = bytes([2, 2, 39, 0])
         ef._data[game_plan_base + GP_CAPTAIN] = 39
@@ -221,7 +227,6 @@ class TestEditFileHeader:
         assert metrics["repaired_lineups"] == 1
         assert metrics["reset_roles"] == 1
         assert report["valid"] is True
-
 
 class TestReadPlayers:
     def test_read_players(self):
@@ -546,7 +551,7 @@ class TestReleaseAndAddPlayer:
         }
 
         # Add a new 41st player
-        ok = ef.add_player(9999, to_team_id=101)
+        ok = ef.add_player(9999, to_team_id=101, allow_overflow_release=True)
         assert ok is True
 
         new_roster = ef.get_team_roster(101)
@@ -580,7 +585,7 @@ class TestReleaseAndAddPlayer:
         }
 
         # Add 41st player
-        ok = ef.add_player(9999, to_team_id=101)
+        ok = ef.add_player(9999, to_team_id=101, allow_overflow_release=True)
         assert ok is True
 
         new_roster = ef.get_team_roster(101)
@@ -611,7 +616,7 @@ class TestReleaseAndAddPlayer:
             for i in range(40)
         }
 
-        ok = ef.add_player(9999, to_team_id=101)
+        ok = ef.add_player(9999, to_team_id=101, allow_overflow_release=True)
         assert ok is True
 
         new_roster = ef.get_team_roster(101)
@@ -620,3 +625,13 @@ class TestReleaseAndAddPlayer:
         # Starting and 2nd GKs (1000, 1011) remain
         assert 1000 in new_roster.roster
         assert 1011 in new_roster.roster
+    def test_full_roster_rejects_unapproved_overflow_release(self):
+        data = self._build_test_data()
+        ef = EditFile()
+        ef.load_bytes(data)
+        to_entry = ef._find_team_player_entry_offset(101)
+        for slot in range(40):
+            ef._write_player_slot(to_entry, slot, 1000 + slot, slot + 1)
+
+        assert ef.add_player(9999, to_team_id=101) is False
+        assert ef.get_team_roster(101).roster == list(range(1000, 1040))

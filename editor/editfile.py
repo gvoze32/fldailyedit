@@ -12,13 +12,13 @@ Reads the decrypted data.dat and provides functions to:
 All offsets are calculated from the header — nothing is hardcoded except entry sizes
 and field positions within entries, which are the same across PES20/21/FL26.
 """
-import csv
 import logging
 import struct
 from pathlib import Path
 
 import config
 from editor.models import ManagerInfo, PlayerInfo, TeamData, TeamInfo
+from editor.player_catalog import PlayerCatalogReport, build_player_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,7 @@ COMPETITION_ENTRY_SIZE = 0x2F8   # 760 bytes
 STADIUM_ENTRY_SIZE = 0xBC        # 188 bytes (wiki says 0xBB but block math proves 0xBC)
 UNKNOWN_ENTRY_SIZE = 0x84        # 132 bytes
 TEAM_PLAYER_ENTRY_SIZE = 0x11C   # 284 bytes
+COMPETITION_SECTION_SIZE = 0x1230  # 4656-byte flat league-membership section
 GAME_PLAN_ENTRY_SIZE = 0x274     # 628 bytes
 
 # ──────────────────────────────────────────────────────────────
@@ -102,6 +103,13 @@ GP_RIGHT_CK = 0x20D        # 1 byte index ID
 GP_PK = 0x20E              # 1 byte index ID
 GP_ATTACK_PLAYERS = 0x20F  # 3 bytes (3 × 1 byte index IDs: 0x20F, 0x210, 0x211)
 GP_CAPTAIN = 0x212         # 1 byte index ID
+
+GP_SINGLE_PLAYER_ROLES = (
+    GP_LEFT_CK,
+    GP_RIGHT_CK,
+    GP_PK,
+    GP_CAPTAIN,
+)
 
 
 def assign_smart_shirt_number(
@@ -191,7 +199,9 @@ class EditFile:
         self.stadium_start: int = 0
         self.unknown_start: int = 0
         self.team_player_start: int = 0
+        self.competition_entry_start: int = 0
         self.game_plan_start: int = 0
+        self.player_catalog_report: PlayerCatalogReport | None = None
 
         # Track players transferred in the current session to protect them from overflow auto-release
         self.transferred_player_ids: set[int] = set()
@@ -256,10 +266,12 @@ class EditFile:
         self.stadium_start = self.competition_start + MAX_COMPETITIONS * COMPETITION_ENTRY_SIZE
         self.unknown_start = self.stadium_start + MAX_STADIUMS * STADIUM_ENTRY_SIZE
         self.team_player_start = self.unknown_start + MAX_UNKNOWN * UNKNOWN_ENTRY_SIZE
-        # Game plan comes after team-player table + competition entry section
-        # Competition entry section is variable, so we calculate game plan start from the end
-        # For now, calculate based on team-player end
-        self.game_plan_start = self.team_player_start + MAX_TEAM_PLAYER * TEAM_PLAYER_ENTRY_SIZE
+        self.competition_entry_start = (
+            self.team_player_start + MAX_TEAM_PLAYER * TEAM_PLAYER_ENTRY_SIZE
+        )
+        self.game_plan_start = (
+            self.competition_entry_start + COMPETITION_SECTION_SIZE
+        )
 
         logger.info(
             f"Calculated offsets: "
@@ -270,6 +282,7 @@ class EditFile:
             f"stadiums=0x{self.stadium_start:X}, "
             f"unknown=0x{self.unknown_start:X}, "
             f"team_player=0x{self.team_player_start:X}, "
+            f"competition_entry=0x{self.competition_entry_start:X}, "
             f"game_plan=0x{self.game_plan_start:X}"
         )
 
@@ -294,48 +307,15 @@ class EditFile:
 
     def get_all_players(self, csv_path: Path | None = None, include_base_db: bool = True) -> dict[int, PlayerInfo]:
         """
-        Read all player entries (ID + name only).
-        First loads the global FL26 player database from CSV (if include_base_db is True),
-        then merges any custom/edited players found in the edit file.
+        Load the current FL26 player catalog and merge edited save players.
+
+        The legacy CSV is used only for rostered IDs absent from the current
+        SmokePatch reference. It is never allowed to reintroduce stale free agents.
 
         Returns:
             {player_id: PlayerInfo}
         """
-        players: dict[int, PlayerInfo] = {}
-
-        # Step 1: Load base player database from CSV if available and requested
-        csv_file = csv_path or getattr(config, "PLAYERS_CSV_FILE", None)
-        if include_base_db and csv_file and Path(csv_file).exists():
-            try:
-                with open(csv_file, "r", encoding="utf-8-sig") as f:
-                    reader = csv.reader(f)
-                    header = next(reader, None)
-                    for row in reader:
-                        if len(row) >= 2 and row[0].strip().isdigit():
-                            pid = int(row[0].strip())
-                            pname = row[1].strip()
-                            ovr = 0
-                            pos = ""
-                            if len(row) >= 3:
-                                val = row[2].strip()
-                                if val.isdigit():
-                                    ovr = int(val)
-                                else:
-                                    pos = val
-                            if len(row) >= 4:
-                                val = row[3].strip()
-                                if val.isdigit():
-                                    ovr = int(val)
-                                else:
-                                    pos = val
-                            players[pid] = PlayerInfo(
-                                player_id=pid, name=pname, print_name=pname, overall_rating=ovr, position=pos
-                            )
-                logger.info(f"Loaded {len(players)} players from database CSV ({csv_file})")
-            except Exception as e:
-                logger.warning(f"Failed to load player database CSV: {e}")
-
-        # Step 2: Merge custom edited players from the edit file
+        edited_players: dict[int, PlayerInfo] = {}
         edited_count = 0
         for i in range(self.player_count):
             entry_offset = self.player_start + i * PLAYER_TOTAL_SIZE
@@ -351,15 +331,35 @@ class EditFile:
             name = self._read_string(entry_offset + PE_PLAYER_NAME, 61)
             print_name = self._read_string(entry_offset + PE_PRINT_NAME, 61)
 
-            players[player_id] = PlayerInfo(
+            edited_players[player_id] = PlayerInfo(
                 player_id=player_id,
                 name=name,
                 print_name=print_name,
             )
             edited_count += 1
 
-        if edited_count > 0:
-            logger.info(f"Merged {edited_count} custom/edited players from save file")
+        if not include_base_db:
+            return edited_players
+
+        roster_ids = {
+            player_id
+            for roster in self.get_all_rosters().values()
+            for player_id in roster.player_ids
+            if player_id
+        }
+        players, report = build_player_catalog(
+            current_path=config.CURRENT_PLAYERS_FILE,
+            legacy_csv_path=csv_path or config.PLAYERS_CSV_FILE,
+            edited_players=edited_players,
+            roster_ids=roster_ids,
+        )
+        self.player_catalog_report = report
+        logger.info(
+            "Loaded %s current players, %s roster-only legacy fallbacks, and %s edited players",
+            report.current_entries,
+            report.legacy_roster_fallbacks,
+            report.edited_entries,
+        )
         logger.info(f"Total active players in database: {len(players)}")
         return players
 
@@ -420,34 +420,15 @@ class EditFile:
         logger.info(f"Read {len(managers)} managers")
         return managers
 
-    def get_team_manager(self, team_id: int) -> int | None:
-        """Get the assigned manager ID for a team."""
-        team_info = self.get_all_team_info().get(team_id)
-        return team_info.manager_id if team_info else None
-
-    def set_team_manager(self, team_id: int, manager_id: int) -> bool:
-        """Set the assigned manager ID for a team."""
-        for i in range(self.team_count):
-            entry_offset = self.team_start + i * TEAM_ENTRY_SIZE
-            if entry_offset + TEAM_ENTRY_SIZE > len(self._data):
-                break
-            tid = struct.unpack_from("<I", self._data, entry_offset + TE_TEAM_ID)[0]
-            if tid == team_id:
-                struct.pack_into("<I", self._data, entry_offset + TE_MANAGER_ID, manager_id)
-                logger.info(f"Assigned manager ID {manager_id} to team {team_id}")
-                return True
-        return False
-
     def get_league_divisions(self) -> list[list[int]]:
         """
-        Read the 29 league division groupings from offset 0xA08650.
+        Read league division groupings from the Competition Entry section.
 
         Returns:
             List of lists of team IDs for each league division.
         """
-        entry_start = 0xA08650
-        entry_size = 0x1230
-        num_slots = entry_size // 4
+        entry_start = self.competition_entry_start
+        num_slots = COMPETITION_SECTION_SIZE // 4
         all_teams = self.get_all_team_info()
 
         divisions: list[list[int]] = []
@@ -577,7 +558,11 @@ class EditFile:
         return teams
 
     def find_overflow_release_candidate(
-        self, team_id: int, exclude_player_id: int | None = None
+        self,
+        team_id: int,
+        exclude_player_id: int | None = None,
+        roster_player_ids: list[int] | None = None,
+        protected_player_ids: set[int] | None = None,
     ) -> tuple[int, int]:
         """
         Find the best player to release to Free Agent when team roster is full (40/40).
@@ -590,30 +575,37 @@ class EditFile:
         Returns:
             (slot_index, player_id)
         """
-        to_entry = self._find_team_player_entry_offset(team_id)
-        if to_entry is None:
-            return 39, 0
-
-        to_roster = self._read_team_player_entry(to_entry)
+        if roster_player_ids is None:
+            to_entry = self._find_team_player_entry_offset(team_id)
+            if to_entry is None:
+                return 39, 0
+            player_ids = self._read_team_player_entry(to_entry).player_ids
+        else:
+            player_ids = roster_player_ids
         # Protect both the current incoming player and any player transferred in this run
-        protected_ids = {exclude_player_id} | getattr(self, "transferred_player_ids", set())
+        protected_ids = (
+            {exclude_player_id}
+            | getattr(self, "transferred_player_ids", set())
+            | (protected_player_ids or set())
+        )
         active_slots = [
             (slot, pid)
-            for slot, pid in enumerate(to_roster.player_ids)
+            for slot, pid in enumerate(player_ids)
             if pid != 0 and pid not in protected_ids
         ]
         # If all players in squad were transferred in this run, fallback to all except current
         if not active_slots:
             active_slots = [
                 (slot, pid)
-                for slot, pid in enumerate(to_roster.player_ids)
+                for slot, pid in enumerate(player_ids)
                 if pid != 0 and pid != exclude_player_id
             ]
         if not active_slots:
             return 39, 0
 
         if not hasattr(self, "_player_cache") or not self._player_cache:
-            self._player_cache = self.get_all_players()
+            # Overflow release is unsafe without caller-supplied metadata.
+            return 39, 0
 
         # Count total goalkeepers in active roster to protect minimum GK requirement
         total_gks = 0
@@ -699,6 +691,7 @@ class EditFile:
         shirt_number: int | None = None,
         preferred_shirt_number: int | None = None,
         position: str = "",
+        allow_overflow_release: bool = False,
     ) -> bool:
         """
         Transfer a player from one team to another.
@@ -771,6 +764,12 @@ class EditFile:
 
         overflow_pid: int | None = None
         if to_roster.is_full:
+            if not allow_overflow_release:
+                logger.error(
+                    f"Destination team {to_team_id} is full (40/40); "
+                    "overflow release was not authorized"
+                )
+                return False
             _, overflow_pid = self.find_overflow_release_candidate(
                 to_team_id, exclude_player_id=player_id
             )
@@ -825,9 +824,7 @@ class EditFile:
             logger.error(f"No empty slot in destination team {to_team_id}")
             return False
 
-        if not hasattr(self, "_player_cache") or not self._player_cache:
-            self._player_cache = self.get_all_players()
-        pinfo = self._player_cache.get(player_id)
+        pinfo = getattr(self, "_player_cache", {}).get(player_id)
         effective_pos = position or (pinfo.position if pinfo else "")
         is_gk = (pinfo.is_goalkeeper if pinfo else False) or (effective_pos.upper() == "GK")
 
@@ -907,6 +904,7 @@ class EditFile:
         shirt_number: int | None = None,
         preferred_shirt_number: int | None = None,
         position: str = "",
+        allow_overflow_release: bool = False,
     ) -> bool:
         """
         Sign a player from Free Agent into a team.
@@ -942,6 +940,12 @@ class EditFile:
             return False
 
         if to_roster.is_full:
+            if not allow_overflow_release:
+                logger.error(
+                    f"Team {to_team_id} roster is full (40/40); "
+                    "overflow release was not authorized"
+                )
+                return False
             slot_to_rel, pid_to_rel = self.find_overflow_release_candidate(to_team_id, exclude_player_id=player_id)
             if pid_to_rel == 0:
                 logger.error(f"No safe overflow release candidate for team {to_team_id}")
@@ -960,9 +964,7 @@ class EditFile:
             logger.error(f"Team {to_team_id} roster is full (40 players)")
             return False
 
-        if not hasattr(self, "_player_cache") or not self._player_cache:
-            self._player_cache = self.get_all_players()
-        pinfo = self._player_cache.get(player_id)
+        pinfo = getattr(self, "_player_cache", {}).get(player_id)
         effective_pos = position or (pinfo.position if pinfo else "")
         is_gk = (pinfo.is_goalkeeper if pinfo else False) or (effective_pos.upper() == "GK")
 
@@ -1047,8 +1049,7 @@ class EditFile:
 
         # Update role bytes (Captain, CK, PK, Attackers)
         # In PES21, these bytes store the ROSTER INDEX (0..39) or 0xFF (Default/Auto)
-        role_offsets = [GP_CAPTAIN, GP_LEFT_CK, GP_RIGHT_CK, GP_PK]
-        for roff in role_offsets:
+        for roff in GP_SINGLE_PLAYER_ROLES:
             target_off = gp_offset + roff
             if target_off < len(self._data):
                 val = self._data[target_off]
@@ -1097,16 +1098,8 @@ class EditFile:
 
     def _find_game_plan_offset(self, team_id: int) -> int | None:
         """Find the byte offset of a team's game plan entry."""
-        # game_plan_start is after team-player table + competition entry section
-        # It's already calculated correctly in _calculate_offsets
-        # Note: there's a 4656-byte (0x1230) competition entry section between
-        # team-player table and game plans, which game_plan_start doesn't account for.
-        # The actual game plan base = team_player_end + 0x1230
-        competition_entry_size = 0x1230  # 4656 bytes flat section
-        gp_base = self.game_plan_start + competition_entry_size
-
         for i in range(self.game_plan_count):
-            offset = gp_base + i * GAME_PLAN_ENTRY_SIZE
+            offset = self.game_plan_start + i * GAME_PLAN_ENTRY_SIZE
             if offset + 4 > len(self._data):
                 break
             tid = struct.unpack_from("<I", self._data, offset + GP_TEAM_ID)[0]
@@ -1122,14 +1115,13 @@ class EditFile:
         the inactive tail, and roles pointing outside the active roster are reset
         to the game's automatic value (0xFF).
         """
-        game_plan_base = self.game_plan_start + 0x1230
         rosters = self.get_all_rosters()
         repaired_lineups = 0
         reset_roles = 0
         checked = 0
 
         for i in range(min(self.game_plan_count, MAX_GAME_PLANS)):
-            offset = game_plan_base + i * GAME_PLAN_ENTRY_SIZE
+            offset = self.game_plan_start + i * GAME_PLAN_ENTRY_SIZE
             if offset + GAME_PLAN_ENTRY_SIZE > len(self._data):
                 break
 
@@ -1160,7 +1152,7 @@ class EditFile:
                 )
                 repaired_lineups += 1
 
-            role_offsets = [GP_LEFT_CK, GP_RIGHT_CK, GP_PK, GP_CAPTAIN]
+            role_offsets = list(GP_SINGLE_PLAYER_ROLES)
             role_offsets.extend(GP_ATTACK_PLAYERS + index for index in range(3))
             for role_offset in role_offsets:
                 role_address = offset + role_offset
@@ -1200,8 +1192,7 @@ class EditFile:
         errors: list[str] = []
         warnings: list[str] = []
 
-        game_plan_base = self.game_plan_start + 0x1230
-        expected_size = game_plan_base + MAX_GAME_PLANS * GAME_PLAN_ENTRY_SIZE
+        expected_size = self.game_plan_start + MAX_GAME_PLANS * GAME_PLAN_ENTRY_SIZE
         if len(self._data) != expected_size:
             errors.append(
                 f"data.dat size is {len(self._data):,}; expected {expected_size:,} bytes "
@@ -1222,6 +1213,30 @@ class EditFile:
             if not 0 <= count <= maximum:
                 errors.append(f"Header {name} count {count} exceeds block capacity {maximum}")
 
+        edited_player_ids: set[int] = set()
+        for i in range(min(self.player_count, MAX_PLAYERS)):
+            offset = self.player_start + i * PLAYER_TOTAL_SIZE
+            if offset + PLAYER_ENTRY_SIZE > len(self._data):
+                errors.append(f"Player entry {i} exceeds data.dat bounds")
+                break
+            player_id = struct.unpack_from("<I", self._data, offset + PE_PLAYER_ID)[0]
+            if player_id == 0:
+                continue
+            if player_id in edited_player_ids:
+                errors.append(f"Duplicate edited-player ID {player_id}")
+            edited_player_ids.add(player_id)
+
+        team_ids: set[int] = set()
+        for i in range(min(self.team_count, MAX_TEAMS)):
+            offset = self.team_start + i * TEAM_ENTRY_SIZE
+            if offset + TEAM_ENTRY_SIZE > len(self._data):
+                errors.append(f"Team entry {i} exceeds data.dat bounds")
+                break
+            team_id = struct.unpack_from("<I", self._data, offset + TE_TEAM_ID)[0]
+            if team_id in team_ids:
+                errors.append(f"Duplicate team entry for team {team_id}")
+            team_ids.add(team_id)
+
         rosters: dict[int, TeamData] = {}
         seen_team_ids: set[int] = set()
         for i in range(min(self.team_player_count, MAX_TEAM_PLAYER)):
@@ -1231,6 +1246,8 @@ class EditFile:
                 break
             roster = self._read_team_player_entry(offset)
             tid = roster.team_id
+            if tid not in team_ids:
+                errors.append(f"Team-player entry references unknown team {tid}")
             if tid in seen_team_ids:
                 errors.append(f"Duplicate team-player entry for team {tid}")
             seen_team_ids.add(tid)
@@ -1273,14 +1290,21 @@ class EditFile:
             errors.append(f"Player {pid} is registered to multiple clubs: {tids}")
 
         checked_game_plans = 0
+        seen_game_plan_team_ids: set[int] = set()
         for i in range(min(self.game_plan_count, MAX_GAME_PLANS)):
-            offset = game_plan_base + i * GAME_PLAN_ENTRY_SIZE
+            offset = self.game_plan_start + i * GAME_PLAN_ENTRY_SIZE
             if offset + GAME_PLAN_ENTRY_SIZE > len(self._data):
                 errors.append(f"Game-plan entry {i} exceeds data.dat bounds")
                 break
             tid = struct.unpack_from("<I", self._data, offset + GP_TEAM_ID)[0]
+            if tid in seen_game_plan_team_ids:
+                errors.append(f"Duplicate game-plan entry for team {tid}")
+            seen_game_plan_team_ids.add(tid)
             roster = rosters.get(tid)
-            if roster is None or roster.roster_size == 0:
+            if roster is None:
+                errors.append(f"Game-plan entry references unknown team {tid}")
+                continue
+            if roster.roster_size == 0:
                 continue
 
             checked_game_plans += 1
@@ -1296,7 +1320,7 @@ class EditFile:
             if len(starters) != len(set(starters)) or any(slot not in active_slots for slot in starters):
                 errors.append(f"Team {tid} game plan has duplicate or empty starting slots")
 
-            role_offsets = [GP_LEFT_CK, GP_RIGHT_CK, GP_PK, GP_CAPTAIN]
+            role_offsets = list(GP_SINGLE_PLAYER_ROLES)
             role_offsets.extend(GP_ATTACK_PLAYERS + index for index in range(3))
             for role_offset in role_offsets:
                 value = self._data[offset + role_offset]
@@ -1341,6 +1365,8 @@ class EditFile:
             "stadium_start": 0x980D7C,
             "unknown_start": 0x983D38,
             "team_player_start": 0x9D4648,
+            "competition_entry_start": 0xA08650,
+            "game_plan_start": 0xA09880,
         }
 
         results = {}
@@ -1375,6 +1401,7 @@ class EditFile:
         print(f"  Stadiums:    0x{self.stadium_start:08X}")
         print(f"  Unknown:     0x{self.unknown_start:08X}")
         print(f"  Team-Player: 0x{self.team_player_start:08X}")
+        print(f"  League data: 0x{self.competition_entry_start:08X}")
         print(f"  Game Plans:  0x{self.game_plan_start:08X}")
 
         # Validate against vanilla

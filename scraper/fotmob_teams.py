@@ -1,112 +1,121 @@
 #!/usr/bin/env python3
-"""
-Crawler to extract all FotMob Team IDs directly from their XML Sitemaps.
-This produces a complete list of ~45,000 teams covered by FotMob.
-"""
+"""Fail-closed FotMob team sitemap crawler."""
 
 import csv
 import json
 import logging
+import os
 import re
+import tempfile
 import time
 from pathlib import Path
-
+from urllib.parse import unquote
 import urllib.request
-import urllib.error
+
+import config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("fotmob_crawler")
 
 SITEMAP_INDEX_URL = "https://www.fotmob.com/sitemap/en/teams.xml"
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
+
 def clean_name(slug: str) -> str:
-    """Convert URL slug back to a human-readable name."""
-    # Special decoding if needed, but normally URL slugs are mostly dashes
-    # decode uri component equivalent
-    from urllib.parse import unquote
-    name = unquote(slug)
-    name = name.replace("-", " ")
-    return name.title()
+    return unquote(slug).replace("-", " ").title()
 
-def crawl_sitemaps():
-    logger.info(f"Fetching sitemap index: {SITEMAP_INDEX_URL}")
+
+def _fetch_text(url: str) -> str:
+    request = urllib.request.Request(url, headers=HEADERS)
+    with urllib.request.urlopen(request, timeout=15) as response:
+        return response.read().decode("utf-8")
+
+
+def _atomic_write(path: Path, write) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     try:
-        req = urllib.request.Request(SITEMAP_INDEX_URL, headers=HEADERS)
-        with urllib.request.urlopen(req, timeout=15) as response:
-            index_text = response.read().decode('utf-8')
-    except Exception as e:
-        logger.error(f"Failed to fetch index sitemap: {e}")
-        return
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            write(handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, path)
+    finally:
+        temp_path = Path(temp_name)
+        if temp_path.exists():
+            temp_path.unlink()
 
-    # Extract all child sitemaps e.g. https://www.fotmob.com/sitemap/en/teams/1.xml
-    child_sitemaps = re.findall(r"<loc>(https://www\.fotmob\.com/sitemap/en/teams/\d+\.xml)</loc>", index_text)
-    
+
+def crawl_sitemaps() -> list[dict]:
+    """Fetch every child sitemap or raise without replacing existing indexes."""
+    logger.info("Fetching sitemap index: %s", SITEMAP_INDEX_URL)
+    index_text = _fetch_text(SITEMAP_INDEX_URL)
+    child_sitemaps = re.findall(
+        r"<loc>(https://www\.fotmob\.com/sitemap/en/teams/\d+\.xml)</loc>",
+        index_text,
+    )
     if not child_sitemaps:
-        logger.error("No child sitemaps found in index!")
-        return
+        raise RuntimeError("FotMob sitemap index contained no child sitemaps")
 
-    logger.info(f"Found {len(child_sitemaps)} child sitemaps.")
-    
-    teams = []
-    seen_ids = set()
-
-    for idx, sitemap_url in enumerate(child_sitemaps, 1):
-        logger.info(f"Fetching sitemap {idx}/{len(child_sitemaps)}: {sitemap_url}")
+    teams: list[dict] = []
+    seen_ids: set[int] = set()
+    failures: list[str] = []
+    for index, sitemap_url in enumerate(child_sitemaps, 1):
+        logger.info("Fetching sitemap %s/%s", index, len(child_sitemaps))
         try:
-            req = urllib.request.Request(sitemap_url, headers=HEADERS)
-            with urllib.request.urlopen(req, timeout=15) as response:
-                sitemap_text = response.read().decode('utf-8')
-        except Exception as e:
-            logger.error(f"Failed to fetch {sitemap_url}: {e}")
+            sitemap_text = _fetch_text(sitemap_url)
+        except Exception as exc:
+            failures.append(f"{sitemap_url}: {exc}")
             continue
-            
-        # Example: <loc>https://www.fotmob.com/teams/161812/overview/wealdstone</loc>
-        # Pattern handles /teams/ID/overview/slug
-        matches = re.finditer(r"<loc>https://www\.fotmob\.com/teams/(\d+)/overview/([^<]+)</loc>", sitemap_text)
-        
-        count = 0
-        for m in matches:
-            team_id = int(m.group(1))
-            slug = m.group(2)
-            
-            if team_id not in seen_ids:
-                seen_ids.add(team_id)
-                teams.append({
-                    "fotmob_id": team_id,
-                    "name": clean_name(slug),
-                    "slug": slug,
-                    "url": f"https://www.fotmob.com/teams/{team_id}/overview/{slug}"
-                })
-                count += 1
-                
-        logger.info(f"Extracted {count} new teams from sitemap {idx}.")
-        time.sleep(0.5) # Be gentle to FotMob
-        
-    logger.info(f"Finished crawling. Total unique teams extracted: {len(teams)}")
-    
-    # Sort teams by ID
-    teams.sort(key=lambda x: x["fotmob_id"])
-    
-    # Save files
-    data_dir = Path("data")
-    data_dir.mkdir(exist_ok=True)
-    
-    json_path = data_dir / "fotmob_teams.json"
-    csv_path = data_dir / "fotmob_teams.csv"
-    
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(teams, f, indent=2, ensure_ascii=False)
-        
-    with open(csv_path, "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["fotmob_id", "name", "slug", "url"])
+        matches = list(re.finditer(
+            r"<loc>https://www\.fotmob\.com/teams/(\d+)/overview/([^<]+)</loc>",
+            sitemap_text,
+        ))
+        if not matches:
+            failures.append(f"{sitemap_url}: no team URLs")
+            continue
+        for match in matches:
+            team_id = int(match.group(1))
+            slug = match.group(2)
+            if team_id in seen_ids:
+                continue
+            seen_ids.add(team_id)
+            teams.append({
+                "fotmob_id": team_id,
+                "name": clean_name(slug),
+                "slug": slug,
+                "url": f"https://www.fotmob.com/teams/{team_id}/overview/{slug}",
+            })
+        time.sleep(0.5)
+
+    if failures:
+        preview = "; ".join(failures[:5])
+        raise RuntimeError(
+            f"FotMob sitemap crawl incomplete ({len(failures)} failed): {preview}"
+        )
+    if not teams:
+        raise RuntimeError("FotMob sitemap crawl produced no teams")
+
+    teams.sort(key=lambda item: item["fotmob_id"])
+    json_path = config.DATA_DIR / "fotmob_teams.json"
+    csv_path = config.DATA_DIR / "fotmob_teams.csv"
+    _atomic_write(
+        json_path,
+        lambda handle: json.dump(teams, handle, indent=2, ensure_ascii=False),
+    )
+
+    def write_csv(handle) -> None:
+        writer = csv.DictWriter(handle, fieldnames=["fotmob_id", "name", "slug", "url"])
         writer.writeheader()
         writer.writerows(teams)
-        
-    logger.info(f"Saved JSON: {json_path} ({(json_path.stat().st_size / 1024 / 1024):.2f} MB)")
-    logger.info(f"Saved CSV: {csv_path} ({(csv_path.stat().st_size / 1024 / 1024):.2f} MB)")
-    
+
+    _atomic_write(csv_path, write_csv)
+    logger.info("Saved %s complete FotMob team identities", len(teams))
+    return teams
+
+
 if __name__ == "__main__":
     crawl_sitemaps()

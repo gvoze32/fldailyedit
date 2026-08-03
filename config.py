@@ -24,10 +24,6 @@ ENCRYPTER_BIN = VENDOR_DIR / "pesXdecrypter" / "encrypter21"
 BACKUP_DIR = PROJECT_ROOT / "backups"
 MAX_BACKUPS = 10  # auto-delete oldest beyond this
 
-# --- Scraper ---
-FOTMOB_TRANSFERS_URL = "https://www.fotmob.com/transfers"
-FOTMOB_API_TEMPLATE = "https://www.fotmob.com/api/data/transfers?orderBy=lastModified&page={page}&minFeeCurrency=EUR&popular={popular}"
-
 # --- Fuzzy matching ---
 MATCH_THRESHOLD_PLAYER = 80  # minimum confidence (0-100) for player name match
 MATCH_THRESHOLD_TEAM = 75    # minimum confidence for team name match
@@ -35,8 +31,9 @@ MATCH_THRESHOLD_TEAM = 75    # minimum confidence for team name match
 # --- Data files ---
 TEAM_ALIASES_FILE = DATA_DIR / "team_aliases.json"
 NAME_OVERRIDES_FILE = DATA_DIR / "name_overrides.json"
-LEAGUES_FILE = DATA_DIR / "leagues.json"
 PLAYERS_CSV_FILE = DATA_DIR / "players.csv"
+CURRENT_PLAYERS_FILE = DATA_DIR / "FL2622wc_players.txt"
+CURRENT_TEAMS_FILE = DATA_DIR / "FL262_teams.txt"
 
 # --- Logging ---
 TRANSFER_LOG_FILE = DATA_DIR / "transfer_log.jsonl"
