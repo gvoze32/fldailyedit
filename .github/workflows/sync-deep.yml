@@ -38,6 +38,7 @@ jobs:
           python run.py validate --edit-file base/EDIT00000000
           python run.py run \
             --window auto \
+            --pages 100 \
             --deep \
             --edit-file base/EDIT00000000 \
             --output output/EDIT00000000

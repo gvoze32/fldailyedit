@@ -57,6 +57,77 @@ def _transfer_sort_key(transfer):
     )
 
 
+def _decide_roster_action(
+    current_team_id: int | None,
+    from_team_id: int | None,
+    to_team_id: int | None,
+    transfer_type: str,
+) -> str:
+    """Choose a fail-closed roster mutation from the verified current state."""
+    if transfer_type == "squad_update":
+        return "shirt_update" if to_team_id is not None and current_team_id == to_team_id else "skip"
+
+    if from_team_id is not None and to_team_id is not None:
+        if current_team_id == to_team_id:
+            return "noop"
+        if current_team_id == from_team_id:
+            return "move"
+        return "skip"
+
+    if from_team_id is None and to_team_id is not None:
+        if current_team_id == to_team_id:
+            return "noop"
+        if current_team_id is None:
+            return "add"
+        return "skip"
+
+    if from_team_id is not None and to_team_id is None:
+        if current_team_id == from_team_id:
+            return "release"
+        if current_team_id is None:
+            return "noop"
+        return "skip"
+
+    return "skip"
+
+
+def _iso_date_arg(value: str) -> str:
+    parsed = parse_iso_date(value)
+    if parsed is None or value != parsed.isoformat():
+        raise argparse.ArgumentTypeError("expected an ISO date in YYYY-MM-DD format")
+    return value
+
+
+def _percentage_arg(value: str) -> float:
+    try:
+        number = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("expected a number from 0 to 100") from exc
+    if not 0 <= number <= 100:
+        raise argparse.ArgumentTypeError("expected a number from 0 to 100")
+    return number
+
+
+def _positive_int_arg(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("expected a positive integer") from exc
+    if number < 1:
+        raise argparse.ArgumentTypeError("expected a positive integer")
+    return number
+
+
+def _positive_float_arg(value: str) -> float:
+    try:
+        number = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("expected a positive number") from exc
+    if number <= 0:
+        raise argparse.ArgumentTypeError("expected a positive number")
+    return number
+
+
 def setup_logging(verbose: bool = False):
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
@@ -137,8 +208,9 @@ def cmd_inspect(args):
             suffix = f" ... [{cl[-1]}]" if len(cl) > 3 else ""
             print(f"  Division {idx+1:2d} ({len(cl):2d} teams): {preview}{suffix}")
 
-        print(f"\nTotal Clubs: {len([t for t in teams.values() if t.team_id > 100])}")
-        print(f"Total National Teams: {len([t for t in teams.values() if t.team_id <= 100])}")
+        club_ids = ef.get_club_team_ids()
+        print(f"\nTotal Clubs: {len(club_ids)}")
+        print(f"Total Other/National Teams: {len(set(teams) - club_ids)}")
         managers = ef.get_all_managers()
         print(f"Total Managers / Coaches: {len(managers)}")
 
@@ -310,14 +382,18 @@ def cmd_run(args):
     deep_mode = getattr(args, "deep", False)
 
     start_d, end_d = get_transfer_window_range(window)
-    cutoff_info = f"since {since_date}" if since_date else f"window '{window}' (from {start_d})"
+    cutoff_info = (
+        f"since {since_date}"
+        if since_date
+        else f"window '{window}' ({start_d} to {end_d or 'latest'})"
+    )
     transfers_list = []
     if club_filter:
         clubs = [c.strip() for c in club_filter.split(",") if c.strip()]
         print(f"\n🎯 Scraping club-focused transfers for: {', '.join(clubs)} ({cutoff_info})...")
         transfers_list.append(fetch_transfers_for_club_names(clubs, since_date=since_date, window=window))
     elif deep_mode:
-        print(f"\n🌪️ Deep Mode: Scraping transfers and squad for 150+ Major Global Clubs ({cutoff_info})...")
+        print(f"\n🌪️ Deep Mode: Scraping transfers and squads for indexed clubs ({cutoff_info})...")
         transfers_list.append(fetch_major_clubs_transfers_safely(since_date=since_date, window=window))
         print(f"\n📡 Adding Live Global Feed to catch other minor leagues ({cutoff_info}, max_pages={pages})...")
         transfers_list.append(fetch_fotmob_transfers(max_pages=pages, popular_only=popular_only, since_date=since_date, window=window))
@@ -431,7 +507,10 @@ def cmd_run(args):
             nationalities=player_nationalities,
             ages=player_ages,
         )
-        matcher.load_team_db(team_name_to_id)
+        # team_name_to_id is already filtered through the save's league
+        # memberships. Do not apply the legacy ID<=100 heuristic: FL26 has
+        # real clubs in that numeric range (for example Manchester United).
+        matcher.load_team_db(team_name_to_id, clubs_only=False)
 
         # Build team_player_map for context-aware disambiguation
         all_rosters = ef.get_all_rosters()
@@ -492,35 +571,44 @@ def cmd_run(args):
         # ── Step 6: Apply transfers ──
         run_records = []
         if dry_run:
-            print(f"\n🔍 DRY-RUN — would apply {len(fully_matched)} transfers:")
+            print("\n🔍 DRY-RUN — checking each match against the current roster:")
+            would_apply = 0
+            already_current = 0
+            safety_skipped = 0
             for m in fully_matched:
-                print(f"  {m}")
-                transfer_logger.log_transfer(
-                    player_name=m.matched_player_name or m.transfer.player_name,
-                    player_id=m.player_id,
-                    from_team=m.matched_from_team or m.transfer.from_club,
-                    from_team_id=m.from_team_id or 0,
-                    to_team=m.matched_to_team or m.transfer.to_club,
-                    to_team_id=m.to_team_id or 0,
-                    confidence=m.min_confidence,
-                    transfer_type=m.transfer.transfer_type,
-                    dry_run=True,
-                    position=m.transfer.position,
-                    fee=m.transfer.fee,
-                    market_value=m.transfer.market_value,
+                current_clubs = ef.find_player_teams(m.player_id, club_only=True)
+                if len(current_clubs) > 1:
+                    safety_skipped += 1
+                    print(f"  SAFETY SKIP (duplicate registration): {m}")
+                    continue
+                current_tid = current_clubs[0] if current_clubs else None
+                action = _decide_roster_action(
+                    current_tid,
+                    m.from_team_id,
+                    m.to_team_id,
+                    m.transfer.transfer_type,
                 )
-                run_records.append({
-                    "player_name": m.matched_player_name or m.transfer.player_name,
-                    "from_team": m.matched_from_team or m.transfer.from_club,
-                    "to_team": m.matched_to_team or m.transfer.to_club,
-                    "position": m.transfer.position,
-                    "fee": m.transfer.fee,
-                    "transfer_type": m.transfer.transfer_type,
-                    "confidence": m.min_confidence,
-                    "dry_run": True,
-                })
-            transfer_logger.save_reports(run_records)
-            print(f"\nDry-run complete. {len(fully_matched)} transfers validated and logged.")
+                if action == "skip":
+                    safety_skipped += 1
+                    print(
+                        f"  SAFETY SKIP (current={current_tid}, "
+                        f"source={m.from_team_id}, destination={m.to_team_id}): {m}"
+                    )
+                    continue
+                if action == "noop" or (
+                    action == "shirt_update" and m.transfer.shirt_number is None
+                ):
+                    already_current += 1
+                    print(f"  ALREADY CURRENT: {m}")
+                    continue
+
+                would_apply += 1
+                print(f"  WOULD {action.upper()}: {m}")
+            print(
+                f"\nDry-run complete. Would apply: {would_apply}, "
+                f"already current: {already_current}, safety-skipped: {safety_skipped}. "
+                "No files were written."
+            )
             return
 
         # Create backup before modifying
@@ -530,6 +618,7 @@ def cmd_run(args):
 
         print(f"\n⚡ Applying {len(fully_matched)} transfers with Smart Shirt Numbers & Game Plan Doctor...")
         applied = 0
+        unchanged = 0
         failed = 0
         original_data = bytes(ef._data)
         pending_logs = []
@@ -549,41 +638,47 @@ def cmd_run(args):
                 print(f"  ✗ Skipped {m.matched_player_name or t.player_name}: player is in multiple clubs {current_clubs}")
                 continue
             current_tid = current_clubs[0] if current_clubs else None
-
-            is_squad_update = t.transfer_type == "squad_update"
-            if is_squad_update:
-                if to_tid and current_tid == to_tid and t.shirt_number is not None:
-                    if ef.update_player_shirt_number(to_tid, pid, t.shirt_number):
-                        applied += 1
+            action = _decide_roster_action(
+                current_tid,
+                m.from_team_id,
+                to_tid,
+                t.transfer_type,
+            )
+            if action == "skip":
+                failed += 1
+                print(
+                    f"  ✗ Safety skip {m.matched_player_name or t.player_name}: "
+                    f"current={current_tid}, expected source={m.from_team_id}, destination={to_tid}"
+                )
                 continue
-                
+            if action == "noop":
+                unchanged += 1
+                continue
+
             ok = False
-            pref_shirt = m.transfer.shirt_number
-            if to_tid is not None:
-                if current_tid == to_tid:
-                    ok = True
-                    if pref_shirt is not None:
-                        ok = ef.update_player_shirt_number(to_tid, pid, pref_shirt)
-                elif current_tid is not None:
-                    ok = ef.move_player(
-                        pid,
-                        current_tid,
-                        to_tid,
-                        shirt_number=pref_shirt,
-                        position=t.position,
-                    )
-                else:
-                    ok = ef.add_player(
-                        pid,
-                        to_tid,
-                        shirt_number=pref_shirt,
-                        position=t.position,
-                    )
-            else:
-                if current_tid is None:
-                    ok = True
-                else:
-                    ok = ef.release_player(pid, current_tid)
+            pref_shirt = t.shirt_number
+            if action == "shirt_update":
+                if pref_shirt is None:
+                    unchanged += 1
+                    continue
+                ok = ef.update_player_shirt_number(to_tid, pid, pref_shirt)
+            elif action == "move":
+                ok = ef.move_player(
+                    pid,
+                    m.from_team_id,
+                    to_tid,
+                    shirt_number=pref_shirt,
+                    position=t.position,
+                )
+            elif action == "add":
+                ok = ef.add_player(
+                    pid,
+                    to_tid,
+                    shirt_number=pref_shirt,
+                    position=t.position,
+                )
+            elif action == "release":
+                ok = ef.release_player(pid, m.from_team_id)
 
             if ok:
                 applied += 1
@@ -602,7 +697,7 @@ def cmd_run(args):
                 failed += 1
                 print(f"  ✗ Failed: {m.matched_player_name or m.transfer.player_name} ({m.action_type})")
 
-        print(f"\n  Applied: {applied}, Failed: {failed}")
+        print(f"\n  Applied: {applied}, Already current: {unchanged}, Failed/skipped: {failed}")
 
         post_integrity = ef.validate_integrity()
         if not post_integrity["valid"]:
@@ -722,33 +817,33 @@ def main():
     p_run.add_argument("-o", "--output", type=str, help="Path to output updated edit00000000 (default: output/EDIT00000000)")
     p_run.add_argument("--in-place", action="store_true", help="Overwrite input edit file in-place instead of writing to output/")
     p_run.add_argument("--club", type=str, help="Comma-separated club names to focus scrape (e.g. 'Chelsea,Arsenal')")
-    p_run.add_argument("--deep", action="store_true", help="Deep fetch across all 5,700+ Global Clubs directly")
+    p_run.add_argument("--deep", action="store_true", help="Deep fetch across all locally indexed FotMob clubs")
     p_run.add_argument("--window", type=str, choices=["auto", "summer", "winter", "all"], default="auto", help="Transfer window (default: auto)")
-    p_run.add_argument("--since", type=str, help="Scrape transfers since date (YYYY-MM-DD)")
-    p_run.add_argument("--threshold", type=float, help="Fuzzy match confidence threshold (0-100)")
-    p_run.add_argument("--pages", type=int, default=10, help="Maximum FotMob API pages (default: 10)")
+    p_run.add_argument("--since", type=_iso_date_arg, help="Scrape transfers since date (YYYY-MM-DD)")
+    p_run.add_argument("--threshold", type=_percentage_arg, help="Fuzzy match confidence threshold (0-100)")
+    p_run.add_argument("--pages", type=_positive_int_arg, default=10, help="Maximum FotMob API pages (default: 10)")
     p_run.add_argument("--popular", action="store_true", help="Only request FotMob popular transfers")
     p_run.set_defaults(func=cmd_run)
 
     # schedule
     p_sched = sub.add_parser("schedule", help="Run transfers continuously on a timer")
-    p_sched.add_argument("--interval-hours", type=float, default=6.0, help="Interval between runs in hours (default: 6.0)")
+    p_sched.add_argument("--interval-hours", type=_positive_float_arg, default=6.0, help="Interval between runs in hours (default: 6.0)")
     p_sched.add_argument("--dry-run", action="store_true", help="Don't modify the edit file")
     p_sched.add_argument("--edit-file", type=str, help="Path to input edit00000000")
     p_sched.add_argument("-o", "--output", type=str, help="Path to output updated edit00000000 (default: output/EDIT00000000)")
     p_sched.add_argument("--in-place", action="store_true", help="Overwrite input edit file in-place")
     p_sched.add_argument("--club", type=str, help="Comma-separated club names to focus scrape (e.g. 'Chelsea,Arsenal')")
-    p_sched.add_argument("--deep", action="store_true", help="Deep fetch across all 5,700+ Global Clubs directly")
+    p_sched.add_argument("--deep", action="store_true", help="Deep fetch across all locally indexed FotMob clubs")
     p_sched.add_argument("--window", type=str, choices=["auto", "summer", "winter", "all"], default="auto", help="Transfer window (default: auto)")
-    p_sched.add_argument("--since", type=str, help="Scrape transfers since date (YYYY-MM-DD)")
-    p_sched.add_argument("--threshold", type=float, help="Fuzzy match confidence threshold (0-100)")
-    p_sched.add_argument("--pages", type=int, default=10, help="Maximum FotMob API pages (default: 10)")
+    p_sched.add_argument("--since", type=_iso_date_arg, help="Scrape transfers since date (YYYY-MM-DD)")
+    p_sched.add_argument("--threshold", type=_percentage_arg, help="Fuzzy match confidence threshold (0-100)")
+    p_sched.add_argument("--pages", type=_positive_int_arg, default=10, help="Maximum FotMob API pages (default: 10)")
     p_sched.add_argument("--popular", action="store_true", help="Only request FotMob popular transfers")
     p_sched.set_defaults(func=cmd_schedule)
 
     # cron
     p_cron = sub.add_parser("cron", help="Generate crontab line for automated scheduling")
-    p_cron.add_argument("--interval-hours", type=int, default=6, help="Interval in hours (default: 6)")
+    p_cron.add_argument("--interval-hours", type=_positive_int_arg, default=6, help="Interval in hours (default: 6)")
     p_cron.set_defaults(func=cmd_cron)
 
     # inspect

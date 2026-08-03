@@ -93,6 +93,9 @@ class TestPlayerMatching:
         assert pid is None
         assert conf == 0.0
 
+    def test_override_metadata_is_not_treated_as_player_alias(self):
+        assert "_comment" not in NameMatcher()._player_overrides
+
     def test_middle_name_token_set(self, matcher):
         """'Gabriel Jesus' matching 'Gabriel Fernando de Jesus'."""
         matcher.load_player_db({"Gabriel Fernando de Jesus": 5001})
@@ -142,6 +145,32 @@ class TestPlayerMatching:
         assert pid == 3002
         assert name == "Patrick"
         assert conf == 100.0
+
+    def test_source_roster_has_priority_over_destination(self):
+        """Duplicate names resolve to the source player, not an arbitrary union member."""
+        m = NameMatcher()
+        m.load_player_db([("Patrick", 3001), ("Patrick", 3002)])
+
+        pid, name, conf = m.match_player(
+            "Patrick",
+            from_team_id=10,
+            to_team_id=20,
+            team_player_map={10: [3001], 20: [3002]},
+        )
+        assert (pid, name, conf) == (3001, "Patrick", 100.0)
+
+    def test_roster_context_does_not_bypass_threshold(self):
+        m = NameMatcher()
+        m.load_player_db({"Alice Brown": 4001})
+
+        pid, _, conf = m.match_player(
+            "Zzzzz Unknown",
+            threshold=95,
+            from_team_id=10,
+            team_player_map={10: [4001]},
+        )
+        assert pid is None
+        assert conf < 95
 
     def test_position_compatibility_gk_protection(self):
         """A goalkeeper transfer should not match an outfield player of same name."""
@@ -200,12 +229,30 @@ class TestTeamMatching:
             "Juventus": 2007,
             "Inter Milan": 2008,
             "AC Sparta Praha": 2009,
+            "Atletico Madrid": 2010,
         })
         return m
 
     def test_exact_match(self, matcher):
         tid, name, conf = matcher.match_team("Manchester United")
         assert tid == 2001
+        assert conf == 100.0
+
+    def test_low_id_club_is_not_mistaken_for_national_team(self):
+        m = NameMatcher()
+        m.load_team_db({"Manchester United": 100})
+        assert m.match_team("Man Utd") == (100, "Manchester United", 100.0)
+
+    def test_alias_target_can_resolve_through_club_affix(self):
+        m = NameMatcher()
+        m.load_team_db({"Juventus FC": 120})
+        assert m.match_team("Juve") == (120, "Juventus FC", 100.0)
+
+    @pytest.mark.parametrize("name", ["Free Agent", "Without Club", "Retired", ""])
+    def test_non_club_sentinel_is_never_fuzzy_matched(self, matcher, name):
+        tid, matched_name, conf = matcher.match_team(name)
+        assert tid is None
+        assert matched_name == ""
         assert conf == 100.0
 
     def test_alias_match(self, matcher):
@@ -223,6 +270,10 @@ class TestTeamMatching:
         tid, name, conf = matcher.match_team("Bayern Munich")
         assert tid == 2005
         assert conf == 100.0
+
+    def test_alias_lookup_normalizes_diacritics(self, matcher):
+        tid, name, conf = matcher.match_team("Atletico de Madrid")
+        assert (tid, name, conf) == (2010, "Atletico Madrid", 100.0)
 
     def test_fuzzy_team(self, matcher):
         """'Barcelona' should fuzzy-match 'FC Barcelona'."""

@@ -243,11 +243,14 @@ FotMob names vs FL26 database names will differ:
 
 **Multi-strategy approach using rapidfuzz:**
 1. Normalize both strings (lowercase, strip diacritics via `unicodedata`)
-2. Try exact match first
-3. `token_sort_ratio` — handles word order differences
-4. `partial_ratio` — handles abbreviations/partial names
-5. Configurable threshold (default 80%)
-6. Manual override files for known mismatches:
+2. Resolve exact duplicate names against the source roster first; use the
+   destination roster only as an already-applied/idempotent fallback
+3. Apply position compatibility, nationality, and age evidence
+4. Combine `token_set_ratio`, `token_sort_ratio`, `WRatio`, and phonetic evidence
+5. Require the configurable threshold (default 80%) and a 3-point runner-up margin
+6. Treat `Free Agent`, `Without Club`, `Retired`, and equivalent sentinels as
+   deliberately unmatched clubs, never fuzzy-match them
+7. Manual override files for known mismatches (override keys are normalized):
    - `data/team_aliases.json` — team name aliases
    - `data/name_overrides.json` — player name overrides
 
@@ -281,6 +284,7 @@ fleditscrape/
 │   ├── test_scraper.py
 │   ├── test_matcher.py
 │   ├── test_editor.py
+│   ├── test_run_logic.py
 │   └── fixtures/            # Saved HTML + mock binaries for tests
 ├── vendor/
 │   └── pesXdecrypter/       # Compiled decrypter/encrypter binary
@@ -435,8 +439,45 @@ Reference season membership finding:
 Canonical base decision:
 
 - `base/EDIT00000000` is Gondowan's Mid-Summer FL26 2.2 EDIT dated 27/07/2026.
+- Source: https://www.reddit.com/r/SPFootballLife/comments/1v7z782/release_gondowans_midsummer_edit_file_more_than/
 - It includes 500+ transfers, rating/position changes, auto lineups, squad
   numbers, manager updates, loan returns, and promotions/relegations for the
   four first/second-division pairs listed above.
 - Runtime defaults, workflows, and validation utilities must use `base/` as the
   single canonical input directory.
+
+Final ingestion/mutation safety rules:
+
+- Automatic windows are bounded to Jan 1–Feb 28/29 or Jun 1–Sep 30. Between
+  windows, `auto` selects the most recently completed window; malformed
+  `since_date` values are rejected instead of silently disabling filtering.
+- `auto` depends only on today's date and window open/end boundaries, never on
+  base provenance or sidecar metadata. Daily workflows need no season-specific
+  edits. Global FotMob pages must all be scanned up to the configured limit
+  because the endpoint is sorted by `lastModified`, not by `transferDate`; an
+  old corrected record must not terminate pagination early.
+- Undated transactional events are excluded whenever a bounded date filter is
+  active. Squad-number observations remain separate `squad_update` records.
+- Every resolved fetch range is capped at the current UTC date. Pre-agreements
+  may be visible in a source before registration opens, but must not mutate the
+  game roster until FotMob's effective `transferDate` is reached.
+- Manual club filters prefer normalized exact names and accept a substring only
+  when it resolves uniquely; ambiguous club filters are skipped.
+- A transfer mutates the roster only if the player's actual current club equals
+  the matched source. Signings require the player to be unregistered, releases
+  require the expected source, already-applied events are no-ops, and any other
+  state is a safety skip.
+- The dry run uses the same decision gate as the real mutation path.
+- Club/national-team classification must come from the league-membership block,
+  not a numeric ID threshold. FL26 has playable clubs at IDs `<=100` (Manchester
+  United is ID 100 in the supplied team database).
+- Current regression baseline: 114 tests passing; canonical base and output
+  both validate at 10,995,800 bytes, 749 rosters, 583 clubs, zero duplicate club
+  registrations, and 747 checked game plans.
+
+Persistent agent preferences:
+
+- Use RTK (Rust Token Killer) wrappers for shell work whenever an equivalent
+  RTK command exists; use `rtk run` or `rtk proxy` when no filtered wrapper fits.
+- Keep caveman full mode active for every response and task: terse Indonesian,
+  no filler, full technical accuracy. Disable only when user explicitly asks.

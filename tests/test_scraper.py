@@ -1,6 +1,8 @@
 """
 Tests for the FotMob scraper and transfer models.
 """
+import asyncio
+
 import pytest
 from scraper.models import Transfer
 
@@ -195,6 +197,7 @@ class TestTransferWindowLogic:
         ref = date(2026, 7, 1)
         start, end = get_transfer_window_range("auto", ref_date=ref)
         assert start == date(2026, 6, 1)
+        assert end == date(2026, 9, 30)
 
     def test_window_range_auto_winter(self):
         from datetime import date
@@ -203,6 +206,24 @@ class TestTransferWindowLogic:
         ref = date(2026, 2, 1)
         start, end = get_transfer_window_range("auto", ref_date=ref)
         assert start == date(2026, 1, 1)
+        assert end == date(2026, 2, 28)
+
+    def test_window_range_auto_between_windows_is_bounded(self):
+        from datetime import date
+        from scraper.fotmob import get_transfer_window_range
+
+        assert get_transfer_window_range("auto", date(2026, 4, 10)) == (
+            date(2026, 1, 1), date(2026, 2, 28)
+        )
+        assert get_transfer_window_range("auto", date(2026, 11, 10)) == (
+            date(2026, 6, 1), date(2026, 9, 30)
+        )
+
+    def test_window_range_winter_handles_leap_year(self):
+        from datetime import date
+        from scraper.fotmob import get_transfer_window_range
+
+        assert get_transfer_window_range("winter", date(2028, 1, 10))[1] == date(2028, 2, 29)
 
     def test_window_range_all(self):
         from datetime import date
@@ -221,3 +242,161 @@ class TestTransferWindowLogic:
         assert parse_iso_date("") is None
         assert parse_iso_date("invalid-date") is None
 
+    def test_invalid_explicit_since_date_is_rejected(self):
+        from scraper.fotmob import _resolve_date_range
+
+        with pytest.raises(ValueError, match="expected YYYY-MM-DD"):
+            _resolve_date_range("03/08/2026", "auto")
+
+    def test_effective_range_never_includes_future_transfer(self):
+        from datetime import date
+        from scraper.fotmob import _resolve_date_range
+
+        assert _resolve_date_range(
+            "2026-07-28", "auto", ref_date=date(2026, 8, 3)
+        ) == (date(2026, 7, 28), date(2026, 8, 3))
+        assert _resolve_date_range(
+            None, "summer", ref_date=date(2026, 8, 3)
+        ) == (date(2026, 6, 1), date(2026, 8, 3))
+
+
+class TestScraperSafety:
+    def test_global_feed_does_not_stop_on_old_item_in_last_modified_order(self, monkeypatch):
+        from scraper import fotmob
+
+        pages = [
+            {
+                "transfers": [
+                    {
+                        "name": "Recently Corrected Old Deal",
+                        "fromClub": "A",
+                        "toClub": "B",
+                        "transferDate": "2026-01-01",
+                    },
+                    {
+                        "name": "Current Page Deal",
+                        "fromClub": "A",
+                        "toClub": "B",
+                        "transferDate": "2026-08-01",
+                    },
+                ]
+            },
+            {
+                "transfers": [{
+                    "name": "Next Page Deal",
+                    "fromClub": "C",
+                    "toClub": "D",
+                    "transferDate": "2026-08-02",
+                }]
+            },
+            {"transfers": []},
+        ]
+
+        class FakeResponse:
+            status = 200
+
+            def __init__(self, payload):
+                self.payload = payload
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                return False
+
+            async def json(self, content_type=None):
+                return self.payload
+
+        class FakeSession:
+            def __init__(self, *_, **__):
+                self.page = 0
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                return False
+
+            def get(self, _):
+                payload = pages[self.page]
+                self.page += 1
+                return FakeResponse(payload)
+
+        monkeypatch.setattr(fotmob.aiohttp, "ClientSession", FakeSession)
+        transfers = asyncio.run(
+            fotmob.FotmobScraper()._fetch_transfers_async(
+                max_pages=3,
+                since_date="2026-07-28",
+            )
+        )
+        assert [transfer.player_name for transfer in transfers] == [
+            "Current Page Deal",
+            "Next Page Deal",
+        ]
+
+    def test_bounded_window_skips_undated_transfer(self):
+        from datetime import date
+        from scraper.fotmob import FotmobScraper
+
+        payload = {
+            "transfers": {
+                "data": {
+                    "Players in": [
+                        {"name": "No Date", "fromClub": "A", "toClub": "B"},
+                        {
+                            "name": "Dated",
+                            "fromClub": "A",
+                            "toClub": "B",
+                            "transferDate": "2026-07-01",
+                        },
+                    ]
+                }
+            }
+        }
+        results = FotmobScraper()._extract_transfers_from_team_data(
+            payload, date(2026, 6, 1), date(2026, 9, 30)
+        )
+        assert [transfer.player_name for transfer in results] == ["Dated"]
+
+    def test_bad_squad_member_does_not_discard_valid_members(self):
+        from scraper.fotmob import FotmobScraper
+
+        payload = {
+            "squad": {
+                "squad": [{
+                    "members": [
+                        {"name": "Broken", "shirtNumber": "not-a-number"},
+                        {"name": "Valid", "shirtNumber": "17", "role": None},
+                    ]
+                }]
+            }
+        }
+        results = FotmobScraper()._extract_squad_from_team_data(payload, 42, "Example FC")
+        assert len(results) == 1
+        assert results[0].player_name == "Valid"
+        assert results[0].shirt_number == 17
+        assert results[0].to_club == "Example FC"
+
+    def test_club_target_resolution_rejects_ambiguous_substring(self):
+        from scraper.fotmob import _resolve_club_targets
+
+        available = {"Manchester United": 1, "Manchester City": 2, "Arsenal": 3}
+        assert _resolve_club_targets(["Arsenal"], available) == [("Arsenal", 3)]
+        assert _resolve_club_targets(["Manchester"], available) == []
+
+    def test_merge_normalizes_diacritics_and_enriches_duplicate(self):
+        from scraper.fotmob import merge_transfers
+
+        first = Transfer("Kylian Mbappé", "Paris SG", "Real Madrid", date="2026-07-01")
+        second = Transfer(
+            "Kylian Mbappe",
+            "Paris SG",
+            "Real Madrid",
+            date="2026-07-01T10:00:00Z",
+            position="CF",
+            market_value=180_000_000,
+        )
+        merged = merge_transfers([[first], [second]])
+        assert len(merged) == 1
+        assert merged[0].position == "CF"
+        assert merged[0].market_value == 180_000_000

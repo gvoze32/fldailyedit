@@ -30,6 +30,15 @@ _CLUB_AFFIX_REGEX = re.compile(
     re.IGNORECASE,
 )
 
+_NON_CLUB_NAMES = {
+    "",
+    "free agent",
+    "without club",
+    "unattached",
+    "career break",
+    "retired",
+}
+
 # Position categorization maps
 _POS_GK = {"GK"}
 _POS_DEF = {"CB", "LB", "RB", "DF", "LWB", "RWB"}
@@ -146,13 +155,37 @@ class NameMatcher:
         # Manual overrides
         self._player_overrides: dict[str, str] = {}  # scraped_name → fl26_name
         self._team_aliases: dict[str, str] = {}       # alias → canonical fl26_name
+        self._normalized_player_overrides: dict[str, str] = {}
+        self._normalized_team_aliases: dict[str, str] = {}
 
         self._load_overrides()
 
     def _load_overrides(self):
         """Load manual override files."""
-        self._player_overrides = _load_json(config.NAME_OVERRIDES_FILE)
-        self._team_aliases = _load_json(config.TEAM_ALIASES_FILE)
+        raw_player_overrides = _load_json(config.NAME_OVERRIDES_FILE)
+        raw_team_aliases = _load_json(config.TEAM_ALIASES_FILE)
+        self._player_overrides = {
+            alias: target
+            for alias, target in raw_player_overrides.items()
+            if isinstance(alias, str)
+            and isinstance(target, str)
+            and not alias.startswith("_")
+        }
+        self._team_aliases = {
+            alias: target
+            for alias, target in raw_team_aliases.items()
+            if isinstance(alias, str)
+            and isinstance(target, str)
+            and not alias.startswith("_")
+        }
+        self._normalized_player_overrides = {
+            _normalize(alias): target
+            for alias, target in self._player_overrides.items()
+        }
+        self._normalized_team_aliases = {
+            _normalize(alias): target
+            for alias, target in self._team_aliases.items()
+        }
         if self._player_overrides:
             logger.info(f"Loaded {len(self._player_overrides)} player name overrides")
         if self._team_aliases:
@@ -217,14 +250,16 @@ class NameMatcher:
     def load_team_db(
         self,
         teams: Mapping[str, int] | Iterable[tuple[str, int]],
-        clubs_only: bool = True,
+        clubs_only: bool = False,
     ):
         """
         Load the FL26 team database.
 
         Args:
             teams: {team_name: team_id} or an iterable of name/ID pairs.
-            clubs_only: If True, exclude national teams (team_id <= 100).
+            clubs_only: Legacy numeric filter for unfiltered databases. Prefer
+                passing an already verified club mapping and leaving this False;
+                FL26 contains real clubs with IDs at or below 100.
         """
         self._team_db.clear()
         self._team_candidates.clear()
@@ -359,14 +394,23 @@ class NameMatcher:
             logger.warning("Player database is empty — load it first")
             return None, "", 0.0
 
-        # Build roster context before attempting exact matches. Exact names are
-        # not necessarily unique in a 20k+ player database.
-        relevant_rosters = set()
+        # Source context is authoritative for a pending transfer. Destination
+        # context is only a fallback for an event already reflected by the base.
+        source_roster: set[int] = set()
+        destination_roster: set[int] = set()
         if team_player_map:
             if from_team_id is not None and from_team_id in team_player_map:
-                relevant_rosters.update(team_player_map[from_team_id])
+                source_roster.update(team_player_map[from_team_id])
             if to_team_id is not None and to_team_id in team_player_map:
-                relevant_rosters.update(team_player_map[to_team_id])
+                destination_roster.update(team_player_map[to_team_id])
+        context_groups = [
+            (label, roster)
+            for label, roster in (
+                ("source", source_roster),
+                ("destination", destination_roster),
+            )
+            if roster
+        ]
 
         def resolve_exact(records: list[tuple[str, int]]) -> tuple[str, int] | None:
             compatible = [
@@ -376,12 +420,13 @@ class NameMatcher:
                 or not self._player_positions
                 or _is_position_compatible(position, self._player_positions.get(pid, ""))
             ]
-            if relevant_rosters:
-                contextual = [(orig, pid) for orig, pid in compatible if pid in relevant_rosters]
+            for _, roster in context_groups:
+                contextual = [(orig, pid) for orig, pid in compatible if pid in roster]
                 if len(contextual) == 1:
                     return contextual[0]
                 if contextual:
                     compatible = contextual
+                    break
 
             if nationality and len(compatible) > 1:
                 norm_nat = _normalize(nationality)
@@ -408,6 +453,8 @@ class NameMatcher:
 
         # Step 1: Check manual overrides
         override_target = self._player_overrides.get(scraped_name)
+        if not override_target:
+            override_target = self._normalized_player_overrides.get(_normalize(scraped_name))
         if override_target:
             norm_target = _normalize(override_target)
             selected = resolve_exact(self._player_candidates.get(norm_target, []))
@@ -451,11 +498,11 @@ class NameMatcher:
 
         best_name, best_conf = "", 0.0
 
-        if relevant_rosters:
+        for context_label, roster in context_groups:
             contextual_scores: list[tuple[float, str, int]] = []
-            for cand_norm, cand_raw_score, _ in candidates:
+            for cand_norm, _, _ in candidates:
                 for orig, pid in self._player_candidates.get(cand_norm, []):
-                    if pid in relevant_rosters:
+                    if pid in roster:
                         composite_score = self._score_player(
                             norm_query,
                             cand_norm,
@@ -466,14 +513,24 @@ class NameMatcher:
                         )
                         contextual_scores.append((composite_score, orig, pid))
             contextual_scores.sort(reverse=True, key=lambda item: item[0])
-            if contextual_scores and contextual_scores[0][0] >= 68.0:
+            if contextual_scores and contextual_scores[0][0] >= threshold:
                 top = contextual_scores[0]
-                if len(contextual_scores) == 1 or top[0] > contextual_scores[1][0]:
+                runner_up = next(
+                    (item for item in contextual_scores[1:] if item[2] != top[2]),
+                    None,
+                )
+                if runner_up is None or top[0] - runner_up[0] >= 3.0:
                     logger.debug(
-                        f"Context confirmed: '{scraped_name}' found in club roster "
+                        f"{context_label.title()} context confirmed: '{scraped_name}' found in club roster "
                         f"as '{top[1]}' (pid={top[2]}, score={top[0]:.1f}%)"
                     )
-                    return top[2], top[1], 100.0
+                    return top[2], top[1], top[0]
+                logger.warning(
+                    f"Ambiguous {context_label} roster match '{scraped_name}': "
+                    f"'{top[1]}' ({top[0]:.1f}) vs '{runner_up[1]}' "
+                    f"({runner_up[0]:.1f}); skipping"
+                )
+                return None, "", top[0]
 
         # Step 4: General Multi-Scorer Matching with position check
         scored: list[tuple[float, str, int]] = []
@@ -559,6 +616,11 @@ class NameMatcher:
         if threshold == 0:
             threshold = config.MATCH_THRESHOLD_TEAM
 
+        # These values deliberately mean "no roster".  Never allow fuzzy
+        # matching to reinterpret one as an actual club with a similar name.
+        if _normalize(scraped_name) in _NON_CLUB_NAMES:
+            return None, "", 100.0
+
         if not self._team_names:
             logger.warning("Team database is empty — load it first")
             return None, "", 0.0
@@ -566,36 +628,28 @@ class NameMatcher:
         # Step 1: Check aliases
         alias_target = self._team_aliases.get(scraped_name)
         if not alias_target:
-            for alias, target in self._team_aliases.items():
-                if alias.lower() == scraped_name.lower():
-                    alias_target = target
-                    break
+            alias_target = self._normalized_team_aliases.get(_normalize(scraped_name))
 
-        if alias_target:
-            norm_target = _normalize(alias_target)
-            alias_candidates = self._team_candidates.get(norm_target, [])
-            if len(alias_candidates) == 1:
-                orig, tid = alias_candidates[0]
-                logger.debug(f"Team alias: '{scraped_name}' → '{orig}' (id={tid})")
-                return tid, orig, 100.0
-
-        norm_query = _normalize(scraped_name)
+        query_name = alias_target or scraped_name
+        norm_query = _normalize(query_name)
 
         # Step 2: Exact match
         exact_candidates = self._team_candidates.get(norm_query, [])
         if len(exact_candidates) == 1:
             orig, tid = exact_candidates[0]
+            if alias_target:
+                logger.debug(f"Team alias: '{scraped_name}' → '{orig}' (id={tid})")
             return tid, orig, 100.0
         if len(exact_candidates) > 1:
             logger.warning(f"Ambiguous exact team name '{scraped_name}'; skipping")
             return None, "", 100.0
 
         # Step 3: Exact match on cleaned club name (stripping FC, CF, AC, etc.)
-        cleaned_query = _clean_club_name(scraped_name)
+        cleaned_query = _clean_club_name(query_name)
         cleaned_candidates = self._cleaned_team_candidates.get(cleaned_query, [])
         if len(cleaned_candidates) == 1:
             orig, tid = cleaned_candidates[0]
-            return tid, orig, 98.0
+            return tid, orig, 100.0 if alias_target else 98.0
         if len(cleaned_candidates) > 1:
             logger.warning(
                 f"Ambiguous cleaned team name '{scraped_name}' matches "
@@ -625,7 +679,7 @@ class NameMatcher:
             candidates = self._team_candidates.get(best_name, [])
             if len(candidates) == 1:
                 orig, tid = candidates[0]
-                return tid, orig, best_conf
+                return tid, orig, 100.0 if alias_target else best_conf
 
         # Step 5: Fallback fuzzy match on cleaned club names
         if cleaned_query and self._cleaned_team_names:
@@ -650,7 +704,7 @@ class NameMatcher:
                 candidates = self._cleaned_team_candidates.get(clean_name, [])
                 if len(candidates) == 1:
                     orig, tid = candidates[0]
-                    return tid, orig, clean_conf
+                    return tid, orig, 100.0 if alias_target else clean_conf
 
         logger.debug(
             f"No team match for '{scraped_name}' "

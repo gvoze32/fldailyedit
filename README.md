@@ -1,7 +1,7 @@
 # FLEditScrape — Football Life & PES 2021 Transfer Tool
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-80%2F80%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-114%2F114%20passed-brightgreen.svg)]()
 [![Daily Sync](https://img.shields.io/badge/Cloud%20Sync-Automated%20Daily-success.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -14,7 +14,8 @@ It automatically fetches live, verified football transfers from **FotMob's real-
 > Always validate a base save before applying transfers. The pipeline now refuses
 > structurally inconsistent inputs instead of publishing a corrupt output.
 
-The canonical [base file](base/EDIT00000000) is **Gondowan's Mid-Summer EDIT**
+The canonical [base file](base/EDIT00000000) is
+[**Gondowan's Mid-Summer EDIT**](https://www.reddit.com/r/SPFootballLife/comments/1v7z782/release_gondowans_midsummer_edit_file_more_than/)
 dated 27 July 2026. It includes 500+ transfers, rating/position changes, revised
 squad numbers, loan returns, manager changes, auto lineups, and promotion/
 relegation updates for the English, French, Italian, and Spanish first/second
@@ -53,7 +54,7 @@ Pre-built and updated `EDIT00000000` save files and visual transfer report cards
 
 | Game | Save Directory (Windows) |
 |---|---|
-| **SP Football Life** | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\save\` |
+| **SP Football Life 2026** | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\` |
 | **eFootball PES 2021 Vanilla** | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\<user_id>\save\` |
 
 > [!TIP]
@@ -64,11 +65,13 @@ Pre-built and updated `EDIT00000000` save files and visual transfer report cards
 ## ⚡ Key Features
 
 - **🚀 Live Real-Time Scraping**: Direct async HTTP stream from FotMob for all latest transfers, loans, releases, and signings (<0.5s execution, 0 bot blocks).
-- **🌪️ Deep Mode (Ultimate 5,700+ Clubs)**: Bypass FotMob Cloudflare blocks by sequentially deep-fetching the profiles of all **5,707 clubs** actively indexed by FotMob, retrieving 100% of full-season transfers across the globe.
+- **🌪️ Deep Mode (635 Indexed Clubs)**: Sequentially fetches every unique club currently present in the repository's validated FotMob indexes, including squad metadata that is absent from the global feed.
 - **🛡️ Formation & Game Plan Doctor**: Preserves the active lineup mapping when roster slots are compacted. Roles belonging to a departing player are reset to the game's automatic/default selection.
 - **🔢 Authentic Squad Sync**: Beyond just transfers, the script extracts real **Shirt Numbers** from FotMob squad lists and perfectly applies them in-game! Falls back to smart auto-assignment if the data is missing.
 - **🎯 Tri-Factor Disambiguation Gate**: Strict multi-parameter matching combining name similarity, position gate, nationality verification, and age checks (+6.0 boost for exact nationality match, age-range alignment).
-- **👥 Bidirectional Squad Roster Verification**: Matches player candidates against active club rosters in the decrypted save file (`from_team` for departures, `to_team` for arrivals and loan returns), and skips ambiguous identities instead of guessing.
+- **👥 Source-First Squad Verification**: Resolves duplicate player names against the source roster first, then the destination only as an idempotent fallback. Ambiguous identities and below-threshold context matches are skipped.
+- **🚧 Fail-Closed Transfer Gate**: A move or release is applied only when the player's actual current club equals the matched source club. Stale events and source/current conflicts cannot move a player out of an unrelated team.
+- **📅 Bounded Window Filtering**: Automatic summer/winter ranges have explicit end dates, leap years are supported, invalid `--since` values fail, and undated events are excluded from bounded runs.
 - **📊 Visual HTML & Markdown Report Cards**: Automatically compiles clean, beautiful visual report tables with status badges, player positions, transfer fees, and confidence ratings into `transfer_summary.html` and GitHub Step Summaries.
 - **🔄 Intelligent Loan & Loan Return Handling**: On-loan players are seamlessly transferred to their loan clubs, and players returning from loans (*End of Loan*) are accurately restored to their parent clubs.
 - **📋 Contract Extension Auto-Filter**: Automatically detects and skips same-club contract renewals (`contractExtension: true`) to avoid redundant roster operations.
@@ -128,8 +131,8 @@ python run.py run --dry-run --edit-file base/EDIT00000000 --pages 5
 # Validate the repaired legacy base against known-good FL26 invariants
 python run.py validate --edit-file base/EDIT00000000
 
-# Apply transfers from the legacy base and write to output/EDIT00000000
-python run.py run --edit-file base/EDIT00000000 --pages 40
+# Auto-select the active or most recently completed transfer window
+python run.py run --edit-file base/EDIT00000000 --window auto --pages 100
 
 # Repair the legacy base using multiple references, while preserving its
 # original promotion/division membership
@@ -159,12 +162,28 @@ python run.py run --edit-file /path/to/EDIT00000000 --in-place
 | `cron` | `python run.py cron --interval-hours 6` | Generate Linux/macOS crontab entry string. |
 
 **Parameter Flags for `run`:**
-- `--deep`: **(Default in Actions)** Deep fetch across all **5,700+ Global Clubs** (via local JSON crawler dataset) to extract full-season transfers and real squad shirt numbers.
+- `--deep`: **(Default in Actions)** Deep fetch across all **635 currently indexed unique clubs** to extract window-scoped transfers and real squad shirt numbers.
 - `--club "Chelsea,Arsenal"`: Target specific club(s).
-- `--window {auto,summer,winter,all}`: Transfer window cutoff date (default: `auto`).
-- `--since YYYY-MM-DD`: Custom cutoff date (e.g. `--since 2026-06-01`).
+- `--window auto`: Selects the current or most recently completed transfer
+  window from today's date: winter (Jan–Feb) or summer (Jun–Sep). New seasons
+  are detected automatically; no metadata or workflow edits are needed.
+- `--window summer`: Most recent Jun 1–Sep 30 range.
+- `--window winter`: Jan 1–Feb 28/29 of the selected year.
+- `--window all`: No lower date cutoff (future-effective deals are still held
+  until their date). This is the widest option, but is slower and can replay
+  irrelevant history; it is not the recommended workflow setting.
+- `--since YYYY-MM-DD`: Include every dated transfer on/after the cutoff. The
+  value is a manual override; normal canonical runs do not need it. The upper
+  bound is always today, so a pre-agreement is not applied until its FotMob
+  effective transfer date arrives.
 - `--threshold N`: Fuzzy match threshold score (0–100, default: `80`).
 - `--dry-run`: Simulation mode without writing changes to disk.
+
+The transfer-window countdown sites are useful for checking registration
+deadlines, which vary by league. They are not used as transaction feeds. Player
+moves continue to come from FotMob, while the canonical workflows use the base
+cutoff plus today's date so their result does not depend on a single league's
+opening or closing day.
 
 ---
 
@@ -173,7 +192,7 @@ python run.py run --edit-file /path/to/EDIT00000000 --in-place
 ```text
 fleditscrape/
 ├── .github/workflows/     # GitHub Actions workflows
-│   ├── sync-deep.yml      # Daily cron (00:00 UTC) full deep fetch of 5,700+ clubs
+│   ├── sync-deep.yml      # Daily cron (00:00 UTC) deep fetch of indexed clubs
 │   └── sync-fast.yml      # Daily cron (00:00 UTC) fast global live feed
 ├── base/                  # Canonical validated Gondowan FL26 base
 │   └── EDIT00000000
@@ -200,7 +219,7 @@ fleditscrape/
 │   └── leagues.json       # Supported playable leagues
 ├── vendor/                # Native decryption tools
 │   └── pesXdecrypter/     # C implementation of PES 2021 crypto engine
-└── tests/                 # Complete unit test suite (80 tests)
+└── tests/                 # Complete unit test suite (114 tests)
 ```
 
 ---
@@ -213,7 +232,7 @@ Run the automated test suite:
 pytest -v
 ```
 
-All **80 unit tests** pass across binary parsing, canonical path configuration, integrity repair/validation, duplicate-name safety, ambiguous-club safety, roster slot shifting, goalkeeper protection, position compatibility gates, and fuzzy matching.
+All **114 unit tests** pass across binary parsing, canonical path configuration, integrity repair/validation, automatic transfer-window selection, duplicate-name and source-roster priority, fail-closed roster decisions, bounded transfer ranges, future-effective transfer protection, CLI input validation, low-ID club handling, ambiguous-club safety, roster slot shifting, goalkeeper protection, position compatibility gates, and fuzzy matching.
 
 ---
 

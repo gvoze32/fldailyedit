@@ -6,8 +6,10 @@ using direct lightweight async HTTP requests with automatic transfer window
 detection and date filtering.
 """
 import asyncio
+from calendar import monthrange
 from datetime import date, datetime, timezone
 import logging
+import unicodedata
 from typing import Optional, Union
 import aiohttp
 
@@ -55,15 +57,20 @@ def get_transfer_window_range(
 
     if w == "winter":
         year = ref_date.year
-        return date(year, 1, 1), date(year, 2, 28)
+        return date(year, 1, 1), date(year, 2, monthrange(year, 2)[1])
 
-    # auto mode
-    if ref_date.month >= 6:
-        # Currently in or after summer window
-        return date(ref_date.year, 6, 1), None
-    else:
-        # Currently in or after winter window
-        return date(ref_date.year, 1, 1), None
+    if w != "auto":
+        raise ValueError(f"Unknown transfer window: {window!r}")
+
+    # Auto mode uses the current window while it is active, otherwise the
+    # most recently completed window.  Keeping both ends bounded prevents a
+    # stale event from a different window entering the mutation pipeline.
+    if ref_date.month <= 5:
+        year = ref_date.year
+        return date(year, 1, 1), date(year, 2, monthrange(year, 2)[1])
+
+    year = ref_date.year
+    return date(year, 6, 1), date(year, 9, 30)
 
 
 def parse_iso_date(date_str: str) -> Optional[date]:
@@ -75,6 +82,40 @@ def parse_iso_date(date_str: str) -> Optional[date]:
         return datetime.strptime(clean_str, "%Y-%m-%d").date()
     except Exception:
         return None
+
+
+def _resolve_date_range(
+    since_date: Optional[Union[str, date]],
+    window: str,
+    ref_date: Optional[date] = None,
+) -> tuple[Optional[date], Optional[date]]:
+    """Resolve date filters, rejecting invalid and not-yet-effective events."""
+    today = ref_date or datetime.now(timezone.utc).date()
+    if since_date:
+        if isinstance(since_date, datetime):
+            return since_date.date(), today
+        if isinstance(since_date, date):
+            return since_date, today
+        if isinstance(since_date, str):
+            parsed = parse_iso_date(since_date)
+            if parsed is None:
+                raise ValueError(
+                    f"Invalid since_date {since_date!r}; expected YYYY-MM-DD"
+                )
+            return parsed, today
+        raise TypeError("since_date must be a date, datetime, ISO date string, or None")
+
+    if window and window.lower() != "all":
+        start_date, window_end = get_transfer_window_range(window, ref_date=today)
+        return start_date, min(window_end, today) if window_end else today
+    return None, today
+
+
+def _normalize_key_text(value: str) -> str:
+    """Normalize human-readable names for deterministic deduplication."""
+    decomposed = unicodedata.normalize("NFKD", value or "")
+    ascii_text = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return " ".join(ascii_text.casefold().split())
 
 
 class FotmobScraper:
@@ -93,22 +134,14 @@ class FotmobScraper:
         """
         Fetch transfers asynchronously from FotMob API.
 
-        If since_date or window is specified, automatically paginates until
-        transfers older than the cutoff date are reached.
+        Every requested page is scanned and then filtered by date. The endpoint
+        is ordered by last modification, not necessarily by transfer date, so
+        seeing one old transfer is not a safe reason to stop pagination.
         """
         transfers: list[Transfer] = []
         popular_param = "true" if popular_only else "false"
 
-        start_date: Optional[date] = None
-        end_date: Optional[date] = None
-
-        if since_date:
-            if isinstance(since_date, str):
-                start_date = parse_iso_date(since_date)
-            elif isinstance(since_date, date):
-                start_date = since_date
-        elif window and window != "all":
-            start_date, end_date = get_transfer_window_range(window)
+        start_date, end_date = _resolve_date_range(since_date, window)
 
         if start_date:
             logger.info(f"Scraping FotMob transfers window: {start_date} to {end_date or 'latest'}")
@@ -136,25 +169,27 @@ class FotmobScraper:
 
                 logger.info(f"FotMob page {page_num} returned {len(raw_transfers)} items")
 
-                reached_cutoff = False
                 for item in raw_transfers:
                     t = self._parse_fotmob_item(item)
                     if not t:
                         continue
 
                     item_date = parse_iso_date(t.date)
+                    if (start_date or end_date) and item_date is None:
+                        logger.warning(
+                            "Skipping undated transfer inside a bounded window: %s (%s -> %s)",
+                            t.player_name,
+                            t.from_club,
+                            t.to_club,
+                        )
+                        continue
                     if item_date:
                         if end_date and item_date > end_date:
                             continue
                         if start_date and item_date < start_date:
-                            reached_cutoff = True
                             continue
 
                     transfers.append(t)
-
-                if reached_cutoff:
-                    logger.info(f"Reached window start date {start_date} on page {page_num}. Stopping pagination.")
-                    break
 
         return transfers
 
@@ -286,16 +321,7 @@ class FotmobScraper:
         window: str = "auto",
     ) -> list[Transfer]:
         """Fetch all verified transfers (in & out) for a specific club."""
-        start_date: Optional[date] = None
-        end_date: Optional[date] = None
-
-        if since_date:
-            if isinstance(since_date, str):
-                start_date = parse_iso_date(since_date)
-            elif isinstance(since_date, date):
-                start_date = since_date
-        elif window and window != "all":
-            start_date, end_date = get_transfer_window_range(window)
+        start_date, end_date = _resolve_date_range(since_date, window)
 
         timeout = aiohttp.ClientTimeout(total=15)
         async with aiohttp.ClientSession(headers=self.headers, timeout=timeout) as session:
@@ -332,6 +358,14 @@ class FotmobScraper:
                     continue
 
                 item_date = parse_iso_date(t.date)
+                if (start_date or end_date) and item_date is None:
+                    logger.warning(
+                        "Skipping undated club transfer inside a bounded window: %s (%s -> %s)",
+                        t.player_name,
+                        t.from_club,
+                        t.to_club,
+                    )
+                    continue
                 if item_date:
                     if end_date and item_date > end_date:
                         continue
@@ -345,31 +379,50 @@ class FotmobScraper:
     def _extract_squad_from_team_data(self, data: dict, team_id: int, team_name: str) -> list[Transfer]:
         """Extract current squad members to sync real shirt numbers."""
         results: list[Transfer] = []
-        try:
-            squad_sections = data.get("squad", {}).get("squad", [])
-            for section in squad_sections:
-                members = section.get("members", [])
-                for m in members:
-                    name = m.get("name")
-                    shirt = m.get("shirtNumber")
-                    if not name or not shirt:
-                        continue
-                    
-                    pos = m.get("role", {}).get("fallback", "")
-                    
-                    results.append(Transfer(
-                        player_name=name.strip(),
-                        from_club=team_name,
-                        to_club=team_name,
-                        transfer_type="squad_update",
-                        shirt_number=int(shirt),
-                        position=pos,
-                        to_club_id_fotmob=team_id,
-                        from_club_id_fotmob=team_id,
-                    ))
-        except Exception as e:
-            logger.debug(f"Failed to parse squad data: {e}")
-            
+        if not team_name.strip():
+            logger.warning("Skipping squad sync for FotMob team %s without a team name", team_id)
+            return results
+
+        squad = data.get("squad", {})
+        squad_sections = squad.get("squad", []) if isinstance(squad, dict) else []
+        if not isinstance(squad_sections, list):
+            return results
+
+        for section in squad_sections:
+            if not isinstance(section, dict):
+                continue
+            members = section.get("members", [])
+            if not isinstance(members, list):
+                continue
+            for member in members:
+                if not isinstance(member, dict):
+                    continue
+                name = str(member.get("name") or "").strip()
+                shirt = member.get("shirtNumber")
+                if not name or shirt in (None, ""):
+                    continue
+                try:
+                    shirt_number = int(shirt)
+                except (TypeError, ValueError):
+                    logger.debug("Ignoring invalid shirt number %r for %s", shirt, name)
+                    continue
+                if not 1 <= shirt_number <= 99:
+                    logger.debug("Ignoring out-of-range shirt number %r for %s", shirt, name)
+                    continue
+
+                role = member.get("role")
+                position = role.get("fallback", "") if isinstance(role, dict) else ""
+                results.append(Transfer(
+                    player_name=name,
+                    from_club=team_name,
+                    to_club=team_name,
+                    transfer_type="squad_update",
+                    shirt_number=shirt_number,
+                    position=position,
+                    to_club_id_fotmob=team_id,
+                    from_club_id_fotmob=team_id,
+                ))
+
         return results
 
     async def _fetch_club_manager_async(self, team_id: int) -> Optional[str]:
@@ -393,16 +446,7 @@ class FotmobScraper:
         window: str = "auto",
     ) -> list[Transfer]:
         """Fetch transfers for all major global clubs sequentially with a delay to avoid rate limits."""
-        start_date: Optional[date] = None
-        end_date: Optional[date] = None
-
-        if since_date:
-            if isinstance(since_date, str):
-                start_date = parse_iso_date(since_date)
-            elif isinstance(since_date, date):
-                start_date = since_date
-        elif window and window != "all":
-            start_date, end_date = get_transfer_window_range(window)
+        start_date, end_date = _resolve_date_range(since_date, window)
 
         all_transfers: list[Transfer] = []
         timeout = aiohttp.ClientTimeout(total=15)
@@ -467,37 +511,96 @@ def get_deep_clubs() -> dict[str, int]:
     return clubs
 
 
+def _resolve_club_targets(
+    club_names: list[str],
+    available_clubs: dict[str, int],
+) -> list[tuple[str, int]]:
+    """Resolve requested club names without arbitrary first-substring matches."""
+    targets: list[tuple[str, int]] = []
+    seen_ids: set[int] = set()
+    normalized = [(_normalize_key_text(name), name, int(team_id)) for name, team_id in available_clubs.items()]
+
+    for requested in club_names:
+        clean = requested.strip()
+        if not clean:
+            continue
+
+        if clean.isdigit():
+            team_id = int(clean)
+            known_name = next((name for name, cid in available_clubs.items() if int(cid) == team_id), clean)
+        else:
+            query = _normalize_key_text(clean)
+            exact = [(name, team_id) for norm, name, team_id in normalized if norm == query]
+            if len(exact) == 1:
+                known_name, team_id = exact[0]
+            else:
+                partial = [
+                    (name, candidate_id)
+                    for norm, name, candidate_id in normalized
+                    if query and (query in norm or norm in query)
+                ]
+                if len(partial) != 1:
+                    reason = "ambiguous" if partial else "not found"
+                    logger.warning("Club %r is %s in the FotMob club index; skipping", clean, reason)
+                    continue
+                known_name, team_id = partial[0]
+
+        if team_id not in seen_ids:
+            targets.append((known_name, team_id))
+            seen_ids.add(team_id)
+
+    return targets
+
+
+def _payload_team_name(data: dict, fallback: str) -> str:
+    """Extract the canonical team name from a FotMob team response."""
+    details = data.get("details")
+    if isinstance(details, dict) and details.get("name"):
+        return str(details["name"]).strip()
+    if data.get("name"):
+        return str(data["name"]).strip()
+    return fallback.strip()
+
+
 def merge_transfers(transfer_lists: list[list[Transfer]]) -> list[Transfer]:
     """
     Merge multiple transfer lists and deduplicate by player, from_club, to_club, and date.
     Preserves richer metadata when duplicate entries exist.
     """
-    seen: dict[tuple[str, str, str, str], Transfer] = {}
+    seen: dict[tuple[str, str, str, str, str], Transfer] = {}
 
     for t_list in transfer_lists:
         for t in t_list:
+            from_key = (
+                f"id:{t.from_club_id_fotmob}"
+                if t.from_club_id_fotmob is not None
+                else _normalize_key_text(t.from_club)
+            )
+            to_key = (
+                f"id:{t.to_club_id_fotmob}"
+                if t.to_club_id_fotmob is not None
+                else _normalize_key_text(t.to_club)
+            )
             key = (
-                t.player_name.strip().lower(),
-                t.from_club.strip().lower(),
-                t.to_club.strip().lower(),
+                _normalize_key_text(t.player_name),
+                from_key,
+                to_key,
                 (t.date or "").split("T")[0],
+                "squad_update" if t.transfer_type == "squad_update" else "transfer_event",
             )
 
             if key not in seen:
                 seen[key] = t
             else:
                 existing = seen[key]
-                # Upgrade with position/fee/shirt if existing is empty
-                if not existing.position and t.position:
-                    existing.position = t.position
-                if not existing.fee and t.fee:
-                    existing.fee = t.fee
-                if not existing.shirt_number and t.shirt_number:
-                    existing.shirt_number = t.shirt_number
-                if not existing.nationality and t.nationality:
-                    existing.nationality = t.nationality
-                if not existing.age and t.age:
-                    existing.age = t.age
+                # Upgrade every missing field from the richer duplicate.
+                for attr in (
+                    "position", "fee", "shirt_number", "nationality", "age",
+                    "market_value", "from_club_id_fotmob", "to_club_id_fotmob",
+                    "from_club_full_name", "to_club_full_name",
+                ):
+                    if not getattr(existing, attr) and getattr(t, attr):
+                        setattr(existing, attr, getattr(t, attr))
 
     return list(seen.values())
 
@@ -538,48 +641,24 @@ def fetch_transfers_for_club_names(
     window: str = "auto",
 ) -> list[Transfer]:
     """Fetch transfers for specific club names or FotMob IDs."""
-    team_ids: list[int] = []
-    for name in club_names:
-        clean = name.strip()
-        if clean.isdigit():
-            team_ids.append(int(clean))
-        else:
-            # Look up in available clubs
-            matched_id = None
-            available_clubs = get_deep_clubs()
-            for club, cid in available_clubs.items():
-                if clean.lower() in club.lower() or club.lower() in clean.lower():
-                    matched_id = cid
-                    break
-            if matched_id:
-                team_ids.append(matched_id)
-            else:
-                logger.warning(f"Could not find FotMob ID for club '{clean}'")
-
-    if not team_ids:
+    targets = _resolve_club_targets(club_names, get_deep_clubs())
+    if not targets:
         logger.warning("No valid club IDs found to fetch")
         return []
 
-    # Since fetch_transfers_for_clubs_async was removed, we just reuse the sequential logic for a subset
     scraper = FotmobScraper()
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
-    if since_date:
-        if isinstance(since_date, str):
-            start_date = parse_iso_date(since_date)
-        elif isinstance(since_date, date):
-            start_date = since_date
-    elif window and window != "all":
-        start_date, end_date = get_transfer_window_range(window)
+    start_date, end_date = _resolve_date_range(since_date, window)
 
-    all_t = []
+    all_t: list[Transfer] = []
+
     async def fetch_subset():
         async with aiohttp.ClientSession(headers=scraper.headers, timeout=aiohttp.ClientTimeout(total=15)) as sess:
-            for tid in team_ids:
+            for requested_name, tid in targets:
                 data = await scraper._fetch_club_data_async(sess, tid)
                 if data:
                     all_t.extend(scraper._extract_transfers_from_team_data(data, start_date, end_date))
-                    # We can also extract squad for specific club filter
-                    all_t.extend(scraper._extract_squad_from_team_data(data, tid, ""))
+                    team_name = _payload_team_name(data, requested_name)
+                    all_t.extend(scraper._extract_squad_from_team_data(data, tid, team_name))
+
     asyncio.run(fetch_subset())
     return merge_transfers([all_t])
