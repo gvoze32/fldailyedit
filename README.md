@@ -1,9 +1,9 @@
-# FLEditScrape
+# FL Daily Edit
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-FLEditScrape updates SP Football Life 2026 and eFootball PES 2021 squads by
+FL Daily Edit updates SP Football Life 2026 and eFootball PES 2021 squads by
 applying real-world transfers to an `EDIT00000000` save file.
 
 ## Compatibility
@@ -32,8 +32,8 @@ GitHub Actions generates an updated save and transfer reports each day.
 > GitHub requires you to sign in before downloading workflow artifacts.
 
 1. Open the latest successful
-   [Deep Sync](https://github.com/gvoze32/fleditscrape/actions/workflows/sync-deep.yml)
-   or [Fast Sync](https://github.com/gvoze32/fleditscrape/actions/workflows/sync-fast.yml)
+   [Deep Sync](https://github.com/gvoze32/fldailyedit/actions/workflows/sync-deep.yml)
+   or [Fast Sync](https://github.com/gvoze32/fldailyedit/actions/workflows/sync-fast.yml)
    run.
 2. Download `updated-fl-save-and-reports.zip` from the **Artifacts** section.
 3. Extract `EDIT00000000`.
@@ -79,8 +79,8 @@ Local setup is supported on macOS, Linux, and Windows through WSL. Python 3.10
 or newer is required.
 
 ```bash
-git clone https://github.com/gvoze32/fleditscrape.git
-cd fleditscrape
+git clone https://github.com/gvoze32/fldailyedit.git
+cd fldailyedit
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -167,4 +167,4 @@ process locking.
 
 ## License
 
-FLEditScrape is available under the [MIT License](LICENSE).
+FL Daily Edit is available under the [MIT License](LICENSE).

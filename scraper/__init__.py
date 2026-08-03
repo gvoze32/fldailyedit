@@ -1,5 +1,5 @@
 """
-Scraper package for FL26 Transfer Automation Tool.
+Scraper package for FL Daily Edit.
 """
 from scraper.fotmob import FotmobScraper, fetch_fotmob_transfers
 from scraper.matcher import NameMatcher

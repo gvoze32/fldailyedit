@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FL26 Transfer Automation Tool — Main Entry Point
+FL Daily Edit — Main Entry Point
 
 Usage:
     python run.py run --dry-run                       # Scrape + match only, no file changes
@@ -1642,7 +1642,7 @@ def cmd_cron(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="FL26 Transfer Automation Tool",
+        description="FL Daily Edit",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )

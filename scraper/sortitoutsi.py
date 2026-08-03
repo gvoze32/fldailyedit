@@ -19,7 +19,7 @@ SORTITOUTSI_READER_URL = (
     "https://r.jina.ai/http://sortitoutsi.net/football-manager-data-update"
 )
 SORTITOUTSI_HEADERS = {
-    "User-Agent": "fleditscrape/0.1 (PES transfer updater; contact via project repository)",
+    "User-Agent": "fldailyedit/0.1 (PES transfer updater; contact via project repository)",
     "Accept": "text/html, text/markdown;q=0.9, */*;q=0.5",
 }
 

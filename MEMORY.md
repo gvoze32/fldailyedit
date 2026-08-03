@@ -1,4 +1,4 @@
-# FL26 Transfer Automation Tool — Project Memory
+# FL Daily Edit — Project Memory
 
 > This file is a persistent memory for AI assistants working on this project.
 > Read this FIRST before doing anything. It contains the full project context,
@@ -218,7 +218,7 @@ Repo: https://github.com/kickoffsage/pes2021-transfer-tool
 - `team_utils.py` uses magic numbers: `f.seek(100, 1)` to skip to team name, `f.read(70)` for name — these correspond to: Team entry offset 0x068 for name (0x068 - 0x004 = 0x64 = 100 bytes after team ID), 70 bytes for name field. Correct for vanilla PES21 but not dynamically calculated.
 
 Those dependencies describe the historical reference project, not this one.
-FLEditScrape's runtime dependencies are `aiohttp` and `rapidfuzz`; `pytest` is
+FL Daily Edit's runtime dependencies are `aiohttp` and `rapidfuzz`; `pytest` is
 the development dependency.
 
 ---
@@ -262,7 +262,7 @@ FotMob names vs FL26 database names will differ:
 ## 8. Current Project Structure
 
 ```
-fleditscrape/
+fldailyedit/
 ├── MEMORY.md                # THIS FILE — project context for AI continuity
 ├── config.py                # Central config (paths, thresholds, URLs)
 ├── run.py                   # Main CLI entry point (full pipeline)

@@ -16,7 +16,7 @@ from scraper.models import Transfer
 TRANSFERMARKT_URL = "https://www.transfermarkt.com/transfers/neuestetransfers/statistik"
 TRANSFERMARKT_READER_PREFIX = "https://r.jina.ai/"
 TRANSFERMARKT_HEADERS = {
-    "User-Agent": "fleditscrape/0.1 (PES transfer updater; contact via project repository)",
+    "User-Agent": "fldailyedit/0.1 (PES transfer updater; contact via project repository)",
     "Accept": "text/markdown, text/plain;q=0.9",
     "X-Cache-Tolerance": "300",
     "X-Retain-Images": "none",

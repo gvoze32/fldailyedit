@@ -52,7 +52,7 @@ def decrypt(edit_file_path: Path) -> Path:
         )
 
     # Create temp directory for decrypted output
-    temp_dir = Path(tempfile.mkdtemp(prefix="fleditscrape_dec_"))
+    temp_dir = Path(tempfile.mkdtemp(prefix="fldailyedit_dec_"))
 
     try:
         logger.info(f"Decrypting {edit_file_path} → {temp_dir}")
@@ -188,7 +188,7 @@ def encrypt(decrypted_dir: Path, output_path: Path) -> Path:
 
 def cleanup_temp(temp_dir: Path):
     """Remove a temporary decryption directory."""
-    if temp_dir and temp_dir.exists() and "fleditscrape_dec_" in str(temp_dir):
+    if temp_dir and temp_dir.exists() and "fldailyedit_dec_" in str(temp_dir):
         shutil.rmtree(temp_dir, ignore_errors=True)
         logger.debug(f"Cleaned up temp dir: {temp_dir}")
 

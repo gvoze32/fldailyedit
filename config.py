@@ -1,5 +1,5 @@
 """
-Central configuration for the FL26 Transfer Automation Tool.
+Central configuration for FL Daily Edit.
 All paths, thresholds, and settings in one place.
 """
 from pathlib import Path

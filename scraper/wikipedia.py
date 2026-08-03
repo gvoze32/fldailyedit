@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 WIKIPEDIA_API_URL = "https://en.wikipedia.org/w/api.php"
 WIKIPEDIA_HEADERS = {
-    "User-Agent": "fleditscrape/0.1 (PES transfer updater; contact via project repository)",
+    "User-Agent": "fldailyedit/0.1 (PES transfer updater; contact via project repository)",
     "Accept": "application/json",
 }
 
