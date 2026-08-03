@@ -1,13 +1,13 @@
 """
 Data models for the scraper module.
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 
 @dataclass
 class Transfer:
-    """A single transfer scraped from FotMob."""
+    """A normalized transfer event from one or more external sources."""
     player_name: str
     from_club: str
     to_club: str
@@ -28,6 +28,12 @@ class Transfer:
     age: int = 0
     shirt_number: Optional[int] = None
     player_id_fotmob: Optional[int] = None
+    sources: tuple[str, ...] = ("fotmob",)
+    source_urls: tuple[str, ...] = ()
+    proof_urls: tuple[str, ...] = ()
+    player_id_sortitoutsi: Optional[int] = None
+    verification_status: str = "verified"
+    infer_from_current_roster: bool = False
 
     def __str__(self):
         pos_badge = f" [{self.position}]" if self.position else ""

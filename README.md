@@ -7,10 +7,11 @@
 
 An automated, safe, and intelligent player transfer synchronization tool for **SP Football Life** and **eFootball PES 2021**.
 
-It fetches live football transfers from **FotMob**, verifies player identity against
-the current FL26 catalog and the save's actual roster state, handles stale loan
-chains, assigns conflict-free shirt numbers, protects tactical game plans, and
-writes validated updates into your `EDIT00000000` save file.
+It reconciles **FotMob**, confirmed **Wikipedia** transfer lists, and moderated
+**Sortitoutsi** submissions, verifies player identity against the current FL26
+catalog and the save's actual roster state, handles stale loan chains, assigns
+conflict-free shirt numbers, protects tactical game plans, and writes validated
+updates into your `EDIT00000000` save file.
 
 > [!NOTE]
 > **Current Base Database: SP Football Life 2026**
@@ -40,7 +41,7 @@ If you play SP Football Life or PES 2021, you know the struggle of keeping your 
 - **Unreliable Option Files:** Waiting for random people on YouTube to upload their "Option Files" is frustrating. They are often **inaccurate, incomplete, or break your game's tactics**.
 - **Missing the Hype:** Especially during the transfer window, when your favorite club just signed a new star player, you want to play with them *immediately*—not weeks later.
 
-**FLEditScrape solves this completely.** Instead of waiting, this tool directly intercepts live, verified transfers from FotMob's real-time database and writes them perfectly into your save file—handling squad limits, shirt numbers, and positions automatically. Your game is now synced with the real world, every single day.
+**FLEditScrape solves this completely.** Instead of waiting, this tool reconciles a live roster feed, confirmed seasonal lists, and moderated fast signals before updating your save—handling squad limits, shirt numbers, and positions automatically. Your game is now synced with the real world, every single day.
 
 ---
 
@@ -67,14 +68,15 @@ Pre-built and updated `EDIT00000000` save files and visual transfer report cards
 
 ## ⚡ Key Features
 
-- **🚀 Live Real-Time Scraping**: Direct async HTTP stream from FotMob for all latest transfers, loans, releases, and signings (<0.5s execution, 0 bot blocks).
+- **🚀 Three Complementary Sources**: FotMob supplies global history and squad metadata, Wikipedia supplies cited complete routes, and enabled Sortitoutsi submissions provide fast destination signals with proof links.
+- **🤝 Provenance-Aware Reconciliation**: Duplicate events are merged across sources without losing IDs, citations, effective dates, or proof URLs. Community-only signals cannot silently override a complete route.
 - **🌪️ Deep Mode (504 One-to-One Clubs)**: Sequentially fetches each FotMob identity that maps unambiguously to one PES club, including squad metadata absent from the global feed.
 - **🛡️ Formation & Game Plan Doctor**: Preserves the active lineup mapping when roster slots are compacted. Roles belonging to a departing player are reset to the game's automatic/default selection.
 - **🔢 Authentic Squad Sync**: The script extracts real **Shirt Numbers** from FotMob squad lists and applies conflict-free updates in-game. A number already owned by another squad member is safely skipped without cancelling unrelated transfers.
 - **🎯 Roster-Aware Identity Gate**: Matches the current 29.5k FL26 player catalog, then resolves duplicate names against source/destination roster context. Position, nationality, and age evidence is used only when it is genuinely present.
 - **👥 Source-First Squad Verification**: Resolves duplicate player names against the source roster first, then the destination only as an idempotent fallback. Ambiguous identities and below-threshold context matches are skipped.
 - **🪪 Stable Player Identity**: Persists FotMob `playerId` ↔ PES player-ID evidence per output save, so renamed players can be recovered while conflicting histories are rejected.
-- **🚧 Fail-Closed Transfer Gate**: A move or release is applied only when the player's actual current club equals the matched source club. Stale events and source/current conflicts cannot move a player out of an unrelated team.
+- **🚧 Fail-Closed Transfer Gate**: A move or release is applied only when the player's actual current club equals the matched source club. A destination-only Sortitoutsi signal requires `Enabled` status, a proof URL, an exact player match, one unique current FL26 roster, and a valid destination; otherwise it is skipped.
 - **📅 Cumulative Auto Replay**: Automatic mode scans every available FotMob page through today, while manual summer/winter ranges remain bounded and future-effective or undated events are excluded.
 - **📊 Visual HTML & Markdown Report Cards**: Separates real club transfers from shirt-number-only changes, with responsive tables, accurate metrics, confidence ratings, and a concise GitHub Step Summary.
 - **🔄 Intelligent Loan & Loan Return Handling**: On-loan players are seamlessly transferred to their loan clubs, and players returning from loans (*End of Loan*) are accurately restored to their parent clubs.
@@ -89,8 +91,10 @@ Pre-built and updated `EDIT00000000` save files and visual transfer report cards
 
 ```mermaid
 graph LR
-    A[FotMob Live API] -->|Direct Async HTTP| B[Scraper Engine]
-    B -->|Metadata: Pos, Loan, Fee, MV| C[Deep Matcher RapidFuzz]
+    A[FotMob Live API] --> B[Source Reconciler]
+    W[Wikipedia API] --> B
+    S[Sortitoutsi Enabled Signals] --> B
+    B -->|Route + Provenance + Metadata| C[Deep Matcher RapidFuzz]
     D[Decrypted Save Roster & DB] --> C
     C -->|Bidirectional Squad + Pos Gate| E[Safety Backup Engine]
     E -->|edit00000000 backup| F[pesXdecrypter Decrypt]
@@ -184,6 +188,9 @@ python run.py run --edit-file /path/to/EDIT00000000 --in-place
   bound is always today, so a pre-agreement is not applied until its FotMob
   effective transfer date arrives.
 - `--threshold N`: Fuzzy match threshold score (0–100, default: `80`).
+- `--fotmob-only`: Disable the fail-soft Wikipedia and Sortitoutsi supplements
+  for debugging or source comparison. Club-focused `--club` runs are already
+  FotMob-only so their requested scope remains deterministic.
 - `--dry-run`: Simulation mode without writing changes to disk.
 - `--from-base`: Explicitly rebuild from `base/EDIT00000000`. Without this
   flag, a default run continues from an existing successful output so older
@@ -194,17 +201,19 @@ python run.py run --edit-file /path/to/EDIT00000000 --in-place
   this flag, the transfer is safely skipped.
 
 Any HTTP/API failure before a complete FotMob snapshot is read aborts the run;
-partial scrape results are never written to the edit file. Dry-run and real-run
-share the same chronological roster planner, including loan-chain history from
-previous successful runs. Loan history is isolated per output save, and the
-scheduler survives a fail-closed iteration instead of terminating permanently.
+partial FotMob results are never written to the edit file. Wikipedia and
+Sortitoutsi are supplemental and fail independently, so an outage or rate limit
+does not discard a complete FotMob snapshot. Dry-run and real-run share the same
+chronological roster planner, including loan-chain history from previous
+successful runs. Loan history is isolated per output save, and the scheduler
+survives a fail-closed iteration instead of terminating permanently.
 
 The transfer-window countdown sites are useful for checking registration
 deadlines, which vary by league. They are not used as transaction feeds. Player
-moves continue to come from FotMob. The first default run starts from the base;
-later runs continue from the last verified output while still reading cumulative
-effective transfer history, so their result does not depend on a single league's
-opening or closing day.
+moves come from the reconciled source pipeline. The first default run starts
+from the base; later runs continue from the last verified output while still
+reading cumulative effective transfer history, so their result does not depend
+on a single league's opening or closing day.
 
 ---
 
@@ -225,6 +234,9 @@ fleditscrape/
 ├── README.md              # Project documentation
 ├── scraper/               # Scraper & Matching modules
 │   ├── fotmob.py          # Direct async FotMob scraper
+│   ├── wikipedia.py       # Cited seasonal transfer-list adapter
+│   ├── sortitoutsi.py     # Enabled community-signal adapter
+│   ├── sources.py         # Cross-source provenance reconciliation
 │   ├── matcher.py         # Position-aware fuzzy matcher & squad verification
 │   └── models.py          # Transfer and MatchedTransfer data models
 ├── editor/                # PES 2021 / Football Life binary save editor

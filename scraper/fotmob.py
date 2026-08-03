@@ -752,10 +752,17 @@ def merge_transfers(transfer_lists: list[list[Transfer]]) -> list[Transfer]:
                 "position", "fee", "shirt_number", "nationality", "age",
                 "market_value", "from_club_id_fotmob", "to_club_id_fotmob",
                 "from_club_full_name", "to_club_full_name",
-                "player_id_fotmob",
+                "player_id_fotmob", "player_id_sortitoutsi",
             ):
                 if not getattr(existing, attr) and getattr(t, attr):
                     setattr(existing, attr, getattr(t, attr))
+            existing.sources = tuple(dict.fromkeys((*existing.sources, *t.sources)))
+            existing.source_urls = tuple(
+                dict.fromkeys((*existing.source_urls, *t.source_urls))
+            )
+            existing.proof_urls = tuple(
+                dict.fromkeys((*existing.proof_urls, *t.proof_urls))
+            )
             if "T" not in (existing.date or "") and "T" in (t.date or ""):
                 existing.date = t.date
             if existing.transfer_type == "transfer" and t.transfer_type != "transfer":

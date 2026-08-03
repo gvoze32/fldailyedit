@@ -73,7 +73,15 @@ def test_transfer_history_is_scoped_per_output_save(monkeypatch, tmp_path):
         "to_team": "B",
         "to_team_id": 2,
     }
-    log_transfer(**common, save_scope="save-a", fotmob_player_id=777)
+    log_transfer(
+        **common,
+        save_scope="save-a",
+        fotmob_player_id=777,
+        sortitoutsi_player_id=888,
+        sources=("fotmob", "wikipedia", "sortitoutsi"),
+        source_urls=("https://example.test/source",),
+        proof_urls=("https://example.test/proof",),
+    )
     log_transfer(**common, save_scope="save-b")
     log_transfer(**common)
 
@@ -81,3 +89,12 @@ def test_transfer_history_is_scoped_per_output_save(monkeypatch, tmp_path):
     assert len(read_log(save_scope="save-a", include_legacy=True)) == 2
     assert len(read_log()) == 3
     assert read_log(save_scope="save-a")[0]["fotmob_player_id"] == 777
+    assert read_log(save_scope="save-a")[0]["sortitoutsi_player_id"] == 888
+    assert read_log(save_scope="save-a")[0]["sources"] == [
+        "fotmob",
+        "wikipedia",
+        "sortitoutsi",
+    ]
+    assert read_log(save_scope="save-a")[0]["proof_urls"] == [
+        "https://example.test/proof"
+    ]

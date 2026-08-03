@@ -10,7 +10,7 @@ Usage:
     python run.py log                                 # Show recent transfer log
 
 Workflow:
-    1. Scrape live transfers from FotMob API
+    1. Collect and reconcile FotMob, Wikipedia, and Sortitoutsi transfers
     2. Decrypt and validate the edit file (pesXdecrypter)
     3. Load the current FL26 catalog and roster state
     4. Match identities and plan safe roster actions
@@ -48,6 +48,9 @@ from scraper.fotmob import (
 )
 from scraper.matcher import NameMatcher
 from scraper.models import MatchedTransfer
+from scraper.sortitoutsi import fetch_sortitoutsi_transfers
+from scraper.sources import reconcile_transfer_sources
+from scraper.wikipedia import fetch_wikipedia_transfers
 
 logger = logging.getLogger(__name__)
 UNRESOLVED_TEAM_ID = -1
@@ -338,6 +341,52 @@ def _match_transfers_statefully(
             )
             pid, pname = None, ""
 
+        current_clubs = (
+            [
+                team_id
+                for team_id, roster in virtual_rosters.items()
+                if team_id in club_ids and pid in roster
+            ]
+            if pid is not None
+            else []
+        )
+        if ftid is None and transfer.infer_from_current_roster:
+            inferred_team_id = current_clubs[0] if len(current_clubs) == 1 else None
+            inferred_team_name = (
+                matcher.get_team_name(inferred_team_id)
+                if inferred_team_id is not None
+                else ""
+            )
+            can_infer_source = (
+                transfer.verification_status == "enabled"
+                and bool(transfer.proof_urls)
+                and pconf == 100.0
+                and ttid is not None
+                and ttid >= 0
+                and inferred_team_id is not None
+                and bool(inferred_team_name)
+            )
+            if can_infer_source:
+                ftid = inferred_team_id
+                ftname = inferred_team_name
+                ftconf = 100.0
+                transfer.from_club = ftname
+                transfer.from_club_full_name = ftname
+                logger.info(
+                    "Inferred moderated transfer source from unique current roster: "
+                    "%s (%s) -> %s",
+                    transfer.player_name,
+                    ftname,
+                    transfer.to_club,
+                )
+            else:
+                # A destination-only community signal must never degrade into a
+                # generic free-agent signing or release when source inference is
+                # ambiguous.
+                ftid = UNRESOLVED_TEAM_ID
+                ftname = ""
+                ftconf = 0.0
+
         if pid is not None and fotmob_player_id is not None:
             existing_pid = fotmob_to_pes.get(fotmob_player_id)
             if existing_pid is None:
@@ -357,14 +406,13 @@ def _match_transfers_statefully(
         )
         matched.append(match)
 
-        if pid is None or transfer.transfer_type == "shirt_number_update":
+        if (
+            pid is None
+            or ftid == UNRESOLVED_TEAM_ID
+            or transfer.transfer_type == "shirt_number_update"
+        ):
             continue
 
-        current_clubs = [
-            team_id
-            for team_id, roster in virtual_rosters.items()
-            if team_id in club_ids and pid in roster
-        ]
         current_team_id = current_clubs[0] if len(current_clubs) == 1 else None
         can_move_from_parent = (
             ftid is not None
@@ -895,6 +943,7 @@ def _scrape_run_transfers(args):
     since_date = getattr(args, "since", None)
     club_filter = getattr(args, "club", None)
     deep_mode = bool(getattr(args, "deep", False))
+    fotmob_only = bool(getattr(args, "fotmob_only", False))
 
     start_date, end_date = get_transfer_window_range(window)
     cutoff_info = (
@@ -948,11 +997,40 @@ def _scrape_run_transfers(args):
             )
         )
 
-    transfers = merge_transfers(transfer_batches)
+    fast_signals = []
+    if not club_filter and not fotmob_only:
+        print(
+            "\n🌐 Adding confirmed Wikipedia transfer lists "
+            f"({cutoff_info})..."
+        )
+        wikipedia_transfers = fetch_wikipedia_transfers(
+            since_date=since_date,
+            window=window,
+        )
+        transfer_batches.append(wikipedia_transfers)
+        print(f"  Wikipedia found {len(wikipedia_transfers)} confirmed transfers")
+
+        print("\n🚦 Adding moderated Sortitoutsi fast signals...")
+        fast_signals = fetch_sortitoutsi_transfers(since_date=since_date)
+        print(f"  Sortitoutsi found {len(fast_signals)} enabled signals")
+
+    transfers = (
+        reconcile_transfer_sources(transfer_batches, fast_signals)
+        if fast_signals or len(transfer_batches) > 1
+        else merge_transfers(transfer_batches)
+    )
     # Apply historical moves oldest-to-newest. Current squad shirt-number
     # updates intentionally run last.
     transfers.sort(key=_transfer_sort_key)
-    print(f"  FotMob found {len(transfers)} total unique verified transfers")
+    source_counts = Counter(
+        source
+        for transfer in transfers
+        for source in transfer.sources
+    )
+    source_summary = ", ".join(
+        f"{source}={count}" for source, count in sorted(source_counts.items())
+    )
+    print(f"  Reconciled sources: {source_summary or 'none'}")
     print(f"\nTotal unique transfers to process: {len(transfers)}")
     for transfer in transfers[:5]:
         print(f"  {transfer}")
@@ -1363,6 +1441,9 @@ def cmd_run(args):
                     "previous_shirt_number": previous_shirt,
                     "shirt_number": pref_shirt if action == "shirt_update" else None,
                     "roster_action": action,
+                    "sources": list(m.transfer.sources),
+                    "source_urls": list(m.transfer.source_urls),
+                    "proof_urls": list(m.transfer.proof_urls),
                 })
             else:
                 ef._data = bytearray(original_data)
@@ -1442,6 +1523,10 @@ def cmd_run(args):
                 roster_action=action,
                 save_scope=save_scope,
                 fotmob_player_id=m.transfer.player_id_fotmob,
+                sortitoutsi_player_id=m.transfer.player_id_sortitoutsi,
+                sources=m.transfer.sources,
+                source_urls=m.transfer.source_urls,
+                proof_urls=m.transfer.proof_urls,
             )
 
         # Save visual reports
@@ -1553,6 +1638,11 @@ def main():
     p_run.add_argument("--threshold", type=_percentage_arg, help="Fuzzy match confidence threshold (0-100)")
     p_run.add_argument("--popular", action="store_true", help="Only request FotMob popular transfers")
     p_run.add_argument(
+        "--fotmob-only",
+        action="store_true",
+        help="Disable supplemental Wikipedia and Sortitoutsi sources",
+    )
+    p_run.add_argument(
         "--allow-overflow-release",
         action="store_true",
         help="Allow releasing a displayed overflow candidate when a roster is full",
@@ -1579,6 +1669,11 @@ def main():
     p_sched.add_argument("--since", type=_iso_date_arg, help="Scrape transfers since date (YYYY-MM-DD)")
     p_sched.add_argument("--threshold", type=_percentage_arg, help="Fuzzy match confidence threshold (0-100)")
     p_sched.add_argument("--popular", action="store_true", help="Only request FotMob popular transfers")
+    p_sched.add_argument(
+        "--fotmob-only",
+        action="store_true",
+        help="Disable supplemental Wikipedia and Sortitoutsi sources",
+    )
     p_sched.add_argument(
         "--allow-overflow-release",
         action="store_true",

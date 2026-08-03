@@ -293,6 +293,14 @@ class NameMatcher:
             f"({ambiguous} ambiguous cleaned names, clubs_only={clubs_only})"
         )
 
+    def get_team_name(self, team_id: int) -> str:
+        """Return the canonical loaded team name for an ID, if available."""
+        for candidates in self._team_candidates.values():
+            for name, candidate_id in candidates:
+                if candidate_id == team_id:
+                    return name
+        return ""
+
     def _score_player(
         self,
         query_norm: str,

@@ -31,6 +31,10 @@ def log_transfer(
     roster_action: str = "",
     save_scope: str = "",
     fotmob_player_id: int | None = None,
+    sortitoutsi_player_id: int | None = None,
+    sources: tuple[str, ...] = (),
+    source_urls: tuple[str, ...] = (),
+    proof_urls: tuple[str, ...] = (),
 ):
     """
     Append a transfer or shirt-number audit record to the JSONL log file.
@@ -57,6 +61,10 @@ def log_transfer(
         "roster_action": roster_action,
         "save_scope": save_scope,
         "fotmob_player_id": fotmob_player_id,
+        "sortitoutsi_player_id": sortitoutsi_player_id,
+        "sources": list(sources),
+        "source_urls": list(source_urls),
+        "proof_urls": list(proof_urls),
     }
 
     log_file = config.TRANSFER_LOG_FILE
