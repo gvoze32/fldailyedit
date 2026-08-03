@@ -24,20 +24,33 @@ WIKIPEDIA_HEADERS = {
     "User-Agent": "fleditscrape/0.1 (PES transfer updater; contact via project repository)",
     "Accept": "application/json",
 }
-PRIORITY_PAGE_PREFIXES = (
-    "List of English football transfers",
-    "List of Spanish football transfers",
-    "List of Italian football transfers",
-    "List of German football transfers",
-    "List of French football transfers",
-    "List of Dutch football transfers",
-    "List of Belgian football transfers",
-    "List of Scottish football transfers",
-)
-# English is the broadest/highest-value confirmed list and remains one cheap
-# bulk revision request. Other leagues stay covered by FotMob and Sortitoutsi;
-# asking MediaWiki to expand several very large seasonal pages is rate-limited.
-WIKIPEDIA_PAGE_LIMIT = 1
+
+_A_LEAGUE_TEAM_NAMES = {
+    "AIS": "Australian Institute of Sport",
+    "AU": "Adelaide United",
+    "AUC": "Auckland FC",
+    "BR": "Brisbane Roar",
+    "CCM": "Central Coast Mariners",
+    "GC": "Gold Coast United",
+    "GCU": "Gold Coast United",
+    "MAC": "Macarthur FC",
+    "MC": "Melbourne City",
+    "MH": "Melbourne Heart",
+    "MV": "Melbourne Victory",
+    "NJ": "Newcastle Jets",
+    "NQ": "North Queensland Fury",
+    "NQF": "North Queensland Fury",
+    "NQT": "North Queensland Thunder",
+    "NUJ": "Newcastle Jets",
+    "NZK": "New Zealand Knights",
+    "PG": "Perth Glory",
+    "QR": "Queensland Roar",
+    "SFC": "Sydney FC",
+    "SR": "Sydney Rovers",
+    "WP": "Wellington Phoenix",
+    "WSW": "Western Sydney Wanderers",
+    "WU": "Western United",
+}
 
 
 def _clean_text(value: str) -> str:
@@ -249,6 +262,33 @@ def _clean_wikitext(value: str) -> str:
     value = re.sub(r"(?is)<ref\b[^>]*>.*?</ref\s*>", "", value)
     value = re.sub(r"(?is)<ref\b[^>]*/\s*>", "", value)
     value = re.sub(
+        r"(?is)\{\{\s*A-League team\s*\|\s*([^|{}]+)(?:\|[^{}]*)?\}\}",
+        lambda match: _A_LEAGUE_TEAM_NAMES.get(
+            match.group(1).strip().upper(),
+            match.group(1).strip(),
+        ),
+        value,
+    )
+
+    def date_template(match: re.Match) -> str:
+        parts = [
+            part.strip()
+            for part in _split_top_level(match.group(1), "|")
+            if part.strip() and "=" not in part
+        ]
+        if len(parts) < 3 or not all(part.isdigit() for part in parts[:3]):
+            return ""
+        try:
+            return date(*(int(part) for part in parts[:3])).isoformat()
+        except ValueError:
+            return ""
+
+    value = re.sub(
+        r"(?is)\{\{\s*dts\s*\|([^{}]*)\}\}",
+        date_template,
+        value,
+    )
+    value = re.sub(
         r"(?is)\{\{\s*sortname\s*\|\s*([^|{}]+)\|\s*([^|{}]+)(?:\|.*?)?\}\}",
         lambda match: f"{match.group(1).strip()} {match.group(2).strip()}",
         value,
@@ -290,6 +330,15 @@ def _clean_wikitext(value: str) -> str:
     return _clean_text(unescape(value))
 
 
+def _clean_route_club(value: str) -> str:
+    return re.sub(
+        r"\s*\((?:end of loan|loan return|loan|free transfer)\)\s*$",
+        "",
+        _clean_wikitext(value),
+        flags=re.I,
+    ).strip()
+
+
 def _wiki_cell(value: str) -> str:
     # Strip table-cell attributes such as rowspan="4" | while preserving the
     # first pipe that belongs to a template or wikilink.
@@ -315,7 +364,8 @@ def _wikitext_tables(wikitext: str) -> list[tuple[list[str], list[list[str]]]]:
                 if current:
                     rows.append(current)
                     current = []
-                in_header = False
+                if headers:
+                    in_header = False
                 continue
             if line == "|}":
                 if current:
@@ -337,6 +387,118 @@ def _wikitext_tables(wikitext: str) -> list[tuple[list[str], list[list[str]]]]:
     return tables
 
 
+def _template_body(value: str, template_name: str) -> str | None:
+    """Return one balanced template body, including nested templates."""
+    match = re.search(rf"\{{\{{\s*{re.escape(template_name)}\b", value, re.I)
+    if match is None:
+        return None
+    start = match.start()
+    depth = 0
+    index = start
+    while index < len(value) - 1:
+        pair = value[index : index + 2]
+        if pair == "{{":
+            depth += 1
+            index += 2
+            continue
+        if pair == "}}":
+            depth -= 1
+            if depth == 0:
+                return value[start + 2 : index]
+            index += 2
+            continue
+        index += 1
+    return None
+
+
+def _parse_wikipedia_club_lists(
+    wikitext: str,
+    source_url: str,
+) -> list[Transfer]:
+    """Parse undated club In/Out lists as corroboration-only routes."""
+    parsed: list[Transfer] = []
+    club = ""
+    direction = ""
+
+    for raw_line in wikitext.splitlines():
+        line = raw_line.strip()
+        heading_match = re.fullmatch(r"===\s*(.*?)\s*===", line)
+        if heading_match:
+            club = _clean_wikitext(heading_match.group(1))
+            direction = ""
+            continue
+
+        marker = _clean_wikitext(line).casefold().rstrip(":")
+        if marker in {"in", "out"}:
+            direction = marker
+            continue
+        if not club or direction not in {"in", "out"}:
+            continue
+
+        body = _template_body(line, "fs player")
+        if body is None:
+            continue
+        parts = _split_top_level(body, "|")
+        params: dict[str, str] = {}
+        for part in parts[1:]:
+            if "=" not in part:
+                continue
+            name, value = part.split("=", 1)
+            params[name.strip().casefold()] = value.strip()
+
+        player = _clean_wikitext(params.get("name", ""))
+        other_raw = params.get("other", "")
+        other = _clean_wikitext(other_raw)
+        route_match = re.search(
+            r"\bfrom\s+(.+)" if direction == "in" else r"\bto\s+(.+)",
+            other,
+            re.I,
+        )
+        if not player or route_match is None:
+            continue
+        other_club = re.split(
+            r",\s*(?:previously|after|following)\b",
+            route_match.group(1),
+            maxsplit=1,
+            flags=re.I,
+        )[0].strip()
+        if not other_club or other_club == club:
+            continue
+
+        normalized_other = other.casefold()
+        if "loan return" in normalized_other:
+            transfer_type, is_loan = "end of loan", False
+        elif "loan" in normalized_other:
+            transfer_type, is_loan = "loan", True
+        elif "free" in normalized_other:
+            transfer_type, is_loan = "free transfer", False
+        else:
+            transfer_type, is_loan = "transfer", False
+        from_club, to_club = (
+            (other_club, club) if direction == "in" else (club, other_club)
+        )
+        proof_urls = tuple(
+            dict.fromkeys(
+                re.findall(r"\burl\s*=\s*(https?://[^|}\s]+)", line, re.I)
+            )
+        )
+        parsed.append(
+            Transfer(
+                player_name=player,
+                from_club=from_club,
+                to_club=to_club,
+                transfer_type=transfer_type,
+                position=_clean_wikitext(params.get("pos", "")),
+                is_loan=is_loan,
+                sources=("wikipedia",),
+                source_urls=(source_url,),
+                proof_urls=proof_urls,
+                verification_status="corroborator",
+            )
+        )
+    return parsed
+
+
 def parse_wikipedia_transfer_wikitext(
     wikitext: str,
     page_title: str,
@@ -344,9 +506,9 @@ def parse_wikipedia_transfer_wikitext(
     start_date: date | None = None,
     end_date: date | None = None,
 ) -> list[Transfer]:
-    """Parse normalized transfer rows from bulk-retrievable page wikitext."""
+    """Parse dated table events and undated club-list corroborators."""
     source_url = f"https://en.wikipedia.org/wiki/{quote(page_title.replace(' ', '_'))}"
-    parsed: list[Transfer] = []
+    parsed: list[Transfer] = _parse_wikipedia_club_lists(wikitext, source_url)
     for headers, rows in _wikitext_tables(wikitext):
         date_index = _header_index(headers, {"date"})
         player_index = _header_index(headers, {"player", "name"})
@@ -373,14 +535,24 @@ def parse_wikipedia_transfer_wikitext(
             if end_date and event_date > end_date:
                 continue
             player = _clean_wikitext(values[int(player_index)])
-            from_club = _clean_wikitext(values[int(from_index)])
-            to_club = _clean_wikitext(values[int(to_index)])
+            from_raw = values[int(from_index)]
+            to_raw = values[int(to_index)]
+            from_club = _clean_route_club(from_raw)
+            to_club = _clean_route_club(to_raw)
             fee_raw = values[int(fee_index)] if fee_index is not None and len(values) > fee_index else ""
             fee = _clean_wikitext(fee_raw)
             if not player or not from_club or not to_club or from_club == to_club:
                 continue
-            transfer_type, is_loan = _transfer_type(fee)
-            proof_match = re.search(r"\burl\s*=\s*(https?://[^|}\s]+)", fee_raw)
+            route_detail = _clean_wikitext(" ".join((from_raw, to_raw, fee_raw)))
+            transfer_type, is_loan = _transfer_type(route_detail)
+            proof_urls = tuple(
+                dict.fromkeys(
+                    re.findall(
+                        r"\burl\s*=\s*(https?://[^|}\s]+)",
+                        " ".join(values),
+                    )
+                )
+            )
             parsed.append(
                 Transfer(
                     player_name=player,
@@ -392,7 +564,7 @@ def parse_wikipedia_transfer_wikitext(
                     is_loan=is_loan,
                     sources=("wikipedia",),
                     source_urls=(source_url,),
-                    proof_urls=(proof_match.group(1),) if proof_match else (),
+                    proof_urls=proof_urls,
                 )
             )
     return parsed
@@ -483,21 +655,13 @@ async def _fetch_wikipedia_transfers_async(
     timeout = aiohttp.ClientTimeout(total=30)
     connector = aiohttp.TCPConnector(limit=6)
     async with aiohttp.ClientSession(
-        headers=WIKIPEDIA_HEADERS, timeout=timeout, connector=connector
+        headers=WIKIPEDIA_HEADERS,
+        timeout=timeout,
+        connector=connector,
+        cookie_jar=aiohttp.DummyCookieJar(),
     ) as session:
         page_titles: list[str] = []
         for category in _category_candidates(today, since_date, window):
-            summer_match = re.fullmatch(
-                r"Category:Football transfers summer (\d{4})", category
-            )
-            if summer_match:
-                # The English list uses a stable title. Constructing it avoids
-                # an otherwise redundant category API request on every run.
-                page_titles.append(
-                    "List of English football transfers summer "
-                    f"{summer_match.group(1)}"
-                )
-                continue
             try:
                 payload = await _fetch_json(
                     session,
@@ -518,25 +682,9 @@ async def _fetch_wikipedia_transfers_async(
                 and "women" not in str(member.get("title", "")).casefold()
             )
 
-        # Rendered transfer tables are large. Limit this supplemental source to
-        # the leagues most likely represented by FL26 and keep concurrency low
-        # to respect MediaWiki's shared API rate limits.
-        page_titles = [
-            title
-            for title in dict.fromkeys(page_titles)
-            if title.startswith(PRIORITY_PAGE_PREFIXES)
-        ]
-        page_titles.sort(
-            key=lambda title: next(
-                (
-                    index
-                    for index, prefix in enumerate(PRIORITY_PAGE_PREFIXES)
-                    if title.startswith(prefix)
-                ),
-                len(PRIORITY_PAGE_PREFIXES),
-            )
-        )
-        page_titles = page_titles[:WIKIPEDIA_PAGE_LIMIT]
+        # Category membership defines coverage. Fetch every men's page in one
+        # bulk revision request; women's pages are outside FL26's player pool.
+        page_titles = list(dict.fromkeys(page_titles))
         batches: list[list[Transfer]] = []
         if page_titles:
             try:

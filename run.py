@@ -51,6 +51,7 @@ from scraper.models import MatchedTransfer
 from scraper.sortitoutsi import fetch_sortitoutsi_transfers
 from scraper.sources import reconcile_transfer_sources
 from scraper.wikipedia import fetch_wikipedia_transfers
+from scraper.transfermarkt import fetch_transfermarkt_transfers
 
 logger = logging.getLogger(__name__)
 UNRESOLVED_TEAM_ID = -1
@@ -998,6 +999,7 @@ def _scrape_run_transfers(args):
         )
 
     fast_signals = []
+    corroborators = []
     if not club_filter and not fotmob_only:
         print(
             "\n🌐 Adding confirmed Wikipedia transfer lists "
@@ -1007,16 +1009,40 @@ def _scrape_run_transfers(args):
             since_date=since_date,
             window=window,
         )
-        transfer_batches.append(wikipedia_transfers)
-        print(f"  Wikipedia found {len(wikipedia_transfers)} confirmed transfers")
+        wikipedia_events = [
+            transfer for transfer in wikipedia_transfers if transfer.date
+        ]
+        wikipedia_corroborators = [
+            transfer
+            for transfer in wikipedia_transfers
+            if not transfer.date
+            and transfer.verification_status == "corroborator"
+        ]
+        transfer_batches.append(wikipedia_events)
+        corroborators.extend(wikipedia_corroborators)
+        print(
+            f"  Wikipedia found {len(wikipedia_events)} dated transfers and "
+            f"{len(wikipedia_corroborators)} undated route corroborators"
+        )
 
         print("\n🚦 Adding moderated Sortitoutsi fast signals...")
         fast_signals = fetch_sortitoutsi_transfers(since_date=since_date)
         print(f"  Sortitoutsi found {len(fast_signals)} enabled signals")
 
+        print("\n🔎 Adding Transfermarkt route corroborators...")
+        transfermarkt_corroborators = fetch_transfermarkt_transfers()
+        corroborators.extend(transfermarkt_corroborators)
+        print(
+            f"  Transfermarkt found {len(transfermarkt_corroborators)} recent complete routes"
+        )
+
     transfers = (
-        reconcile_transfer_sources(transfer_batches, fast_signals)
-        if fast_signals or len(transfer_batches) > 1
+        reconcile_transfer_sources(
+            transfer_batches,
+            fast_signals,
+            corroborators,
+        )
+        if fast_signals or corroborators or len(transfer_batches) > 1
         else merge_transfers(transfer_batches)
     )
     # Apply historical moves oldest-to-newest. Current squad shirt-number
@@ -1524,6 +1550,10 @@ def cmd_run(args):
                 save_scope=save_scope,
                 fotmob_player_id=m.transfer.player_id_fotmob,
                 sortitoutsi_player_id=m.transfer.player_id_sortitoutsi,
+                transfermarkt_player_id=m.transfer.player_id_transfermarkt,
+                transfermarkt_from_club_id=m.transfer.from_club_id_transfermarkt,
+                transfermarkt_to_club_id=m.transfer.to_club_id_transfermarkt,
+                transfermarkt_transfer_id=m.transfer.transfer_id_transfermarkt,
                 sources=m.transfer.sources,
                 source_urls=m.transfer.source_urls,
                 proof_urls=m.transfer.proof_urls,

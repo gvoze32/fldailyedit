@@ -28,12 +28,29 @@ def _same_or_adjacent_date(left: str, right: str) -> bool:
     return abs((left_date - right_date).days) <= 1
 
 
-def _same_destination(left: Transfer, right: Transfer) -> bool:
-    left_name = _normalize(left.to_club_full_name or left.to_club)
-    right_name = _normalize(right.to_club_full_name or right.to_club)
-    if not left_name or not right_name:
+def _same_club_name(left_name: str, right_name: str) -> bool:
+    left_key = _normalize(left_name)
+    right_key = _normalize(right_name)
+    if not left_key or not right_key:
         return False
-    return left_name == right_name or fuzz.token_set_ratio(left_name, right_name) >= 92
+    return (
+        left_key == right_key
+        or fuzz.token_set_ratio(left_key, right_key) >= 92
+    )
+
+
+def _same_destination(left: Transfer, right: Transfer) -> bool:
+    return _same_club_name(
+        left.to_club_full_name or left.to_club,
+        right.to_club_full_name or right.to_club,
+    )
+
+
+def _same_source(left: Transfer, right: Transfer) -> bool:
+    return _same_club_name(
+        left.from_club_full_name or left.from_club,
+        right.from_club_full_name or right.from_club,
+    )
 
 
 def _compatible_event_type(left: Transfer, right: Transfer) -> bool:
@@ -50,6 +67,17 @@ def _merge_provenance(target: Transfer, source: Transfer) -> None:
     target.proof_urls = tuple(dict.fromkeys((*target.proof_urls, *source.proof_urls)))
     if target.player_id_sortitoutsi is None:
         target.player_id_sortitoutsi = source.player_id_sortitoutsi
+    for attr in (
+        "player_id_transfermarkt",
+        "from_club_id_transfermarkt",
+        "to_club_id_transfermarkt",
+        "transfer_id_transfermarkt",
+    ):
+        if getattr(target, attr) is None:
+            setattr(target, attr, getattr(source, attr))
+    for attr in ("position", "fee", "nationality", "age"):
+        if not getattr(target, attr) and getattr(source, attr):
+            setattr(target, attr, getattr(source, attr))
     if target.transfer_type == "transfer" and source.transfer_type != "transfer":
         target.transfer_type = source.transfer_type
         target.is_loan = source.is_loan
@@ -58,6 +86,7 @@ def _merge_provenance(target: Transfer, source: Transfer) -> None:
 def reconcile_transfer_sources(
     verified_batches: list[list[Transfer]],
     fast_signals: list[Transfer] | None = None,
+    corroborators: list[Transfer] | None = None,
 ) -> list[Transfer]:
     """
     Merge complete routes, then reconcile destination-only community signals.
@@ -70,6 +99,8 @@ def reconcile_transfer_sources(
     inferred_signals = 0
     corroborated_signals = 0
     ambiguous_signals = 0
+    corroborated_routes = 0
+    ignored_routes = 0
 
     for signal in fast_signals or []:
         candidates = [
@@ -94,11 +125,37 @@ def reconcile_transfer_sources(
                 signal.to_club,
             )
 
+    for corroborator in corroborators or []:
+        candidates = [
+            transfer
+            for transfer in verified
+            if _normalize(transfer.player_name)
+            == _normalize(corroborator.player_name)
+            and _same_source(transfer, corroborator)
+            and _same_destination(transfer, corroborator)
+            and _compatible_event_type(transfer, corroborator)
+        ]
+        if len(candidates) == 1:
+            _merge_provenance(candidates[0], corroborator)
+            corroborated_routes += 1
+        else:
+            ignored_routes += 1
+            if len(candidates) > 1:
+                logger.warning(
+                    "Ignoring ambiguous route corroborator for %s: %s -> %s",
+                    corroborator.player_name,
+                    corroborator.from_club,
+                    corroborator.to_club,
+                )
+
     logger.info(
-        "Cross-source reconciliation: %s corroborated, %s roster-inference candidates, "
-        "%s ambiguous signals ignored",
+        "Cross-source reconciliation: %s fast signals corroborated, "
+        "%s roster-inference candidates, %s ambiguous signals ignored, "
+        "%s complete routes corroborated, %s route corroborators ignored",
         corroborated_signals,
         inferred_signals,
         ambiguous_signals,
+        corroborated_routes,
+        ignored_routes,
     )
     return verified

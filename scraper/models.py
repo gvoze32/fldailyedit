@@ -32,6 +32,10 @@ class Transfer:
     source_urls: tuple[str, ...] = ()
     proof_urls: tuple[str, ...] = ()
     player_id_sortitoutsi: Optional[int] = None
+    player_id_transfermarkt: Optional[int] = None
+    from_club_id_transfermarkt: Optional[int] = None
+    to_club_id_transfermarkt: Optional[int] = None
+    transfer_id_transfermarkt: Optional[int] = None
     verification_status: str = "verified"
     infer_from_current_roster: bool = False
 

@@ -1,5 +1,7 @@
 """Report regression tests."""
 
+import pytest
+
 from editor.logger import (
     generate_html_report,
     generate_markdown_report,
@@ -73,15 +75,22 @@ def test_transfer_history_is_scoped_per_output_save(monkeypatch, tmp_path):
         "to_team": "B",
         "to_team_id": 2,
     }
-    log_transfer(
-        **common,
-        save_scope="save-a",
-        fotmob_player_id=777,
-        sortitoutsi_player_id=888,
-        sources=("fotmob", "wikipedia", "sortitoutsi"),
-        source_urls=("https://example.test/source",),
-        proof_urls=("https://example.test/proof",),
-    )
+    try:
+        log_transfer(
+            **common,
+            save_scope="save-a",
+            fotmob_player_id=777,
+            sortitoutsi_player_id=888,
+            transfermarkt_player_id=999,
+            transfermarkt_from_club_id=111,
+            transfermarkt_to_club_id=222,
+            transfermarkt_transfer_id=333,
+            sources=("fotmob", "wikipedia", "sortitoutsi", "transfermarkt"),
+            source_urls=("https://example.test/source",),
+            proof_urls=("https://example.test/proof",),
+        )
+    except TypeError:
+        pytest.fail("Transfermarkt audit fields are not implemented")
     log_transfer(**common, save_scope="save-b")
     log_transfer(**common)
 
@@ -90,10 +99,15 @@ def test_transfer_history_is_scoped_per_output_save(monkeypatch, tmp_path):
     assert len(read_log()) == 3
     assert read_log(save_scope="save-a")[0]["fotmob_player_id"] == 777
     assert read_log(save_scope="save-a")[0]["sortitoutsi_player_id"] == 888
+    assert read_log(save_scope="save-a")[0]["transfermarkt_player_id"] == 999
+    assert read_log(save_scope="save-a")[0]["transfermarkt_from_club_id"] == 111
+    assert read_log(save_scope="save-a")[0]["transfermarkt_to_club_id"] == 222
+    assert read_log(save_scope="save-a")[0]["transfermarkt_transfer_id"] == 333
     assert read_log(save_scope="save-a")[0]["sources"] == [
         "fotmob",
         "wikipedia",
         "sortitoutsi",
+        "transfermarkt",
     ]
     assert read_log(save_scope="save-a")[0]["proof_urls"] == [
         "https://example.test/proof"
