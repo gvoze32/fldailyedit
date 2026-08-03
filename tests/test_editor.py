@@ -12,11 +12,12 @@ from editor.editfile import (
     COMPETITION_ENTRY_SIZE, STADIUM_ENTRY_SIZE, UNKNOWN_ENTRY_SIZE,
     TEAM_PLAYER_ENTRY_SIZE, GAME_PLAN_ENTRY_SIZE,
     MAX_PLAYERS, MAX_TEAMS, MAX_MANAGERS, MAX_COMPETITIONS,
-    MAX_STADIUMS, MAX_UNKNOWN, MAX_TEAM_PLAYER,
+    MAX_STADIUMS, MAX_UNKNOWN, MAX_TEAM_PLAYER, MAX_GAME_PLANS,
     HDR_PLAYER_COUNT, HDR_TEAM_COUNT, HDR_MANAGER_COUNT,
     HDR_STADIUM_COUNT, HDR_COMPETITION_COUNT, HDR_UNKNOWN_COUNT,
     HDR_TEAM_PLAYER_COUNT, HDR_GAME_PLAN_COUNT,
     TP_TEAM_ID, TP_PLAYER_IDS, TP_SHIRT_NUMBERS, TP_MAX_PLAYERS,
+    GP_TEAM_ID, GP_LINEUP, GP_CAPTAIN,
     PE_PLAYER_ID, PE_PLAYER_NAME,
     TE_TEAM_ID, TE_TEAM_NAME,
 )
@@ -92,7 +93,14 @@ def _build_mock_data(
 
     # Competition entry section (flat 4656 bytes) + Game plan block
     comp_entry_section = bytearray(0x1230)
-    gp_block = bytearray(num_game_plans * GAME_PLAN_ENTRY_SIZE)
+    gp_block = bytearray(MAX_GAME_PLANS * GAME_PLAN_ENTRY_SIZE)
+    if team_player_entries:
+        for i, (tid, _pids, _shirts) in enumerate(team_player_entries[:num_game_plans]):
+            offset = i * GAME_PLAN_ENTRY_SIZE
+            struct.pack_into("<I", gp_block, offset + GP_TEAM_ID, tid)
+            gp_block[offset + GP_LINEUP:offset + GP_LINEUP + TP_MAX_PLAYERS] = bytes(
+                range(TP_MAX_PLAYERS)
+            )
 
     # Assemble everything
     data = bytearray()
@@ -148,6 +156,71 @@ class TestEditFileHeader:
         results = ef.validate_offsets()
         for name, r in results.items():
             assert r["match"], f"{name}: expected {r['expected']}, got {r['actual']}"
+
+    def test_valid_mock_passes_integrity_validation(self):
+        data = _build_mock_data(
+            num_players=5,
+            num_teams=2,
+            num_team_player=2,
+            num_game_plans=2,
+            team_entries=[(101, "Alpha FC"), (102, "Beta FC")],
+            team_player_entries=[
+                (101, [1001, 1002, 1003], [7, 10, 11]),
+                (102, [2001, 2002], [1, 9]),
+            ],
+        )
+        ef = EditFile()
+        ef.load_bytes(data)
+
+        report = ef.validate_integrity()
+
+        assert report["valid"] is True
+        assert report["errors"] == []
+
+    def test_integrity_rejects_role_pointing_to_empty_roster_slot(self):
+        data = bytearray(_build_mock_data(
+            num_players=1,
+            num_teams=1,
+            num_team_player=1,
+            num_game_plans=1,
+            team_entries=[(101, "Alpha FC")],
+            team_player_entries=[(101, [1001], [7])],
+        ))
+        ef = EditFile()
+        ef.load_bytes(data)
+        game_plan_base = ef.game_plan_start + 0x1230
+        data[game_plan_base + GP_CAPTAIN] = 39  # captain references an empty slot
+        ef.load_bytes(data)
+
+        report = ef.validate_integrity()
+
+        assert report["valid"] is False
+        assert any("points to empty roster slot 39" in error for error in report["errors"])
+
+    def test_repair_game_plan_preserves_valid_order_and_fills_missing_slots(self):
+        data = bytearray(_build_mock_data(
+            num_players=4,
+            num_teams=1,
+            num_team_player=1,
+            num_game_plans=1,
+            team_entries=[(101, "Alpha FC")],
+            team_player_entries=[(101, [1001, 1002, 1003, 1004], [7, 8, 9, 10])],
+        ))
+        ef = EditFile()
+        ef.load_bytes(data)
+        game_plan_base = ef.game_plan_start + 0x1230
+        lineup = game_plan_base + GP_LINEUP
+        ef._data[lineup:lineup + 4] = bytes([2, 2, 39, 0])
+        ef._data[game_plan_base + GP_CAPTAIN] = 39
+
+        metrics = ef.repair_game_plans()
+        report = ef.validate_integrity()
+
+        assert list(ef._data[lineup:lineup + 4]) == [2, 0, 1, 3]
+        assert ef._data[game_plan_base + GP_CAPTAIN] == 0xFF
+        assert metrics["repaired_lineups"] == 1
+        assert metrics["reset_roles"] == 1
+        assert report["valid"] is True
 
 
 class TestReadPlayers:
@@ -246,6 +319,7 @@ class TestMovePlayer:
 
         result = ef.move_player(1002, from_team_id=101, to_team_id=102)
         assert result is True
+        assert ef.validate_integrity()["valid"] is True
 
         # Verify source: 1002 removed, 1003 compacted into slot 1
         src = ef.get_team_roster(101)
@@ -430,6 +504,17 @@ class TestReleaseAndAddPlayer:
         ok = ef.add_player(2001, to_team_id=102)
         assert ok is False
 
+    def test_add_player_rejects_existing_player_on_another_club(self):
+        """A signing may not duplicate a player already registered elsewhere."""
+        data = self._build_test_data()
+        ef = EditFile()
+        ef.load_bytes(data)
+
+        ok = ef.add_player(1001, to_team_id=102)
+        assert ok is False
+        assert ef.get_team_roster(101).has_player(1001)
+        assert not ef.get_team_roster(102).has_player(1001)
+
     def test_overflow_releases_lowest_rated_player(self):
         """When team is full (40/40), adding a 41st player auto-releases the lowest rated player."""
         data = self._build_test_data()
@@ -527,4 +612,3 @@ class TestReleaseAndAddPlayer:
         # Starting and 2nd GKs (1000, 1011) remain
         assert 1000 in new_roster.roster
         assert 1011 in new_roster.roster
-

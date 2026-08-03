@@ -31,12 +31,12 @@ FL26 is built on the PES 2021 engine but the SmokePatch team has modified:
 - Team IDs (different/additional teams)
 - Possibly different table sizes (more entries in each table)
 
-The binary structure (field layout within entries) is expected to be IDENTICAL to vanilla PES 2021
-(same entry sizes, same field offsets within entries), but the TABLE START OFFSETS will differ
-if FL26 has more players/teams/etc, because tables are laid out sequentially.
+The validated FL26 files use the same fixed table capacities, entry sizes, field
+offsets, and table starts as vanilla PES 2021. Header counts describe populated
+entries and must only bound iteration; they do not determine table starts.
 
-**Strategy:** Use the header at offset 0x60 to read entry COUNTS dynamically, then calculate
-table start offsets from those counts × entry sizes. Do NOT hardcode start offsets.
+**Strategy:** Use the fixed capacity layout for offsets, read header counts to
+bound populated-entry iteration, and validate both against the actual file size.
 
 ---
 
@@ -296,7 +296,7 @@ fleditscrape/
    - `data/team_aliases.json`, `data/leagues.json`
    - Tests with saved HTML fixtures
 
-2. **Phase 2 — Editor** (needs sample FL26 edit file + pesXdecrypter)
+2. **Phase 2 — Editor** (needs a base FL26 edit file + pesXdecrypter)
    - `editor/models.py`, `editor/crypto.py`, `editor/editfile.py`, `editor/backup.py`
    - Dynamic offset calculation from header
    - Tests with mock binary data
@@ -380,4 +380,63 @@ Use these to verify offset calculations against a known-good vanilla file:
 | Team-Player table end | 0xA0864F |
 | First team entry start | 0x8ED2FC |
 
-If FL26 has different counts, the start offsets will shift, but entry sizes stay the same.
+Different populated counts do not shift table starts. A genuinely expanded future
+FL database would require a separately validated layout version.
+
+---
+
+## 13. FL26 Known-Good Validation (2026-08-03)
+
+Three independently sourced Football Life 2026 `EDIT00000000` files in
+`reference/` were treated as known-good and compared after decryption.
+
+Confirmed invariants shared by all three:
+
+- `data.dat` is exactly 10,995,800 bytes.
+- Fixed PES21 table starts/capacities are correct for these FL26 files.
+- Header counts are populated counts; all three use 749 teams, 749 team-player
+  entries, and 749 game-plan entries.
+- Club rosters contain no duplicate player registration across two clubs.
+- Rosters are compact (no zero slot before a later non-zero player), shirt
+  numbers are unique per active roster, and empty slots have shirt number zero.
+- The active game-plan prefix maps the compact active roster one-to-one.
+  The full 40-byte lineup is **not always** a strict `0..39` permutation, so a
+  validator that enforces that globally produces false corruption reports.
+- Decrypting, re-encrypting, and decrypting again preserves all six logical
+  blocks byte-for-byte. pesXdecrypter itself is therefore not the primary
+  source of the observed corrupt output.
+
+Repository findings:
+
+- The original legacy base failed the new known-good-derived
+  validator (duplicate club registrations and invalid active game-plan prefixes).
+- The old generated `output/EDIT00000000` amplified these problems by adding
+  over one hundred new cross-club duplicate registrations and modifying
+  hundreds of game plans.
+- The pipeline must validate input before edits, validate output after edits,
+  reject ambiguous duplicate player names, resolve a player's actual current
+  club before moving/signing, and verify encryption by round-trip decryption.
+
+Reference season membership finding:
+
+- All three references contain the same promotion/relegation membership changes
+  relative to the legacy base for the English, French, Italian, and Spanish
+  first/second divisions.
+- The underlying team IDs and the union of playable club IDs are unchanged; the
+  teams are only reassigned between division lists.
+- Repairing the legacy base must preserve its 0x1230-byte league-membership
+  block and use references only to resolve corrupt roster registrations.
+- Before Gondowan was selected as the canonical base, the tracked legacy file
+  was repaired using three-reference
+  consensus: 21 duplicate registrations, 137 remaining active lineups, and 6
+  inactive role pointers were corrected. The league-membership block remained
+  byte-identical (`SHA-256 6f677bd02e34d0e5aa66e9d2247e09651e3a44a8f78bc0fb922e114ced5c2cb7`).
+
+Canonical base decision:
+
+- `base/EDIT00000000` is Gondowan's Mid-Summer FL26 2.2 EDIT dated 27/07/2026.
+- It includes 500+ transfers, rating/position changes, auto lineups, squad
+  numbers, manager updates, loan returns, and promotions/relegations for the
+  four first/second-division pairs listed above.
+- Runtime defaults, workflows, and validation utilities must use `base/` as the
+  single canonical input directory.

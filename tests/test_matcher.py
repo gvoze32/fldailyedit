@@ -122,6 +122,27 @@ class TestPlayerMatching:
         assert pid == 3001
         assert conf == 100.0
 
+    def test_identical_names_require_context(self):
+        """Duplicate normalized names must never be resolved by insertion order."""
+        m = NameMatcher()
+        m.load_player_db([
+            ("Patrick", 3001),
+            ("Patrick", 3002),
+        ])
+
+        pid, _, conf = m.match_player("Patrick")
+        assert pid is None
+        assert conf == 100.0
+
+        pid, name, conf = m.match_player(
+            "Patrick",
+            from_team_id=2007,
+            team_player_map={2007: [3002]},
+        )
+        assert pid == 3002
+        assert name == "Patrick"
+        assert conf == 100.0
+
     def test_position_compatibility_gk_protection(self):
         """A goalkeeper transfer should not match an outfield player of same name."""
         m = NameMatcher()
@@ -215,6 +236,19 @@ class TestTeamMatching:
         assert tid == 2009
         assert conf >= 80
 
+    def test_ambiguous_affix_cleaned_team_is_not_guessed(self):
+        m = NameMatcher()
+        m.load_team_db({
+            "FC Barcelona": 2003,
+            "Barcelona SC": 2658,
+        })
+
+        tid, name, conf = m.match_team("Barcelona", threshold=60)
+
+        assert tid is None
+        assert name == ""
+        assert conf >= 60
+
     def test_no_match(self, matcher):
         tid, name, conf = matcher.match_team("Nonexistent FC", threshold=80)
         assert tid is None
@@ -224,4 +258,3 @@ class TestTeamMatching:
         tid, name, conf = m.match_team("Any Team")
         assert tid is None
         assert conf == 0.0
-

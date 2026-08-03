@@ -30,3 +30,6 @@ data/cron.log
 # OS
 .DS_Store
 Thumbs.db
+
+# Reference
+reference/

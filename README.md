@@ -1,7 +1,7 @@
 # FLEditScrape — Football Life & PES 2021 Transfer Tool
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-73%2F73%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-80%2F80%20passed-brightgreen.svg)]()
 [![Daily Sync](https://img.shields.io/badge/Cloud%20Sync-Automated%20Daily-success.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -11,7 +11,20 @@ It automatically fetches live, verified football transfers from **FotMob's real-
 
 > [!NOTE]
 > **Current Base Database: SP Football Life 2026**
-> The `sample/EDIT00000000` currently tracking transfers uses the base database from **SP Football Life 2026**. Future version upgrades will dynamically update this sample base.
+> Always validate a base save before applying transfers. The pipeline now refuses
+> structurally inconsistent inputs instead of publishing a corrupt output.
+
+The canonical [base file](base/EDIT00000000) is **Gondowan's Mid-Summer EDIT**
+dated 27 July 2026. It includes 500+ transfers, rating/position changes, revised
+squad numbers, loan returns, manager changes, auto lineups, and promotion/
+relegation updates for the English, French, Italian, and Spanish first/second
+divisions. It does not add promoted clubs from third divisions or create players.
+
+> [!IMPORTANT]
+> This base requires **Football Life 26 Update 2.2** and SmokePatch's **National
+> Squads Update**. According to its release notes, it will not work with UML,
+> older FL26 versions/updates, or without the national-squad update. Start a new
+> Master League or Become a Legend career after installing it.
 
 ---
 
@@ -52,16 +65,16 @@ Pre-built and updated `EDIT00000000` save files and visual transfer report cards
 
 - **🚀 Live Real-Time Scraping**: Direct async HTTP stream from FotMob for all latest transfers, loans, releases, and signings (<0.5s execution, 0 bot blocks).
 - **🌪️ Deep Mode (Ultimate 5,700+ Clubs)**: Bypass FotMob Cloudflare blocks by sequentially deep-fetching the profiles of all **5,707 clubs** actively indexed by FotMob, retrieving 100% of full-season transfers across the globe.
-- **🛡️ Formation & Game Plan Doctor**: Automatically safeguards team tactics. When a captain, free-kick taker, or corner specialist is transferred out, the Game Plan Doctor safely reassigns captaincy and set-piece roles to the highest-rated remaining active team member.
+- **🛡️ Formation & Game Plan Doctor**: Preserves the active lineup mapping when roster slots are compacted. Roles belonging to a departing player are reset to the game's automatic/default selection.
 - **🔢 Authentic Squad Sync**: Beyond just transfers, the script extracts real **Shirt Numbers** from FotMob squad lists and perfectly applies them in-game! Falls back to smart auto-assignment if the data is missing.
 - **🎯 Tri-Factor Disambiguation Gate**: Strict multi-parameter matching combining name similarity, position gate, nationality verification, and age checks (+6.0 boost for exact nationality match, age-range alignment).
-- **👥 Bidirectional Squad Roster Verification**: Matches player candidates against active club rosters in the decrypted save file (`from_team` for departures, `to_team` for arrivals and loan returns), achieving **100% match accuracy**.
+- **👥 Bidirectional Squad Roster Verification**: Matches player candidates against active club rosters in the decrypted save file (`from_team` for departures, `to_team` for arrivals and loan returns), and skips ambiguous identities instead of guessing.
 - **📊 Visual HTML & Markdown Report Cards**: Automatically compiles clean, beautiful visual report tables with status badges, player positions, transfer fees, and confidence ratings into `transfer_summary.html` and GitHub Step Summaries.
 - **🔄 Intelligent Loan & Loan Return Handling**: On-loan players are seamlessly transferred to their loan clubs, and players returning from loans (*End of Loan*) are accurately restored to their parent clubs.
 - **📋 Contract Extension Auto-Filter**: Automatically detects and skips same-club contract renewals (`contractExtension: true`) to avoid redundant roster operations.
 - **🧠 Position-Aware Overflow & Starting XI Protection**: When a squad reaches the 40-player limit, the tool automatically releases deep reserves with the lowest overall ability while **protecting Starting XI players** and **preserving at least 2 Goalkeepers per squad**.
 - **📊 23k+ Universal Database**: Pre-indexed database of **23,780 players** and **580+ clubs** across 29 leagues. National teams are safely protected.
-- **🛡️ Safe & Reversible**: Automatic rolling backups before every modification, dry-run simulation mode, and structured JSON Lines audit logs.
+- **🛡️ Safe & Reversible**: Automatic rolling backups, pre/post-edit integrity checks, atomic verified encryption, dry-run simulation mode, and structured JSON Lines audit logs.
 
 ---
 
@@ -110,13 +123,24 @@ cd vendor/pesXdecrypter && make && cd ../..
 
 ```bash
 # Preview transfers without altering files (Dry-run mode)
-python run.py run --dry-run --edit-file sample/EDIT00000000 --pages 5
+python run.py run --dry-run --edit-file base/EDIT00000000 --pages 5
 
-# Apply transfers: reads from sample/ and writes cleanly to output/EDIT00000000
-python run.py run --edit-file sample/EDIT00000000 --pages 40
+# Validate the repaired legacy base against known-good FL26 invariants
+python run.py validate --edit-file base/EDIT00000000
+
+# Apply transfers from the legacy base and write to output/EDIT00000000
+python run.py run --edit-file base/EDIT00000000 --pages 40
+
+# Repair the legacy base using multiple references, while preserving its
+# original promotion/division membership
+python run.py repair --edit-file base/EDIT00000000 \
+  --reference /path/to/reference-1/EDIT00000000 \
+  --reference /path/to/reference-2/EDIT00000000 \
+  --reference /path/to/reference-3/EDIT00000000 \
+  --output output/EDIT00000000
 
 # Custom output destination or in-place update
-python run.py run --edit-file sample/EDIT00000000 -o output/EDIT00000000
+python run.py run --edit-file base/EDIT00000000 -o output/EDIT00000000
 python run.py run --edit-file /path/to/EDIT00000000 --in-place
 ```
 
@@ -129,6 +153,8 @@ python run.py run --edit-file /path/to/EDIT00000000 --in-place
 | `run` | `python run.py run --edit-file <PATH>` | Scrape live transfers and apply directly to edit file. |
 | `log` | `python run.py log --last 20` | View human-readable summary of recently applied transfers. |
 | `inspect` | `python run.py inspect --edit-file <PATH>` | Inspect teams, player counts, and offsets of any edit file. |
+| `validate` | `python run.py validate --edit-file <PATH>` | Decrypt and reject duplicate club registrations, invalid rosters, or broken game-plan mappings. |
+| `repair` | `python run.py repair --edit-file <PATH> --reference <PATH> ...` | Repair a legacy base by reference consensus without importing reference league memberships. |
 | `schedule`| `python run.py schedule --interval-hours 6` | Run periodic sync in the background. |
 | `cron` | `python run.py cron --interval-hours 6` | Generate Linux/macOS crontab entry string. |
 
@@ -149,12 +175,12 @@ fleditscrape/
 ├── .github/workflows/     # GitHub Actions workflows
 │   ├── sync-deep.yml      # Daily cron (00:00 UTC) full deep fetch of 5,700+ clubs
 │   └── sync-fast.yml      # Daily cron (00:00 UTC) fast global live feed
-├── sample/                # Pristine / base save file (never overwritten)
+├── base/                  # Canonical validated Gondowan FL26 base
 │   └── EDIT00000000
 ├── output/                # Generated updated save file
 │   └── EDIT00000000
 ├── config.py              # Central configurations and paths
-├── run.py                 # Unified CLI tool (run, schedule, cron, inspect, log)
+├── run.py                 # Unified CLI tool (run, repair, schedule, cron, inspect, validate, log)
 ├── pyproject.toml         # Package metadata and dependencies
 ├── README.md              # Project documentation
 ├── scraper/               # Scraper & Matching modules
@@ -174,7 +200,7 @@ fleditscrape/
 │   └── leagues.json       # Supported playable leagues
 ├── vendor/                # Native decryption tools
 │   └── pesXdecrypter/     # C implementation of PES 2021 crypto engine
-└── tests/                 # Complete unit test suite (72 tests)
+└── tests/                 # Complete unit test suite (80 tests)
 ```
 
 ---
@@ -187,7 +213,7 @@ Run the automated test suite:
 pytest -v
 ```
 
-All **72 unit tests** pass with 100% coverage across binary parsing, roster slot shifting, loan returns, goalkeeper protection, position compatibility gates, and fuzzy matching.
+All **80 unit tests** pass across binary parsing, canonical path configuration, integrity repair/validation, duplicate-name safety, ambiguous-club safety, roster slot shifting, goalkeeper protection, position compatibility gates, and fuzzy matching.
 
 ---
 

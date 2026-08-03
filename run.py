@@ -3,11 +3,11 @@
 FL26 Transfer Automation Tool — Main Entry Point
 
 Usage:
-    python run.py --dry-run                          # Scrape + match only, no file changes
-    python run.py --edit-file /path/to/edit00000000  # Full pipeline
-    python run.py --dry-run --leagues "Premier League,La Liga"
-    python run.py --inspect --edit-file /path/to/edit00000000  # Just inspect the edit file
-    python run.py --log                              # Show recent transfer log
+    python run.py run --dry-run                       # Scrape + match only, no file changes
+    python run.py run --edit-file /path/to/EDIT00000000
+    python run.py inspect --edit-file /path/to/EDIT00000000
+    python run.py validate --edit-file /path/to/EDIT00000000
+    python run.py log                                 # Show recent transfer log
 
 Workflow:
     1. Load league config from data/leagues.json
@@ -25,6 +25,7 @@ import logging
 import struct
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 import config
@@ -36,6 +37,7 @@ from scraper.fotmob import (
     fetch_fotmob_transfers,
     get_transfer_window_range,
     merge_transfers,
+    parse_iso_date,
     fetch_transfers_for_club_names,
     fetch_major_clubs_transfers_safely,
 )
@@ -43,6 +45,16 @@ from scraper.matcher import NameMatcher
 from scraper.models import MatchedTransfer
 
 logger = logging.getLogger(__name__)
+
+
+def _transfer_sort_key(transfer):
+    """Apply dated transfers chronologically and current-squad updates last."""
+    parsed_date = parse_iso_date(transfer.date)
+    return (
+        transfer.transfer_type == "squad_update",
+        parsed_date is None,
+        parsed_date or parse_iso_date("2000-01-01"),
+    )
 
 
 def setup_logging(verbose: bool = False):
@@ -92,6 +104,15 @@ def cmd_inspect(args):
         ef.load(data_dat)
         ef.print_summary()
 
+        integrity = ef.validate_integrity()
+        status = "PASS" if integrity["valid"] else "FAIL"
+        print(f"\nIntegrity: {status}")
+        print(f"  Metrics: {integrity['metrics']}")
+        for error in integrity["errors"][:20]:
+            print(f"  ERROR: {error}")
+        if len(integrity["errors"]) > 20:
+            print(f"  ... and {len(integrity['errors']) - 20} more errors")
+
         print("\n--- League Divisions in Save File ---")
         teams = ef.get_all_team_info()
         entry_start = 0xA08650
@@ -112,9 +133,9 @@ def cmd_inspect(args):
             clusters.append(current_cluster)
 
         for idx, cl in enumerate(clusters):
-            sample = ", ".join(cl[:3])
+            preview = ", ".join(cl[:3])
             suffix = f" ... [{cl[-1]}]" if len(cl) > 3 else ""
-            print(f"  Division {idx+1:2d} ({len(cl):2d} teams): {sample}{suffix}")
+            print(f"  Division {idx+1:2d} ({len(cl):2d} teams): {preview}{suffix}")
 
         print(f"\nTotal Clubs: {len([t for t in teams.values() if t.team_id > 100])}")
         print(f"Total National Teams: {len([t for t in teams.values() if t.team_id <= 100])}")
@@ -123,6 +144,139 @@ def cmd_inspect(args):
 
     finally:
         crypto.cleanup_temp(temp_dir)
+
+
+def cmd_validate(args):
+    """Validate an encrypted FL26 edit file and return a shell-friendly status."""
+    edit_path = Path(args.edit_file)
+    print(f"Validating {edit_path}...")
+    temp_dir = crypto.decrypt(edit_path)
+    try:
+        ef = EditFile(temp_dir / "data.dat")
+        ef.load()
+        report = ef.validate_integrity()
+        print(f"Metrics: {report['metrics']}")
+        for warning in report["warnings"]:
+            print(f"WARNING: {warning}")
+        for error in report["errors"]:
+            print(f"ERROR: {error}")
+        if report["valid"]:
+            print("PASS: save structure matches known-good Football Life 2026 files")
+            return
+        print(f"FAIL: {len(report['errors'])} integrity error(s)")
+        raise SystemExit(2)
+    finally:
+        crypto.cleanup_temp(temp_dir)
+
+
+def cmd_repair(args):
+    """Repair a legacy base using consensus registrations from valid references."""
+    edit_path = Path(args.edit_file)
+    output_path = Path(args.output) if args.output else config.OUTPUT_FILE_PATH
+    reference_paths = [Path(path) for path in args.reference]
+
+    base_temp = crypto.decrypt(edit_path)
+    reference_temps: list[Path] = []
+    try:
+        ef = EditFile(base_temp / "data.dat")
+        ef.load()
+        league_block_start = ef.game_plan_start
+        league_block_end = league_block_start + 0x1230
+        original_league_block = bytes(ef._data[league_block_start:league_block_end])
+
+        references: list[EditFile] = []
+        for reference_path in reference_paths:
+            reference_temp = crypto.decrypt(reference_path)
+            reference_temps.append(reference_temp)
+            reference = EditFile(reference_temp / "data.dat")
+            reference.load()
+            report = reference.validate_integrity()
+            if not report["valid"]:
+                raise ValueError(
+                    f"Reference is not structurally valid: {reference_path} "
+                    f"({len(report['errors'])} errors)"
+                )
+            references.append(reference)
+
+        base_clubs = ef.get_club_team_ids()
+        registrations: dict[int, list[int]] = {}
+        for tid, roster in ef.get_all_rosters().items():
+            if tid not in base_clubs:
+                continue
+            for player_id in roster.roster:
+                registrations.setdefault(player_id, []).append(tid)
+        duplicates = {
+            player_id: teams
+            for player_id, teams in registrations.items()
+            if len(teams) > 1
+        }
+
+        repaired_duplicates = 0
+        released_to_free_agent = 0
+        players = ef.get_all_players()
+        for player_id, current_teams in sorted(duplicates.items()):
+            votes: list[int | None] = []
+            for reference in references:
+                reference_teams = reference.find_player_teams(player_id, club_only=True)
+                if len(reference_teams) > 1:
+                    raise ValueError(
+                        f"Reference unexpectedly registers player {player_id} to multiple clubs"
+                    )
+                votes.append(reference_teams[0] if reference_teams else None)
+
+            preferred_team, vote_count = Counter(votes).most_common(1)[0]
+            if vote_count <= len(references) // 2:
+                raise ValueError(
+                    f"References do not agree how to repair player {player_id}: {votes}"
+                )
+
+            for team_id in list(current_teams):
+                if team_id != preferred_team and not ef.release_player(player_id, team_id):
+                    raise RuntimeError(f"Could not remove duplicate player {player_id} from {team_id}")
+
+            if preferred_team is None:
+                released_to_free_agent += 1
+            elif preferred_team not in ef.find_player_teams(player_id, club_only=True):
+                player = players.get(player_id)
+                if not ef.add_player(
+                    player_id,
+                    preferred_team,
+                    position=player.position if player else "",
+                ):
+                    raise RuntimeError(
+                        f"Could not place duplicate player {player_id} on consensus team "
+                        f"{preferred_team}"
+                    )
+            repaired_duplicates += 1
+
+        game_plan_repairs = ef.repair_game_plans()
+        if bytes(ef._data[league_block_start:league_block_end]) != original_league_block:
+            raise RuntimeError("Repair attempted to change league promotion/division membership")
+
+        final_report = ef.validate_integrity()
+        if not final_report["valid"]:
+            for error in final_report["errors"][:20]:
+                print(f"ERROR: {error}")
+            raise RuntimeError(
+                f"Repair did not produce a valid save ({len(final_report['errors'])} errors remain)"
+            )
+
+        ef.save(base_temp / "data.dat")
+        replaced_output_backup = None
+        if output_path.exists():
+            replaced_output_backup = backup_mod.create_backup(output_path)
+        crypto.encrypt(base_temp, output_path)
+        print(f"PASS: repaired legacy base → {output_path}")
+        if replaced_output_backup is not None:
+            print(f"  Previous output backup: {replaced_output_backup}")
+        print(f"  Duplicate player registrations repaired: {repaired_duplicates}")
+        print(f"  Players released by reference consensus: {released_to_free_agent}")
+        print(f"  Game-plan repair: {game_plan_repairs}")
+        print("  League/division membership: preserved byte-for-byte from the legacy base")
+    finally:
+        for reference_temp in reference_temps:
+            crypto.cleanup_temp(reference_temp)
+        crypto.cleanup_temp(base_temp)
 
 
 def cmd_run(args):
@@ -139,7 +293,7 @@ def cmd_run(args):
     elif in_place:
         output_path = edit_path
     else:
-        # Default behavior: write to output/EDIT00000000 to preserve sample/ input
+        # Default behavior: write to output/EDIT00000000 to preserve base/ input
         output_path = config.OUTPUT_FILE_PATH
 
     if not dry_run and not edit_path.exists():
@@ -157,9 +311,6 @@ def cmd_run(args):
 
     start_d, end_d = get_transfer_window_range(window)
     cutoff_info = f"since {since_date}" if since_date else f"window '{window}' (from {start_d})"
-    pages = 200
-    popular_only = False
-
     transfers_list = []
     if club_filter:
         clubs = [c.strip() for c in club_filter.split(",") if c.strip()]
@@ -175,6 +326,10 @@ def cmd_run(args):
         transfers_list.append(fetch_fotmob_transfers(max_pages=pages, popular_only=popular_only, since_date=since_date, window=window))
 
     transfers = merge_transfers(transfers_list)
+    # FotMob returns recent activity first. Apply historical moves oldest to
+    # newest so the final roster reflects the latest destination. Current
+    # squad shirt-number updates intentionally run last.
+    transfers.sort(key=_transfer_sort_key)
     print(f"  FotMob found {len(transfers)} total unique verified transfers")
 
     print(f"\nTotal unique transfers to process: {len(transfers)}")
@@ -212,6 +367,17 @@ def cmd_run(args):
         ef = EditFile()
         ef.load(data_dat)
 
+        integrity = ef.validate_integrity()
+        if not integrity["valid"]:
+            print("\n❌ Input save failed FL26 integrity validation; no changes will be written.")
+            for error in integrity["errors"][:20]:
+                print(f"  - {error}")
+            remaining = len(integrity["errors"]) - 20
+            if remaining > 0:
+                print(f"  ... and {remaining} more errors")
+            print("Use a known-good Football Life 2026 EDIT00000000 as --edit-file.")
+            sys.exit(2)
+
         # ── Step 4: Build name databases ──
         print("\n📋 Reading FL26 database...")
         players = ef.get_all_players()
@@ -241,10 +407,10 @@ def cmd_run(args):
                             sp_team_names[int(parts[0].strip())] = parts[1].strip()
 
         # Build name dictionaries, preferring Smokepatch full names if available
-        player_name_to_id = {}
+        player_records = []
         for pid, p in players.items():
             name = sp_player_names.get(pid, p.name)
-            player_name_to_id[name] = pid
+            player_records.append((name, pid))
             
         team_name_to_id = {}
         for tid, t in teams_info.items():
@@ -256,11 +422,11 @@ def cmd_run(args):
         player_nationalities = {pid: p.nationality for pid, p in players.items() if p.nationality}
         player_ages = {pid: p.age for pid, p in players.items() if p.age}
 
-        print(f"  {len(player_name_to_id)} players, {len(team_name_to_id)} playable clubs (national teams excluded)")
+        print(f"  {len(player_records)} players, {len(team_name_to_id)} playable clubs (national teams excluded)")
 
         matcher = NameMatcher()
         matcher.load_player_db(
-            player_name_to_id,
+            player_records,
             positions=player_positions,
             nationalities=player_nationalities,
             ages=player_ages,
@@ -315,7 +481,7 @@ def cmd_run(args):
         print(f"  ✗ Unmatched: {len(partial)}")
 
         if partial:
-            print("\n  Unmatched transfers (sample):")
+            print("\n  Unmatched transfers (preview):")
             for m in partial[:10]:
                 print(f"    {m}")
 
@@ -365,9 +531,8 @@ def cmd_run(args):
         print(f"\n⚡ Applying {len(fully_matched)} transfers with Smart Shirt Numbers & Game Plan Doctor...")
         applied = 0
         failed = 0
-
-        # Sort transfers: releases first, then club transfers, then signings to avoid slot overflow
-        fully_matched.sort(key=lambda m: 0 if m.is_release else (1 if m.is_club_transfer else 2))
+        original_data = bytes(ef._data)
+        pending_logs = []
 
         for m in fully_matched:
             pid = m.player_id
@@ -378,70 +543,51 @@ def cmd_run(args):
             if pid is None:
                 continue
                 
-            is_squad_update = (t.transfer_type == "squad_update")
+            current_clubs = ef.find_player_teams(pid, club_only=True)
+            if len(current_clubs) > 1:
+                failed += 1
+                print(f"  ✗ Skipped {m.matched_player_name or t.player_name}: player is in multiple clubs {current_clubs}")
+                continue
+            current_tid = current_clubs[0] if current_clubs else None
+
+            is_squad_update = t.transfer_type == "squad_update"
             if is_squad_update:
-                if to_tid and t.shirt_number is not None:
+                if to_tid and current_tid == to_tid and t.shirt_number is not None:
                     if ef.update_player_shirt_number(to_tid, pid, t.shirt_number):
                         applied += 1
                 continue
                 
             ok = False
             pref_shirt = m.transfer.shirt_number
-            if m.is_club_transfer:
-                to_roster = ef.get_team_roster(m.to_team_id)
-                if to_roster and to_roster.has_player(m.player_id):
+            if to_tid is not None:
+                if current_tid == to_tid:
+                    ok = True
+                    if pref_shirt is not None:
+                        ok = ef.update_player_shirt_number(to_tid, pid, pref_shirt)
+                elif current_tid is not None:
+                    ok = ef.move_player(
+                        pid,
+                        current_tid,
+                        to_tid,
+                        shirt_number=pref_shirt,
+                        position=t.position,
+                    )
+                else:
+                    ok = ef.add_player(
+                        pid,
+                        to_tid,
+                        shirt_number=pref_shirt,
+                        position=t.position,
+                    )
+            else:
+                if current_tid is None:
                     ok = True
                 else:
-                    ok = ef.move_player(m.player_id, m.from_team_id, m.to_team_id, shirt_number=pref_shirt)
-                    if not ok:
-                        current_tid = ef.find_player_team(m.player_id, club_only=True)
-                        if current_tid == m.to_team_id:
-                            ok = True
-                        elif current_tid is not None:
-                            ok = ef.move_player(m.player_id, current_tid, m.to_team_id, shirt_number=pref_shirt)
-                        else:
-                            ok = ef.add_player(m.player_id, m.to_team_id, shirt_number=pref_shirt)
-            elif m.is_release:
-                from_roster = ef.get_team_roster(m.from_team_id)
-                if from_roster and not from_roster.has_player(m.player_id):
-                    ok = True
-                else:
-                    ok = ef.release_player(m.player_id, m.from_team_id)
-                    if not ok:
-                        current_tid = ef.find_player_team(m.player_id, club_only=True)
-                        if current_tid is not None:
-                            ok = ef.release_player(m.player_id, current_tid)
-                        else:
-                            ok = True
-            elif m.is_sign:
-                to_roster = ef.get_team_roster(m.to_team_id)
-                if to_roster and to_roster.has_player(m.player_id):
-                    ok = True
-                else:
-                    ok = ef.add_player(m.player_id, m.to_team_id, shirt_number=pref_shirt)
-                    if not ok:
-                        current_tid = ef.find_player_team(m.player_id, club_only=True)
-                        if current_tid == m.to_team_id:
-                            ok = True
-                        elif current_tid is not None:
-                            ok = ef.move_player(m.player_id, current_tid, m.to_team_id, shirt_number=pref_shirt)
+                    ok = ef.release_player(pid, current_tid)
 
             if ok:
                 applied += 1
-                transfer_logger.log_transfer(
-                    player_name=m.matched_player_name or m.transfer.player_name,
-                    player_id=m.player_id,
-                    from_team=m.matched_from_team or m.transfer.from_club,
-                    from_team_id=m.from_team_id or 0,
-                    to_team=m.matched_to_team or m.transfer.to_club,
-                    to_team_id=m.to_team_id or 0,
-                    confidence=m.min_confidence,
-                    transfer_type=m.transfer.transfer_type,
-                    dry_run=False,
-                    position=m.transfer.position,
-                    fee=m.transfer.fee,
-                    market_value=m.transfer.market_value,
-                )
+                pending_logs.append(m)
                 run_records.append({
                     "player_name": m.matched_player_name or m.transfer.player_name,
                     "from_team": m.matched_from_team or m.transfer.from_club,
@@ -458,6 +604,17 @@ def cmd_run(args):
 
         print(f"\n  Applied: {applied}, Failed: {failed}")
 
+        post_integrity = ef.validate_integrity()
+        if not post_integrity["valid"]:
+            ef._data = bytearray(original_data)
+            print("\n❌ Modified save failed integrity validation; changes were rolled back.")
+            for error in post_integrity["errors"][:20]:
+                print(f"  - {error}")
+            remaining = len(post_integrity["errors"]) - 20
+            if remaining > 0:
+                print(f"  ... and {remaining} more errors")
+            sys.exit(2)
+
         # Save modified data.dat
         ef.save(data_dat)
 
@@ -466,20 +623,36 @@ def cmd_run(args):
         print(f"\n🔒 Re-encrypting → {output_path}...")
         crypto.encrypt(temp_dir, output_path)
 
+        # Persist audit entries only after the binary passed validation and
+        # verified encryption round-trip.
+        for m in pending_logs:
+            transfer_logger.log_transfer(
+                player_name=m.matched_player_name or m.transfer.player_name,
+                player_id=m.player_id,
+                from_team=m.matched_from_team or m.transfer.from_club,
+                from_team_id=m.from_team_id or 0,
+                to_team=m.matched_to_team or m.transfer.to_club,
+                to_team_id=m.to_team_id or 0,
+                confidence=m.min_confidence,
+                transfer_type=m.transfer.transfer_type,
+                dry_run=False,
+                position=m.transfer.position,
+                fee=m.transfer.fee,
+                market_value=m.transfer.market_value,
+            )
+
         # Save visual reports
         transfer_logger.save_reports(run_records)
 
         print(f"\n✅ Done! {applied} transfers applied successfully.")
         if output_path.resolve() != edit_path.resolve():
-            print(f"   Input (sample/pristine): {edit_path}")
+            print(f"   Input (base/pristine):   {edit_path}")
             print(f"   Output (updated save):   {output_path}")
         else:
             print(f"   Updated file:            {output_path}")
         print(f"   Backup at:               {backup_path}")
         print(f"   Log at:                  {config.TRANSFER_LOG_FILE}")
         print(f"   Visual Summary Report:   {config.OUTPUT_DIR / 'transfer_summary.md'}")
-        print(f"   Backup at: {backup_path}")
-        print(f"   Log at: {config.TRANSFER_LOG_FILE}")
 
     finally:
         crypto.cleanup_temp(temp_dir)
@@ -545,7 +718,7 @@ def main():
     # run (default)
     p_run = sub.add_parser("run", help="Scrape + match + apply transfers")
     p_run.add_argument("--dry-run", action="store_true", help="Don't modify the edit file")
-    p_run.add_argument("--edit-file", type=str, help="Path to input edit00000000 (default: config.EDIT_FILE_PATH or sample/EDIT00000000)")
+    p_run.add_argument("--edit-file", type=str, help="Path to input EDIT00000000 (default: base/EDIT00000000)")
     p_run.add_argument("-o", "--output", type=str, help="Path to output updated edit00000000 (default: output/EDIT00000000)")
     p_run.add_argument("--in-place", action="store_true", help="Overwrite input edit file in-place instead of writing to output/")
     p_run.add_argument("--club", type=str, help="Comma-separated club names to focus scrape (e.g. 'Chelsea,Arsenal')")
@@ -553,6 +726,8 @@ def main():
     p_run.add_argument("--window", type=str, choices=["auto", "summer", "winter", "all"], default="auto", help="Transfer window (default: auto)")
     p_run.add_argument("--since", type=str, help="Scrape transfers since date (YYYY-MM-DD)")
     p_run.add_argument("--threshold", type=float, help="Fuzzy match confidence threshold (0-100)")
+    p_run.add_argument("--pages", type=int, default=10, help="Maximum FotMob API pages (default: 10)")
+    p_run.add_argument("--popular", action="store_true", help="Only request FotMob popular transfers")
     p_run.set_defaults(func=cmd_run)
 
     # schedule
@@ -567,6 +742,8 @@ def main():
     p_sched.add_argument("--window", type=str, choices=["auto", "summer", "winter", "all"], default="auto", help="Transfer window (default: auto)")
     p_sched.add_argument("--since", type=str, help="Scrape transfers since date (YYYY-MM-DD)")
     p_sched.add_argument("--threshold", type=float, help="Fuzzy match confidence threshold (0-100)")
+    p_sched.add_argument("--pages", type=int, default=10, help="Maximum FotMob API pages (default: 10)")
+    p_sched.add_argument("--popular", action="store_true", help="Only request FotMob popular transfers")
     p_sched.set_defaults(func=cmd_schedule)
 
     # cron
@@ -579,8 +756,36 @@ def main():
     p_inspect.add_argument("--edit-file", type=str, required=True, help="Path to edit00000000")
     p_inspect.set_defaults(func=cmd_inspect)
 
+    # validate
+    p_validate = sub.add_parser("validate", help="Validate an encrypted FL26 edit file")
+    p_validate.add_argument("--edit-file", type=str, required=True, help="Path to edit00000000")
+    p_validate.set_defaults(func=cmd_validate)
+
+    # repair
+    p_repair = sub.add_parser(
+        "repair",
+        help="Repair a legacy base without importing reference league memberships",
+    )
+    p_repair.add_argument("--edit-file", type=str, required=True, help="Legacy base EDIT00000000")
+    p_repair.add_argument(
+        "--reference",
+        type=str,
+        action="append",
+        required=True,
+        help="Known-good reference EDIT00000000; repeat for consensus",
+    )
+    p_repair.add_argument("-o", "--output", type=str, help="Repaired output path")
+    p_repair.set_defaults(func=cmd_repair)
+
+    # log
+    p_log = sub.add_parser("log", help="Show recent transfer log")
+    p_log.add_argument("--last", type=int, default=20, help="Number of recent entries (default: 20)")
+    p_log.set_defaults(func=cmd_log)
+
     # Pre-parse argv: if first arg is a flag or omitted, default to 'run'
-    subcommands = {"run", "schedule", "cron", "inspect", "log", "-h", "--help"}
+    subcommands = {
+        "run", "schedule", "cron", "inspect", "validate", "repair", "log", "-h", "--help"
+    }
     if len(sys.argv) > 1 and sys.argv[1] not in subcommands:
         sys.argv.insert(1, "run")
     elif len(sys.argv) == 1:

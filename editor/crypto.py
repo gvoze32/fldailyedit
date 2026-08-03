@@ -126,10 +126,17 @@ def encrypt(decrypted_dir: Path, output_path: Path) -> Path:
     # Ensure output directory exists
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    temp_fd, temp_name = tempfile.mkstemp(
+        prefix=f".{output_path.name}.", suffix=".tmp", dir=output_path.parent
+    )
+    os.close(temp_fd)
+    temp_output = Path(temp_name)
+    verify_dir: Path | None = None
+
     try:
         logger.info(f"Encrypting {decrypted_dir} → {output_path}")
         result = subprocess.run(
-            [str(encrypter), str(decrypted_dir), str(output_path)],
+            [str(encrypter), str(decrypted_dir), str(temp_output)],
             capture_output=True,
             text=True,
             timeout=60,
@@ -142,14 +149,41 @@ def encrypt(decrypted_dir: Path, output_path: Path) -> Path:
                 f"stderr: {result.stderr}"
             )
 
-        if not output_path.exists():
-            raise CryptoError(f"Encryption completed but output file not created: {output_path}")
+        if not temp_output.exists() or temp_output.stat().st_size == 0:
+            raise CryptoError(f"Encryption completed but output file was not created: {temp_output}")
+
+        # Decrypt the candidate and compare every logical block before replacing
+        # an existing output. This catches wrong-key, truncation, and packaging
+        # failures that a zero exit code alone cannot detect.
+        verify_dir = decrypt(temp_output)
+        block_names = (
+            "encryptHeader.dat",
+            "header.dat",
+            "description.dat",
+            "logo.png",
+            "data.dat",
+            "version.txt",
+        )
+        for block_name in block_names:
+            source_block = decrypted_dir / block_name
+            verified_block = verify_dir / block_name
+            if not source_block.exists() or not verified_block.exists():
+                raise CryptoError(f"Round-trip verification is missing block: {block_name}")
+            if source_block.read_bytes() != verified_block.read_bytes():
+                raise CryptoError(f"Round-trip verification failed for block: {block_name}")
+
+        os.replace(temp_output, output_path)
 
         logger.info(f"Encrypted successfully: {output_path} ({output_path.stat().st_size:,} bytes)")
         return output_path
 
     except subprocess.TimeoutExpired:
         raise CryptoError("Encryption timed out after 60 seconds")
+    finally:
+        if verify_dir is not None:
+            cleanup_temp(verify_dir)
+        if temp_output.exists():
+            temp_output.unlink()
 
 
 def cleanup_temp(temp_dir: Path):

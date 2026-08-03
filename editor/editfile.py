@@ -54,6 +54,7 @@ MAX_COMPETITIONS = 65      # (0x980D7C - 0x974C84) / 760
 MAX_STADIUMS = 65          # (0x983D38 - 0x980D7C) / 188
 MAX_UNKNOWN = 2_500        # (0x9D4648 - 0x983D38) / 132
 MAX_TEAM_PLAYER = 750      # (0xA08650 - 0x9D4648) / 284
+MAX_GAME_PLANS = 750       # fixed block; FL26 currently populates 749 entries
 
 # ──────────────────────────────────────────────────────────────
 # Header field offsets (uint16 LE at these positions)
@@ -554,7 +555,13 @@ class EditFile:
 
     def find_player_team(self, player_id: int, club_only: bool = True) -> int | None:
         """Find the team ID that currently has this player registered."""
+        teams = self.find_player_teams(player_id, club_only=club_only)
+        return teams[0] if teams else None
+
+    def find_player_teams(self, player_id: int, club_only: bool = True) -> list[int]:
+        """Return every team containing a player, preserving table order."""
         club_ids = self.get_club_team_ids() if club_only else None
+        teams: list[int] = []
         for i in range(self.team_player_count):
             entry_offset = self.team_player_start + i * TEAM_PLAYER_ENTRY_SIZE
             if entry_offset + TEAM_PLAYER_ENTRY_SIZE > len(self._data):
@@ -565,8 +572,9 @@ class EditFile:
             for j in range(TP_MAX_PLAYERS):
                 pid = struct.unpack_from("<I", self._data, entry_offset + TP_PLAYER_IDS + j * 4)[0]
                 if pid == player_id:
-                    return tid
-        return None
+                    teams.append(tid)
+                    break
+        return teams
 
     def find_overflow_release_candidate(
         self, team_id: int, exclude_player_id: int | None = None
@@ -646,6 +654,9 @@ class EditFile:
 
     def update_player_shirt_number(self, team_id: int, player_id: int, shirt_number: int) -> bool:
         """Update a player's shirt number directly without transferring."""
+        if not 1 <= shirt_number <= 999:
+            logger.error(f"Invalid shirt number {shirt_number}; expected 1..999")
+            return False
         entry = self._find_team_player_entry_offset(team_id)
         if entry is None:
             return False
@@ -658,6 +669,13 @@ class EditFile:
         # Avoid unnecessary writes
         if roster.shirt_numbers[idx] == shirt_number:
             return True
+
+        if any(
+            pid != 0 and slot != idx and number == shirt_number
+            for slot, (pid, number) in enumerate(zip(roster.player_ids, roster.shirt_numbers))
+        ):
+            logger.warning(f"Shirt #{shirt_number} is already used on team {team_id}")
+            return False
             
         self._write_player_slot(entry, idx, player_id, shirt_number)
         logger.debug(f"Updated player {player_id} on team {team_id} to shirt #{shirt_number}")
@@ -695,6 +713,10 @@ class EditFile:
         """
         target_shirt = shirt_number if shirt_number is not None else preferred_shirt_number
 
+        if from_team_id == to_team_id:
+            logger.error(f"Source and destination are the same team ({from_team_id})")
+            return False
+
         # Find team-player entries
         from_entry = self._find_team_player_entry_offset(from_team_id)
         to_entry = self._find_team_player_entry_offset(to_team_id)
@@ -720,11 +742,40 @@ class EditFile:
             logger.warning(f"Player {player_id} already on destination team {to_team_id}")
             return False
 
+        # A player may also be registered for a national team, but must never
+        # occur in two club rosters. Refuse to amplify a corrupt input.
+        current_clubs = self.find_player_teams(player_id, club_only=True)
+        unexpected_clubs = [tid for tid in current_clubs if tid != from_team_id]
+        if unexpected_clubs:
+            logger.error(
+                f"Player {player_id} is already registered to club(s) {unexpected_clubs}; "
+                "transfer aborted"
+            )
+            return False
+
         # If no preferred shirt number was passed, use their existing shirt number from source
         if target_shirt is None and player_idx < len(from_roster.shirt_numbers):
             old_sn = from_roster.shirt_numbers[player_idx]
             if old_sn > 0:
                 target_shirt = old_sn
+
+        overflow_pid: int | None = None
+        if to_roster.is_full:
+            _, overflow_pid = self.find_overflow_release_candidate(
+                to_team_id, exclude_player_id=player_id
+            )
+            if overflow_pid == 0:
+                logger.error(f"No safe overflow release candidate for team {to_team_id}")
+                return False
+
+            logger.warning(
+                f"Destination team {to_team_id} is full (40/40). "
+                f"Auto-releasing lowest ability player {overflow_pid} to Free Agent."
+            )
+            if not self.release_player(overflow_pid, to_team_id):
+                logger.error(f"Could not release overflow player {overflow_pid} from team {to_team_id}")
+                return False
+            to_roster = self._read_team_player_entry(to_entry)
 
         # --- Step 1: Remove from source ---
         # Find last non-zero player in source roster
@@ -758,17 +809,7 @@ class EditFile:
         # Re-read to_roster in case from_entry == to_entry
         to_roster = self._read_team_player_entry(to_entry)
 
-        # --- Step 2: Handle Full Roster (40 slots limit) ---
-        if to_roster.is_full:
-            slot_to_rel, pid_to_rel = self.find_overflow_release_candidate(to_team_id, exclude_player_id=player_id)
-            logger.warning(
-                f"Destination team {to_team_id} is full (40/40). "
-                f"Auto-releasing lowest ability player {pid_to_rel} (slot {slot_to_rel}) to Free Agent."
-            )
-            self.release_player(pid_to_rel, to_team_id)
-            to_roster = self._read_team_player_entry(to_entry)
-
-        # --- Step 3: Add to destination with Smart Shirt Number ---
+        # --- Step 2: Add to destination with Smart Shirt Number ---
         dest_slot = to_roster.first_empty_slot()
         if dest_slot == -1:
             logger.error(f"No empty slot in destination team {to_team_id}")
@@ -882,13 +923,26 @@ class EditFile:
             logger.warning(f"Player {player_id} already on team {to_team_id}")
             return False
 
+        current_clubs = self.find_player_teams(player_id, club_only=True)
+        if current_clubs:
+            logger.error(
+                f"Player {player_id} is already registered to club(s) {current_clubs}; "
+                f"cannot add to team {to_team_id} as a free agent"
+            )
+            return False
+
         if to_roster.is_full:
             slot_to_rel, pid_to_rel = self.find_overflow_release_candidate(to_team_id, exclude_player_id=player_id)
+            if pid_to_rel == 0:
+                logger.error(f"No safe overflow release candidate for team {to_team_id}")
+                return False
             logger.warning(
                 f"Team {to_team_id} roster is full (40/40). "
                 f"Auto-releasing lowest ability player {pid_to_rel} (slot {slot_to_rel}) to Free Agent."
             )
-            self.release_player(pid_to_rel, to_team_id)
+            if not self.release_player(pid_to_rel, to_team_id):
+                logger.error(f"Could not release overflow player {pid_to_rel} from team {to_team_id}")
+                return False
             to_roster = self._read_team_player_entry(to_entry)
 
         dest_slot = to_roster.first_empty_slot()
@@ -929,6 +983,12 @@ class EditFile:
 
     def _write_player_slot(self, entry_offset: int, slot_idx: int, player_id: int, shirt_num: int):
         """Write a player ID and shirt number to a specific slot in a Team-Player entry."""
+        if not 0 <= slot_idx < TP_MAX_PLAYERS:
+            raise IndexError(f"Roster slot out of range: {slot_idx}")
+        if not 0 <= player_id <= 0xFFFFFFFF:
+            raise ValueError(f"Player ID out of uint32 range: {player_id}")
+        if not 0 <= shirt_num <= 999:
+            raise ValueError(f"Shirt number out of range: {shirt_num}")
         pid_offset = entry_offset + TP_PLAYER_IDS + slot_idx * 4
         sn_offset = entry_offset + TP_SHIRT_NUMBERS + slot_idx * 2
 
@@ -938,8 +998,10 @@ class EditFile:
     def _update_game_plan_after_removal(self, team_id: int, removed_idx: int, replacement_idx: int):
         """
         Game Plan Doctor: Repair squad tactics integrity when a player is removed.
-        Guarantees that the 40-byte lineup array remains a strict mathematical
-        permutation of numbers 0..39 (no duplicate 0s, no 0xFF, no missing values).
+        Preserve the order of active players after roster compaction.
+
+        Only a structurally valid game plan is changed. Custom/legacy layouts
+        that do not map the active roster exactly are left byte-for-byte intact.
         """
         gp_offset = self._find_game_plan_offset(team_id)
         if gp_offset is None or gp_offset + GAME_PLAN_ENTRY_SIZE > len(self._data):
@@ -948,47 +1010,30 @@ class EditFile:
         lineup_offset = gp_offset + GP_LINEUP
         lineup = list(self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS])
 
-        # If dummy team or not a valid permutation, skip
-        if sorted(lineup) != list(range(40)):
+        old_size = (replacement_idx + 1) if replacement_idx >= 0 else (removed_idx + 1)
+        if not 1 <= old_size <= TP_MAX_PLAYERS:
+            return
+        expected_old_slots = set(range(old_size))
+        active_order = lineup[:old_size]
+        if len(active_order) != len(set(active_order)) or set(active_order) != expected_old_slots:
+            logger.warning(
+                f"Team {team_id} has a non-standard game plan; preserving it during removal"
+            )
             return
 
-        N = (replacement_idx + 1) if replacement_idx >= 0 else (removed_idx + 1)
-        L = N - 1
-        D = removed_idx
+        last_idx = old_size - 1
+        new_active_order = [
+            removed_idx if slot == last_idx else slot
+            for slot in active_order
+            if slot != removed_idx
+        ]
+        if len(new_active_order) != old_size - 1 or set(new_active_order) != set(range(old_size - 1)):
+            logger.warning(f"Could not safely compact game plan for team {team_id}; preserving it")
+            return
 
-        if D == L or replacement_idx < 0:
-            pos_L = lineup.index(L)
-            if pos_L < 11 and N > 11:
-                sub_pos = 11 if pos_L == 0 else (12 if N > 12 else 11)
-                sub = lineup[sub_pos]
-                lineup[pos_L] = sub
-                lineup[sub_pos:N-1] = lineup[sub_pos+1:N]
-                lineup[N-1] = L
-            elif 11 <= pos_L < N:
-                lineup[pos_L:N-1] = lineup[pos_L+1:N]
-                lineup[N-1] = L
-        else:
-            pos_D = lineup.index(D)
-            pos_L = lineup.index(L)
-
-            # Player at L moves into slot D
-            lineup[pos_L] = D
-
-            if pos_D < 11 and N > 11:
-                sub_pos = 11 if pos_D == 0 else (12 if N > 12 else 11)
-                sub = lineup[sub_pos]
-                lineup[pos_D] = sub
-                lineup[sub_pos:N-1] = lineup[sub_pos+1:N]
-                lineup[N-1] = L
-            elif 11 <= pos_D < N:
-                lineup[pos_D:N-1] = lineup[pos_D+1:N]
-                lineup[N-1] = L
-            else:
-                lineup[pos_D] = L
-
-        # Write lineup back to memory
-        for i in range(TP_MAX_PLAYERS):
-            self._data[lineup_offset + i] = lineup[i]
+        lineup[: old_size - 1] = new_active_order
+        lineup[old_size - 1] = last_idx
+        self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS] = bytes(lineup)
 
         # Update role bytes (Captain, CK, PK, Attackers)
         # In PES21, these bytes store the ROSTER INDEX (0..39) or 0xFF (Default/Auto)
@@ -997,24 +1042,24 @@ class EditFile:
             target_off = gp_offset + roff
             if target_off < len(self._data):
                 val = self._data[target_off]
-                if val == D:
+                if val == removed_idx:
                     self._data[target_off] = 0xFF
-                elif val == L:
-                    self._data[target_off] = D
+                elif val == last_idx:
+                    self._data[target_off] = removed_idx
 
         att_off = gp_offset + GP_ATTACK_PLAYERS
         for b in range(3):
             if att_off + b < len(self._data):
                 val = self._data[att_off + b]
-                if val == D:
+                if val == removed_idx:
                     self._data[att_off + b] = 0xFF
-                elif val == L:
-                    self._data[att_off + b] = D
+                elif val == last_idx:
+                    self._data[att_off + b] = removed_idx
 
     def _update_game_plan_after_addition(self, team_id: int, added_slot: int):
         """
         Ensure newly signed player at added_slot is placed on active bench
-        while preserving strict 0..39 permutation invariant.
+        while preserving the active-roster one-to-one mapping.
         """
         gp_offset = self._find_game_plan_offset(team_id)
         if gp_offset is None or gp_offset + GAME_PLAN_ENTRY_SIZE > len(self._data):
@@ -1023,18 +1068,22 @@ class EditFile:
         lineup_offset = gp_offset + GP_LINEUP
         lineup = list(self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS])
 
-        if sorted(lineup) != list(range(40)):
+        # The active prefix before addition must be a one-to-one mapping of
+        # the compact roster slots. Otherwise preserve the original tactics.
+        active_prefix = lineup[:added_slot]
+        if len(active_prefix) != len(set(active_prefix)) or set(active_prefix) != set(range(added_slot)):
             return
 
-        try:
-            pos = lineup.index(added_slot)
-        except ValueError:
-            return
-
-        if pos != added_slot and added_slot < 40:
-            lineup[pos], lineup[added_slot] = lineup[added_slot], lineup[pos]
-            for i in range(TP_MAX_PLAYERS):
-                self._data[lineup_offset + i] = lineup[i]
+        if added_slot < TP_MAX_PLAYERS:
+            try:
+                pos = lineup.index(added_slot, added_slot)
+            except ValueError:
+                pos = -1
+            if pos >= 0 and pos != added_slot:
+                lineup[pos], lineup[added_slot] = lineup[added_slot], lineup[pos]
+            else:
+                lineup[added_slot] = added_slot
+            self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS] = bytes(lineup)
 
     def _find_game_plan_offset(self, team_id: int) -> int | None:
         """Find the byte offset of a team's game plan entry."""
@@ -1055,6 +1104,67 @@ class EditFile:
                 return offset
         return None
 
+    def repair_game_plans(self) -> dict[str, int]:
+        """Repair active lineup mappings without replacing tactical data wholesale.
+
+        Existing valid roster-slot references keep their relative order. Missing
+        active slots are appended, duplicate/empty references are displaced to
+        the inactive tail, and roles pointing outside the active roster are reset
+        to the game's automatic value (0xFF).
+        """
+        game_plan_base = self.game_plan_start + 0x1230
+        rosters = self.get_all_rosters()
+        repaired_lineups = 0
+        reset_roles = 0
+        checked = 0
+
+        for i in range(min(self.game_plan_count, MAX_GAME_PLANS)):
+            offset = game_plan_base + i * GAME_PLAN_ENTRY_SIZE
+            if offset + GAME_PLAN_ENTRY_SIZE > len(self._data):
+                break
+
+            tid = struct.unpack_from("<I", self._data, offset + GP_TEAM_ID)[0]
+            roster = rosters.get(tid)
+            if roster is None or roster.roster_size == 0:
+                continue
+
+            checked += 1
+            active_slots = [slot for slot, pid in enumerate(roster.player_ids) if pid != 0]
+            active_set = set(active_slots)
+            lineup_offset = offset + GP_LINEUP
+            lineup = list(self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS])
+
+            preserved: list[int] = []
+            seen: set[int] = set()
+            for slot in lineup:
+                if slot in active_set and slot not in seen:
+                    preserved.append(slot)
+                    seen.add(slot)
+            preserved.extend(slot for slot in active_slots if slot not in seen)
+
+            active_count = len(active_slots)
+            if lineup[:active_count] != preserved:
+                lineup[:active_count] = preserved
+                self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS] = bytes(
+                    lineup
+                )
+                repaired_lineups += 1
+
+            role_offsets = [GP_LEFT_CK, GP_RIGHT_CK, GP_PK, GP_CAPTAIN]
+            role_offsets.extend(GP_ATTACK_PLAYERS + index for index in range(3))
+            for role_offset in role_offsets:
+                role_address = offset + role_offset
+                value = self._data[role_address]
+                if value != 0xFF and value not in active_set:
+                    self._data[role_address] = 0xFF
+                    reset_roles += 1
+
+        return {
+            "checked_game_plans": checked,
+            "repaired_lineups": repaired_lineups,
+            "reset_roles": reset_roles,
+        }
+
     # ──────────────────────────────────────────────────────────
     # Save
     # ──────────────────────────────────────────────────────────
@@ -1074,6 +1184,136 @@ class EditFile:
     # ──────────────────────────────────────────────────────────
     # Diagnostics
     # ──────────────────────────────────────────────────────────
+
+    def validate_integrity(self) -> dict[str, object]:
+        """Validate FL26 table bounds and cross-table roster invariants."""
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        game_plan_base = self.game_plan_start + 0x1230
+        expected_size = game_plan_base + MAX_GAME_PLANS * GAME_PLAN_ENTRY_SIZE
+        if len(self._data) != expected_size:
+            errors.append(
+                f"data.dat size is {len(self._data):,}; expected {expected_size:,} bytes "
+                "for the FL26/PES21 layout"
+            )
+
+        count_limits = {
+            "players": (self.player_count, MAX_PLAYERS),
+            "teams": (self.team_count, MAX_TEAMS),
+            "managers": (self.manager_count, MAX_MANAGERS),
+            "competitions": (self.competition_count, MAX_COMPETITIONS),
+            "stadiums": (self.stadium_count, MAX_STADIUMS),
+            "unknown": (self.unknown_count, MAX_UNKNOWN),
+            "team-player": (self.team_player_count, MAX_TEAM_PLAYER),
+            "game plans": (self.game_plan_count, MAX_GAME_PLANS),
+        }
+        for name, (count, maximum) in count_limits.items():
+            if not 0 <= count <= maximum:
+                errors.append(f"Header {name} count {count} exceeds block capacity {maximum}")
+
+        rosters: dict[int, TeamData] = {}
+        seen_team_ids: set[int] = set()
+        for i in range(min(self.team_player_count, MAX_TEAM_PLAYER)):
+            offset = self.team_player_start + i * TEAM_PLAYER_ENTRY_SIZE
+            if offset + TEAM_PLAYER_ENTRY_SIZE > len(self._data):
+                errors.append(f"Team-player entry {i} exceeds data.dat bounds")
+                break
+            roster = self._read_team_player_entry(offset)
+            tid = roster.team_id
+            if tid in seen_team_ids:
+                errors.append(f"Duplicate team-player entry for team {tid}")
+            seen_team_ids.add(tid)
+            rosters[tid] = roster
+
+            nonzero_slots = [slot for slot, pid in enumerate(roster.player_ids) if pid != 0]
+            if nonzero_slots:
+                last_slot = nonzero_slots[-1]
+                holes = [slot for slot in range(last_slot) if roster.player_ids[slot] == 0]
+                if holes:
+                    errors.append(f"Team {tid} roster has empty holes at slots {holes}")
+
+            active_ids = [pid for pid in roster.player_ids if pid != 0]
+            if len(active_ids) != len(set(active_ids)):
+                errors.append(f"Team {tid} contains the same player more than once")
+
+            active_shirts = [
+                shirt
+                for pid, shirt in zip(roster.player_ids, roster.shirt_numbers)
+                if pid != 0 and shirt != 0
+            ]
+            if any(shirt > 999 for shirt in active_shirts):
+                errors.append(f"Team {tid} contains a shirt number above 999")
+            if len(active_shirts) != len(set(active_shirts)):
+                errors.append(f"Team {tid} contains duplicate non-zero shirt numbers")
+            if any(pid == 0 and shirt != 0 for pid, shirt in zip(roster.player_ids, roster.shirt_numbers)):
+                errors.append(f"Team {tid} has a shirt number assigned to an empty roster slot")
+
+        club_ids = self.get_club_team_ids()
+        club_registrations: dict[int, list[int]] = {}
+        for tid, roster in rosters.items():
+            if tid not in club_ids:
+                continue
+            for pid in roster.roster:
+                club_registrations.setdefault(pid, []).append(tid)
+        duplicate_club_players = {
+            pid: tids for pid, tids in club_registrations.items() if len(tids) > 1
+        }
+        for pid, tids in sorted(duplicate_club_players.items()):
+            errors.append(f"Player {pid} is registered to multiple clubs: {tids}")
+
+        checked_game_plans = 0
+        for i in range(min(self.game_plan_count, MAX_GAME_PLANS)):
+            offset = game_plan_base + i * GAME_PLAN_ENTRY_SIZE
+            if offset + GAME_PLAN_ENTRY_SIZE > len(self._data):
+                errors.append(f"Game-plan entry {i} exceeds data.dat bounds")
+                break
+            tid = struct.unpack_from("<I", self._data, offset + GP_TEAM_ID)[0]
+            roster = rosters.get(tid)
+            if roster is None or roster.roster_size == 0:
+                continue
+
+            checked_game_plans += 1
+            active_slots = {slot for slot, pid in enumerate(roster.player_ids) if pid != 0}
+            lineup = list(self._data[offset + GP_LINEUP : offset + GP_LINEUP + TP_MAX_PLAYERS])
+            active_prefix = lineup[: len(active_slots)]
+            if len(active_prefix) != len(set(active_prefix)) or set(active_prefix) != active_slots:
+                errors.append(
+                    f"Team {tid} game-plan active prefix does not map its roster one-to-one"
+                )
+
+            starters = lineup[: min(11, len(active_slots))]
+            if len(starters) != len(set(starters)) or any(slot not in active_slots for slot in starters):
+                errors.append(f"Team {tid} game plan has duplicate or empty starting slots")
+
+            role_offsets = [GP_LEFT_CK, GP_RIGHT_CK, GP_PK, GP_CAPTAIN]
+            role_offsets.extend(GP_ATTACK_PLAYERS + index for index in range(3))
+            for role_offset in role_offsets:
+                value = self._data[offset + role_offset]
+                if value != 0xFF and value >= TP_MAX_PLAYERS:
+                    errors.append(
+                        f"Team {tid} game-plan role at 0x{role_offset:X} has invalid slot {value}"
+                    )
+                elif value != 0xFF and value not in active_slots:
+                    errors.append(
+                        f"Team {tid} game-plan role at 0x{role_offset:X} points to "
+                        f"empty roster slot {value}"
+                    )
+
+        metrics = {
+            "data_size": len(self._data),
+            "expected_data_size": expected_size,
+            "rosters": len(rosters),
+            "clubs": len(club_ids),
+            "duplicate_club_players": len(duplicate_club_players),
+            "checked_game_plans": checked_game_plans,
+        }
+        return {
+            "valid": not errors,
+            "errors": errors,
+            "warnings": warnings,
+            "metrics": metrics,
+        }
 
     def validate_offsets(self) -> dict:
         """

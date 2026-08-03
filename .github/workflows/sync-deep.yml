@@ -35,14 +35,11 @@ jobs:
       - name: Run Transfer Sync
         id: run_sync
         run: |
-          MODE_FLAG="--deep"
-
-          WINDOW="all"
-
-          eval python run.py run \
-            --window "$WINDOW" \
-            $MODE_FLAG \
-            --edit-file sample/EDIT00000000 \
+          python run.py validate --edit-file base/EDIT00000000
+          python run.py run \
+            --window auto \
+            --deep \
+            --edit-file base/EDIT00000000 \
             --output output/EDIT00000000
 
       - name: Generate Actions Summary

@@ -63,7 +63,7 @@ def validate():
         
     logger.info(f"Loaded {len(fotmob_teams)} FotMob teams.")
     
-    pes_teams = get_pes_teams("sample/EDIT00000000")
+    pes_teams = get_pes_teams("base/EDIT00000000")
     logger.info(f"Loaded {len(pes_teams)} Club teams from PES save file.")
     
     # Save the PES teams to JSON as requested
