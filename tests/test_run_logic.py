@@ -5,6 +5,7 @@ import argparse
 import pytest
 
 from run import (
+    _build_superseded_loan_sources,
     _decide_roster_action,
     _dedupe_shirt_number_matches,
     _iso_date_arg,
@@ -35,6 +36,85 @@ def test_decide_roster_action_is_fail_closed(
     current, source, destination, transfer_type, expected
 ):
     assert _decide_roster_action(current, source, destination, transfer_type) == expected
+
+
+def _club_match(
+    *,
+    source: int,
+    destination: int,
+    date: str,
+    transfer_type: str = "transfer",
+    is_loan: bool = False,
+) -> MatchedTransfer:
+    return MatchedTransfer(
+        transfer=Transfer(
+            player_name="Randal Kolo Muani",
+            from_club="Source",
+            to_club="Destination",
+            date=date,
+            transfer_type=transfer_type,
+            is_loan=is_loan,
+        ),
+        player_id=115254,
+        from_team_id=source,
+        to_team_id=destination,
+        player_confidence=100,
+        from_team_confidence=100,
+        to_team_confidence=100,
+    )
+
+
+def test_new_parent_club_transfer_can_reconcile_stale_loan_roster():
+    psg, tottenham, juventus = 114, 179, 120
+    loan = _club_match(
+        source=psg,
+        destination=tottenham,
+        date="2025-09-01T19:27:00Z",
+        transfer_type="loan",
+        is_loan=True,
+    )
+    permanent = _club_match(
+        source=psg,
+        destination=juventus,
+        date="2026-08-02T18:40:10Z",
+    )
+
+    # Source authorization is date-based, not dependent on API item ordering.
+    allowed = _build_superseded_loan_sources([permanent, loan])
+
+    assert allowed[id(permanent)] == frozenset({tottenham})
+    assert _decide_roster_action(
+        tottenham,
+        psg,
+        juventus,
+        "transfer",
+        allowed[id(permanent)],
+    ) == "move"
+
+
+def test_unrelated_stale_roster_remains_fail_closed():
+    psg, tottenham, juventus, unrelated = 114, 179, 120, 999
+    loan = _club_match(
+        source=psg,
+        destination=tottenham,
+        date="2025-09-01",
+        transfer_type="loan",
+        is_loan=True,
+    )
+    permanent = _club_match(
+        source=psg,
+        destination=juventus,
+        date="2026-08-02",
+    )
+    allowed = _build_superseded_loan_sources([loan, permanent])
+
+    assert _decide_roster_action(
+        unrelated,
+        psg,
+        juventus,
+        "transfer",
+        allowed[id(permanent)],
+    ) == "skip"
 
 
 def test_cli_date_validation_is_strict():

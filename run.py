@@ -26,6 +26,7 @@ import struct
 import sys
 import time
 from collections import Counter
+from datetime import date
 from pathlib import Path
 
 import config
@@ -62,6 +63,7 @@ def _decide_roster_action(
     from_team_id: int | None,
     to_team_id: int | None,
     transfer_type: str,
+    superseded_loan_team_ids: frozenset[int] = frozenset(),
 ) -> str:
     """Choose a fail-closed roster mutation from the verified current state."""
     if transfer_type == "shirt_number_update":
@@ -70,7 +72,10 @@ def _decide_roster_action(
     if from_team_id is not None and to_team_id is not None:
         if current_team_id == to_team_id:
             return "noop"
-        if current_team_id == from_team_id:
+        if (
+            current_team_id == from_team_id
+            or current_team_id in superseded_loan_team_ids
+        ):
             return "move"
         return "skip"
 
@@ -89,6 +94,56 @@ def _decide_roster_action(
         return "skip"
 
     return "skip"
+
+
+def _build_superseded_loan_sources(
+    matches: list[MatchedTransfer],
+) -> dict[int, frozenset[int]]:
+    """Authorize newer parent-club moves from an earlier loan destination.
+
+    Transfer feeds commonly omit the synthetic loan-return event. For example,
+    PSG -> Tottenham (loan) followed by PSG -> Juventus (permanent) leaves a
+    current PES roster at Tottenham even though the newer event names PSG as
+    its source. Only a strictly earlier, fully matched loan from that same
+    parent club can authorize the stale loan club as the actual move source.
+    """
+    prior_loans: dict[int, list[tuple[int, int, date]]] = {}
+    allowed_sources: dict[int, frozenset[int]] = {}
+
+    for match in matches:
+        player_id = match.player_id
+        transfer_date = parse_iso_date(match.transfer.date)
+        if (
+            player_id is not None
+            and match.from_team_id is not None
+            and match.to_team_id is not None
+            and transfer_date is not None
+            and (match.transfer.is_loan or match.transfer.transfer_type == "loan")
+        ):
+            prior_loans.setdefault(player_id, []).append(
+                (match.from_team_id, match.to_team_id, transfer_date)
+            )
+
+    for match in matches:
+        player_id = match.player_id
+        transfer_date = parse_iso_date(match.transfer.date)
+        if (
+            player_id is not None
+            and match.from_team_id is not None
+            and match.to_team_id is not None
+            and transfer_date is not None
+        ):
+            allowed_sources[id(match)] = frozenset(
+                loan_team_id
+                for parent_team_id, loan_team_id, loan_date in prior_loans.get(
+                    player_id, []
+                )
+                if parent_team_id == match.from_team_id
+                and loan_team_id != match.to_team_id
+                and loan_date < transfer_date
+            )
+
+    return allowed_sources
 
 
 def _dedupe_shirt_number_matches(
@@ -585,6 +640,7 @@ def cmd_run(args):
             matched.append(mt)
 
         matched, duplicate_shirt_matches = _dedupe_shirt_number_matches(matched)
+        superseded_loan_sources = _build_superseded_loan_sources(matched)
         if duplicate_shirt_matches:
             print(
                 f"  ⚠ Skipped {duplicate_shirt_matches} duplicate or ambiguous "
@@ -646,6 +702,7 @@ def cmd_run(args):
                     m.from_team_id,
                     m.to_team_id,
                     m.transfer.transfer_type,
+                    superseded_loan_sources.get(id(m), frozenset()),
                 )
                 if action == "skip":
                     safety_skipped += 1
@@ -712,6 +769,7 @@ def cmd_run(args):
                 m.from_team_id,
                 to_tid,
                 t.transfer_type,
+                superseded_loan_sources.get(id(m), frozenset()),
             )
             if action == "skip":
                 failed += 1
@@ -739,7 +797,7 @@ def cmd_run(args):
             elif action == "move":
                 ok = ef.move_player(
                     pid,
-                    m.from_team_id,
+                    current_tid,
                     to_tid,
                     shirt_number=pref_shirt,
                     position=t.position,
