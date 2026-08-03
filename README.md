@@ -70,7 +70,7 @@ Pre-built and updated `EDIT00000000` save files and visual transfer report cards
 - **🚀 Live Real-Time Scraping**: Direct async HTTP stream from FotMob for all latest transfers, loans, releases, and signings (<0.5s execution, 0 bot blocks).
 - **🌪️ Deep Mode (504 One-to-One Clubs)**: Sequentially fetches each FotMob identity that maps unambiguously to one PES club, including squad metadata absent from the global feed.
 - **🛡️ Formation & Game Plan Doctor**: Preserves the active lineup mapping when roster slots are compacted. Roles belonging to a departing player are reset to the game's automatic/default selection.
-- **🔢 Authentic Squad Sync**: Beyond just transfers, the script extracts real **Shirt Numbers** from FotMob squad lists and perfectly applies them in-game! Falls back to smart auto-assignment if the data is missing.
+- **🔢 Authentic Squad Sync**: The script extracts real **Shirt Numbers** from FotMob squad lists and applies conflict-free updates in-game. A number already owned by another squad member is safely skipped without cancelling unrelated transfers.
 - **🎯 Roster-Aware Identity Gate**: Matches the current 29.5k FL26 player catalog, then resolves duplicate names against source/destination roster context. Position, nationality, and age evidence is used only when it is genuinely present.
 - **👥 Source-First Squad Verification**: Resolves duplicate player names against the source roster first, then the destination only as an idempotent fallback. Ambiguous identities and below-threshold context matches are skipped.
 - **🪪 Stable Player Identity**: Persists FotMob `playerId` ↔ PES player-ID evidence per output save, so renamed players can be recovered while conflicting histories are rejected.

@@ -466,6 +466,9 @@ Final ingestion/mutation safety rules:
   when the number really changes, deduplicates each player/club observation,
   and reports them separately from club transfers in HTML, Markdown, and GitHub
   Step Summary.
+- A shirt-number observation that conflicts with another current squad member
+  is a non-fatal safety skip. Known source-data conflicts must never roll back
+  an otherwise valid transfer batch; unexpected binary mutation failures still do.
 - Canonical base and output validate at 10,995,800 bytes, 749 rosters, 583
   clubs, zero duplicate club registrations, and 747 checked game plans.
 - `data/FL2622wc_players.txt` is the authoritative current player-name catalog

@@ -1119,11 +1119,26 @@ def _print_dry_run(edit_file: EditFile, roster_plan) -> None:
             already_current += 1
             print(f"  ALREADY CURRENT: {match}")
             continue
-        if action == "shirt_update" and edit_file.get_player_shirt_number(
-            match.to_team_id, match.player_id
-        ) == match.transfer.shirt_number:
-            already_current += 1
-            continue
+        if action == "shirt_update":
+            current_shirt = edit_file.get_player_shirt_number(
+                match.to_team_id, match.player_id
+            )
+            if current_shirt == match.transfer.shirt_number:
+                already_current += 1
+                continue
+            conflicting_player = _find_shirt_number_conflict(
+                edit_file,
+                match.to_team_id,
+                match.player_id,
+                match.transfer.shirt_number,
+            )
+            if conflicting_player is not None:
+                safety_skipped += 1
+                print(
+                    f"  SAFETY SKIP (shirt_number_conflict:{conflicting_player}): "
+                    f"{match}"
+                )
+                continue
 
         would_apply += 1
         if planned_action.overflow_player_id is not None:
@@ -1137,6 +1152,29 @@ def _print_dry_run(edit_file: EditFile, roster_plan) -> None:
         f"already current: {already_current}, safety-skipped: {safety_skipped}. "
         "No files were written."
     )
+
+
+def _find_shirt_number_conflict(
+    edit_file: EditFile,
+    team_id: int | None,
+    player_id: int | None,
+    shirt_number: int | None,
+) -> int | None:
+    """Return the other player already using a requested shirt number."""
+    if team_id is None or player_id is None or shirt_number is None:
+        return None
+    roster = edit_file.get_team_roster(team_id)
+    if roster is None:
+        return None
+    for other_player_id, other_shirt_number in zip(
+        roster.player_ids, roster.shirt_numbers
+    ):
+        if (
+            other_player_id not in (0, player_id)
+            and other_shirt_number == shirt_number
+        ):
+            return other_player_id
+    return None
 
 
 def cmd_run(args):
@@ -1275,6 +1313,17 @@ def cmd_run(args):
                 previous_shirt = ef.get_player_shirt_number(to_tid, pid)
                 if previous_shirt == pref_shirt:
                     unchanged += 1
+                    continue
+                conflicting_player = _find_shirt_number_conflict(
+                    ef, to_tid, pid, pref_shirt
+                )
+                if conflicting_player is not None:
+                    failed += 1
+                    print(
+                        f"  ✗ Safety skip {m.matched_player_name or t.player_name}: "
+                        f"shirt #{pref_shirt} is already assigned to player "
+                        f"{conflicting_player} on team {to_tid}"
+                    )
                     continue
                 ok = ef.update_player_shirt_number(to_tid, pid, pref_shirt)
             elif action == "move":

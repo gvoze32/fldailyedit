@@ -223,6 +223,24 @@ def test_same_day_transfers_sort_by_timestamp():
     assert sorted([later, earlier], key=_transfer_sort_key) == [earlier, later]
 
 
+def test_shirt_number_conflict_identifies_other_player():
+    from run import _find_shirt_number_conflict
+
+    class FakeEditFile:
+        def get_team_roster(self, team_id):
+            assert team_id == 100
+            return TeamData(
+                team_id=100,
+                player_ids=[10, 20] + [0] * 38,
+                shirt_numbers=[1, 12] + [0] * 38,
+            )
+
+    edit_file = FakeEditFile()
+    assert _find_shirt_number_conflict(edit_file, 100, 10, 12) == 20
+    assert _find_shirt_number_conflict(edit_file, 100, 20, 12) is None
+    assert _find_shirt_number_conflict(edit_file, 100, 10, 7) is None
+
+
 def test_team_matching_uses_full_name_and_rejects_conflicts():
     class FakeMatcher:
         def match_team(self, name):
