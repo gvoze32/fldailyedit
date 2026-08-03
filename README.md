@@ -28,6 +28,9 @@ divisions.
 
 GitHub Actions generates an updated save and transfer reports each day.
 
+> [!NOTE]
+> GitHub requires you to sign in before downloading workflow artifacts.
+
 1. Open the latest successful
    [Deep Sync](https://github.com/gvoze32/fleditscrape/actions/workflows/sync-deep.yml)
    or [Fast Sync](https://github.com/gvoze32/fleditscrape/actions/workflows/sync-fast.yml)
