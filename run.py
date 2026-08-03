@@ -1273,11 +1273,10 @@ def cmd_run(args):
         print(f"  Backup: {backup_path}")
 
         print(f"\n⚡ Applying verified transfers and shirt-number changes...")
-        applied = 0
         transfer_applied = 0
         shirt_numbers_applied = 0
         unchanged = 0
-        failed = 0
+        safety_skipped = 0
         original_data = bytes(ef._data)
         pending_logs = []
 
@@ -1293,9 +1292,9 @@ def cmd_run(args):
             action = planned_action.action
             current_tid = planned_action.current_team_id
             if action == "skip":
-                failed += 1
+                safety_skipped += 1
                 print(
-                    f"  ✗ Safety skip {m.matched_player_name or t.player_name}: "
+                    f"  ⚠ Safety skip {m.matched_player_name or t.player_name}: "
                     f"{planned_action.reason or 'state mismatch'}"
                 )
                 continue
@@ -1318,9 +1317,9 @@ def cmd_run(args):
                     ef, to_tid, pid, pref_shirt
                 )
                 if conflicting_player is not None:
-                    failed += 1
+                    safety_skipped += 1
                     print(
-                        f"  ✗ Safety skip {m.matched_player_name or t.player_name}: "
+                        f"  ⚠ Safety skip {m.matched_player_name or t.player_name}: "
                         f"shirt #{pref_shirt} is already assigned to player "
                         f"{conflicting_player} on team {to_tid}"
                     )
@@ -1347,7 +1346,6 @@ def cmd_run(args):
                 ok = ef.release_player(pid, m.from_team_id)
 
             if ok:
-                applied += 1
                 if action == "shirt_update":
                     shirt_numbers_applied += 1
                 else:
@@ -1377,7 +1375,7 @@ def cmd_run(args):
         print(
             f"\n  Transfers applied: {transfer_applied}, "
             f"shirt numbers changed: {shirt_numbers_applied}, "
-            f"already current: {unchanged}, failed/skipped: {failed}"
+            f"already current: {unchanged}, safety-skipped: {safety_skipped}"
         )
 
         post_integrity = ef.validate_integrity()
