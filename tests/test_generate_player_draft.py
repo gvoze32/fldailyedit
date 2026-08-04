@@ -584,6 +584,10 @@ def test_overlong_draft_filename_uses_strict_schema_error(tmp_path):
         "profile-host",
         "issue-url-number",
         "proof-credentials",
+        "identity-spacing",
+        "source-spacing",
+        "position-spacing",
+        "duplicate-positions",
     ),
 )
 def test_malformed_draft_shape_uses_strict_schema_errors(tmp_path, mutation):
@@ -611,10 +615,19 @@ def test_malformed_draft_shape_uses_strict_schema_errors(tmp_path, mutation):
         payload["evidence"]["issue_url"] = (
             "https://github.com/gvoze32/fldailyedit/issues/99"
         )
-    else:
+    elif mutation == "proof-credentials":
         payload["evidence"]["proof_urls"] = [
             "https://user:secret@example.com/proof"
         ]
+    elif mutation == "identity-spacing":
+        payload["identity"]["name"] = "Dastan  Satpayev"
+        payload["identity"]["aliases"] = ["Dastan  Satpayev"]
+    elif mutation == "source-spacing":
+        payload["source"]["current_club"] = "Chelsea  FC"
+    elif mutation == "position-spacing":
+        payload["source"]["positions"] = ["AM  RL", "ST"]
+    else:
+        payload["source"]["positions"] = ["AM RL", "AM RL"]
     (tmp_path / "dastan-satpayev.json").write_text(
         json.dumps(payload), encoding="utf-8"
     )

@@ -643,6 +643,13 @@ def _generated_draft_text(
     return value
 
 
+def _generated_source_text(value: object, context: str) -> str:
+    text = _generated_draft_text(value, context, None)
+    if " ".join(text.split()) != text:
+        raise PlayerSpecError(f"{context} must use normalized source text")
+    return text
+
+
 def _generated_draft_https_url(
     value: object, context: str, maximum: int | None
 ) -> str:
@@ -717,9 +724,9 @@ def _generated_draft_missing_fields(
             _IDENTITY_FIELDS,
             identity_context,
         )
-        name = _text(identity, "name", identity_context)
-        if identity["name"] != name:
-            raise PlayerSpecError(f"{identity_context} name must be canonical")
+        name = _generated_source_text(
+            identity["name"], f"{identity_context} name"
+        )
         if identity["print_name"] is not None or identity["pes_id"] is not None:
             raise PlayerSpecError(
                 f"{identity_context} PES placeholders must be null"
@@ -767,20 +774,20 @@ def _generated_draft_missing_fields(
                 f"{source_context} profile_url must match the source identity"
             )
         positions = source["positions"]
-        if (
-            not isinstance(positions, list)
-            or any(
-                not isinstance(position, str)
-                or not position
-                or position != position.strip()
-                for position in positions
+        if not isinstance(positions, list):
+            raise PlayerSpecError(f"{source_context} positions must be a list")
+        normalized_positions = tuple(
+            _generated_source_text(position, f"{source_context} positions")
+            for position in positions
+        )
+        if len(set(normalized_positions)) != len(normalized_positions):
+            raise PlayerSpecError(
+                f"{source_context} positions must not contain duplicates"
             )
-        ):
-            raise PlayerSpecError(f"{source_context} positions must be canonical")
         for field in ("date_of_birth", "nationality", "current_club"):
             value = source[field]
-            if value is not None and _text(source, field, source_context) != value:
-                raise PlayerSpecError(f"{source_context} {field} must be canonical")
+            if value is not None:
+                _generated_source_text(value, f"{source_context} {field}")
 
         evidence_context = f"{context} evidence"
         evidence = _object(raw["evidence"], evidence_context)
