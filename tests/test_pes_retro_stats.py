@@ -142,6 +142,11 @@ def test_parse_pes_retro_stats_url_accepts_canonical_profiles(url, expected):
         "https://pesretrostats.com/player/0ce2dbde-marco-palestra?source=test",
         "https://pesretrostats.com/player/0ce2dbde-marco-palestra#stats",
         "https://pesretrostats.com/api/player/0ce2dbde",
+        "https://pesretrostats.com:/player/0ce2dbde-marco-palestra",
+        "https://pesretrostats.com/player/0ce2dbde-marco-palestra?",
+        "https://pesretrostats.com/player/0ce2dbde-marco-palestra#",
+        "https://pesretrostats.com/\tplayer/0ce2dbde-marco-palestra",
+        "https://pesretrostats.com/player/0ce2dbde-marco-\npalestra",
     ],
 )
 def test_parse_pes_retro_stats_url_rejects_noncanonical_inputs(url):

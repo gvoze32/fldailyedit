@@ -163,6 +163,8 @@ def parse_pes_retro_stats_url(url: str) -> tuple[str, str]:
     ):
         raise PesRetroStatsError(_INVALID_URL)
     canonical = urlunsplit(("https", _ALLOWED_HOST, parsed.path, "", ""))
+    if canonical != url:
+        raise PesRetroStatsError(_INVALID_URL)
     return match.group("short_id"), canonical
 
 
