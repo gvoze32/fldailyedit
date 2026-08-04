@@ -74,32 +74,61 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pr_url="$(
-            gh pr list \
-              --head "$BRANCH_NAME" \
-              --state all \
-              --limit 1 \
-              --json url \
-              --jq '.[0].url // empty'
-          )"
-          if [[ -n "$pr_url" ]]; then
-            COMMENT_BODY="Draft player specification: $pr_url"
-            gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
-          fi
+          pr_response="$RUNNER_TEMP/existing-player-draft-pr.json"
+          gh api --method GET "repos/$GITHUB_REPOSITORY/pulls" \
+            -f state=all \
+            -f "head=$GITHUB_REPOSITORY_OWNER:$BRANCH_NAME" \
+            > "$pr_response"
 
-          python - "$pr_url" <<'PY'
+          pr_url="$(
+            python - "$pr_response" <<'PY'
+          import json
           import os
+          import re
           import secrets
           import sys
           from pathlib import Path
 
-          value = sys.argv[1]
+          pulls = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          if not isinstance(pulls, list) or len(pulls) > 1:
+              raise SystemExit("expected at most one pull request for the issue branch")
+
+          value = ""
+          if pulls:
+              pull = pulls[0]
+              if not isinstance(pull, dict):
+                  raise SystemExit("pull request response must contain an object")
+              repository = os.environ["GITHUB_REPOSITORY"]
+              branch_name = os.environ["BRANCH_NAME"]
+              head = pull.get("head", {})
+              base = pull.get("base", {})
+              if (
+                  not isinstance(head, dict)
+                  or not isinstance(base, dict)
+                  or head.get("repo", {}).get("full_name") != repository
+                  or head.get("ref") != branch_name
+                  or base.get("repo", {}).get("full_name") != repository
+              ):
+                  raise SystemExit("refusing a cross-repository or mismatched pull request")
+              value = pull.get("html_url")
+              if not isinstance(value, str) or not re.fullmatch(
+                  rf"https://github\.com/{re.escape(repository)}/pull/[1-9][0-9]*",
+                  value,
+              ):
+                  raise SystemExit("pull request response has a non-canonical URL")
+
           delimiter = f"ghadelimiter_{secrets.token_hex(16)}"
           while delimiter in value.splitlines():
               delimiter = f"ghadelimiter_{secrets.token_hex(16)}"
           with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
               output.write(f"pr_url<<{delimiter}\n{value}\n{delimiter}\n")
+          print(value)
           PY
+          )"
+          if [[ -n "$pr_url" ]]; then
+            COMMENT_BODY="Draft player specification: $pr_url"
+            gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
+          fi
 
       - name: Generate player specification
         if: steps.existing.outputs.pr_url == ''
@@ -148,14 +177,56 @@ jobs:
                   output.write(f"{name}<<{delimiter}\n{value}\n{delimiter}\n")
           PY
 
-      - name: Commit and open draft PR
+      - name: Verify an existing base-repository branch
         if: steps.existing.outputs.pr_url == ''
+        id: remote
         env:
           BRANCH_NAME: player-draft/issue-${{ steps.event.outputs.issue_number }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          GH_REPO: ${{ github.repository }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ steps.event.outputs.issue_number }}
+          SPEC_PATH: ${{ steps.generate.outputs.spec_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote_ref="$RUNNER_TEMP/player-draft-remote-ref"
+          remote_status=0
+          git ls-remote --exit-code --heads origin "refs/heads/$BRANCH_NAME" \
+            > "$remote_ref" || remote_status="$?"
+
+          case "$remote_status" in
+            0)
+              branch_exists=true
+              git fetch --no-tags origin \
+                "refs/heads/$BRANCH_NAME:refs/remotes/origin/$BRANCH_NAME"
+              changed_paths="$(
+                git diff --name-only "HEAD...refs/remotes/origin/$BRANCH_NAME"
+              )"
+              if [[ "$changed_paths" != "$SPEC_PATH" ]]; then
+                printf '%s\n' "remote issue branch changes unexpected paths" >&2
+                exit 1
+              fi
+
+              remote_spec="$RUNNER_TEMP/remote-player-spec.json"
+              git show "refs/remotes/origin/$BRANCH_NAME:$SPEC_PATH" > "$remote_spec"
+              if ! cmp -- "$SPEC_PATH" "$remote_spec"; then
+                printf '%s\n' "remote issue branch spec differs from generated spec" >&2
+                exit 1
+              fi
+              ;;
+            2)
+              branch_exists=false
+              ;;
+            *)
+              printf '%s\n' "cannot inspect remote issue branch" >&2
+              exit "$remote_status"
+              ;;
+          esac
+
+          printf 'branch_exists=%s\n' "$branch_exists" >> "$GITHUB_OUTPUT"
+
+
+      - name: Commit and push generated branch
+        if: steps.existing.outputs.pr_url == '' && steps.remote.outputs.branch_exists == 'false'
+        env:
+          BRANCH_NAME: player-draft/issue-${{ steps.event.outputs.issue_number }}
           PLAYER_NAME: ${{ steps.generate.outputs.player_name }}
           SPEC_PATH: ${{ steps.generate.outputs.spec_path }}
         shell: bash
@@ -174,6 +245,19 @@ jobs:
 
           git commit -m "player: draft $PLAYER_NAME"
           git push --set-upstream origin "$BRANCH_NAME"
+
+      - name: Open draft PR
+        if: steps.existing.outputs.pr_url == ''
+        env:
+          BRANCH_NAME: player-draft/issue-${{ steps.event.outputs.issue_number }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.event.outputs.issue_number }}
+          PLAYER_NAME: ${{ steps.generate.outputs.player_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
           pr_url="$(
             gh pr create \
               --draft \

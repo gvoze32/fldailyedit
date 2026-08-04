@@ -1,4 +1,7 @@
+import os
 import re
+import subprocess
+import textwrap
 from pathlib import Path
 
 
@@ -44,6 +47,77 @@ def _field_label(block: str) -> str:
     match = re.search(r"(?m)^      label: (.+)$", block)
     assert match is not None
     return match.group(1)
+
+
+def _workflow_step_script(name: str) -> str:
+    text = WORKFLOW_PATH.read_text(encoding="utf-8")
+    match = re.search(
+        rf"(?ms)^      - name: {re.escape(name)}$\n"
+        r".*?^        run: \|\n(?P<script>.*?)(?=^      - name:|\Z)",
+        text,
+    )
+    assert match is not None
+    return textwrap.dedent(match.group("script"))
+
+
+def _git(cwd: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _remote_branch_fixture(
+    tmp_path: Path,
+    *,
+    local_spec: str,
+    remote_spec: str,
+    extra_path: bool = False,
+) -> tuple[Path, dict[str, str]]:
+    origin = tmp_path / "origin.git"
+    repository = tmp_path / "repository"
+    runner_temp = tmp_path / "runner"
+    output_path = tmp_path / "github-output"
+    branch_name = "player-draft/issue-42"
+    spec_path = Path("players/test-player.json")
+
+    _git(tmp_path, "init", "--bare", str(origin))
+    _git(tmp_path, "init", "-b", "main", str(repository))
+    _git(repository, "config", "user.name", "Workflow Test")
+    _git(repository, "config", "user.email", "workflow@example.invalid")
+    (repository / "base.txt").write_text("base\n", encoding="utf-8")
+    _git(repository, "add", "base.txt")
+    _git(repository, "commit", "-m", "base")
+    _git(repository, "remote", "add", "origin", str(origin))
+    _git(repository, "push", "--set-upstream", "origin", "main")
+
+    _git(repository, "switch", "--create", branch_name)
+    (repository / spec_path).parent.mkdir(parents=True)
+    (repository / spec_path).write_text(remote_spec, encoding="utf-8")
+    _git(repository, "add", "--", spec_path.as_posix())
+    if extra_path:
+        (repository / "unexpected.txt").write_text("unexpected\n", encoding="utf-8")
+        _git(repository, "add", "unexpected.txt")
+    _git(repository, "commit", "-m", "remote draft")
+    _git(repository, "push", "--set-upstream", "origin", branch_name)
+
+    _git(repository, "switch", "main")
+    (repository / spec_path).parent.mkdir(parents=True)
+    (repository / spec_path).write_text(local_spec, encoding="utf-8")
+    runner_temp.mkdir()
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "BRANCH_NAME": branch_name,
+            "GITHUB_OUTPUT": str(output_path),
+            "RUNNER_TEMP": str(runner_temp),
+            "SPEC_PATH": spec_path.as_posix(),
+        }
+    )
+    return repository, environment
 
 
 def test_issue_form_matches_the_generator_heading_contract_exactly():
@@ -127,8 +201,15 @@ def test_generate_workflow_uses_safe_branch_and_one_idempotent_draft_pr():
     assert 'isinstance(issue_number, int)' in text
     assert 'issue_number <= 0' in text
     assert "player-draft/issue-${{ steps.event.outputs.issue_number }}" in text
-    assert re.search(r'gh pr list\s+\\\n(?:.*\n)*?\s+--head "\$BRANCH_NAME"', text)
-    assert "--state all" in text
+    assert (
+        'gh api --method GET "repos/$GITHUB_REPOSITORY/pulls"' in text
+    )
+    assert '-f "head=$GITHUB_REPOSITORY_OWNER:$BRANCH_NAME"' in text
+    assert "-f state=all" in text
+    assert 'head.get("repo", {}).get("full_name") != repository' in text
+    assert 'head.get("ref") != branch_name' in text
+    assert 'base.get("repo", {}).get("full_name") != repository' in text
+    assert 'gh pr list --head' not in text
     assert 'git switch --create "$BRANCH_NAME"' in text
     assert 'git add -- "$SPEC_PATH"' in text
     assert 'git diff --cached --name-only' in text
@@ -137,6 +218,81 @@ def test_generate_workflow_uses_safe_branch_and_one_idempotent_draft_pr():
     assert "--draft" in text
     assert '--title "player: draft $PLAYER_NAME"' in text
     assert 'gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"' in text
+
+
+def test_generate_workflow_recovers_only_an_exact_matching_base_repo_branch():
+    text = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert (
+        'git ls-remote --exit-code --heads origin "refs/heads/$BRANCH_NAME"'
+        in text
+    )
+    assert 'refs/heads/$BRANCH_NAME:refs/remotes/origin/$BRANCH_NAME' in text
+    assert 'git diff --name-only "HEAD...refs/remotes/origin/$BRANCH_NAME"' in text
+    assert '[[ "$changed_paths" != "$SPEC_PATH" ]]' in text
+    assert 'git show "refs/remotes/origin/$BRANCH_NAME:$SPEC_PATH"' in text
+    assert 'cmp -- "$SPEC_PATH" "$remote_spec"' in text
+    assert "steps.remote.outputs.branch_exists == 'false'" in text
+
+
+def test_remote_branch_recovery_accepts_the_exact_generated_spec(tmp_path):
+    repository, environment = _remote_branch_fixture(
+        tmp_path,
+        local_spec='{"name": "same"}\n',
+        remote_spec='{"name": "same"}\n',
+    )
+
+    result = subprocess.run(
+        ["bash", "-c", _workflow_step_script("Verify an existing base-repository branch")],
+        cwd=repository,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert Path(environment["GITHUB_OUTPUT"]).read_text(encoding="utf-8") == (
+        "branch_exists=true\n"
+    )
+
+
+def test_remote_branch_recovery_rejects_a_different_spec_blob(tmp_path):
+    repository, environment = _remote_branch_fixture(
+        tmp_path,
+        local_spec='{"name": "new"}\n',
+        remote_spec='{"name": "old"}\n',
+    )
+
+    result = subprocess.run(
+        ["bash", "-c", _workflow_step_script("Verify an existing base-repository branch")],
+        cwd=repository,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "remote issue branch spec differs from generated spec" in result.stderr
+
+
+def test_remote_branch_recovery_rejects_an_additional_changed_path(tmp_path):
+    repository, environment = _remote_branch_fixture(
+        tmp_path,
+        local_spec='{"name": "same"}\n',
+        remote_spec='{"name": "same"}\n',
+        extra_path=True,
+    )
+
+    result = subprocess.run(
+        ["bash", "-c", _workflow_step_script("Verify an existing base-repository branch")],
+        cwd=repository,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "remote issue branch changes unexpected paths" in result.stderr
 
 
 def test_generate_workflow_does_not_put_untrusted_event_data_in_shell_structure():
