@@ -176,13 +176,16 @@ registered position.
 5. Merging the PR remains the human approval state. There is no separate
    `approved` flag in the JSON file.
 
-Every generated proposal is expected to fail completed-file validation while
-its top-level `source` and `draft` objects remain. Both are review-only
-generated-draft metadata and must be removed before completed validation. A
-create must also have every game-local field named by `draft.missing`
-completed. Persist the canonical profile UUID as
-`identity.pes_retro_stats_id`, its canonical profile URL as
-`evidence.profile_url`, and only the reviewed gameplay values in `pes`.
+Every generated proposal is expected to fail completed-file validation. To
+convert its generated evidence to completed schema v2, remove the draft-only
+`evidence.current_team`, `evidence.issue_number`, and `evidence.issue_url`
+fields; retain the canonical `evidence.profile_url`, reviewed
+`evidence.proof_urls`, and `evidence.effective_date`; and add a reviewed,
+non-empty `evidence.reason`. Persist the canonical profile UUID as
+`identity.pes_retro_stats_id` and only the reviewed gameplay values in `pes`.
+For a create, also complete every game-local field named by `draft.missing`.
+Then remove the top-level `source` and `draft` objects, which are review-only
+generated-draft metadata, before completed validation.
 
 ### Direct one-file PR path
 
