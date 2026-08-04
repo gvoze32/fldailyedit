@@ -374,13 +374,13 @@ def parse_sortitoutsi_player_profile(
                 raise _unavailable()
             matching_people.append(candidate)
 
-    if person_objects:
-        if len(matching_people) != 1:
-            raise _unavailable()
+    if len(matching_people) > 1:
+        raise _unavailable()
+    if matching_people:
         person = matching_people[0]
-    else:
+    elif has_page_identity:
         person = {}
-    if not has_page_identity and not matching_people:
+    else:
         raise _unavailable()
     labeled = _labeled_values(parser)
     item_properties = {

@@ -265,6 +265,41 @@ def test_parse_profile_selects_the_unique_person_with_the_requested_identity():
     assert source.date_of_birth == "2008-08-12"
 
 
+def test_parse_profile_ignores_nonmatching_people_when_page_identity_matches():
+    html = f"""
+    <html><head>
+      <link rel="canonical" href="{PROFILE_URL}">
+      <script type="application/ld+json">
+        {{
+          "@graph": [
+            {{
+              "@type": "Person",
+              "@id": "https://sortitoutsi.net/football-manager-data-update/person/111/author",
+              "name": "Profile Author"
+            }},
+            {{"@type": "Person", "name": "Unidentified Contributor"}}
+          ]
+        }}
+      </script>
+    </head><body>
+      <h1>Dastan Satpayev</h1>
+      <dl>
+        <dt>Date of Birth</dt><dd>12 August 2008</dd>
+        <dt>Nationality</dt><dd>Kazakhstan</dd>
+        <dt>Positions</dt><dd>AM RL; ST</dd>
+        <dt>Current Club</dt><dd>Chelsea</dd>
+      </dl>
+    </body></html>
+    """
+
+    source = parse_sortitoutsi_player_profile(html, PROFILE_URL, 2000370206)
+
+    assert source.name == "Dastan Satpayev"
+    assert source.date_of_birth == "12 August 2008"
+    assert source.positions == ("AM RL", "ST")
+    assert source.current_club == "Chelsea"
+
+
 def test_parse_profile_rejects_ambiguous_people_with_the_requested_identity():
     html = f"""
     <html><head>
