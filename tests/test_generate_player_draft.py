@@ -899,6 +899,24 @@ def test_untrusted_event_is_rejected_before_profile_fetch(monkeypatch, tmp_path)
     assert fetched == []
     assert not output_dir.exists()
 
+@pytest.mark.parametrize("player_name", ["Dastan  Satpaev", "Dastan\u00a0Satpaev"])
+def test_noncanonical_player_name_whitespace_is_rejected_before_profile_fetch(
+    monkeypatch, tmp_path, player_name
+):
+    event_path = tmp_path / "event.json"
+    event_path.write_text(
+        json.dumps(issue_event(**{"Player name": player_name})), encoding="utf-8"
+    )
+    fetched = install_fetch(monkeypatch, make_source())
+    output_dir = tmp_path / "players"
+
+    with pytest.raises(
+        PlayerDraftError, match="^Player name must use canonical whitespace$"
+    ):
+        write_player_draft(event_path, output_dir)
+    assert fetched == []
+    assert not output_dir.exists()
+
 
 def test_cli_prints_exact_machine_output(monkeypatch, tmp_path, capsys):
     import run

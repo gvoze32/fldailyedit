@@ -140,14 +140,14 @@ both workflows, first run the transfer command against an output save, then run
 
 ## Player Updates
 
-Each reviewed Player Update is one schema-version-2 JSON file per player under
-`players/`. It records an `operation` (`create` or `update`), a lifecycle
-(`active`, `upstreamed`, or `retired`), exact `applies_to` base revisions,
-stable player identity, the Pes Retro Stats source snapshot, cited evidence,
-and PES data. Create updates contain a proposed complete player record and
-destination roster data. Existing-player updates contain only supported values
-that differ from the verified base; every change records literal `from` and
-`to` values.
+Each reviewed Player Update is one completed schema-version-2 JSON file per
+player under `players/`. It records an `operation` (`create` or `update`), a
+lifecycle (`active`, `upstreamed`, or `retired`), exact `applies_to` base
+revisions, stable player identity and Pes Retro Stats UUID/profile provenance,
+cited evidence, and reviewed PES data. Create updates contain a proposed
+complete player record and destination roster data. Existing-player updates
+contain only supported values that differ from the verified base; every change
+records literal `from` and `to` values.
 Supported update groups are abilities, position proficiency, playing style,
 player skills, COM styles, nationality, physical/basic settings, and
 registered position.
@@ -176,17 +176,23 @@ registered position.
 5. Merging the PR remains the human approval state. There is no separate
    `approved` flag in the JSON file.
 
-The generated create draft is expected to fail validation until all local
-fields named by its `draft.missing` list have been completed and the draft-only
-metadata has been removed.
+Every generated proposal is expected to fail completed-file validation while
+its top-level `source` and `draft` objects remain. Both are review-only
+generated-draft metadata and must be removed before completed validation. A
+create must also have every game-local field named by `draft.missing`
+completed. Persist the canonical profile UUID as
+`identity.pes_retro_stats_id`, its canonical profile URL as
+`evidence.profile_url`, and only the reviewed gameplay values in `pes`.
 
 ### Direct one-file PR path
 
 An advanced contributor may skip the issue-generated draft and directly open a
-PR that adds or modifies exactly one `players/<player-slug>.json` file. Supply
-the same source snapshot, cited evidence, reviewed PES values, expected update
+PR that adds or modifies exactly one completed
+`players/<player-slug>.json` file. Supply the canonical UUID/profile provenance
+in `identity` and `evidence`, cited proof, reviewed PES values, expected update
 baselines, lifecycle, and exact base revision, then run
-`python run.py players validate` before requesting review. Keep other code or
+`python run.py players validate` before requesting review. Do not include the
+generated draft's top-level `source` or `draft` metadata. Keep other code or
 documentation changes out of that PR.
 
 Application is always an explicit command and requires the exact revision from

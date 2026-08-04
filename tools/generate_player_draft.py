@@ -114,6 +114,8 @@ def _player_name(value: object) -> str:
     name = _text(value, "Player name", _MAX_PLAYER_NAME_BYTES)
     if len(name.splitlines()) != 1:
         raise PlayerDraftError("Player name must contain exactly one name")
+    if " ".join(name.split()) != name:
+        raise PlayerDraftError("Player name must use canonical whitespace")
     if len(name.encode("utf-8")) > _MAX_PLAYER_NAME_BYTES:
         raise PlayerDraftError(
             f"Player name exceeds {_MAX_PLAYER_NAME_BYTES} UTF-8 bytes"
