@@ -169,6 +169,28 @@ def test_readme_uses_player_update_language_for_public_contributions():
     assert "## Player-spec contributions" not in text
 
 
+def test_workflows_use_player_update_copy_on_public_surfaces():
+    generator = WORKFLOW_PATH.read_text(encoding="utf-8")
+    target = PLAYER_TARGET_PATH.read_text(encoding="utf-8")
+    ci = CI_PATH.read_text(encoding="utf-8")
+
+    assert generator.startswith("name: Generate Player Update Draft\n")
+    assert "- name: Generate Player Update" in generator
+    assert 'COMMENT_BODY="Draft Player Update: $pr_url"' in generator
+    assert '--title "Draft Player Update: $PLAYER_NAME"' in generator
+    assert (
+        "This is an incomplete Player Update. Semantic validation must fail "
+        "until a human fills every required value."
+        in generator
+    )
+
+    assert target.startswith("name: Validate Player Update pull request\n")
+    assert "name: Validate trusted Player Update boundary" in target
+    assert "- name: Materialize validated Player Update" in target
+    assert "- name: Validate materialized Player Update" in target
+    assert "- name: Validate Player Updates" in ci
+
+
 def test_issue_form_uses_plain_player_update_copy_without_changing_contract():
     text = FORM_PATH.read_text(encoding="utf-8")
     assert "name: Player Update Request" in text
@@ -294,7 +316,7 @@ def test_generate_workflow_uses_safe_branch_and_one_idempotent_draft_pr():
     assert 'git push --set-upstream origin "$BRANCH_NAME"' in text
     assert "gh pr create" in text
     assert "--draft" in text
-    assert '--title "player: draft $PLAYER_NAME"' in text
+    assert '--title "Draft Player Update: $PLAYER_NAME"' in text
     assert 'gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"' in text
 
 

@@ -1,4 +1,4 @@
-name: Generate player specification draft
+name: Generate Player Update Draft
 
 on:
   issues:
@@ -130,11 +130,11 @@ jobs:
           PY
           )"
           if [[ -n "$pr_url" ]]; then
-            COMMENT_BODY="Draft player specification: $pr_url"
+            COMMENT_BODY="Draft Player Update: $pr_url"
             gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
           fi
 
-      - name: Generate player specification
+      - name: Generate Player Update
         if: steps.existing.outputs.pr_url == ''
         id: generate
         shell: bash
@@ -263,15 +263,15 @@ jobs:
         run: |
           set -euo pipefail
           printf -v PR_BODY \
-            'Closes #%s\n\nSemantic validation must fail until a human fills every required value.' \
+            'Closes #%s\n\nThis is an incomplete Player Update. Semantic validation must fail until a human fills every required value.' \
             "$ISSUE_NUMBER"
           pr_url="$(
             gh pr create \
               --draft \
               --head "$BRANCH_NAME" \
               --base "$DEFAULT_BRANCH" \
-              --title "player: draft $PLAYER_NAME" \
+              --title "Draft Player Update: $PLAYER_NAME" \
               --body "$PR_BODY"
           )"
-          COMMENT_BODY="Draft player specification: $pr_url"
+          COMMENT_BODY="Draft Player Update: $pr_url"
           gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"

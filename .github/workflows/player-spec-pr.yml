@@ -1,4 +1,4 @@
-name: Validate player specification pull request
+name: Validate Player Update pull request
 
 on:
   pull_request_target:
@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   player-spec-pr:
-    name: Validate trusted player specification boundary
+    name: Validate trusted Player Update boundary
     runs-on: ubuntu-latest
 
     steps:
@@ -99,7 +99,7 @@ jobs:
           )"
           printf 'player_path=%s\n' "$player_path" >> "$GITHUB_OUTPUT"
 
-      - name: Materialize validated player specification
+      - name: Materialize validated Player Update
         if: steps.boundary.outputs.player_path != ''
         env:
           HEAD_SHA: ${{ steps.event.outputs.head_sha }}
@@ -127,7 +127,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .
 
-      - name: Validate materialized player specification
+      - name: Validate materialized Player Update
         if: steps.boundary.outputs.player_path != ''
         shell: bash
         run: |

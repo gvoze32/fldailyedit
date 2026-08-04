@@ -39,7 +39,7 @@ jobs:
           pip install -e .
           pip install pytest
 
-      - name: Validate player specifications
+      - name: Validate Player Updates
         run: |
           python run.py players validate
 

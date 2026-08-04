@@ -191,7 +191,7 @@ def test_boundary_fetches_pull_ref_then_materializes_only_the_validated_blob(tmp
         {"HEAD_SHA": head_sha, "PLAYER_PATH": player_path.as_posix()}
     )
     materialize = subprocess.run(
-        ["bash", "-c", _step_script("Materialize validated player specification")],
+        ["bash", "-c", _step_script("Materialize validated Player Update")],
         cwd=runner,
         env=environment,
         check=False,
