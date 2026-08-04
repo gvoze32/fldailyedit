@@ -18,6 +18,7 @@ from pathlib import Path
 
 import config
 from editor.models import ManagerInfo, PlayerInfo, TeamData, TeamInfo
+from editor.player_codec import PlayerAbilityProfile, decode_player_entry
 from editor.player_catalog import PlayerCatalogReport, build_player_catalog
 
 logger = logging.getLogger(__name__)
@@ -304,6 +305,22 @@ class EditFile:
             return raw.decode("utf-8", errors="replace")
         except Exception:
             return raw.decode("latin-1", errors="replace")
+
+    def get_player_ability_profile(
+        self, player_id: int
+    ) -> PlayerAbilityProfile | None:
+        """Decode an edited-player ability record by PES player ID."""
+        for index in range(self.player_count):
+            entry_offset = self.player_start + index * PLAYER_TOTAL_SIZE
+            entry_end = entry_offset + PLAYER_ENTRY_SIZE
+            if entry_end > len(self._data):
+                break
+            current_id = struct.unpack_from(
+                "<I", self._data, entry_offset + PE_PLAYER_ID
+            )[0]
+            if current_id == player_id:
+                return decode_player_entry(self._data[entry_offset:entry_end])
+        return None
 
     def get_all_players(self, csv_path: Path | None = None, include_base_db: bool = True) -> dict[int, PlayerInfo]:
         """
@@ -643,6 +660,49 @@ class EditFile:
 
         best_slot, best_pid = min(active_slots, key=candidate_sort_key)
         return best_slot, best_pid
+
+    def append_created_player(
+        self,
+        player_id: int,
+        player_entry: bytes,
+        appearance_entry: bytes,
+    ) -> None:
+        """Append one fully serialized created player without changing any roster."""
+        if self.player_count >= MAX_PLAYERS:
+            raise ValueError("edited-player block is full")
+        if len(player_entry) != PLAYER_ENTRY_SIZE:
+            raise ValueError(
+                f"player entry must be {PLAYER_ENTRY_SIZE} bytes; got {len(player_entry)}"
+            )
+        if len(appearance_entry) != PLAYER_APPEARANCE_SIZE:
+            raise ValueError(
+                f"appearance entry must be {PLAYER_APPEARANCE_SIZE} bytes; "
+                f"got {len(appearance_entry)}"
+            )
+        if struct.unpack_from("<I", player_entry, PE_PLAYER_ID)[0] != player_id:
+            raise ValueError("serialized player ID does not match requested player ID")
+        if struct.unpack_from("<I", appearance_entry, 0)[0] != player_id:
+            raise ValueError("serialized appearance ID does not match requested player ID")
+
+        for index in range(self.player_count):
+            offset = self.player_start + index * PLAYER_TOTAL_SIZE
+            existing_id = struct.unpack_from(
+                "<I", self._data, offset + PE_PLAYER_ID
+            )[0]
+            if existing_id == player_id:
+                raise ValueError(f"edited-player ID {player_id} already exists")
+
+        target = self.player_start + self.player_count * PLAYER_TOTAL_SIZE
+        target_end = target + PLAYER_TOTAL_SIZE
+        if target_end > self.team_start or target_end > len(self._data):
+            raise ValueError("created-player slot exceeds the allocated player block")
+        if any(self._data[target:target_end]):
+            raise ValueError(f"created-player slot {self.player_count} is not empty")
+
+        self._data[target:target_end] = player_entry + appearance_entry
+        self.player_count += 1
+        struct.pack_into("<H", self._data, HDR_PLAYER_COUNT, self.player_count)
+        self.player_catalog_report = None
 
     def get_player_shirt_number(self, team_id: int, player_id: int) -> int | None:
         """Return a player's current shirt number, or None when not registered."""

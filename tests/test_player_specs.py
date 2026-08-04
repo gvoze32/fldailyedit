@@ -1,5 +1,6 @@
 import hashlib
 import json
+import struct
 
 import pytest
 
@@ -298,3 +299,359 @@ def test_player_slug_normalizes_unicode_to_ascii_tokens():
     from editor.player_spec import player_slug
 
     assert player_slug("  Dastan Sätpayev -- U-21  ") == "dastan-satpayev-u-21"
+
+
+def dastan_spec(tmp_path):
+    from editor.player_spec import load_player_specs
+
+    write_payload(tmp_path, "dastan-satpayev.json", valid_dastan_payload())
+    return load_player_specs(tmp_path)[0]
+
+
+def make_player_spec_edit_file(roster_size: int):
+    from editor.editfile import (
+        GAME_PLAN_ENTRY_SIZE,
+        GP_LINEUP,
+        HEADER_SIZE,
+        HDR_GAME_PLAN_COUNT,
+        HDR_PLAYER_COUNT,
+        HDR_TEAM_COUNT,
+        HDR_TEAM_PLAYER_COUNT,
+        MAX_GAME_PLANS,
+        PE_PLAYER_ID,
+        PE_PLAYER_NAME,
+        PE_PRINT_NAME,
+        PLAYER_APPEARANCE_SIZE,
+        PLAYER_ENTRY_SIZE,
+        PLAYER_TOTAL_SIZE,
+        TEAM_PLAYER_ENTRY_SIZE,
+        TE_TEAM_ID,
+        TE_TEAM_NAME,
+        TP_PLAYER_IDS,
+        TP_SHIRT_NUMBERS,
+        TP_TEAM_ID,
+        EditFile,
+    )
+
+    edit_file = EditFile()
+    edit_file._calculate_offsets()
+    edit_file._data = bytearray(
+        edit_file.game_plan_start + MAX_GAME_PLANS * GAME_PLAN_ENTRY_SIZE
+    )
+    struct.pack_into("<H", edit_file._data, HDR_PLAYER_COUNT, 1)
+    struct.pack_into("<H", edit_file._data, HDR_TEAM_COUNT, 1)
+    struct.pack_into("<H", edit_file._data, HDR_TEAM_PLAYER_COUNT, 1)
+    struct.pack_into("<H", edit_file._data, HDR_GAME_PLAN_COUNT, 1)
+    edit_file._parse_header()
+
+    existing_id = 181639
+    player_offset = HEADER_SIZE
+    struct.pack_into("<I", edit_file._data, player_offset + PE_PLAYER_ID, existing_id)
+    struct.pack_into("<I", edit_file._data, player_offset + 4, existing_id)
+    edit_file._data[
+        player_offset + PE_PLAYER_NAME : player_offset + PE_PLAYER_NAME + 16
+    ] = b"Existing Player\0"
+    edit_file._data[
+        player_offset + PE_PRINT_NAME : player_offset + PE_PRINT_NAME + 9
+    ] = b"EXISTING\0"
+    struct.pack_into(
+        "<I",
+        edit_file._data,
+        player_offset + PLAYER_ENTRY_SIZE,
+        existing_id,
+    )
+    assert PLAYER_TOTAL_SIZE == PLAYER_ENTRY_SIZE + PLAYER_APPEARANCE_SIZE
+
+    struct.pack_into("<I", edit_file._data, edit_file.team_start + TE_TEAM_ID, 102)
+    edit_file._data[
+        edit_file.team_start + TE_TEAM_NAME : edit_file.team_start + TE_TEAM_NAME + 11
+    ] = b"Chelsea FC\0"
+
+    roster_offset = edit_file.team_player_start
+    struct.pack_into("<I", edit_file._data, roster_offset + TP_TEAM_ID, 102)
+    player_ids = list(range(100001, 100001 + roster_size))
+    available_shirts = list(range(1, 36)) + list(range(37, 42))
+    for slot, player_id in enumerate(player_ids):
+        struct.pack_into(
+            "<I",
+            edit_file._data,
+            roster_offset + TP_PLAYER_IDS + slot * 4,
+            player_id,
+        )
+        struct.pack_into(
+            "<H",
+            edit_file._data,
+            roster_offset + TP_SHIRT_NUMBERS + slot * 2,
+            available_shirts[slot],
+        )
+
+    struct.pack_into("<I", edit_file._data, edit_file.game_plan_start, 102)
+    lineup = bytes(range(roster_size)) + bytes([0xFF] * (40 - roster_size))
+    edit_file._data[
+        edit_file.game_plan_start
+        + GP_LINEUP : edit_file.game_plan_start
+        + GP_LINEUP
+        + 40
+    ] = lineup
+    return edit_file
+
+
+def test_create_serializer_builds_linked_player_and_appearance_records(tmp_path):
+    from editor.player_codec import (
+        FIELD_SPECS,
+        PLAYER_APPEARANCE_SIZE,
+        PLAYER_DATA_SIZE,
+        _read_field,
+        decode_player_entry,
+        serialize_created_player,
+    )
+
+    spec = dastan_spec(tmp_path)
+    assert spec.create is not None
+
+    player_entry, appearance_entry = serialize_created_player(spec.create)
+    profile = decode_player_entry(player_entry)
+
+    assert len(player_entry) == PLAYER_DATA_SIZE
+    assert len(appearance_entry) == PLAYER_APPEARANCE_SIZE
+    assert int.from_bytes(player_entry[:4], "little") == spec.identity.pes_id
+    assert int.from_bytes(player_entry[4:8], "little") == spec.identity.pes_id
+    assert int.from_bytes(appearance_entry[:4], "little") == spec.identity.pes_id
+    assert int.from_bytes(appearance_entry[8:12], "little") == 0
+    assert appearance_entry[4] & (1 << 2)
+    assert appearance_entry[12:19] == bytes([0x77] * 7)
+    assert appearance_entry[45] == spec.create.skin_color
+    assert appearance_entry[64] == spec.create.iris_color
+    assert (
+        player_entry[0x36:0x73].split(b"\0", 1)[0].decode()
+        == spec.identity.name
+    )
+    assert (
+        player_entry[0x73:0xB0].split(b"\0", 1)[0].decode()
+        == spec.identity.print_name
+    )
+    assert (
+        player_entry[0xB0:0xF0].split(b"\0", 1)[0].decode()
+        == spec.identity.print_name
+    )
+    assert profile.player_id == spec.identity.pes_id
+    assert profile.nationality_id == spec.create.nationality_id
+    assert (profile.age, profile.height, profile.weight) == (
+        spec.create.age,
+        spec.create.height,
+        spec.create.weight,
+    )
+    assert profile.registered_position == spec.create.registered_position
+    assert profile.playing_style == spec.create.playing_style
+    assert profile.abilities == spec.create.abilities
+    assert profile.position_proficiency == {
+        "GK": 0,
+        "CB": 0,
+        "LB": 0,
+        "RB": 0,
+        "DMF": 0,
+        "CMF": 0,
+        "LMF": 0,
+        "RMF": 0,
+        "AMF": 0,
+        "RWF": 2,
+        "SS": 1,
+        "CF": 2,
+        "LWF": 2,
+    }
+    for flag in (
+        "edited_player",
+        "edited_basic_settings",
+        "edited_registered_position",
+        "edited_playable_positions",
+        "edited_abilities",
+    ):
+        assert _read_field(player_entry, FIELD_SPECS[flag]) == 1
+    assert _read_field(player_entry, FIELD_SPECS["strong_foot"]) == 0
+
+
+def test_full_roster_returns_waiting_without_mutation(tmp_path, monkeypatch):
+    from editor.player_spec import apply_create
+
+    edit_file = make_player_spec_edit_file(roster_size=40)
+    before = bytes(edit_file._data)
+    spec = dastan_spec(tmp_path)
+    monkeypatch.setattr(
+        edit_file,
+        "release_player",
+        lambda *args, **kwargs: pytest.fail("create must never release a player"),
+    )
+
+    result = apply_create(edit_file, spec, {})
+
+    assert (result.status, result.reason) == (
+        "waiting",
+        "destination_roster_full",
+    )
+    assert edit_file.player_count == 1
+    assert bytes(edit_file._data) == before
+
+
+def test_create_registers_linked_roster_and_game_plan_and_is_idempotent(
+    tmp_path,
+):
+    from editor.editfile import GP_LINEUP
+    from editor.player_spec import apply_create
+
+    edit_file = make_player_spec_edit_file(roster_size=39)
+    spec = dastan_spec(tmp_path)
+    assert spec.create is not None
+
+    result = apply_create(edit_file, spec, {})
+
+    assert result.status == "created"
+    assert edit_file.player_count == 2
+    assert struct.unpack_from("<H", edit_file._data, 0x60)[0] == 2
+    profile = edit_file.get_player_ability_profile(spec.identity.pes_id)
+    assert profile is not None
+    assert profile.abilities == spec.create.abilities
+    roster = edit_file.get_team_roster(spec.create.team_id)
+    assert roster is not None
+    assert roster.player_ids[39] == spec.identity.pes_id
+    assert roster.shirt_numbers[39] == spec.create.preferred_shirt_number
+    assert edit_file._data[edit_file.game_plan_start + GP_LINEUP + 39] == 39
+
+    before_second_run = bytes(edit_file._data)
+    current_players = edit_file.get_all_players(include_base_db=False)
+    second_result = apply_create(edit_file, spec, current_players)
+
+    assert second_result.status == "already_applied"
+    assert edit_file.player_count == 2
+    assert bytes(edit_file._data) == before_second_run
+
+
+def test_create_rolls_back_bytes_header_counts_and_offsets_when_roster_add_fails(
+    tmp_path,
+    monkeypatch,
+):
+    from editor.editfile import HDR_PLAYER_COUNT
+    from editor.player_spec import PlayerSpecError, apply_create
+
+    edit_file = make_player_spec_edit_file(roster_size=39)
+    before = bytes(edit_file._data)
+    before_count = edit_file.player_count
+    offset_fields = (
+        "player_start",
+        "team_start",
+        "manager_start",
+        "competition_start",
+        "stadium_start",
+        "unknown_start",
+        "team_player_start",
+        "competition_entry_start",
+        "game_plan_start",
+    )
+    before_offsets = tuple(getattr(edit_file, field) for field in offset_fields)
+    monkeypatch.setattr(edit_file, "add_player", lambda *args, **kwargs: False)
+
+    with pytest.raises(PlayerSpecError, match="could not register"):
+        apply_create(edit_file, dastan_spec(tmp_path), {})
+
+    assert bytes(edit_file._data) == before
+    assert edit_file.player_count == before_count
+    assert struct.unpack_from("<H", edit_file._data, HDR_PLAYER_COUNT)[0] == before_count
+    assert tuple(getattr(edit_file, field) for field in offset_fields) == before_offsets
+
+
+def test_create_allows_an_unused_id_below_existing_created_ids(tmp_path):
+    from editor.editfile import PLAYER_ENTRY_SIZE
+    from editor.player_spec import apply_create
+
+    edit_file = make_player_spec_edit_file(roster_size=39)
+    struct.pack_into("<I", edit_file._data, edit_file.player_start, 200001)
+    struct.pack_into("<I", edit_file._data, edit_file.player_start + 4, 200001)
+    struct.pack_into(
+        "<I",
+        edit_file._data,
+        edit_file.player_start + PLAYER_ENTRY_SIZE,
+        200001,
+    )
+    spec = dastan_spec(tmp_path)
+
+    result = apply_create(edit_file, spec, {})
+
+    assert result.status == "created"
+    assert edit_file.player_count == 2
+    assert edit_file.get_player_ability_profile(200000) is not None
+
+
+def test_create_rejects_id_collision_with_different_normalized_identity(tmp_path):
+    from editor.models import PlayerInfo
+    from editor.player_spec import assess_create
+
+    edit_file = make_player_spec_edit_file(roster_size=39)
+    spec = dastan_spec(tmp_path)
+    occupied = PlayerInfo(
+        player_id=spec.identity.pes_id,
+        name="Another Player",
+        print_name=spec.identity.print_name or "",
+    )
+
+    result = assess_create(edit_file, spec, {occupied.player_id: occupied})
+
+    assert (result.status, result.reason) == (
+        "rejected",
+        "pes_id_identity_mismatch",
+    )
+
+
+def test_create_rejects_destination_team_name_mismatch(tmp_path):
+    from editor.editfile import TE_TEAM_NAME
+    from editor.models import PlayerInfo
+    from editor.player_spec import assess_create
+
+    edit_file = make_player_spec_edit_file(roster_size=39)
+    edit_file._data[
+        edit_file.team_start + TE_TEAM_NAME : edit_file.team_start + TE_TEAM_NAME + 11
+    ] = b"Arsenal FC\0"
+
+    spec = dastan_spec(tmp_path)
+    existing = PlayerInfo(
+        player_id=spec.identity.pes_id,
+        name=spec.identity.name,
+    )
+    result = assess_create(edit_file, spec, {existing.player_id: existing})
+
+    assert (result.status, result.reason) == (
+        "rejected",
+        "destination_team_name_mismatch",
+    )
+
+
+def test_inactive_create_returns_before_identity_or_edit_access(tmp_path, monkeypatch):
+    from dataclasses import replace
+
+    from editor.player_spec import assess_create
+
+    edit_file = make_player_spec_edit_file(roster_size=39)
+    spec = replace(
+        dastan_spec(tmp_path),
+        lifecycle_status="retired",
+        lifecycle_reason="Historical record",
+    )
+    monkeypatch.setattr(
+        edit_file,
+        "get_all_team_info",
+        lambda: pytest.fail("inactive create must not inspect teams"),
+    )
+    monkeypatch.setattr(
+        edit_file,
+        "get_team_roster",
+        lambda *args: pytest.fail("inactive create must not inspect rosters"),
+    )
+
+    class InaccessiblePlayers(dict):
+        def get(self, *args, **kwargs):
+            pytest.fail("inactive create must not inspect identities")
+
+        def values(self):
+            pytest.fail("inactive create must not inspect identities")
+
+    result = assess_create(edit_file, spec, InaccessiblePlayers())
+
+    assert (result.status, result.reason) == ("retired", "Historical record")

@@ -6,9 +6,13 @@ import json
 from pathlib import Path
 import re
 from types import MappingProxyType
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
 import unicodedata
 from urllib.parse import urlsplit
+
+if TYPE_CHECKING:
+    from editor.editfile import EditFile
+    from editor.models import PlayerInfo
 
 import config
 from editor.player_codec import (
@@ -17,6 +21,7 @@ from editor.player_codec import (
     FIELD_SPECS,
     PLAYER_SKILL_FIELDS,
     POSITION_NAMES,
+    serialize_created_player,
 )
 
 
@@ -93,6 +98,14 @@ class PlayerSpec:
     evidence: Evidence
     create: CreatePlayerData | None
     patches: Mapping[str, FieldPatch]
+
+
+@dataclass(frozen=True, slots=True)
+class SpecResult:
+    pes_id: int
+    name: str
+    status: str
+    reason: str
 
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
@@ -242,7 +255,8 @@ def _ascii_tokens(value: str) -> tuple[str, ...]:
     return tuple(re.findall(r"[a-z0-9]+", ascii_text))
 
 
-def _normalized_alias(value: str) -> str:
+def normalize_player_identity(value: str) -> str:
+    """Return the normalized identity key used for runtime matching."""
     return " ".join(_ascii_tokens(value))
 
 
@@ -302,8 +316,10 @@ def _load_identity(value: object) -> PlayerIdentity:
     name = _text(raw, "name", "identity")
     print_name = _optional_text(raw, "print_name", "identity")
     aliases = _string_list(raw.get("aliases"), "identity aliases", normalized_unique=True)
-    canonical = _normalized_alias(name)
-    if not canonical or canonical not in {_normalized_alias(alias) for alias in aliases}:
+    canonical = normalize_player_identity(name)
+    if not canonical or canonical not in {
+        normalize_player_identity(alias) for alias in aliases
+    }:
         raise PlayerSpecError("identity aliases must include the canonical name")
     return PlayerIdentity(
         name=name,
@@ -657,7 +673,7 @@ def validate_spec_set(specs: tuple[PlayerSpec, ...]) -> None:
             )
         sortitoutsi_ids[identity.sortitoutsi_id] = spec.path
         for alias in identity.aliases:
-            normalized = _normalized_alias(alias)
+            normalized = normalize_player_identity(alias)
             if normalized in aliases and aliases[normalized] != spec.path:
                 raise PlayerSpecError(
                     f"duplicate normalized alias {alias!r} in {aliases[normalized]} and {spec.path}"
@@ -677,3 +693,120 @@ def load_player_specs(
     specs = tuple(_load_one_spec(path) for path in paths)
     validate_spec_set(specs)
     return specs
+
+
+def _result(spec: PlayerSpec, status: str, reason: str, *, pes_id: int | None = None) -> SpecResult:
+    return SpecResult(
+        pes_id=spec.identity.pes_id if pes_id is None else pes_id,
+        name=spec.identity.name,
+        status=status,
+        reason=reason,
+    )
+
+
+def _matches_identity(player: "PlayerInfo", identity_keys: set[str]) -> bool:
+    if normalize_player_identity(player.name) in identity_keys:
+        return True
+    return bool(
+        player.print_name
+        and normalize_player_identity(player.print_name) in identity_keys
+    )
+
+
+def assess_create(
+    edit_file: "EditFile",
+    spec: PlayerSpec,
+    all_players: Mapping[int, "PlayerInfo"],
+) -> SpecResult:
+    """Assess create idempotency and destination safety without mutation."""
+    if spec.lifecycle_status != "active":
+        return _result(
+            spec,
+            spec.lifecycle_status,
+            spec.lifecycle_reason or f"lifecycle_{spec.lifecycle_status}",
+        )
+    if spec.operation != "create" or spec.create is None:
+        return _result(spec, "rejected", "operation_is_not_create")
+
+    create = spec.create
+    teams = edit_file.get_all_team_info()
+    destination = teams.get(create.team_id)
+    if destination is None:
+        return _result(spec, "rejected", "destination_team_missing")
+    if destination.name != create.team_name:
+        return _result(spec, "rejected", "destination_team_name_mismatch")
+
+    identity = spec.identity
+    identity_keys = {
+        normalize_player_identity(value)
+        for value in (identity.name, *identity.aliases)
+    }
+    id_match = all_players.get(identity.pes_id)
+    if id_match is not None:
+        if not _matches_identity(id_match, identity_keys):
+            return _result(spec, "rejected", "pes_id_identity_mismatch")
+        return _result(spec, "already_applied", "matching_player_exists")
+
+    for player in all_players.values():
+        if _matches_identity(player, identity_keys):
+            return _result(
+                spec,
+                "already_applied",
+                "matching_identity_exists",
+                pes_id=player.player_id,
+            )
+
+    roster = edit_file.get_team_roster(create.team_id)
+    if roster is None:
+        return _result(spec, "rejected", "destination_roster_missing")
+    if roster.is_full:
+        return _result(spec, "waiting", "destination_roster_full")
+    return _result(spec, "ready", "eligible")
+
+
+def apply_create(
+    edit_file: "EditFile",
+    spec: PlayerSpec,
+    all_players: Mapping[int, "PlayerInfo"],
+) -> SpecResult:
+    """Atomically serialize and register one reviewed created player."""
+    assessment = assess_create(edit_file, spec, all_players)
+    if assessment.status != "ready":
+        return assessment
+
+    create = spec.create
+    if create is None:
+        raise AssertionError("ready create assessment requires create data")
+
+    original_data = bytes(edit_file._data)
+    original_catalog_report = edit_file.player_catalog_report
+    original_transferred_ids = set(edit_file.transferred_player_ids)
+    try:
+        player_entry, appearance_entry = serialize_created_player(create)
+        edit_file.append_created_player(
+            spec.identity.pes_id,
+            player_entry,
+            appearance_entry,
+        )
+        added = edit_file.add_player(
+            spec.identity.pes_id,
+            create.team_id,
+            preferred_shirt_number=create.preferred_shirt_number,
+            position=create.registered_position,
+            allow_overflow_release=False,
+        )
+        if not added:
+            raise PlayerSpecError(
+                f"could not register created player {spec.identity.name} "
+                f"to team {create.team_id}"
+            )
+    except Exception:
+        edit_file._data = bytearray(original_data)
+        edit_file._parse_header()
+        edit_file._calculate_offsets()
+        edit_file.player_catalog_report = original_catalog_report
+        edit_file.transferred_player_ids.clear()
+        edit_file.transferred_player_ids.update(original_transferred_ids)
+        raise
+
+    return _result(spec, "created", "created_and_registered")
