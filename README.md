@@ -185,13 +185,13 @@ target save.
 ### Revision lifecycle
 
 When the official base changes, update `base/EDIT00000000` and
-`data/base_manifest.json` together. Keep historical specs in `players/`; do not
-delete them merely because the revision changed. An active spec whose
-`applies_to` list does not contain the new revision is inactive: validation
-reports `needs_review` and application skips it. After review, add the new
-revision only when the spec still applies, mark it `upstreamed` when the
-official base includes its change, or mark it `retired` when it no longer
-applies.
+`data/base_manifest.json` together. Keep historical Player Updates in
+`players/`; do not delete them merely because the revision changed. An active
+Player Update whose `applies_to` list does not contain the new revision is
+inactive: validation reports `needs_review` and application skips it. After
+review, add the new revision only when the Player Update still applies, mark it
+`upstreamed` when the official base includes its change, or mark it `retired`
+when it no longer applies.
 
 Common `run` options:
 

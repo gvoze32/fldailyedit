@@ -167,6 +167,25 @@ def test_readme_uses_player_update_language_for_public_contributions():
     assert "player update issue form" in text
     assert "CI accepts a Player Update only when" in text
     assert "## Player-spec contributions" not in text
+    lifecycle = " ".join(
+        text.split("### Revision lifecycle", 1)[1]
+        .split("Common `run` options:", 1)[0]
+        .split()
+    )
+    assert "Keep historical Player Updates in `players/`" in lifecycle
+    assert "An active Player Update whose `applies_to` list" in lifecycle
+    assert "revision only when the Player Update still applies" in lifecycle
+    for retired_phrase in ("historical specs", "active spec", "the spec"):
+        assert retired_phrase not in lifecycle
+    for technical_literal in (
+        "`players/`",
+        "`applies_to`",
+        "`needs_review`",
+        "`upstreamed`",
+        "`retired`",
+    ):
+        assert technical_literal in lifecycle
+
 
 
 def test_workflows_use_player_update_copy_on_public_surfaces():
