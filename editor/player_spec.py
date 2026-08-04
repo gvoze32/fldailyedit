@@ -629,6 +629,42 @@ def _load_update(value: object) -> Mapping[str, FieldPatch]:
     return MappingProxyType(patches)
 
 
+def _generated_draft_text(value: object, context: str, maximum: int) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or len(value) > maximum
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
+    ):
+        raise PlayerSpecError(f"{context} must be canonical text")
+    return value
+
+
+def _generated_draft_https_url(
+    value: object, context: str, maximum: int
+) -> str:
+    url = _generated_draft_text(value, context, maximum)
+    if any(character.isspace() for character in url):
+        raise PlayerSpecError(f"{context} must be a canonical HTTPS URL")
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except (TypeError, ValueError):
+        raise PlayerSpecError(
+            f"{context} must be a canonical HTTPS URL"
+        ) from None
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is not None
+    ):
+        raise PlayerSpecError(f"{context} must be a canonical HTTPS URL")
+    return url
+
+
 def _generated_draft_missing_fields(
     raw: Mapping[str, object], path: Path
 ) -> tuple[str, ...] | None:
@@ -690,13 +726,16 @@ def _generated_draft_missing_fields(
             raise PlayerSpecError(
                 f"{identity_context} aliases must contain the exact source name"
             )
-        sortitoutsi_id = _integer(
-            identity,
-            "sortitoutsi_id",
-            1,
-            9_999_999_999_999_999_999,
-            identity_context,
-        )
+        sortitoutsi_id = identity["sortitoutsi_id"]
+        if (
+            isinstance(sortitoutsi_id, bool)
+            or not isinstance(sortitoutsi_id, int)
+            or sortitoutsi_id < 0
+            or len(str(sortitoutsi_id)) > 20
+        ):
+            raise PlayerSpecError(
+                f"{identity_context} sortitoutsi_id must be a 1-20 digit integer"
+            )
         if path.stem != player_slug(name):
             raise PlayerSpecError(
                 f"player spec filename {path.name!r} does not match identity name {name!r}"
@@ -710,13 +749,9 @@ def _generated_draft_missing_fields(
             _DRAFT_SOURCE_FIELDS,
             source_context,
         )
-        source_profile = _https_url(
-            source["profile_url"], f"{source_context} profile_url"
+        source_profile = _generated_draft_https_url(
+            source["profile_url"], f"{source_context} profile_url", 500
         )
-        if source["profile_url"] != source_profile:
-            raise PlayerSpecError(
-                f"{source_context} profile_url must be canonical"
-            )
         profile_match = _DRAFT_PROFILE_URL_RE.fullmatch(source_profile)
         if (
             profile_match is None
@@ -749,28 +784,31 @@ def _generated_draft_missing_fields(
             _DRAFT_EVIDENCE_FIELDS,
             evidence_context,
         )
-        evidence_profile = _https_url(
-            evidence["profile_url"], f"{evidence_context} profile_url"
+        evidence_profile = _generated_draft_https_url(
+            evidence["profile_url"], f"{evidence_context} profile_url", 500
         )
-        if evidence["profile_url"] != evidence_profile:
-            raise PlayerSpecError(
-                f"{evidence_context} profile_url must be canonical"
-            )
-        proof_urls = _string_list(
-            evidence["proof_urls"], f"{evidence_context} proof_urls"
-        )
+        raw_proof_urls = evidence["proof_urls"]
         if (
-            evidence["proof_urls"] != list(proof_urls)
-            or len(proof_urls) > 10
-            or any(
-                _https_url(url, f"{evidence_context} proof_urls") != url
-                for url in proof_urls
-            )
+            not isinstance(raw_proof_urls, list)
+            or not raw_proof_urls
+            or len(raw_proof_urls) > 10
         ):
             raise PlayerSpecError(
-                f"{evidence_context} proof_urls must be canonical HTTPS URLs"
+                f"{evidence_context} proof_urls must be a non-empty list"
             )
-        effective_date = _text(evidence, "effective_date", evidence_context)
+        proof_urls = tuple(
+            _generated_draft_https_url(
+                url, f"{evidence_context} proof_urls", 300
+            )
+            for url in raw_proof_urls
+        )
+        if len(set(proof_urls)) != len(proof_urls):
+            raise PlayerSpecError(
+                f"{evidence_context} proof_urls contains duplicate URLs"
+            )
+        effective_date = _generated_draft_text(
+            evidence["effective_date"], f"{evidence_context} effective_date", 10
+        )
         if (
             evidence["effective_date"] != effective_date
             or not _ISO_DATE_RE.fullmatch(effective_date)
@@ -779,23 +817,21 @@ def _generated_draft_missing_fields(
                 f"{evidence_context} effective_date must use YYYY-MM-DD"
             )
         date.fromisoformat(effective_date)
-        current_team = _text(evidence, "current_team", evidence_context)
-        if evidence["current_team"] != current_team:
+        _generated_draft_text(
+            evidence["current_team"], f"{evidence_context} current_team", 100
+        )
+        issue_number = evidence["issue_number"]
+        if (
+            isinstance(issue_number, bool)
+            or not isinstance(issue_number, int)
+            or issue_number <= 0
+        ):
             raise PlayerSpecError(
-                f"{evidence_context} current_team must be canonical"
+                f"{evidence_context} issue_number must be a positive integer"
             )
-        issue_number = _integer(
-            evidence,
-            "issue_number",
-            1,
-            9_999_999_999_999_999_999,
-            evidence_context,
+        issue_url = _generated_draft_https_url(
+            evidence["issue_url"], f"{evidence_context} issue_url", 500
         )
-        issue_url = _https_url(
-            evidence["issue_url"], f"{evidence_context} issue_url"
-        )
-        if evidence["issue_url"] != issue_url:
-            raise PlayerSpecError(f"{evidence_context} issue_url must be canonical")
         issue_match = _DRAFT_ISSUE_URL_RE.fullmatch(issue_url)
         if (
             issue_match is None

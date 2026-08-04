@@ -486,6 +486,47 @@ def test_generated_draft_preserves_optional_source_metadata(
         load_player_specs(tmp_path)
 
 
+@pytest.mark.parametrize("person_id", (0, int("9" * 20)))
+def test_generated_draft_accepts_source_id_bounds(tmp_path, person_id):
+    from editor.player_spec import IncompletePlayerSpecError, load_player_specs
+
+    payload = build_player_draft(
+        parse_player_issue_event(dastan_issue_event()), dastan_source()
+    )
+    profile_url = (
+        "https://sortitoutsi.net/football-manager-data-update/person/"
+        f"{person_id}"
+    )
+    payload["identity"]["sortitoutsi_id"] = person_id
+    payload["source"]["profile_url"] = profile_url
+    payload["evidence"]["profile_url"] = profile_url
+    (tmp_path / "dastan-satpayev.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+
+    with pytest.raises(IncompletePlayerSpecError):
+        load_player_specs(tmp_path)
+
+
+
+def test_generated_draft_accepts_unbounded_positive_issue_number(tmp_path):
+    from editor.player_spec import IncompletePlayerSpecError, load_player_specs
+
+    payload = build_player_draft(
+        parse_player_issue_event(dastan_issue_event()), dastan_source()
+    )
+    issue_number = int("9" * 20)
+    payload["evidence"]["issue_number"] = issue_number
+    payload["evidence"]["issue_url"] = (
+        f"https://github.com/gvoze32/fldailyedit/issues/{issue_number}"
+    )
+    (tmp_path / "dastan-satpayev.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+
+    with pytest.raises(IncompletePlayerSpecError):
+        load_player_specs(tmp_path)
+
 @pytest.mark.parametrize(
     "mutation",
     (
@@ -495,6 +536,7 @@ def test_generated_draft_preserves_optional_source_metadata(
         "evidence-issue-number",
         "profile-host",
         "issue-url-number",
+        "proof-credentials",
     ),
 )
 def test_malformed_draft_shape_uses_strict_schema_errors(tmp_path, mutation):
@@ -518,10 +560,14 @@ def test_malformed_draft_shape_uses_strict_schema_errors(tmp_path, mutation):
     elif mutation == "profile-host":
         payload["source"]["profile_url"] = "https://example.com/person/2000370206"
         payload["evidence"]["profile_url"] = payload["source"]["profile_url"]
-    else:
+    elif mutation == "issue-url-number":
         payload["evidence"]["issue_url"] = (
             "https://github.com/gvoze32/fldailyedit/issues/99"
         )
+    else:
+        payload["evidence"]["proof_urls"] = [
+            "https://user:secret@example.com/proof"
+        ]
     (tmp_path / "dastan-satpayev.json").write_text(
         json.dumps(payload), encoding="utf-8"
     )
