@@ -150,7 +150,7 @@ Pembaruan create berisi usulan record pemain lengkap dan data roster tujuan.
 Pembaruan untuk pemain yang sudah ada hanya berisi nilai yang didukung dan berbeda
 dari base terverifikasi; setiap perubahan mencatat nilai literal `from` dan `to`.
 Kelompok pembaruan yang didukung adalah kemampuan, kecakapan posisi, gaya bermain,
-kemampuan pemain, gaya COM, kewarganegaraan, pengaturan fisik/dasar, dan posisi
+keahlian pemain, gaya COM, kewarganegaraan, pengaturan fisik/dasar, dan posisi
 terdaftar.
 
 ### Jalur issue sederhana
@@ -162,7 +162,7 @@ terdaftar.
 2. Workflow generator yang dikonfigurasi mengambil profil tersebut dan membuka
    draft PR yang berisi satu usulan schema-version-2
    `players/<player-slug>.json`. Workflow ini memperoleh snapshot sumber,
-   identitas, pengaturan fisik, data posisi, kemampuan, gaya bermain, kemampuan
+   identitas, pengaturan fisik, data posisi, kemampuan, gaya bermain, keahlian
    pemain, dan gaya COM dari profil tersebut.
 3. Untuk create, hanya nilai lokal gim yang tidak tersedia dari sumber yang tetap
    tercantum di `draft.missing`: ID PES dan nama cetak untuk identitas dan pemain,
