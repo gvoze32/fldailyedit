@@ -158,8 +158,8 @@ _DRAFT_PROFILE_URL_RE = re.compile(
     r"https://(?:www\.)?sortitoutsi\.net/football-manager-data-update/person/"
     r"(?P<person_id>[0-9]{1,20})(?:/[a-z0-9]+(?:-[a-z0-9]+)*)?\Z"
 )
-_DRAFT_ISSUE_URL_RE = re.compile(
-    r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/"
+_DRAFT_ISSUE_PATH_RE = re.compile(
+    r"/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/"
     r"(?P<issue_number>[1-9][0-9]*)\Z"
 )
 _LIFECYCLE_FIELDS = frozenset({"status", "reason", "superseded_by"})
@@ -629,12 +629,14 @@ def _load_update(value: object) -> Mapping[str, FieldPatch]:
     return MappingProxyType(patches)
 
 
-def _generated_draft_text(value: object, context: str, maximum: int) -> str:
+def _generated_draft_text(
+    value: object, context: str, maximum: int | None
+) -> str:
     if (
         not isinstance(value, str)
         or not value
         or value != value.strip()
-        or len(value) > maximum
+        or (maximum is not None and len(value) > maximum)
         or any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
     ):
         raise PlayerSpecError(f"{context} must be canonical text")
@@ -642,7 +644,7 @@ def _generated_draft_text(value: object, context: str, maximum: int) -> str:
 
 
 def _generated_draft_https_url(
-    value: object, context: str, maximum: int
+    value: object, context: str, maximum: int | None
 ) -> str:
     url = _generated_draft_text(value, context, maximum)
     if any(character.isspace() for character in url):
@@ -740,6 +742,10 @@ def _generated_draft_missing_fields(
             raise PlayerSpecError(
                 f"player spec filename {path.name!r} does not match identity name {name!r}"
             )
+        if len(path.name.encode("utf-8")) > 240:
+            raise PlayerSpecError(
+                f"player spec filename {path.name!r} exceeds 240 UTF-8 bytes"
+            )
 
         source_context = f"{context} source"
         source = _object(raw["source"], source_context)
@@ -750,7 +756,7 @@ def _generated_draft_missing_fields(
             source_context,
         )
         source_profile = _generated_draft_https_url(
-            source["profile_url"], f"{source_context} profile_url", 500
+            source["profile_url"], f"{source_context} profile_url", None
         )
         profile_match = _DRAFT_PROFILE_URL_RE.fullmatch(source_profile)
         if (
@@ -785,7 +791,7 @@ def _generated_draft_missing_fields(
             evidence_context,
         )
         evidence_profile = _generated_draft_https_url(
-            evidence["profile_url"], f"{evidence_context} profile_url", 500
+            evidence["profile_url"], f"{evidence_context} profile_url", None
         )
         raw_proof_urls = evidence["proof_urls"]
         if (
@@ -832,9 +838,13 @@ def _generated_draft_missing_fields(
         issue_url = _generated_draft_https_url(
             evidence["issue_url"], f"{evidence_context} issue_url", 500
         )
-        issue_match = _DRAFT_ISSUE_URL_RE.fullmatch(issue_url)
+        parsed_issue_url = urlsplit(issue_url)
+        issue_match = _DRAFT_ISSUE_PATH_RE.fullmatch(parsed_issue_url.path)
         if (
-            issue_match is None
+            parsed_issue_url.hostname != "github.com"
+            or parsed_issue_url.query
+            or parsed_issue_url.fragment
+            or issue_match is None
             or int(issue_match.group("issue_number")) != issue_number
         ):
             raise PlayerSpecError(

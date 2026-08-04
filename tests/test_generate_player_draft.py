@@ -467,6 +467,13 @@ def test_generated_draft_validation_reports_exact_missing_human_fields(
     (
         {"date_of_birth": "12 August 2008"},
         {"positions": ()},
+        {
+            "profile_url": (
+                "https://sortitoutsi.net/football-manager-data-update/person/"
+                "2000370206/"
+                + "a" * 600
+            )
+        },
     ),
 )
 def test_generated_draft_preserves_optional_source_metadata(
@@ -526,6 +533,46 @@ def test_generated_draft_accepts_unbounded_positive_issue_number(tmp_path):
 
     with pytest.raises(IncompletePlayerSpecError):
         load_player_specs(tmp_path)
+
+def test_generated_draft_accepts_case_insensitive_github_host(tmp_path):
+    from editor.player_spec import IncompletePlayerSpecError, load_player_specs
+
+    payload = build_player_draft(
+        parse_player_issue_event(dastan_issue_event()), dastan_source()
+    )
+    payload["evidence"]["issue_url"] = payload["evidence"]["issue_url"].replace(
+        "https://github.com", "HTTPS://GITHUB.COM"
+    )
+    (tmp_path / "dastan-satpayev.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+
+    with pytest.raises(IncompletePlayerSpecError):
+        load_player_specs(tmp_path)
+
+
+def test_overlong_draft_filename_uses_strict_schema_error(tmp_path):
+    from editor.player_spec import (
+        IncompletePlayerSpecError,
+        PlayerSpecError,
+        load_player_specs,
+    )
+
+    payload = build_player_draft(
+        parse_player_issue_event(dastan_issue_event()), dastan_source()
+    )
+    name = "a" * 237
+    payload["identity"]["name"] = name
+    payload["identity"]["aliases"] = [name]
+    path = tmp_path / f"{name}.json"
+    assert len(path.name.encode("utf-8")) > 240
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(PlayerSpecError) as exc_info:
+        load_player_specs(tmp_path)
+
+    assert not isinstance(exc_info.value, IncompletePlayerSpecError)
+
 
 @pytest.mark.parametrize(
     "mutation",
