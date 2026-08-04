@@ -1,0 +1,135 @@
+name: Validate player specification pull request
+
+on:
+  pull_request_target:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  player-spec-pr:
+    name: Validate trusted player specification boundary
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out trusted base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up trusted Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Read trusted pull request coordinates
+        id: event
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          event = json.loads(
+              Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8")
+          )
+          number = event.get("number")
+          pull_request = event.get("pull_request")
+          if (
+              isinstance(number, bool)
+              or not isinstance(number, int)
+              or number <= 0
+          ):
+              raise SystemExit("pull request number must be a positive integer")
+          if not isinstance(pull_request, dict):
+              raise SystemExit("event must contain a pull request object")
+
+          def checked_sha(value: object, name: str) -> str:
+              if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{40}", value) is None:
+                  raise SystemExit(f"{name} must be a full lowercase Git SHA")
+              return value
+
+          base = pull_request.get("base")
+          head = pull_request.get("head")
+          if not isinstance(base, dict) or not isinstance(head, dict):
+              raise SystemExit("pull request must contain base and head objects")
+          base_sha = checked_sha(base.get("sha"), "base SHA")
+          head_sha = checked_sha(head.get("sha"), "head SHA")
+
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              output.write(f"pr_number={number}\n")
+              output.write(f"base_sha={base_sha}\n")
+              output.write(f"head_sha={head_sha}\n")
+          PY
+
+      - name: Fetch head data and enforce boundary
+        id: boundary
+        env:
+          BASE_SHA: ${{ steps.event.outputs.base_sha }}
+          CHANGES_FILE: ${{ runner.temp }}/player-spec-pr-changes.tsv
+          HEAD_SHA: ${{ steps.event.outputs.head_sha }}
+          PR_NUMBER: ${{ steps.event.outputs.pr_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_base="$(git rev-parse "HEAD^{commit}")"
+          if [[ "$actual_base" != "$BASE_SHA" ]]; then
+            printf '%s\n' "trusted checkout does not match event base SHA" >&2
+            exit 1
+          fi
+
+          HEAD_REF="refs/remotes/origin/pull/$PR_NUMBER/head"
+          git fetch --no-tags origin "refs/pull/$PR_NUMBER/head:$HEAD_REF"
+          actual_head="$(git rev-parse "$HEAD_REF^{commit}")"
+          if [[ "$actual_head" != "$HEAD_SHA" ]]; then
+            printf '%s\n' "fetched pull ref does not match event head SHA" >&2
+            exit 1
+          fi
+
+          git diff --name-status --diff-filter=ACDMRTUXB "$BASE_SHA...$HEAD_SHA" -- > "$CHANGES_FILE"
+          player_path="$(
+            python tools/check_player_spec_pr.py --changes-file "$CHANGES_FILE"
+          )"
+          printf 'player_path=%s\n' "$player_path" >> "$GITHUB_OUTPUT"
+
+      - name: Materialize validated player specification
+        if: steps.boundary.outputs.player_path != ''
+        env:
+          HEAD_SHA: ${{ steps.event.outputs.head_sha }}
+          PLAYER_PATH: ${{ steps.boundary.outputs.player_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p -- players
+          git show "${HEAD_SHA}:${PLAYER_PATH}" > "$PLAYER_PATH"
+
+      - name: Compile trusted pesXdecrypter binaries
+        if: steps.boundary.outputs.player_path != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          make -C vendor/pesXdecrypter clean
+          make -C vendor/pesXdecrypter
+          chmod +x vendor/pesXdecrypter/decrypter21 vendor/pesXdecrypter/encrypter21
+
+      - name: Install trusted project
+        if: steps.boundary.outputs.player_path != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Validate materialized player specification
+        if: steps.boundary.outputs.player_path != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          python run.py players validate

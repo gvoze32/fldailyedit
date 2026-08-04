@@ -10,6 +10,8 @@ from pathlib import Path
 FORM_PATH = Path(".github/ISSUE_TEMPLATE/player-spec.yml")
 WORKFLOW_PATH = Path(".github/workflows/generate-player-spec.yml")
 CI_PATH = Path(".github/workflows/ci.yml")
+PLAYER_TARGET_PATH = Path(".github/workflows/player-spec-pr.yml")
+
 
 
 EXPECTED_FIELDS = (
@@ -423,54 +425,89 @@ def test_generate_workflow_does_not_put_untrusted_event_data_in_shell_structure(
     assert text.count("shell: bash") == len(run_blocks)
 
 
-def test_ci_keeps_the_python_matrix_and_validates_specs_in_every_matrix_job():
+def test_ci_keeps_the_python_matrix_and_validates_specs_after_native_build():
     text = CI_PATH.read_text(encoding="utf-8")
-    matrix_job = text.split("\n  test:\n", 1)[1].split("\n  player-spec-pr:\n", 1)[0]
+    matrix_job = text.split("\n  test:\n", 1)[1]
+    native_build = "make -C vendor/pesXdecrypter"
+    validator = "python run.py players validate"
 
     assert 'python-version: ["3.10", "3.11", "3.12", "3.13"]' in matrix_job
     assert "os: [ubuntu-latest, macos-latest]" in matrix_job
-    assert "python run.py players validate" in matrix_job
+    assert native_build in matrix_job
+    assert validator in matrix_job
+    assert matrix_job.index(native_build) < matrix_job.index(validator)
+    assert "\n  player-spec-pr:\n" not in text
 
 
-def test_player_spec_pr_job_runs_on_every_pull_request_with_trusted_base_history():
-    text = CI_PATH.read_text(encoding="utf-8")
-    job = text.split("\n  player-spec-pr:\n", 1)[1]
+def test_target_workflow_is_base_owned_read_only_and_runs_for_pull_requests():
+    text = PLAYER_TARGET_PATH.read_text(encoding="utf-8")
 
-    assert "\n  pull_request:\n    branches: [main]\n" in text
-    assert "paths:" not in text.split("\n  pull_request:\n", 1)[1].split(
-        "\n  workflow_dispatch:", 1
-    )[0]
-    assert "if: github.event_name == 'pull_request'" in job
-    assert "fetch-depth: 0" in job
-    assert "GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}" in job
-    assert 'git fetch --no-tags origin "$GITHUB_BASE_SHA"' in job
+    assert "\n  pull_request_target:\n    branches: [main]\n" in text
+    assert "permissions:\n  contents: read\n" in text
+    assert "contents: write" not in text
+    assert "pull-requests:" not in text
+    assert "secrets." not in text
+    assert "ref: ${{ github.event.pull_request.base.sha }}" in text
+    assert "fetch-depth: 0" in text
+    assert "persist-credentials: true" in text
+    assert 'Path(os.environ["GITHUB_EVENT_PATH"])' in text
+    assert 're.fullmatch(r"[0-9a-f]{40}", value)' in text
+    assert "isinstance(number, bool)" in text
+    assert "number <= 0" in text
 
 
-def test_player_spec_pr_job_uses_exact_three_dot_filter_and_trusted_base_guard():
-    text = CI_PATH.read_text(encoding="utf-8")
-    job = text.split("\n  player-spec-pr:\n", 1)[1]
+def test_target_workflow_fetches_numeric_pull_ref_and_verifies_head_sha():
+    text = PLAYER_TARGET_PATH.read_text(encoding="utf-8")
 
+    assert (
+        'git fetch --no-tags origin '
+        '"refs/pull/$PR_NUMBER/head:$HEAD_REF"'
+    ) in text
+    assert 'HEAD_REF="refs/remotes/origin/pull/$PR_NUMBER/head"' in text
+    assert 'actual_head="$(git rev-parse "$HEAD_REF^{commit}")"' in text
+    assert '[[ "$actual_head" != "$HEAD_SHA" ]]' in text
+    assert 'actual_base="$(git rev-parse "HEAD^{commit}")"' in text
+    assert '[[ "$actual_base" != "$BASE_SHA" ]]' in text
     assert (
         'git diff --name-status --diff-filter=ACDMRTUXB '
-        '"$GITHUB_BASE_SHA...HEAD" -- > "$CHANGES_FILE"'
-    ) in job
-    assert (
-        'git show "${GITHUB_BASE_SHA}:tools/check_player_spec_pr.py" '
-        '> "$TRUSTED_GUARD"'
-    ) in job
-    guard = 'python "$TRUSTED_GUARD" --changes-file "$CHANGES_FILE"'
+        '"$BASE_SHA...$HEAD_SHA" -- > "$CHANGES_FILE"'
+    ) in text
+
+
+def test_target_workflow_runs_base_guard_before_materializing_one_head_blob():
+    text = PLAYER_TARGET_PATH.read_text(encoding="utf-8")
+    guard = (
+        'python tools/check_player_spec_pr.py --changes-file "$CHANGES_FILE"'
+    )
+    materialize = 'git show "${HEAD_SHA}:${PLAYER_PATH}" > "$PLAYER_PATH"'
+    native_build = "make -C vendor/pesXdecrypter clean"
     validator = "python run.py players validate"
-    assert guard in job
-    assert validator in job
-    assert job.index(guard) < job.index(validator)
+
+    assert guard in text
+    assert materialize in text
+    assert native_build in text
+    assert validator in text
+    assert text.index(guard) < text.index(materialize)
+    assert text.index(materialize) < text.index(native_build)
+    assert text.index(native_build) < text.index(validator)
 
 
-def test_pull_request_ci_avoids_privileged_or_issue_contexts():
-    text = CI_PATH.read_text(encoding="utf-8")
+def test_target_workflow_never_checks_out_or_executes_pull_request_head_code():
+    target = PLAYER_TARGET_PATH.read_text(encoding="utf-8")
+    ordinary_ci = CI_PATH.read_text(encoding="utf-8")
+    generator = WORKFLOW_PATH.read_text(encoding="utf-8")
 
-    assert "pull_request_target" not in text
-    assert "github.event.issue" not in text
-    assert "${{ github.event.pull_request.head" not in text
+    assert "pull_request_target" in target
+    assert "pull_request_target" not in ordinary_ci
+    assert "pull_request_target" not in generator
+    assert "github.event.issue" not in target
+    assert "github.event.pull_request.head" not in target
+    assert "git checkout" not in target
+    assert "git switch" not in target
+    assert "pip install" in target
+    assert target.index("tools/check_player_spec_pr.py") < target.index(
+        "pip install"
+    )
 
 
 def test_generated_draft_pr_warns_that_semantic_validation_must_fail():

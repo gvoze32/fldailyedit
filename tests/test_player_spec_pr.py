@@ -27,6 +27,8 @@ def test_player_contribution_accepts_one_canonical_player_file(status, slug):
         ["R100\tdocs/old.txt\tdocs/new.txt"],
         ["R050\tdocs/old.txt\tdocs/new.txt"],
         ["C075\tdocs/source.txt\tdocs/copy.txt"],
+        ["R000\tdocs/zero.txt\tdocs/still-zero.txt"],
+        ["C100\tdocs/source.txt\tdocs/copy.txt"],
     ],
 )
 def test_non_player_pull_request_needs_no_player_guard(changes):
@@ -132,6 +134,10 @@ def test_player_contribution_rejects_non_add_or_modify_statuses(record):
         "R101\tplayers/old.json\tplayers/new.json",
         "R100\tplayers/old.json",
         "A\tplayers/a.json\textra",
+        "R5\tdocs/old.txt\tdocs/new.txt",
+        "R50\tdocs/old.txt\tdocs/new.txt",
+        "C99\tdocs/source.txt\tdocs/copy.txt",
+        "B\tREADME.md",
     ],
 )
 def test_player_contribution_rejects_malformed_name_status_records(record):

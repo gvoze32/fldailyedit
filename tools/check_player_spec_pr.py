@@ -10,8 +10,8 @@ from pathlib import Path, PurePosixPath
 
 
 _PLAYER_PATH = re.compile(r"players/[a-z0-9]+(?:-[a-z0-9]+)*\.json")
-_SCORED_STATUS = re.compile(r"[CR](?:100|0?[0-9]{1,2})")
-_SINGLE_PATH_STATUSES = frozenset("ADMTUXB")
+_SCORED_STATUS = re.compile(r"[CR](?:100|0[0-9]{2})")
+_SINGLE_PATH_STATUSES = frozenset("ADMTUX")
 
 
 class PlayerContributionError(ValueError):
