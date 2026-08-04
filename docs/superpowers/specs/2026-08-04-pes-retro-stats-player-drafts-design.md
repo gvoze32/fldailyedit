@@ -56,7 +56,7 @@ The adapter performs a bounded HTTP fetch with the repository's existing safety 
 - accepted `text/html` response type only; and
 - fail-closed handling for non-200 responses, invalid encodings, malformed HTML, and incomplete bodies.
 
-The parser reads the server-rendered Next.js flight payload and extracts exactly one complete player record. It does not scrape rendered label text because the page contains both PES 6 and PES 21 presentations.
+The parser reads the server-rendered Next.js flight payload and collects structurally complete player-record candidates. It deduplicates semantically identical repeated copies, then requires exactly one distinct player record. It does not scrape rendered label text because the page contains both PES 6 and PES 21 presentations.
 
 The following identities must agree:
 
@@ -65,7 +65,7 @@ The following identities must agree:
 3. the first eight characters of the full player UUID in the payload; and
 4. the single player record used for the draft.
 
-A missing record, multiple candidate records, identity mismatch, unknown field type, or schema drift is an error. The adapter never emits a partially parsed source model.
+A missing record, multiple distinct candidate records, identity mismatch, unknown field type, or schema drift is an error. The adapter never emits a partially parsed source model.
 
 The normalized source model contains:
 
