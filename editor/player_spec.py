@@ -1011,7 +1011,13 @@ def apply_player_specs(
 ) -> tuple[SpecResult, ...]:
     """Apply independent specs in deterministic filename order."""
     ordered_specs = sorted(specs, key=lambda spec: spec.path.name)
-    return tuple(
-        apply_player_spec(edit_file, spec, base_revision, all_players)
-        for spec in ordered_specs
-    )
+    current_players = dict(all_players)
+    results: list[SpecResult] = []
+    for spec in ordered_specs:
+        result = apply_player_spec(edit_file, spec, base_revision, current_players)
+        results.append(result)
+        if result.status == "created":
+            current_players.update(
+                edit_file.get_all_players(include_base_db=False)
+            )
+    return tuple(results)

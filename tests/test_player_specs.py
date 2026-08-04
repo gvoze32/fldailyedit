@@ -1031,6 +1031,47 @@ def test_conflict_does_not_block_independent_waiting_spec_and_order_is_determini
     assert bytes(edit_file._data) == before
 
 
+def test_created_player_is_visible_to_later_identity_assessment(tmp_path):
+    from dataclasses import replace
+
+    from editor.player_spec import apply_player_specs
+
+    first = dastan_spec(tmp_path)
+    second = replace(
+        first,
+        path=tmp_path / "z-satpayev.json",
+        identity=replace(
+            first.identity,
+            name="SATPAYEV",
+            print_name="OTHER",
+            aliases=("Different Prospect",),
+            pes_id=200001,
+            sortitoutsi_id=2000370207,
+        ),
+        create=replace(
+            first.create,
+            player_id=200001,
+            name="SATPAYEV",
+            print_name="OTHER",
+            preferred_shirt_number=37,
+        ),
+    )
+    edit_file = make_player_spec_edit_file(roster_size=38)
+    results = apply_player_specs(
+        edit_file,
+        (second, first),
+        REVISION,
+        current_players(edit_file),
+    )
+
+    assert [(result.status, result.reason, result.pes_id) for result in results] == [
+        ("created", "created_and_registered", 200000),
+        ("already_applied", "matching_identity_exists", 200000),
+    ]
+    assert len(edit_file.get_team_roster(102).roster) == 39
+    assert edit_file.get_all_players(include_base_db=False).get(200001) is None
+
+
 @pytest.mark.parametrize(
     ("failure_mode", "expected_reason"),
     [
