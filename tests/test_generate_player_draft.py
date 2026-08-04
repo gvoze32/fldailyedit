@@ -463,8 +463,39 @@ def test_generated_draft_validation_reports_exact_missing_human_fields(
 
 
 @pytest.mark.parametrize(
+    "source_overrides",
+    (
+        {"date_of_birth": "12 August 2008"},
+        {"positions": ()},
+    ),
+)
+def test_generated_draft_preserves_optional_source_metadata(
+    tmp_path, source_overrides
+):
+    from editor.player_spec import IncompletePlayerSpecError, load_player_specs
+
+    payload = build_player_draft(
+        parse_player_issue_event(dastan_issue_event()),
+        dastan_source(**source_overrides),
+    )
+    (tmp_path / "dastan-satpayev.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+
+    with pytest.raises(IncompletePlayerSpecError):
+        load_player_specs(tmp_path)
+
+
+@pytest.mark.parametrize(
     "mutation",
-    ("schema-version", "extra-field", "identity-name", "evidence-issue-number"),
+    (
+        "schema-version",
+        "extra-field",
+        "identity-name",
+        "evidence-issue-number",
+        "profile-host",
+        "issue-url-number",
+    ),
 )
 def test_malformed_draft_shape_uses_strict_schema_errors(tmp_path, mutation):
     from editor.player_spec import (
@@ -482,8 +513,15 @@ def test_malformed_draft_shape_uses_strict_schema_errors(tmp_path, mutation):
         payload["unexpected"] = "value"
     elif mutation == "identity-name":
         payload["identity"]["name"] = None
-    else:
+    elif mutation == "evidence-issue-number":
         payload["evidence"]["issue_number"] = "42"
+    elif mutation == "profile-host":
+        payload["source"]["profile_url"] = "https://example.com/person/2000370206"
+        payload["evidence"]["profile_url"] = payload["source"]["profile_url"]
+    else:
+        payload["evidence"]["issue_url"] = (
+            "https://github.com/gvoze32/fldailyedit/issues/99"
+        )
     (tmp_path / "dastan-satpayev.json").write_text(
         json.dumps(payload), encoding="utf-8"
     )

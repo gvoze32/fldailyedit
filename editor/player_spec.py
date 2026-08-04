@@ -154,6 +154,14 @@ _DRAFT_EVIDENCE_FIELDS = frozenset(
         "issue_url",
     }
 )
+_DRAFT_PROFILE_URL_RE = re.compile(
+    r"https://(?:www\.)?sortitoutsi\.net/football-manager-data-update/person/"
+    r"(?P<person_id>[0-9]{1,20})(?:/[a-z0-9]+(?:-[a-z0-9]+)*)?\Z"
+)
+_DRAFT_ISSUE_URL_RE = re.compile(
+    r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/"
+    r"(?P<issue_number>[1-9][0-9]*)\Z"
+)
 _LIFECYCLE_FIELDS = frozenset({"status", "reason", "superseded_by"})
 _IDENTITY_FIELDS = frozenset(
     {"name", "print_name", "aliases", "pes_id", "sortitoutsi_id"}
@@ -682,7 +690,7 @@ def _generated_draft_missing_fields(
             raise PlayerSpecError(
                 f"{identity_context} aliases must contain the exact source name"
             )
-        _integer(
+        sortitoutsi_id = _integer(
             identity,
             "sortitoutsi_id",
             1,
@@ -709,20 +717,29 @@ def _generated_draft_missing_fields(
             raise PlayerSpecError(
                 f"{source_context} profile_url must be canonical"
             )
-        positions = _string_list(source["positions"], f"{source_context} positions")
-        if source["positions"] != list(positions):
+        profile_match = _DRAFT_PROFILE_URL_RE.fullmatch(source_profile)
+        if (
+            profile_match is None
+            or int(profile_match.group("person_id")) != sortitoutsi_id
+        ):
+            raise PlayerSpecError(
+                f"{source_context} profile_url must match the source identity"
+            )
+        positions = source["positions"]
+        if (
+            not isinstance(positions, list)
+            or any(
+                not isinstance(position, str)
+                or not position
+                or position != position.strip()
+                for position in positions
+            )
+        ):
             raise PlayerSpecError(f"{source_context} positions must be canonical")
         for field in ("date_of_birth", "nationality", "current_club"):
             value = source[field]
             if value is not None and _text(source, field, source_context) != value:
                 raise PlayerSpecError(f"{source_context} {field} must be canonical")
-        date_of_birth = source["date_of_birth"]
-        if date_of_birth is not None:
-            if not _ISO_DATE_RE.fullmatch(date_of_birth):
-                raise PlayerSpecError(
-                    f"{source_context} date_of_birth must use YYYY-MM-DD"
-                )
-            date.fromisoformat(date_of_birth)
 
         evidence_context = f"{context} evidence"
         evidence = _object(raw["evidence"], evidence_context)
@@ -767,7 +784,7 @@ def _generated_draft_missing_fields(
             raise PlayerSpecError(
                 f"{evidence_context} current_team must be canonical"
             )
-        _integer(
+        issue_number = _integer(
             evidence,
             "issue_number",
             1,
@@ -779,6 +796,14 @@ def _generated_draft_missing_fields(
         )
         if evidence["issue_url"] != issue_url:
             raise PlayerSpecError(f"{evidence_context} issue_url must be canonical")
+        issue_match = _DRAFT_ISSUE_URL_RE.fullmatch(issue_url)
+        if (
+            issue_match is None
+            or int(issue_match.group("issue_number")) != issue_number
+        ):
+            raise PlayerSpecError(
+                f"{evidence_context} issue_url must match issue_number"
+            )
         if evidence_profile != source_profile:
             raise PlayerSpecError(
                 f"{evidence_context} profile_url must match source profile_url"
