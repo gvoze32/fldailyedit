@@ -122,7 +122,7 @@ def test_editfile_reads_and_replaces_exact_player_entry_without_appearance_bytes
 
     assert edit_file.get_edited_player_entry(162196) == replacement
     assert bytes(edit_file._data[PLAYER_ENTRY_SIZE:]) == appearance
-    assert edit_file._player_cache is None
+    assert not hasattr(edit_file, "_player_cache")
 
 
 def test_editfile_entry_accessors_reject_missing_records_and_wrong_sizes():

@@ -76,6 +76,19 @@ def test_bundled_base_create_survives_encryption_roundtrip(tmp_path):
         assert verified.validate_integrity()["valid"] is True
         assert verified.get_team_roster(102).player_index(200000) != -1
         assert verified.get_all_players()[200000].name == "Dastan Satpayev"
+        before_rerun = bytes(verified._data)
+        rerun = apply_player_spec(
+            verified,
+            dastan,
+            load_base_manifest().revision,
+            verified.get_all_players(),
+        )
+        assert (rerun.status, rerun.reason) == (
+            "already_applied",
+            "matching_player_exists",
+        )
+        assert bytes(verified._data) == before_rerun
+
     finally:
         crypto.cleanup_temp(decrypted)
         if reopened is not None:

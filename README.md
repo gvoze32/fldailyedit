@@ -144,8 +144,11 @@ Each reviewed contribution is one JSON file per player under `players/`. The
 engine accepts schema version 1 with an `operation` (`create` or `update`), a
 lifecycle (`active`, `upstreamed`, or `retired`), exact `applies_to` base
 revisions, stable player identity, cited evidence, and PES data. Creation specs
-contain the complete player record and destination roster data. Update specs
-contain explicit ability patches with literal `from` and `to` values.
+contain the complete player record and destination roster data. Update specs may
+patch the whitelisted groups: abilities, position proficiency, playing style,
+player skills, COM styles, nationality, and physical/basic settings. The
+registered position is also whitelisted. Every patch requires literal `from`
+and `to` values.
 
 ### Simple issue path
 

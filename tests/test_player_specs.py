@@ -180,6 +180,69 @@ def test_load_specs_rejects_filename_identity_and_duplicate_ids(tmp_path):
     with pytest.raises(PlayerSpecError, match="PES ID"):
         load_player_specs(tmp_path)
 
+@pytest.mark.parametrize("sortitoutsi_id", (0, 0x80000000))
+def test_completed_specs_reject_ids_outside_positive_signed_32_bit_range(
+    tmp_path, sortitoutsi_id
+):
+    from editor.player_spec import PlayerSpecError, load_player_specs
+
+    payload = valid_marco_payload()
+    payload["identity"]["sortitoutsi_id"] = sortitoutsi_id
+    write_payload(tmp_path, "marco-palestra.json", payload)
+
+    with pytest.raises(PlayerSpecError, match="sortitoutsi_id"):
+        load_player_specs(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("field", "control"),
+    (("name", "\x00"), ("print_name", "\x1f"), ("aliases", "\x7f")),
+)
+def test_create_identity_rejects_embedded_c0_and_del_before_serialization(
+    tmp_path, field, control
+):
+    from editor.player_spec import PlayerSpecError, load_player_specs
+
+    payload = valid_dastan_payload()
+    if field == "aliases":
+        value = payload["identity"]["aliases"][0]
+        payload["identity"]["aliases"][0] = value[:1] + control + value[1:]
+    else:
+        value = payload["identity"][field]
+        controlled = value[:1] + control + value[1:]
+        payload["identity"][field] = controlled
+        payload["pes"][field] = controlled
+    write_payload(tmp_path, "dastan-satpayev.json", payload)
+
+    with pytest.raises(PlayerSpecError, match="canonical text"):
+        load_player_specs(tmp_path)
+
+@pytest.mark.parametrize(
+    ("field", "controlled"),
+    (
+        ("name", "Dastan Satpayev\n"),
+        ("print_name", "\tSATPAYEV"),
+        ("aliases", "Dastan Satpayev\r"),
+    ),
+)
+def test_identity_rejects_boundary_controls_instead_of_trimming_them(
+    tmp_path, field, controlled
+):
+    from editor.player_spec import PlayerSpecError, load_player_specs
+
+    payload = valid_dastan_payload()
+    if field == "aliases":
+        payload["identity"]["aliases"][0] = controlled
+    else:
+        payload["identity"][field] = controlled
+        payload["pes"][field] = controlled
+    write_payload(tmp_path, "dastan-satpayev.json", payload)
+
+    with pytest.raises(PlayerSpecError, match="canonical text"):
+        load_player_specs(tmp_path)
+
+
+
 
 def test_update_patch_requires_distinct_in_range_values(tmp_path):
     from editor.player_spec import PlayerSpecError, load_player_specs
@@ -1084,6 +1147,34 @@ def test_waiting_create_does_not_block_valid_update(tmp_path):
         ("Marco Palestra", "updated"),
     ]
     assert edit_file.get_player_ability_profile(162196).abilities["speed"] == 80
+
+def test_update_before_eligible_create_keeps_cache_mapping_safe(tmp_path):
+    from dataclasses import replace
+
+    from editor.player_spec import apply_player_specs
+
+    edit_file = make_combined_fixture(chelsea_roster_size=39)
+    players = current_players(edit_file)
+    edit_file._player_cache = players
+    update = replace(marco_spec(tmp_path), path=tmp_path / "a-update.json")
+    create = replace(dastan_spec(tmp_path), path=tmp_path / "z-create.json")
+
+    results = apply_player_specs(
+        edit_file,
+        (create, update),
+        REVISION,
+        players,
+    )
+
+    assert [(result.name, result.status) for result in results] == [
+        ("Marco Palestra", "updated"),
+        ("Dastan Satpayev", "created"),
+    ]
+    assert all(result.diagnostic is None for result in results)
+    assert edit_file.get_all_players(include_base_db=False)[200000].name == (
+        "Dastan Satpayev"
+    )
+
 
 
 def test_conflict_does_not_block_independent_waiting_spec_and_order_is_deterministic(

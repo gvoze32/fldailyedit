@@ -37,6 +37,7 @@ jobs:
         run: |
           python run.py validate --edit-file base/EDIT00000000
           python run.py players validate
+          BASE_REVISION="$(python -c 'import json; print(json.load(open("data/base_manifest.json", encoding="utf-8"))["revision"])')"
           mkdir -p output
           cp base/EDIT00000000 output/EDIT00000000
           python run.py run \
@@ -45,7 +46,7 @@ jobs:
             --edit-file output/EDIT00000000 \
             --in-place
           python run.py players apply \
-            --base-revision fl26-u2.2-national-squads \
+            --base-revision "$BASE_REVISION" \
             --edit-file output/EDIT00000000 \
             --in-place
 

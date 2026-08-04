@@ -11,6 +11,12 @@ FORM_PATH = Path(".github/ISSUE_TEMPLATE/player-spec.yml")
 WORKFLOW_PATH = Path(".github/workflows/generate-player-spec.yml")
 CI_PATH = Path(".github/workflows/ci.yml")
 PLAYER_TARGET_PATH = Path(".github/workflows/player-spec-pr.yml")
+SYNC_WORKFLOW_PATHS = (
+    Path(".github/workflows/sync-fast.yml"),
+    Path(".github/workflows/sync-deep.yml"),
+)
+README_PATH = Path("README.md")
+
 
 
 
@@ -517,3 +523,30 @@ def test_generated_draft_pr_warns_that_semantic_validation_must_fail():
         "semantic validation must fail until a human fills every required value"
         in text
     )
+
+def test_sync_workflows_read_revision_from_checked_out_manifest_without_literal_drift():
+    for path in SYNC_WORKFLOW_PATHS:
+        text = path.read_text(encoding="utf-8")
+        assert 'json.load(open("data/base_manifest.json", encoding="utf-8"))["revision"]' in text
+        assert 'BASE_REVISION="$(' in text
+        assert '--base-revision "$BASE_REVISION"' in text
+        assert "fl26-u2.2-national-squads" not in text
+
+
+def test_readme_lists_every_whitelisted_update_patch_group_and_pair_contract():
+    text = README_PATH.read_text(encoding="utf-8")
+    contribution_section = text.split("## Player-spec contributions", 1)[1]
+    for group in (
+        "abilities",
+        "position proficiency",
+        "playing style",
+        "player skills",
+        "COM styles",
+        "nationality",
+        "physical/basic settings",
+        "registered position",
+    ):
+        assert group in contribution_section
+    assert "`from`" in contribution_section
+    assert "`to`" in contribution_section
+

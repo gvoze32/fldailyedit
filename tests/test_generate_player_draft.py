@@ -526,8 +526,10 @@ def test_meta_content_is_normalized_before_draft_validation(tmp_path):
         load_player_specs(tmp_path)
 
 
-@pytest.mark.parametrize("person_id", (0, int("9" * 20)))
-def test_generated_draft_accepts_source_id_bounds(tmp_path, person_id):
+@pytest.mark.parametrize("person_id", (1, 0x7FFFFFFF))
+def test_generated_draft_accepts_positive_signed_32_bit_source_id_bounds(
+    tmp_path, person_id
+):
     from editor.player_spec import IncompletePlayerSpecError, load_player_specs
 
     payload = build_player_draft(
@@ -546,6 +548,36 @@ def test_generated_draft_accepts_source_id_bounds(tmp_path, person_id):
 
     with pytest.raises(IncompletePlayerSpecError):
         load_player_specs(tmp_path)
+
+
+@pytest.mark.parametrize("person_id", (0, 0x80000000))
+def test_generated_draft_rejects_source_ids_outside_completed_contract(
+    tmp_path, person_id
+):
+    from editor.player_spec import (
+        IncompletePlayerSpecError,
+        PlayerSpecError,
+        load_player_specs,
+    )
+
+    payload = build_player_draft(
+        parse_player_issue_event(dastan_issue_event()), dastan_source()
+    )
+    profile_url = (
+        "https://sortitoutsi.net/football-manager-data-update/person/"
+        f"{person_id}"
+    )
+    payload["identity"]["sortitoutsi_id"] = person_id
+    payload["source"]["profile_url"] = profile_url
+    payload["evidence"]["profile_url"] = profile_url
+    (tmp_path / "dastan-satpayev.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+
+    with pytest.raises(PlayerSpecError) as exc_info:
+        load_player_specs(tmp_path)
+    assert not isinstance(exc_info.value, IncompletePlayerSpecError)
+
 
 
 

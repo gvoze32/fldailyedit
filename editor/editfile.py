@@ -350,7 +350,8 @@ class EditFile:
                 break
             if struct.unpack_from("<I", self._data, offset + PE_PLAYER_ID)[0] == player_id:
                 self._data[offset : offset + PLAYER_ENTRY_SIZE] = entry
-                self._player_cache = None
+                if hasattr(self, "_player_cache"):
+                    del self._player_cache
                 return
         raise ValueError(f"edited-player record {player_id} was not found")
 

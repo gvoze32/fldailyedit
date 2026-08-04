@@ -120,6 +120,9 @@ class SpecResult:
     diagnostic: str | None = None
 
 
+SORTITOUTSI_ID_MIN = 1
+SORTITOUTSI_ID_MAX = 0x7FFFFFFF
+
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 _ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
 _TOP_LEVEL_FIELDS = frozenset(
@@ -271,6 +274,16 @@ def _optional_text(raw: Mapping[str, object], field: str, context: str) -> str |
         raise PlayerSpecError(f"{context} {field} must be null or a non-empty string")
     return value.strip()
 
+def _identity_text(value: str, context: str) -> str:
+    if any(
+        ord(character) < 0x20 or ord(character) == 0x7F
+        for character in value
+    ):
+        raise PlayerSpecError(
+            f"{context} must be canonical text without control characters"
+        )
+    return value
+
 
 def _integer(
     raw: Mapping[str, object], field: str, minimum: int, maximum: int, context: str
@@ -354,9 +367,24 @@ def _load_identity(value: object) -> PlayerIdentity:
     raw = _object(value, "identity")
     required = frozenset({"name", "aliases", "pes_id", "sortitoutsi_id"})
     _validate_keys(raw, _IDENTITY_FIELDS, required, "identity")
+    raw_name = raw.get("name")
+    if isinstance(raw_name, str):
+        _identity_text(raw_name, "identity name")
     name = _text(raw, "name", "identity")
+
+    raw_print_name = raw.get("print_name")
+    if isinstance(raw_print_name, str):
+        _identity_text(raw_print_name, "identity print_name")
     print_name = _optional_text(raw, "print_name", "identity")
-    aliases = _string_list(raw.get("aliases"), "identity aliases", normalized_unique=True)
+
+    raw_aliases = raw.get("aliases")
+    if isinstance(raw_aliases, list):
+        for alias in raw_aliases:
+            if isinstance(alias, str):
+                _identity_text(alias, "identity aliases")
+    aliases = _string_list(
+        raw_aliases, "identity aliases", normalized_unique=True
+    )
     canonical = normalize_player_identity(name)
     if not canonical or canonical not in {
         normalize_player_identity(alias) for alias in aliases
@@ -367,7 +395,13 @@ def _load_identity(value: object) -> PlayerIdentity:
         print_name=print_name,
         aliases=aliases,
         pes_id=_integer(raw, "pes_id", 1, 0xFFFFFFFF, "identity"),
-        sortitoutsi_id=_integer(raw, "sortitoutsi_id", 1, 0x7FFFFFFF, "identity"),
+        sortitoutsi_id=_integer(
+            raw,
+            "sortitoutsi_id",
+            SORTITOUTSI_ID_MIN,
+            SORTITOUTSI_ID_MAX,
+            "identity",
+        ),
     )
 
 
@@ -739,12 +773,13 @@ def _generated_draft_missing_fields(
         if (
             isinstance(sortitoutsi_id, bool)
             or not isinstance(sortitoutsi_id, int)
-            or sortitoutsi_id < 0
-            or len(str(sortitoutsi_id)) > 20
+            or not (SORTITOUTSI_ID_MIN <= sortitoutsi_id <= SORTITOUTSI_ID_MAX)
         ):
             raise PlayerSpecError(
-                f"{identity_context} sortitoutsi_id must be a 1-20 digit integer"
+                f"{identity_context} sortitoutsi_id must be between "
+                f"{SORTITOUTSI_ID_MIN} and {SORTITOUTSI_ID_MAX}"
             )
+
         if path.stem != player_slug(name):
             raise PlayerSpecError(
                 f"player spec filename {path.name!r} does not match identity name {name!r}"

@@ -8,10 +8,11 @@ from html.parser import HTMLParser
 import json
 import re
 from typing import Any, Iterable
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import aiohttp
 
+from editor.player_spec import SORTITOUTSI_ID_MAX, SORTITOUTSI_ID_MIN
 from scraper.sortitoutsi import SORTITOUTSI_HEADERS
 
 
@@ -23,7 +24,8 @@ _PERSON_PATH_RE = re.compile(
 _POSITION_SEPARATOR_RE = re.compile(r"\s*[,;|]\s*")
 _CHARSET_RE = re.compile(r"(?:^|;)\s*charset\s*=\s*[\"']?([^;\"'\s]+)", re.I)
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
-_MAX_PERSON_ID_DIGITS = 20
+_MAX_REDIRECT_HOPS = 5
+_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 _UNAVAILABLE_MESSAGE = "SortitoutSI profile is unavailable"
 _INVALID_URL_MESSAGE = "Invalid SortitoutSI person URL"
 
@@ -77,12 +79,12 @@ def parse_sortitoutsi_person_url(url: str) -> tuple[int, str]:
         raise DraftSourceError(_INVALID_URL_MESSAGE)
 
     person_id_text = path_match.group("person_id")
-    if len(person_id_text) > _MAX_PERSON_ID_DIGITS:
-        raise DraftSourceError(_INVALID_URL_MESSAGE)
     try:
         person_id = int(person_id_text)
     except (ValueError, OverflowError):
         raise DraftSourceError(_INVALID_URL_MESSAGE) from None
+    if not SORTITOUTSI_ID_MIN <= person_id <= SORTITOUTSI_ID_MAX:
+        raise DraftSourceError(_INVALID_URL_MESSAGE)
     canonical_url = urlunsplit(("https", host, parsed.path, "", ""))
     return person_id, canonical_url
 
@@ -439,17 +441,14 @@ def parse_sortitoutsi_player_profile(
     )
 
 
-def _validate_response_url_chain(response: aiohttp.ClientResponse, person_id: int) -> str:
-    final_url = ""
-    for item in (*getattr(response, "history", ()), response):
-        try:
-            response_id, normalized_url = parse_sortitoutsi_person_url(str(item.url))
-        except DraftSourceError:
-            raise _unavailable() from None
-        if response_id != person_id:
-            raise _unavailable()
-        final_url = normalized_url
-    return final_url
+def _validated_response_url(response: aiohttp.ClientResponse, person_id: int) -> str:
+    try:
+        response_id, normalized_url = parse_sortitoutsi_person_url(str(response.url))
+    except DraftSourceError:
+        raise _unavailable() from None
+    if response_id != person_id:
+        raise _unavailable()
+    return normalized_url
 
 
 def _response_charset(content_type: str) -> str:
@@ -468,42 +467,69 @@ async def fetch_sortitoutsi_player_profile(url: str) -> PlayerDraftSource:
             headers=SORTITOUTSI_HEADERS,
             timeout=timeout,
         ) as session:
-            async with session.get(requested_url, allow_redirects=True) as response:
-                if response.status != 200:
-                    raise _unavailable()
+            current_url = requested_url
+            visited_urls = {current_url}
+            for redirect_count in range(_MAX_REDIRECT_HOPS + 1):
+                async with session.get(
+                    current_url, allow_redirects=False
+                ) as response:
+                    response_url = _validated_response_url(response, person_id)
+                    if response.status in _REDIRECT_STATUSES:
+                        if redirect_count == _MAX_REDIRECT_HOPS:
+                            raise _unavailable()
+                        location = response.headers.get("Location")
+                        if not isinstance(location, str) or not location:
+                            raise _unavailable()
+                        try:
+                            candidate_url = urljoin(response_url, location)
+                            redirect_id, next_url = parse_sortitoutsi_person_url(
+                                candidate_url
+                            )
+                        except (DraftSourceError, TypeError, ValueError):
+                            raise _unavailable() from None
+                        if redirect_id != person_id or next_url in visited_urls:
+                            raise _unavailable()
+                        visited_urls.add(next_url)
+                        current_url = next_url
+                        continue
 
-                final_url = _validate_response_url_chain(response, person_id)
-                content_type = response.headers.get("Content-Type", "")
-                media_type = content_type.split(";", 1)[0].strip().lower()
-                if media_type not in {"text/html", "application/xhtml+xml"}:
-                    raise _unavailable()
+                    if response.status != 200:
+                        raise _unavailable()
 
-                declared_length = response.headers.get("Content-Length")
-                if declared_length is not None:
+                    content_type = response.headers.get("Content-Type", "")
+                    media_type = content_type.split(";", 1)[0].strip().lower()
+                    if media_type not in {"text/html", "application/xhtml+xml"}:
+                        raise _unavailable()
+
+                    declared_length = response.headers.get("Content-Length")
+                    if declared_length is not None:
+                        try:
+                            parsed_length = int(declared_length)
+                        except (TypeError, ValueError):
+                            raise _unavailable() from None
+                        if parsed_length < 0 or parsed_length > _MAX_RESPONSE_BYTES:
+                            raise _unavailable()
+
+                    body = bytearray()
+                    async for chunk in response.content.iter_chunked(64 * 1024):
+                        if len(body) + len(chunk) > _MAX_RESPONSE_BYTES:
+                            raise _unavailable()
+                        body.extend(chunk)
+
                     try:
-                        parsed_length = int(declared_length)
-                    except (TypeError, ValueError):
+                        html = body.decode(_response_charset(content_type))
+                    except (LookupError, UnicodeDecodeError):
                         raise _unavailable() from None
-                    if parsed_length < 0 or parsed_length > _MAX_RESPONSE_BYTES:
-                        raise _unavailable()
-
-                body = bytearray()
-                async for chunk in response.content.iter_chunked(64 * 1024):
-                    if len(body) + len(chunk) > _MAX_RESPONSE_BYTES:
-                        raise _unavailable()
-                    body.extend(chunk)
-
-                try:
-                    html = body.decode(_response_charset(content_type))
-                except (LookupError, UnicodeDecodeError):
-                    raise _unavailable() from None
+                    final_url = response_url
+                    break
+            else:
+                raise _unavailable()
 
         return parse_sortitoutsi_player_profile(html, final_url, person_id)
     except DraftSourceError:
         raise
     except (aiohttp.ClientError, asyncio.TimeoutError):
         raise _unavailable() from None
-
 
 __all__ = [
     "DraftSourceError",

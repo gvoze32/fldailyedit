@@ -35,18 +35,19 @@ def _entries():
     ]
 
 
-def _curated_entry():
+def _player_spec_create_entry():
     return {
         "player_name": "Dastan Satpayev",
         "position": "CF",
         "from_team": "Missing from FL26 database",
         "to_team": "Chelsea FC",
-        "transfer_type": "curated_player_creation",
+        "transfer_type": "player_spec_create",
         "shirt_number": 36,
         "confidence": 100.0,
         "roster_action": "create",
         "dry_run": False,
     }
+
 
 
 def test_markdown_separates_transfers_from_shirt_numbers():
@@ -77,8 +78,8 @@ def test_html_report_has_distinct_sections_and_escapes_values():
     assert "Player <script>" not in report
 
 
-def test_reports_separate_curated_player_creation_from_transfers():
-    entries = _entries() + [_curated_entry()]
+def test_reports_label_current_player_spec_creation_consistently():
+    entries = _entries() + [_player_spec_create_entry()]
 
     markdown = generate_markdown_report(entries)
     html = generate_html_report(entries)
@@ -86,9 +87,20 @@ def test_reports_separate_curated_player_creation_from_transfers():
     assert "Club transfers (1)" in markdown
     assert "Player creations (1)" in markdown
     assert "Dastan Satpayev" in markdown
-    assert "Player creations" in html
-    assert "Player created" in html
-    assert "Dastan Satpayev" in html
+    assert "Reviewed player spec" in markdown
+    assert "Reviewed player spec" in html
+    assert "Reviewed manifest" not in markdown
+    assert "Reviewed manifest" not in html
+
+
+def test_retired_curated_creation_alias_is_not_classified_as_player_spec():
+    legacy = _player_spec_create_entry()
+    legacy["transfer_type"] = "curated_player_creation"
+
+    markdown = generate_markdown_report([legacy])
+
+    assert "### Player creations (" not in markdown
+    assert "Club transfers (1)" in markdown
 
 
 def test_transfer_history_is_scoped_per_output_save(monkeypatch, tmp_path):

@@ -42,7 +42,7 @@ def log_transfer(
     field_changes: tuple[dict, ...] | list[dict] = (),
 ):
     """
-    Append a transfer, shirt-number, or curated-player audit record.
+    Append a transfer, shirt-number, or player-spec audit record.
 
     Each line is a self-contained JSON object for easy parsing.
     """
@@ -89,7 +89,7 @@ def log_transfer(
             f"[{action}] {player_name} (id={player_id}) at {to_team}: "
             f"#{previous_shirt_number} → #{shirt_number} (conf={confidence:.0f}%)"
         )
-    elif transfer_type in {"curated_player_creation", "player_spec_create"}:
+    elif transfer_type == "player_spec_create":
         logger.info(
             f"[{action}] Created {player_name} (id={player_id}) for {to_team}"
         )
@@ -171,12 +171,12 @@ def print_summary(last_n: int = 20):
 
 
 _SHIRT_UPDATE_TYPES = {"shirt_number_update", "squad_update"}
-_PLAYER_CREATION_TYPES = {"curated_player_creation", "player_spec_create"}
+_PLAYER_CREATION_TYPES = {"player_spec_create"}
 _PLAYER_SPEC_UPDATE_TYPES = {"player_spec_update"}
 
 
 def _is_player_creation(entry: dict) -> bool:
-    """Recognize reviewed player-creation audit records."""
+    """Recognize reviewed player-spec creation audit records."""
     return str(entry.get("transfer_type", "")) in _PLAYER_CREATION_TYPES
 
 
@@ -313,7 +313,7 @@ def generate_markdown_report(
                 f"| {status} | **{_markdown_cell(entry.get('player_name', 'Unknown'))}** "
                 f"| `{_markdown_cell(entry.get('position'))}` "
                 f"| {_markdown_cell(entry.get('to_team'))} "
-                f"| #{shirt_number} | Reviewed manifest |"
+                f"| #{shirt_number} | Reviewed player spec |"
             )
         md.append("")
     if include_table and updated_players:
@@ -412,7 +412,7 @@ def generate_html_report(
         f"<td><span class='position'>{value(entry.get('position'))}</span></td>"
         f"<td>{value(entry.get('to_team'))}</td>"
         f"<td class='shirt new'>#{value(entry.get('shirt_number'))}</td>"
-        "<td>Reviewed manifest</td>"
+        "<td>Reviewed player spec</td>"
         "</tr>"
         for entry in created_players
     )
