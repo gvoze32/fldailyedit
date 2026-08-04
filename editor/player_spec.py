@@ -21,6 +21,8 @@ from editor.player_codec import (
     FIELD_SPECS,
     PLAYER_SKILL_FIELDS,
     POSITION_NAMES,
+    decode_player_entry,
+    patch_player_entry,
     serialize_created_player,
 )
 
@@ -810,3 +812,118 @@ def apply_create(
         raise
 
     return _result(spec, "created", "created_and_registered")
+
+
+def _raw_codec_field(entry: bytes, field: str) -> int:
+    field_spec = FIELD_SPECS[field]
+    byte_count = (field_spec.bit_offset + field_spec.width + 7) // 8
+    chunk = int.from_bytes(
+        entry[
+            field_spec.byte_offset : field_spec.byte_offset + byte_count
+        ],
+        "little",
+    )
+    return (chunk >> field_spec.bit_offset) & ((1 << field_spec.width) - 1)
+
+
+def _decoded_patch_value(profile, entry: bytes, field: str) -> int:
+    if field in ABILITY_FIELDS:
+        return profile.abilities[field]
+    if field.startswith("position_"):
+        return profile.position_proficiency[field.removeprefix("position_").upper()]
+    if field == "registered_position":
+        return profile.registered_position_id
+    if field in {"nationality_id", "age", "height", "weight", "playing_style"}:
+        return getattr(profile, field)
+    return _raw_codec_field(entry, field)
+
+
+def _assess_update_state(
+    edit_file: "EditFile",
+    spec: PlayerSpec,
+    all_players: Mapping[int, "PlayerInfo"],
+) -> tuple[SpecResult, bytes | None]:
+    if spec.lifecycle_status != "active":
+        return _result(spec, "rejected", "lifecycle_is_not_active"), None
+    if spec.operation != "update" or not spec.patches:
+        return _result(spec, "rejected", "operation_is_not_update"), None
+
+    identity = spec.identity
+    identity_keys = {
+        normalize_player_identity(value)
+        for value in (identity.name, *identity.aliases)
+    }
+    player = all_players.get(identity.pes_id)
+    if player is None:
+        return _result(spec, "rejected", "pes_id_missing"), None
+    if not _matches_identity(player, identity_keys):
+        return _result(spec, "rejected", "pes_id_identity_mismatch"), None
+
+    entry = edit_file.get_edited_player_entry(identity.pes_id)
+    if entry is None:
+        return _result(spec, "rejected", "edited_player_record_missing"), None
+
+    profile = decode_player_entry(entry)
+    if profile.player_id != identity.pes_id:
+        return _result(spec, "rejected", "edited_player_identity_mismatch"), None
+
+    all_current = True
+    all_target = True
+    for field, patch in spec.patches.items():
+        value = _decoded_patch_value(profile, entry, field)
+        all_current = all_current and value == patch.current
+        all_target = all_target and value == patch.target
+
+    if all_current:
+        return _result(spec, "ready", "all_current"), entry
+    if all_target:
+        return _result(spec, "already_applied", "all_target"), entry
+    return _result(spec, "conflict", "mixed_or_unexpected_values"), entry
+
+
+def assess_update(
+    edit_file: "EditFile",
+    spec: PlayerSpec,
+    all_players: Mapping[int, "PlayerInfo"],
+) -> SpecResult:
+    """Assess a whole-spec update without mutating the edited player record."""
+    result, _ = _assess_update_state(edit_file, spec, all_players)
+    return result
+
+
+def _effective_update_targets(spec: PlayerSpec) -> dict[str, int]:
+    targets = {field: patch.target for field, patch in spec.patches.items()}
+    fields = set(spec.patches)
+    if fields.intersection(
+        _UPDATE_DIRECT_FIELDS - {"registered_position", "playing_style"}
+    ):
+        targets["edited_basic_settings"] = 1
+    if "registered_position" in fields:
+        targets["edited_registered_position"] = 1
+    if any(field.startswith("position_") for field in fields):
+        targets["edited_playable_positions"] = 1
+    if "playing_style" in fields:
+        targets["edited_playing_style"] = 1
+    if any(field.startswith("skill_") for field in fields):
+        targets["edited_skills"] = 1
+    if any(field.startswith("com_style_") for field in fields):
+        targets["edited_com_styles"] = 1
+    return targets
+
+
+def apply_update(
+    edit_file: "EditFile",
+    spec: PlayerSpec,
+    all_players: Mapping[int, "PlayerInfo"],
+) -> SpecResult:
+    """Apply a whole-spec patch only when every current value matches."""
+    assessment, entry = _assess_update_state(edit_file, spec, all_players)
+    if assessment.status != "ready":
+        return assessment
+    if entry is None:
+        raise AssertionError("applicable update assessment requires an edited record")
+
+    targets = _effective_update_targets(spec)
+    patched_entry = patch_player_entry(entry, targets)
+    edit_file.replace_edited_player_entry(spec.identity.pes_id, patched_entry)
+    return _result(spec, "updated", "patched")

@@ -7,6 +7,11 @@ import pytest
 
 REVISION = "fl26-u2.2-national-squads"
 
+PALESTRA_ENTRY = bytes.fromhex(
+    "9479020094790200d700b444000041233f2512073c5f730948e1f0083b220a4528"
+    "6a3c003dd44f424503121201ca8800100000100000"
+) + bytes(186)
+
 
 def valid_marco_payload():
     return {
@@ -308,6 +313,13 @@ def dastan_spec(tmp_path):
     return load_player_specs(tmp_path)[0]
 
 
+def marco_spec(tmp_path):
+    from editor.player_spec import load_player_specs
+
+    write_payload(tmp_path, "marco-palestra.json", valid_marco_payload())
+    return load_player_specs(tmp_path)[0]
+
+
 def make_player_spec_edit_file(roster_size: int):
     from editor.editfile import (
         GAME_PLAN_ENTRY_SIZE,
@@ -394,6 +406,51 @@ def make_player_spec_edit_file(roster_size: int):
         + 40
     ] = lineup
     return edit_file
+
+
+def make_player_spec_edit_file_with_palestra(**updates):
+    from editor.editfile import (
+        PE_PLAYER_NAME,
+        PE_PRINT_NAME,
+        PLAYER_APPEARANCE_SIZE,
+        EditFile,
+    )
+    from editor.player_codec import patch_player_entry
+
+    entry = bytearray(patch_player_entry(PALESTRA_ENTRY, updates))
+    entry[PE_PLAYER_NAME : PE_PLAYER_NAME + 15] = b"Marco Palestra\0"
+    entry[PE_PRINT_NAME : PE_PRINT_NAME + 9] = b"PALESTRA\0"
+    appearance = bytes(
+        (index * 3 + 7) % 256 for index in range(PLAYER_APPEARANCE_SIZE)
+    )
+
+    edit_file = EditFile()
+    edit_file._data = entry + bytearray(appearance)
+    edit_file.player_start = 0
+    edit_file.player_count = 1
+    return edit_file
+
+
+def current_players(edit_file):
+    return edit_file.get_all_players(include_base_db=False)
+
+
+def unchanged_bits(before, after, changed_fields):
+    from editor.player_codec import ABILITY_FIELDS, FIELD_SPECS
+
+    allowed_fields = set(changed_fields)
+    if allowed_fields.intersection(ABILITY_FIELDS):
+        allowed_fields.add("edited_abilities")
+
+    allowed_mask = 0
+    for field in allowed_fields:
+        field_spec = FIELD_SPECS[field]
+        allowed_mask |= (
+            ((1 << field_spec.width) - 1)
+            << (field_spec.byte_offset * 8 + field_spec.bit_offset)
+        )
+    changed_mask = int.from_bytes(before, "little") ^ int.from_bytes(after, "little")
+    return changed_mask & ~allowed_mask == 0
 
 
 def test_create_serializer_builds_linked_player_and_appearance_records(tmp_path):
@@ -655,3 +712,177 @@ def test_inactive_create_returns_before_identity_or_edit_access(tmp_path, monkey
     result = assess_create(edit_file, spec, InaccessiblePlayers())
 
     assert (result.status, result.reason) == ("retired", "Historical record")
+
+
+
+def test_assess_update_reports_applicable_current_state_without_mutation(tmp_path):
+    from editor.player_spec import assess_update
+
+    edit_file = make_player_spec_edit_file_with_palestra()
+    before = bytes(edit_file._data)
+
+    result = assess_update(edit_file, marco_spec(tmp_path), current_players(edit_file))
+
+    assert result.status == "ready"
+    assert bytes(edit_file._data) == before
+
+
+def test_update_applies_only_when_all_current_values_match(tmp_path):
+    from editor.editfile import PLAYER_ENTRY_SIZE
+    from editor.player_codec import decode_player_entry
+    from editor.player_spec import apply_update
+
+    edit_file = make_player_spec_edit_file_with_palestra()
+    spec = marco_spec(tmp_path)
+    before = edit_file.get_edited_player_entry(162196)
+    appearance_before = bytes(edit_file._data[PLAYER_ENTRY_SIZE:])
+
+    result = apply_update(edit_file, spec, current_players(edit_file))
+    after = edit_file.get_edited_player_entry(162196)
+
+    assert result.status == "updated"
+    assert before is not None
+    assert after is not None
+    profile = decode_player_entry(after)
+    assert {
+        field: profile.abilities[field] for field in spec.patches
+    } == {
+        "speed": 80,
+        "acceleration": 77,
+        "defensive_awareness": 62,
+        "ball_winning": 60,
+    }
+    assert unchanged_bits(before, after, changed_fields=spec.patches)
+    assert bytes(edit_file._data[PLAYER_ENTRY_SIZE:]) == appearance_before
+
+
+def test_update_all_target_values_are_already_applied_without_mutation(tmp_path):
+    from editor.player_spec import apply_update
+
+    edit_file = make_player_spec_edit_file_with_palestra(
+        speed=80,
+        acceleration=77,
+        defensive_awareness=62,
+        ball_winning=60,
+    )
+    before = bytes(edit_file._data)
+
+    result = apply_update(
+        edit_file,
+        marco_spec(tmp_path),
+        current_players(edit_file),
+    )
+
+    assert result.status == "already_applied"
+    assert bytes(edit_file._data) == before
+
+
+def test_update_mixed_current_and_target_values_conflict_without_mutation(tmp_path):
+    from editor.player_spec import apply_update
+
+    edit_file = make_player_spec_edit_file_with_palestra(speed=80)
+    before = bytes(edit_file._data)
+
+    result = apply_update(
+        edit_file,
+        marco_spec(tmp_path),
+        current_players(edit_file),
+    )
+
+    assert result.status == "conflict"
+    assert bytes(edit_file._data) == before
+
+
+def test_update_third_value_conflicts_without_mutation(tmp_path):
+    from editor.player_spec import apply_update
+
+    edit_file = make_player_spec_edit_file_with_palestra(speed=79)
+    before = bytes(edit_file._data)
+
+    result = apply_update(
+        edit_file,
+        marco_spec(tmp_path),
+        current_players(edit_file),
+    )
+
+    assert result.status == "conflict"
+    assert bytes(edit_file._data) == before
+
+
+def test_update_identity_mismatch_is_rejected_without_mutation(tmp_path):
+    from editor.models import PlayerInfo
+    from editor.player_spec import apply_update
+
+    edit_file = make_player_spec_edit_file_with_palestra()
+    before = bytes(edit_file._data)
+    different_player = PlayerInfo(player_id=162196, name="Different Player")
+
+    result = apply_update(
+        edit_file,
+        marco_spec(tmp_path),
+        {different_player.player_id: different_player},
+    )
+
+    assert result.status == "rejected"
+    assert bytes(edit_file._data) == before
+
+
+def test_update_catalog_only_player_is_rejected_without_synthesizing_record(tmp_path):
+    from editor.editfile import EditFile
+    from editor.models import PlayerInfo
+    from editor.player_spec import apply_update
+
+    edit_file = EditFile()
+    edit_file._data = bytearray(b"catalog-only")
+    edit_file.player_start = 0
+    edit_file.player_count = 0
+    before = bytes(edit_file._data)
+    catalog_player = PlayerInfo(player_id=162196, name="Marco Palestra")
+
+    result = apply_update(
+        edit_file,
+        marco_spec(tmp_path),
+        {catalog_player.player_id: catalog_player},
+    )
+
+    assert result.status == "rejected"
+    assert bytes(edit_file._data) == before
+    assert edit_file.player_count == 0
+
+
+@pytest.mark.parametrize(
+    ("field", "edited_flag"),
+    [
+        ("nationality_id", "edited_basic_settings"),
+        ("registered_position", "edited_registered_position"),
+        ("position_rb", "edited_playable_positions"),
+        ("playing_style", "edited_playing_style"),
+        ("skill_scissors_feint", "edited_skills"),
+        ("com_style_trickster", "edited_com_styles"),
+    ],
+)
+def test_update_activates_the_matching_edit_category(
+    tmp_path,
+    field,
+    edited_flag,
+):
+    from dataclasses import replace
+
+    from editor.player_codec import FIELD_SPECS, _read_field
+    from editor.player_spec import FieldPatch, apply_update
+
+    current = _read_field(PALESTRA_ENTRY, FIELD_SPECS[field])
+    target = (current + 1) % (1 << FIELD_SPECS[field].width)
+    spec = replace(
+        marco_spec(tmp_path),
+        patches={field: FieldPatch(current=current, target=target)},
+    )
+    edit_file = make_player_spec_edit_file_with_palestra()
+
+    result = apply_update(edit_file, spec, current_players(edit_file))
+
+    assert result.status == "updated"
+    entry = edit_file.get_edited_player_entry(162196)
+    assert entry is not None
+    assert _read_field(entry, FIELD_SPECS[field]) == target
+    assert _read_field(entry, FIELD_SPECS[edited_flag]) == 1

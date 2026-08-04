@@ -322,6 +322,38 @@ class EditFile:
                 return decode_player_entry(self._data[entry_offset:entry_end])
         return None
 
+    def get_edited_player_entry(self, player_id: int) -> bytes | None:
+        """Return exactly one edited player data record without appearance bytes."""
+        block_end = min(
+            self.player_start + MAX_PLAYERS * PLAYER_TOTAL_SIZE,
+            len(self._data),
+        )
+        for index in range(min(self.player_count, MAX_PLAYERS)):
+            offset = self.player_start + index * PLAYER_TOTAL_SIZE
+            if offset + PLAYER_ENTRY_SIZE > block_end:
+                break
+            if struct.unpack_from("<I", self._data, offset + PE_PLAYER_ID)[0] == player_id:
+                return bytes(self._data[offset : offset + PLAYER_ENTRY_SIZE])
+        return None
+
+    def replace_edited_player_entry(self, player_id: int, entry: bytes) -> None:
+        """Replace one edited player data record without touching its appearance."""
+        if len(entry) != PLAYER_ENTRY_SIZE:
+            raise ValueError(f"player entry must be {PLAYER_ENTRY_SIZE} bytes")
+        block_end = min(
+            self.player_start + MAX_PLAYERS * PLAYER_TOTAL_SIZE,
+            len(self._data),
+        )
+        for index in range(min(self.player_count, MAX_PLAYERS)):
+            offset = self.player_start + index * PLAYER_TOTAL_SIZE
+            if offset + PLAYER_ENTRY_SIZE > block_end:
+                break
+            if struct.unpack_from("<I", self._data, offset + PE_PLAYER_ID)[0] == player_id:
+                self._data[offset : offset + PLAYER_ENTRY_SIZE] = entry
+                self._player_cache = None
+                return
+        raise ValueError(f"edited-player record {player_id} was not found")
+
     def get_all_players(self, csv_path: Path | None = None, include_base_db: bool = True) -> dict[int, PlayerInfo]:
         """
         Load the current FL26 player catalog and merge edited save players.

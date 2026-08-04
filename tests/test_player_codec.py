@@ -97,3 +97,65 @@ def test_editfile_finds_decoded_profile_without_mutating_data():
     assert edit_file.get_player_ability_profile(999999) is None
     assert bytes(edit_file._data) == before
 
+
+def test_editfile_reads_and_replaces_exact_player_entry_without_appearance_bytes():
+    from editor.editfile import (
+        PLAYER_APPEARANCE_SIZE,
+        PLAYER_ENTRY_SIZE,
+        EditFile,
+    )
+    from editor.player_codec import patch_player_entry
+
+    appearance = bytes(range(PLAYER_APPEARANCE_SIZE))
+    edit_file = EditFile()
+    edit_file._data = bytearray(PALESTRA_ENTRY + appearance)
+    edit_file.player_start = 0
+    edit_file.player_count = 1
+    edit_file._player_cache = {162196: object()}
+
+    entry = edit_file.get_edited_player_entry(162196)
+    assert entry == PALESTRA_ENTRY
+    assert len(entry) == PLAYER_ENTRY_SIZE
+
+    replacement = patch_player_entry(entry, {"speed": 80})
+    edit_file.replace_edited_player_entry(162196, replacement)
+
+    assert edit_file.get_edited_player_entry(162196) == replacement
+    assert bytes(edit_file._data[PLAYER_ENTRY_SIZE:]) == appearance
+    assert edit_file._player_cache is None
+
+
+def test_editfile_entry_accessors_reject_missing_records_and_wrong_sizes():
+    import pytest
+
+    from editor.editfile import EditFile
+
+    edit_file = EditFile()
+    edit_file._data = bytearray(PALESTRA_ENTRY)
+    edit_file.player_start = 0
+    edit_file.player_count = 1
+
+    assert edit_file.get_edited_player_entry(999999) is None
+    with pytest.raises(ValueError, match="player entry must be 240 bytes"):
+        edit_file.replace_edited_player_entry(162196, b"short")
+    with pytest.raises(ValueError, match="edited-player record 999999 was not found"):
+        edit_file.replace_edited_player_entry(999999, PALESTRA_ENTRY)
+
+
+def test_editfile_entry_accessors_reject_truncated_edited_records():
+    import pytest
+
+    from editor.editfile import EditFile
+
+    truncated = PALESTRA_ENTRY[:16]
+    edit_file = EditFile()
+    edit_file._data = bytearray(truncated)
+    edit_file.player_start = 0
+    edit_file.player_count = 1
+    before = bytes(edit_file._data)
+
+    assert edit_file.get_edited_player_entry(162196) is None
+    with pytest.raises(ValueError, match="edited-player record 162196 was not found"):
+        edit_file.replace_edited_player_entry(162196, PALESTRA_ENTRY)
+    assert bytes(edit_file._data) == before
+
