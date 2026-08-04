@@ -61,6 +61,21 @@ def test_transfer_run_never_loads_or_applies_player_specs(
     assert "players apply" not in help_output
 
 
+def test_players_help_uses_player_update_language(monkeypatch, capsys):
+    import run
+
+    monkeypatch.setattr(run.sys, "argv", ["run.py", "players", "--help"])
+    with pytest.raises(SystemExit) as exc_info:
+        run.main()
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Validate or apply revision-scoped Player Updates" in output
+    assert "Validate Player Updates against the pristine base" in output
+    assert "Generate an incomplete Player Update from an issue event" in output
+    assert "Apply reviewed Player Updates to an EDIT file" in output
+
+
 def test_cmd_run_dry_run_resolves_stale_loan_chain(monkeypatch, tmp_path, capsys):
     import run
 
@@ -391,7 +406,7 @@ def test_players_validate_rejects_invalid_current_active_state(
     assert exc_info.value.code == 2
     output = capsys.readouterr().out
     assert result_status in output
-    assert "semantic validation failed" in output
+    assert "Player Update validation failed" in output
 
 
 @pytest.mark.parametrize(
@@ -698,7 +713,8 @@ def test_players_apply_mixed_success_and_mutation_failure_persists_verified_succ
     assert output.read_bytes() == b"encrypted-output"
     rendered = capsys.readouterr().out
     assert "mutation_failed" in rendered
-    assert "Applied 1 player specs" in rendered
+    assert "Applied 1 Player Update" in rendered
+    assert "player specs" not in rendered.lower()
 
 
 def test_players_apply_audits_and_rebuilds_same_save_reports_after_roundtrip(

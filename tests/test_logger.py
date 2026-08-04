@@ -87,8 +87,10 @@ def test_reports_label_current_player_spec_creation_consistently():
     assert "Club transfers (1)" in markdown
     assert "Player creations (1)" in markdown
     assert "Dastan Satpayev" in markdown
-    assert "Reviewed player spec" in markdown
-    assert "Reviewed player spec" in html
+    assert "Reviewed Player Update" in markdown
+    assert "Reviewed Player Update" in html
+    assert "Reviewed player spec" not in markdown
+    assert "Reviewed player spec" not in html
     assert "Reviewed manifest" not in markdown
     assert "Reviewed manifest" not in html
 

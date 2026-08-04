@@ -313,7 +313,7 @@ def generate_markdown_report(
                 f"| {status} | **{_markdown_cell(entry.get('player_name', 'Unknown'))}** "
                 f"| `{_markdown_cell(entry.get('position'))}` "
                 f"| {_markdown_cell(entry.get('to_team'))} "
-                f"| #{shirt_number} | Reviewed player spec |"
+                f"| #{shirt_number} | Reviewed Player Update |"
             )
         md.append("")
     if include_table and updated_players:
@@ -328,7 +328,7 @@ def generate_markdown_report(
             changes = _markdown_cell(_plain_field_changes(entry))
             md.append(
                 f"| {status} | **{_markdown_cell(entry.get('player_name', 'Unknown'))}** "
-                f"| {changes} | Reviewed player spec |"
+                f"| {changes} | Reviewed Player Update |"
             )
         md.append("")
 
@@ -412,7 +412,7 @@ def generate_html_report(
         f"<td><span class='position'>{value(entry.get('position'))}</span></td>"
         f"<td>{value(entry.get('to_team'))}</td>"
         f"<td class='shirt new'>#{value(entry.get('shirt_number'))}</td>"
-        "<td>Reviewed player spec</td>"
+        "<td>Reviewed Player Update</td>"
         "</tr>"
         for entry in created_players
     )
@@ -426,7 +426,7 @@ def generate_html_report(
             f"{value(change.get('from'))} -> {value(change.get('to'))}"
             for change in entry.get("field_changes", ())
         )
-        + "</td><td>Reviewed player spec</td></tr>"
+        + "</td><td>Reviewed Player Update</td></tr>"
         for entry in updated_players
     )
     shirt_rows = "".join(

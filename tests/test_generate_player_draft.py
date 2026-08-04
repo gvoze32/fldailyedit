@@ -457,7 +457,7 @@ def test_generated_draft_validation_reports_exact_missing_human_fields(
 
     assert exc_info.value.code == 2
     assert capsys.readouterr().out.splitlines() == [
-        "Player-spec semantic validation failed: incomplete draft dastan-satpayev.json",
+        "Player Update validation failed: incomplete draft dastan-satpayev.json",
         "Missing human fields: identity.pes_id, identity.print_name, pes",
     ]
 

@@ -1679,7 +1679,7 @@ def _print_player_spec_results(
     operations = Counter(spec.operation for spec in specs)
     result_counts = Counter(result.status for result in results)
     print(
-        "Player specs: "
+        "Player Updates: "
         f"active={counts['active']}, needs-review={result_counts['needs_review']}, "
         f"upstreamed={counts['upstreamed']}, retired={counts['retired']}, "
         f"create={operations['create']}, update={operations['update']}"
@@ -1733,7 +1733,7 @@ def cmd_players_validate(args) -> None:
         specs = load_player_specs()
         validate_spec_set(specs)
     except IncompletePlayerSpecError as exc:
-        print(f"Player-spec semantic validation failed: incomplete draft {exc.path.name}")
+        print(f"Player Update validation failed: incomplete draft {exc.path.name}")
         print(f"Missing human fields: {', '.join(exc.missing_fields)}")
         raise SystemExit(2) from exc
     decrypted = crypto.decrypt(base_path)
@@ -1750,8 +1750,8 @@ def cmd_players_validate(args) -> None:
         )
         if invalid_results:
             print(
-                "Player-spec semantic validation failed: "
-                f"{len(invalid_results)} current active spec(s) are invalid."
+                "Player Update validation failed: "
+                f"{len(invalid_results)} current active update(s) are invalid."
             )
             raise SystemExit(2)
     finally:
@@ -1858,7 +1858,7 @@ def _raise_for_player_spec_mutation_failures(
     if not failures:
         return
     print(
-        "Player-spec apply failed: "
+        "Applying Player Updates failed: "
         f"{len(failures)} unexpected mutation error(s); "
         "independent successful changes were preserved."
     )
@@ -1913,14 +1913,14 @@ def cmd_players_apply(args) -> None:
             result for result in results if result.status in {"created", "updated"}
         )
         if not changed_results:
-            print("No player-spec changes to apply; no backup or output was written.")
+            print("No Player Update changes to apply; no backup or output was written.")
             _raise_for_player_spec_mutation_failures(results)
             return
 
         _require_valid_edit(edit_file, "Modified save")
         backup_path = backup_mod.create_backup(edit_path)
         if _sha256_file(edit_path) != input_digest:
-            print("Input EDIT file changed while player specs were processing.")
+            print("Input EDIT file changed while Player Updates were being processed.")
             raise SystemExit(2)
         if not same_input_output:
             output_changed = output_path.exists() != output_existed
@@ -1950,8 +1950,9 @@ def cmd_players_apply(args) -> None:
             transfer_logger.log_transfer(**record)
         report_records = transfer_logger.read_log(save_scope)
         transfer_logger.save_reports(report_records)
+        update_label = "Player Update" if len(audit_records) == 1 else "Player Updates"
         print(
-            f"Applied {len(audit_records)} player specs to {output_path}. "
+            f"Applied {len(audit_records)} {update_label} to {output_path}. "
             f"Backup: {backup_path}"
         )
         _raise_for_player_spec_mutation_failures(results)
@@ -2064,17 +2065,20 @@ def main():
 
     # explicit player-spec workflow
     p_players = sub.add_parser(
-        "players", help="Validate or apply revision-scoped player specs"
+        "players",
+        help="Validate or apply revision-scoped Player Updates",
+        description="Validate or apply revision-scoped Player Updates",
+        formatter_class=lambda prog: argparse.HelpFormatter(prog, width=100),
     )
     players_sub = p_players.add_subparsers(
         dest="players_command", required=True
     )
     p_players_validate = players_sub.add_parser(
-        "validate", help="Validate player specs against the pristine base"
+        "validate", help="Validate Player Updates against the pristine base"
     )
     p_players_validate.set_defaults(func=cmd_players_validate)
     p_players_generate = players_sub.add_parser(
-        "generate-draft", help="Generate an incomplete player spec from an issue event"
+        "generate-draft", help="Generate an incomplete Player Update from an issue event"
     )
     p_players_generate.add_argument(
         "--event", required=True, help="Path to a trusted GitHub issue-event JSON file"
@@ -2084,7 +2088,7 @@ def main():
     )
     p_players_generate.set_defaults(func=cmd_players_generate_draft)
     p_players_apply = players_sub.add_parser(
-        "apply", help="Apply reviewed player specs to an EDIT file"
+        "apply", help="Apply reviewed Player Updates to an EDIT file"
     )
     p_players_apply.add_argument(
         "--base-revision",
