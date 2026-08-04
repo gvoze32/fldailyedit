@@ -159,6 +159,38 @@ def _remote_branch_fixture(
     return runner_repository, environment
 
 
+def test_readme_uses_player_update_language_for_public_contributions():
+    text = README_PATH.read_text(encoding="utf-8")
+    assert "## Player Updates" in text
+    assert "Validate all Player Updates against the pristine base" in text
+    assert "Apply reviewed Player Updates explicitly to one save" in text
+    assert "player update issue form" in text
+    assert "CI accepts a Player Update only when" in text
+    assert "## Player-spec contributions" not in text
+
+
+def test_issue_form_uses_plain_player_update_copy_without_changing_contract():
+    text = FORM_PATH.read_text(encoding="utf-8")
+    assert "name: Player Update Request" in text
+    assert 'title: "[Player Update]: "' in text
+    assert (
+        "description: Request a new player or an update to an existing player. "
+        "A maintainer will review the data before it is added."
+        in text
+    )
+    assert (
+        "Choose create to add a new player, or update to change an existing player."
+        in text
+    )
+    assert 'labels: ["player-spec"]' in text
+    assert "        - create\n        - update" in text
+    fields = _field_blocks(text)
+    assert tuple(
+        (field_type, _field_id(block), _field_label(block))
+        for field_type, block in fields
+    ) == EXPECTED_FIELDS
+
+
 def test_issue_form_matches_the_generator_heading_contract_exactly():
     text = FORM_PATH.read_text(encoding="utf-8")
     fields = _field_blocks(text)
@@ -170,7 +202,11 @@ def test_issue_form_matches_the_generator_heading_contract_exactly():
     assert 'labels: ["player-spec"]' in text
     assert "generate-player-draft" not in text
     assert "draft" in text.lower()
-    assert "not an approved player" in text.lower()
+    assert (
+        "description: Request a new player or an update to an existing player. "
+        "A maintainer will review the data before it is added."
+        in text
+    )
 
 
 def test_issue_form_requires_inputs_and_exact_rendered_confirmations():
@@ -535,7 +571,7 @@ def test_sync_workflows_read_revision_from_checked_out_manifest_without_literal_
 
 def test_readme_lists_every_whitelisted_update_patch_group_and_pair_contract():
     text = README_PATH.read_text(encoding="utf-8")
-    contribution_section = text.split("## Player-spec contributions", 1)[1]
+    contribution_section = text.split("## Player Updates", 1)[1]
     for group in (
         "abilities",
         "position proficiency",

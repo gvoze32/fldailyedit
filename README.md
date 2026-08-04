@@ -56,7 +56,7 @@ For an on-demand run or a custom club list, fork the repository and use
 - Lineups and game plans affected by roster changes
 - Transfer reports and JSON Lines audit logs
 - Daily prebuilt saves through GitHub Actions
-- Reviewed player creations and attribute corrections through explicit player-spec commands
+- Reviewed player creations and attribute corrections through explicit Player Update commands
 
 The updater does not overwrite a shirt number already used by another squad
 member. It also checks the player's current club before applying a move.
@@ -101,10 +101,10 @@ python run.py run --dry-run --edit-file base/EDIT00000000
 # Validate an existing save
 python run.py validate --edit-file base/EDIT00000000
 
-# Validate one-file-per-player specs against the pristine base revision
+# Validate one-file-per-player updates against the pristine base revision
 python run.py players validate
 
-# Apply reviewed specs explicitly to an existing output save
+# Apply reviewed Player Updates explicitly to an existing output save
 python run.py players apply \
   --base-revision fl26-u2.2-national-squads \
   --edit-file output/EDIT00000000 \
@@ -126,42 +126,42 @@ python run.py run --help
 | Command | Purpose |
 |---|---|
 | `run` | Apply verified transfers only |
-| `players validate` | Validate all player specs against the pristine base |
-| `players apply` | Apply reviewed player specs explicitly to one save |
+| `players validate` | Validate all Player Updates against the pristine base |
+| `players apply` | Apply reviewed Player Updates explicitly to one save |
 | `log` | Show recently applied transfers |
 | `inspect` | Inspect teams, player counts, and save offsets |
 | `validate` | Check roster registrations and game-plan mappings |
 | `repair` | Repair a legacy base using reference saves |
 
 
-`run` handles transfers only: it never loads or applies player specs. To combine
+`run` handles transfers only: it never loads or applies Player Updates. To combine
 both workflows, first run the transfer command against an output save, then run
 `players apply --in-place` against that same save.
 
-## Player-spec contributions
+## Player Updates
 
-Each reviewed contribution is one JSON file per player under `players/`. The
+Each reviewed Player Update is one JSON file per player under `players/`. The
 engine accepts schema version 1 with an `operation` (`create` or `update`), a
 lifecycle (`active`, `upstreamed`, or `retired`), exact `applies_to` base
-revisions, stable player identity, cited evidence, and PES data. Creation specs
-contain the complete player record and destination roster data. Update specs may
-patch the whitelisted groups: abilities, position proficiency, playing style,
-player skills, COM styles, nationality, and physical/basic settings. The
-registered position is also whitelisted. Every patch requires literal `from`
-and `to` values.
+revisions, stable player identity, cited evidence, and PES data. New-player
+updates contain the complete player record and destination roster data.
+Existing-player updates may patch the whitelisted groups: abilities,
+position proficiency, playing style, player skills, COM styles, nationality,
+and physical/basic settings. The registered position is also whitelisted. Every
+patch requires literal `from` and `to` values.
 
 ### Simple issue path
 
-1. Open the [player-spec issue form](.github/ISSUE_TEMPLATE/player-spec.yml),
+1. Open the [player update issue form](.github/ISSUE_TEMPLATE/player-spec.yml),
    provide the profile and proof URLs, and wait for a maintainer to apply the
    exact `generate-player-draft` label.
 2. The configured generator workflow opens a draft PR containing one
    intentionally incomplete `players/<player-slug>.json` file. Source text is
    data, not approved PES values.
 3. A contributor or maintainer replaces every listed placeholder with explicit
-   PES values. Update specs must also state the expected current (`from`) value
+   PES values. Update files must also state the expected current (`from`) value
    for every proposed (`to`) value.
-4. CI accepts a player-spec change only when the PR adds or modifies exactly one
+4. CI accepts a Player Update only when the PR adds or modifies exactly one
    canonical player JSON path and the shared semantic validator succeeds.
 5. Merging the PR is the approval state. There is no separate `approved` flag
    in the JSON file.

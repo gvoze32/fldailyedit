@@ -1,13 +1,13 @@
-name: Player specification request
-description: Request a source-backed draft for maintainer review, not an approved player.
-title: "[Player spec]: "
+name: Player Update Request
+description: Request a new player or an update to an existing player. A maintainer will review the data before it is added.
+title: "[Player Update]: "
 labels: ["player-spec"]
 body:
   - type: dropdown
     id: operation
     attributes:
       label: Operation
-      description: Choose whether this draft creates or updates a player specification.
+      description: Choose create to add a new player, or update to change an existing player.
       options:
         - create
         - update
