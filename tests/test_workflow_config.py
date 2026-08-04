@@ -8,9 +8,9 @@ from pathlib import Path
 
 
 FORM_PATH = Path(".github/ISSUE_TEMPLATE/player-spec.yml")
-WORKFLOW_PATH = Path(".github/workflows/generate-player-spec.yml")
+WORKFLOW_PATH = Path(".github/workflows/generate-player-update.yml")
 CI_PATH = Path(".github/workflows/ci.yml")
-PLAYER_TARGET_PATH = Path(".github/workflows/player-spec-pr.yml")
+PLAYER_TARGET_PATH = Path(".github/workflows/validate-player-update-pr.yml")
 SYNC_WORKFLOW_PATHS = (
     Path(".github/workflows/sync-fast.yml"),
     Path(".github/workflows/sync-deep.yml"),
@@ -22,7 +22,8 @@ README_PATH = Path("README.md")
 
 EXPECTED_FIELDS = (
     ("dropdown", "operation", "Operation"),
-    ("input", "sortitoutsi_profile", "SortitoutSI profile"),
+    ("input", "player_name", "Player name"),
+    ("input", "pes_retro_stats_profile", "Pes Retro Stats profile"),
     ("input", "current_team", "Current team"),
     ("input", "effective_date", "Effective date"),
     ("textarea", "proof_urls", "Proof URLs"),
@@ -30,8 +31,8 @@ EXPECTED_FIELDS = (
     ("checkboxes", "confirmations", "Confirmations"),
 )
 EXPECTED_CONFIRMATIONS = (
-    "I supplied source evidence.",
-    "I did not derive PES ratings from Football Manager values.",
+    "I supplied one canonical Pes Retro Stats player profile.",
+    "I understand autofilled PES values are unapproved proposals.",
     "I understand a maintainer must review the draft PR.",
 )
 
@@ -256,7 +257,8 @@ def test_issue_form_requires_inputs_and_exact_rendered_confirmations():
 
     for field_id in (
         "operation",
-        "sortitoutsi_profile",
+        "player_name",
+        "pes_retro_stats_profile",
         "current_team",
         "effective_date",
         "proof_urls",
@@ -276,8 +278,8 @@ def test_issue_form_requires_inputs_and_exact_rendered_confirmations():
     )
     assert tuple(confirmation_options) == EXPECTED_CONFIRMATIONS
     assert tuple(f"- [X] {label}" for label in confirmation_options) == (
-        "- [X] I supplied source evidence.",
-        "- [X] I did not derive PES ratings from Football Manager values.",
+        "- [X] I supplied one canonical Pes Retro Stats player profile.",
+        "- [X] I understand autofilled PES values are unapproved proposals.",
         "- [X] I understand a maintainer must review the draft PR.",
     )
 
@@ -309,6 +311,27 @@ def test_generate_workflow_uses_trusted_event_file_and_exact_machine_output():
     assert 'startswith("PLAYER_NAME=")' in text
     assert 'os.environ["GITHUB_OUTPUT"]' in text
     assert 'f"{name}<<{delimiter}\\n{value}\\n{delimiter}\\n"' in text
+
+
+def test_generate_workflow_compiles_decrypter_before_generation():
+    text = WORKFLOW_PATH.read_text(encoding="utf-8")
+    compile_step = """      - name: Compile pesXdecrypter binaries
+        if: steps.existing.outputs.pr_url == ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          make -C vendor/pesXdecrypter clean
+          make -C vendor/pesXdecrypter
+          chmod +x vendor/pesXdecrypter/decrypter21 vendor/pesXdecrypter/encrypter21
+"""
+
+    assert compile_step in text
+    assert text.index(compile_step) < text.index("      - name: Generate Player Update")
+
+
+def test_legacy_workflow_paths_are_absent():
+    assert not Path(".github/workflows/generate-player-spec.yml").exists()
+    assert not Path(".github/workflows/player-spec-pr.yml").exists()
 
 
 def test_generate_workflow_uses_safe_branch_and_one_idempotent_draft_pr():

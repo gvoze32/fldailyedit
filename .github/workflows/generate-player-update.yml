@@ -134,6 +134,15 @@ jobs:
             gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
           fi
 
+      - name: Compile pesXdecrypter binaries
+        if: steps.existing.outputs.pr_url == ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          make -C vendor/pesXdecrypter clean
+          make -C vendor/pesXdecrypter
+          chmod +x vendor/pesXdecrypter/decrypter21 vendor/pesXdecrypter/encrypter21
+
       - name: Generate Player Update
         if: steps.existing.outputs.pr_url == ''
         id: generate

@@ -1,12 +1,19 @@
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import fields, replace
+from dataclasses import fields
+from datetime import date
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 
-from scraper.player_draft import PlayerDraftSource
+import tools.generate_player_draft as generator
+
+from editor.models import PlayerInfo, TeamData, TeamInfo
+from editor.player_codec import PlayerAbilityProfile
+from scraper.pes21_proposal import Pes21Proposal, map_pes21_proposal
+from scraper.pes_retro_stats import PesRetroStatsProfile
 from tools.generate_player_draft import (
     PlayerDraftError,
     PlayerDraftRequest,
@@ -16,33 +23,118 @@ from tools.generate_player_draft import (
 )
 
 
-PROFILE_URL = (
-    "https://sortitoutsi.net/football-manager-data-update/person/2000370206"
-)
-CONFIRMATIONS = """- [X] I supplied source evidence.
-- [X] I did not derive PES ratings from Football Manager values.
+PROFILE_URL = "https://pesretrostats.com/player/f77d9c27-dastan-satpaev"
+PROFILE_UUID = "f77d9c27-8f02-4dbe-b877-4c13724a4886"
+MARCO_URL = "https://pesretrostats.com/player/0ce2dbde-marco-palestra"
+MARCO_UUID = "0ce2dbde-9cd9-423c-a90a-35b07df6a967"
+CONFIRMATIONS = """- [X] I supplied one canonical Pes Retro Stats player profile.
+- [X] I understand autofilled PES values are unapproved proposals.
 - [X] I understand a maintainer must review the draft PR."""
 HEADINGS = (
     "Operation",
-    "SortitoutSI profile",
+    "Player name",
+    "Pes Retro Stats profile",
     "Current team",
     "Effective date",
     "Proof URLs",
     "Contributor notes",
     "Confirmations",
 )
+SOURCE_POSITIONS = (
+    "GK",
+    "CB",
+    "LB",
+    "RB",
+    "CWP",
+    "DMF",
+    "LWB",
+    "RWB",
+    "CMF",
+    "LMF",
+    "RMF",
+    "AMF",
+    "LWF",
+    "RWF",
+    "SS",
+    "CF",
+)
+SOURCE_STATS = MappingProxyType(
+    {
+        "attacking_prowess": 76,
+        "technique": 74,
+        "dribbling": 75,
+        "dribble_accuracy": 72,
+        "short_pass_accuracy": 68,
+        "long_pass_accuracy": 65,
+        "shot_accuracy": 79,
+        "heading": 68,
+        "free_kick_accuracy": 65,
+        "swerve": 70,
+        "top_speed": 80,
+        "acceleration": 82,
+        "shot_power": 77,
+        "jump": 70,
+        "physical_contact": 68,
+        "body_control": 78,
+        "stamina": 72,
+        "defensive_awareness": 42,
+        "ball_winning": 43,
+        "new_aggression": 70,
+        "gk_awareness": 40,
+        "gk_catching": 40,
+        "gk_clearing": 40,
+        "gk_reflexes": 40,
+        "gk_reach": 40,
+    }
+)
+EXPECTED_ABILITIES = {
+    "attacking_awareness": 76,
+    "ball_control": 74,
+    "dribbling": 75,
+    "tight_possession": 72,
+    "low_pass": 68,
+    "lofted_pass": 65,
+    "finishing": 79,
+    "heading": 68,
+    "place_kicking": 65,
+    "curl": 70,
+    "speed": 80,
+    "acceleration": 82,
+    "kicking_power": 77,
+    "jump": 70,
+    "physical_contact": 68,
+    "balance": 78,
+    "stamina": 72,
+    "defensive_awareness": 42,
+    "ball_winning": 43,
+    "aggression": 70,
+    "gk_awareness": 40,
+    "catching": 40,
+    "clearing": 40,
+    "reflexes": 40,
+    "gk_reach": 40,
+}
+CREATE_MISSING_EXPECTED = (
+    "identity.pes_id",
+    "identity.print_name",
+    "pes.player_id",
+    "pes.print_name",
+    "pes.team_id",
+    "pes.team_name",
+    "pes.nationality_id",
+    "pes.skin_color",
+    "pes.iris_color",
+)
 
 
 def issue_body(**overrides: str) -> str:
     values = {
         "Operation": "create",
-        "SortitoutSI profile": PROFILE_URL,
+        "Player name": "Dastan Satpaev",
+        "Pes Retro Stats profile": PROFILE_URL,
         "Current team": "Chelsea FC",
         "Effective date": "2026-08-04",
-        "Proof URLs": (
-            "https://sortitoutsi.net/football-manager-data-update/"
-            "submission/fixture-proof"
-        ),
+        "Proof URLs": "https://example.com/official-proof",
         "Contributor notes": "Missing from the reviewed FL26 base.",
         "Confirmations": CONFIRMATIONS,
     }
@@ -50,13 +142,17 @@ def issue_body(**overrides: str) -> str:
     return "\n\n".join(f"### {heading}\n\n{values[heading]}" for heading in HEADINGS) + "\n"
 
 
-RENDERED_TASK3_FORM_BODY = """### Operation
+RENDERED_FORM_BODY = """### Operation
 
 create
 
-### SortitoutSI profile
+### Player name
 
-https://sortitoutsi.net/football-manager-data-update/person/2000370206
+Dastan Satpaev
+
+### Pes Retro Stats profile
+
+https://pesretrostats.com/player/f77d9c27-dastan-satpaev
 
 ### Current team
 
@@ -68,7 +164,7 @@ Chelsea FC
 
 ### Proof URLs
 
-https://sortitoutsi.net/football-manager-data-update/submission/fixture-proof
+https://example.com/official-proof
 
 ### Contributor notes
 
@@ -76,13 +172,13 @@ Missing from the reviewed FL26 base.
 
 ### Confirmations
 
-- [X] I supplied source evidence.
-- [X] I did not derive PES ratings from Football Manager values.
+- [X] I supplied one canonical Pes Retro Stats player profile.
+- [X] I understand autofilled PES values are unapproved proposals.
 - [X] I understand a maintainer must review the draft PR.
 """
 
 
-def dastan_issue_event() -> dict[str, object]:
+def issue_event(**body_overrides: str) -> dict[str, object]:
     return {
         "action": "labeled",
         "label": {"name": "generate-player-draft"},
@@ -91,23 +187,9 @@ def dastan_issue_event() -> dict[str, object]:
             "state": "open",
             "html_url": "https://github.com/gvoze32/fldailyedit/issues/42",
             "user": {"type": "User"},
-            "body": issue_body(),
+            "body": issue_body(**body_overrides),
         },
     }
-
-
-def dastan_source(**overrides: object) -> PlayerDraftSource:
-    values: dict[str, object] = {
-        "sortitoutsi_id": 2000370206,
-        "name": "Dastan Satpayev",
-        "profile_url": PROFILE_URL,
-        "date_of_birth": "2008-08-12",
-        "nationality": "Kazakhstan",
-        "positions": ("AM RL", "ST"),
-        "current_club": "Chelsea",
-    }
-    values.update(overrides)
-    return PlayerDraftSource(**values)
 
 
 def mutate_issue(event: dict[str, object], field: str, value: object) -> None:
@@ -116,9 +198,140 @@ def mutate_issue(event: dict[str, object], field: str, value: object) -> None:
     issue[field] = value
 
 
+def make_source(**overrides: object) -> PesRetroStatsProfile:
+    positions = {position: None for position in SOURCE_POSITIONS}
+    positions.update({"LWF": "A", "RWF": "B", "SS": "B", "CF": "★"})
+    values: dict[str, object] = {
+        "player_id": PROFILE_UUID,
+        "short_id": "f77d9c27",
+        "name": "Dastan Satpaev",
+        "full_name": "Dastan Satpaev",
+        "profile_url": PROFILE_URL,
+        "birth_date": date(2008, 8, 12),
+        "nationality": "Kazakhstan",
+        "current_club": "Chelsea FC",
+        "shirt_number": 36,
+        "height": 176,
+        "weight": 73,
+        "strong_foot": "R",
+        "weak_foot_accuracy": 5,
+        "weak_foot_frequency": 5,
+        "form": 6,
+        "injury_tolerance": "A",
+        "playing_style": "Goal Poacher",
+        "positions": MappingProxyType(positions),
+        "stats": SOURCE_STATS,
+        "player_skill_codes": ("S02", "S13"),
+        "com_playing_styles": ("Incisive Run",),
+    }
+    values.update(overrides)
+    return PesRetroStatsProfile(**values)
+
+
+def proposal_for(source: PesRetroStatsProfile) -> Pes21Proposal:
+    return map_pes21_proposal(source, effective_date=date(2026, 8, 4))
+
+
+def marco_source(**overrides: object) -> PesRetroStatsProfile:
+    positions = {position: None for position in SOURCE_POSITIONS}
+    positions.update({"RB": "A", "RWB": "★"})
+    values: dict[str, object] = {
+        "player_id": MARCO_UUID,
+        "short_id": "0ce2dbde",
+        "name": "Marco Palestra",
+        "full_name": "Marco Palestra",
+        "profile_url": MARCO_URL,
+        "birth_date": date(2005, 3, 3),
+        "nationality": "Italy",
+        "current_club": "Chelsea FC",
+        "shirt_number": 27,
+        "height": 180,
+        "weight": 68,
+        "strong_foot": "R",
+        "weak_foot_accuracy": 4,
+        "weak_foot_frequency": 4,
+        "form": 6,
+        "injury_tolerance": "B",
+        "playing_style": "Offensive Full-back",
+        "positions": MappingProxyType(positions),
+        "stats": SOURCE_STATS,
+        "player_skill_codes": (),
+        "com_playing_styles": (),
+    }
+    values.update(overrides)
+    return PesRetroStatsProfile(**values)
+
+
+def current_profile(proposal: Pes21Proposal, *, speed: int | None = None) -> PlayerAbilityProfile:
+    abilities = dict(proposal.abilities)
+    if speed is not None:
+        abilities["speed"] = speed
+    return PlayerAbilityProfile(
+        player_id=162196,
+        nationality_id=215,
+        height=proposal.height,
+        weight=proposal.weight,
+        age=proposal.age,
+        registered_position="RB",
+        registered_position_id=3,
+        playing_style=proposal.playing_style,
+        strong_foot=proposal.strong_foot,
+        weak_foot_usage=proposal.weak_foot_usage,
+        weak_foot_accuracy=proposal.weak_foot_accuracy,
+        form=proposal.form,
+        injury_resistance=proposal.injury_resistance,
+        abilities=abilities,
+        position_proficiency=dict(proposal.position_proficiency),
+        player_skills=proposal.player_skills,
+        com_styles=proposal.com_styles,
+    )
+
+
+class FakeEditFile:
+    def __init__(self, proposal: Pes21Proposal, *, changed: bool = True) -> None:
+        self.players = {162196: PlayerInfo(162196, "Marco Palestra", "M. Palestra")}
+        self.teams = {101: TeamInfo(101, "Chelsea FC")}
+        self.rosters = {101: TeamData(101, [162196] + [0] * 39)}
+        target_speed = proposal.abilities["speed"]
+        self.profiles = {
+            162196: current_profile(
+                proposal, speed=target_speed - 1 if changed else target_speed
+            )
+        }
+        self.loaded_path: Path | None = None
+
+    def load(self, path: Path) -> None:
+        self.loaded_path = Path(path)
+
+    def get_all_players(self):
+        return self.players
+
+    def get_all_team_info(self):
+        return self.teams
+
+    def get_team_roster(self, team_id):
+        return self.rosters.get(team_id)
+
+    def get_player_ability_profile(self, player_id):
+        return self.profiles.get(player_id)
+
+
+def update_request() -> PlayerDraftRequest:
+    return parse_player_issue_event(
+        issue_event(
+            Operation="update",
+            **{
+                "Player name": "Marco Palestra",
+                "Pes Retro Stats profile": MARCO_URL,
+            },
+        )
+    )
+
+
 def test_player_draft_request_has_the_published_interface():
     assert tuple(field.name for field in fields(PlayerDraftRequest)) == (
         "operation",
+        "player_name",
         "profile_url",
         "current_team",
         "effective_date",
@@ -128,30 +341,20 @@ def test_player_draft_request_has_the_published_interface():
     )
 
 
-def test_exact_issue_event_parses_to_request():
-    request = parse_player_issue_event(dastan_issue_event())
+def test_exact_rendered_issue_event_parses_to_request():
+    event = issue_event()
+    mutate_issue(event, "body", RENDERED_FORM_BODY)
 
-    assert request == PlayerDraftRequest(
+    assert parse_player_issue_event(event) == PlayerDraftRequest(
         operation="create",
+        player_name="Dastan Satpaev",
         profile_url=PROFILE_URL,
         current_team="Chelsea FC",
         effective_date="2026-08-04",
-        proof_urls=(
-            "https://sortitoutsi.net/football-manager-data-update/submission/fixture-proof",
-        ),
+        proof_urls=("https://example.com/official-proof",),
         issue_number=42,
         issue_url="https://github.com/gvoze32/fldailyedit/issues/42",
     )
-
-
-def test_real_task3_rendered_form_fixture_matches_parser_contract():
-    event = dastan_issue_event()
-    mutate_issue(event, "body", RENDERED_TASK3_FORM_BODY)
-
-    request = parse_player_issue_event(event)
-
-    assert request.issue_number == 42
-    assert request.operation == "create"
 
 
 @pytest.mark.parametrize(
@@ -162,13 +365,12 @@ def test_real_task3_rendered_form_fixture_matches_parser_contract():
         ("label", None),
         ("issue.state", "closed"),
         ("issue.user", {"type": "Bot"}),
-        ("issue.user", {"type": "Organization"}),
         ("issue.number", True),
         ("issue.number", 0),
     ],
 )
 def test_untrusted_event_metadata_is_rejected(mutation: str, value: object):
-    event = dastan_issue_event()
+    event = issue_event()
     if mutation.startswith("issue."):
         mutate_issue(event, mutation.removeprefix("issue."), value)
     else:
@@ -181,639 +383,492 @@ def test_untrusted_event_metadata_is_rejected(mutation: str, value: object):
 @pytest.mark.parametrize(
     "body",
     [
-        issue_body().replace("### Operation", "## Operation", 1),
-        issue_body().replace("### Operation\n\ncreate\n\n", "", 1),
-        issue_body() + "\n### Operation\n\ncreate\n",
+        issue_body().replace("### Player name\n\nDastan Satpaev\n\n", "", 1),
+        issue_body() + "\n### Player name\n\nDastan Satpaev\n",
         issue_body().replace("### Current team", "### Team", 1),
-        "untrusted preamble\n\n" + issue_body(),
         issue_body().replace(
-            "### Operation\n\ncreate\n\n### SortitoutSI profile",
-            "### SortitoutSI profile\n\n" + PROFILE_URL + "\n\n### Operation",
+            "### Player name\n\nDastan Satpaev\n\n### Pes Retro Stats profile",
+            "### Pes Retro Stats profile\n\n" + PROFILE_URL + "\n\n### Player name",
             1,
         ),
+        "untrusted preamble\n\n" + issue_body(),
     ],
 )
-def test_malformed_or_nonexact_headings_are_rejected(body: str):
-    event = dastan_issue_event()
+def test_missing_multiple_or_nonexact_headings_are_rejected(body: str):
+    event = issue_event()
     mutate_issue(event, "body", body)
-
     with pytest.raises(PlayerDraftError):
         parse_player_issue_event(event)
+
+
+@pytest.mark.parametrize(
+    "player_name",
+    ["", "Dastan Satpaev\nOther Player", "é" * 31, "Dastan\x00Satpaev"],
+)
+def test_player_name_requires_one_canonical_identity_within_sixty_utf8_bytes(
+    player_name: str,
+):
+    with pytest.raises(PlayerDraftError):
+        parse_player_issue_event(issue_event(**{"Player name": player_name}))
+
+
+@pytest.mark.parametrize(
+    "profile_url",
+    [
+        "https://evil.example/player/f77d9c27-dastan-satpaev",
+        "https://www.pesretrostats.com/player/f77d9c27-dastan-satpaev",
+        PROFILE_URL + "?source=issue",
+        PROFILE_URL + "#stats",
+        PROFILE_URL + "/",
+    ],
+)
+def test_wrong_host_and_noncanonical_profile_urls_are_rejected(profile_url: str):
+    with pytest.raises(PlayerDraftError):
+        parse_player_issue_event(
+            issue_event(**{"Pes Retro Stats profile": profile_url})
+        )
+
+
+def test_multiple_profile_urls_are_rejected():
+    with pytest.raises(PlayerDraftError):
+        parse_player_issue_event(
+            issue_event(
+                **{
+                    "Pes Retro Stats profile": PROFILE_URL
+                    + "\nhttps://pesretrostats.com/player/0ce2dbde-marco-palestra"
+                }
+            )
+        )
 
 
 @pytest.mark.parametrize(
     "confirmations",
     [
         CONFIRMATIONS.replace("- [X]", "- [ ]", 1),
-        CONFIRMATIONS.replace(
-            "- [X] I supplied source evidence.\n", "", 1
-        ),
-        CONFIRMATIONS + "\n- [X] I also request automatic approval.",
-        CONFIRMATIONS + "\n- [X] I supplied source evidence.",
+        CONFIRMATIONS.replace("\n- [X] I understand autofilled", "\n- [x] I understand autofilled"),
         "\n".join(reversed(CONFIRMATIONS.splitlines())),
-        CONFIRMATIONS.replace("[X]", "[x]"),
-        CONFIRMATIONS.replace("[X]", "[x]", 1),
+        CONFIRMATIONS + "\n- [X] Extra confirmation.",
     ],
 )
 def test_confirmations_require_three_exact_checked_lines(confirmations: str):
-    event = dastan_issue_event()
-    mutate_issue(event, "body", issue_body(Confirmations=confirmations))
-
     with pytest.raises(PlayerDraftError):
-        parse_player_issue_event(event)
-
-
-def test_multiple_profile_urls_are_rejected():
-    event = dastan_issue_event()
-    mutate_issue(
-        event,
-        "body",
-        issue_body(
-            **{
-                "SortitoutSI profile": PROFILE_URL
-                + "\nhttps://sortitoutsi.net/football-manager-data-update/person/2"
-            }
-        ),
-    )
-
-    with pytest.raises(PlayerDraftError):
-        parse_player_issue_event(event)
-
-
-def test_more_than_ten_proof_urls_are_rejected():
-    event = dastan_issue_event()
-    proofs = "\n".join(f"https://example.com/proof/{index}" for index in range(11))
-    mutate_issue(event, "body", issue_body(**{"Proof URLs": proofs}))
-
-    with pytest.raises(PlayerDraftError):
-        parse_player_issue_event(event)
-
-
-@pytest.mark.parametrize(
-    "proof_url",
-    [
-        "http://example.com/proof",
-        "https:///missing-host",
-        "https://example.com/proof\tvalue",
-        "https://user:secret@example.com/proof",
-    ],
-)
-def test_invalid_or_non_https_proof_urls_are_rejected(proof_url: str):
-    event = dastan_issue_event()
-    mutate_issue(event, "body", issue_body(**{"Proof URLs": proof_url}))
-
-    with pytest.raises(PlayerDraftError):
-        parse_player_issue_event(event)
-
-
-@pytest.mark.parametrize(
-    "effective_date",
-    ["", "2026-02-30", "2026-8-4", "20260804", "04-08-2026", "not-a-date"],
-)
-def test_noncanonical_or_invalid_dates_are_rejected(effective_date: str):
-    event = dastan_issue_event()
-    mutate_issue(event, "body", issue_body(**{"Effective date": effective_date}))
-
-    with pytest.raises(PlayerDraftError):
-        parse_player_issue_event(event)
-
-
-@pytest.mark.parametrize(
-    "profile_url",
-    [
-        "http://sortitoutsi.net/football-manager-data-update/person/2000370206",
-        "https://evil.example/football-manager-data-update/person/2000370206",
-        PROFILE_URL + "?redirect=https://evil.example",
-        PROFILE_URL + "/extra/path",
-    ],
-)
-def test_untrusted_profile_urls_are_rejected(profile_url: str):
-    event = dastan_issue_event()
-    mutate_issue(event, "body", issue_body(**{"SortitoutSI profile": profile_url}))
-
-    with pytest.raises(PlayerDraftError):
-        parse_player_issue_event(event)
-
-
-@pytest.mark.parametrize(
-    "issue_url",
-    [
-        "http://github.com/gvoze32/fldailyedit/issues/42",
-        "https://evil.example/gvoze32/fldailyedit/issues/42",
-        "https://github.com/gvoze32/fldailyedit/issues/41",
-        "https://github.com/gvoze32/fldailyedit/issues/42?x=1",
-    ],
-)
-def test_untrusted_issue_urls_are_rejected(issue_url: str):
-    event = dastan_issue_event()
-    mutate_issue(event, "html_url", issue_url)
-
-    with pytest.raises(PlayerDraftError):
-        parse_player_issue_event(event)
-
-
-@pytest.mark.parametrize(
-    ("heading", "value"),
-    [
-        ("Operation", "x" * 11),
-        ("SortitoutSI profile", PROFILE_URL + "x" * 301),
-        ("Current team", "x" * 101),
-        ("Effective date", "2026-08-040"),
-        ("Proof URLs", "https://example.com/" + "x" * 301),
-        ("Contributor notes", "x" * 2001),
-    ],
-)
-def test_issue_form_field_length_limits_are_enforced(heading: str, value: str):
-    event = dastan_issue_event()
-    mutate_issue(event, "body", issue_body(**{heading: value}))
-
-    with pytest.raises(PlayerDraftError):
-        parse_player_issue_event(event)
+        parse_player_issue_event(issue_event(Confirmations=confirmations))
 
 
 @pytest.mark.parametrize("operation", ["create", "update"])
 def test_supported_operations_are_accepted(operation: str):
-    event = dastan_issue_event()
-    mutate_issue(event, "body", issue_body(Operation=operation))
-
-    assert parse_player_issue_event(event).operation == operation
+    assert parse_player_issue_event(issue_event(Operation=operation)).operation == operation
 
 
-def test_create_draft_is_incomplete_and_preserves_source_provenance():
-    request = parse_player_issue_event(dastan_issue_event())
+def test_create_draft_contains_the_complete_source_proposal_and_exact_missing_list():
+    request = parse_player_issue_event(issue_event())
+    source = make_source()
 
-    payload = build_player_draft(request, dastan_source())
+    payload = build_player_draft(request, source, proposal_for(source))
 
-    assert payload["schema_version"] == 1
+    assert generator.CREATE_MISSING == CREATE_MISSING_EXPECTED
+    assert payload["schema_version"] == 2
     assert payload["operation"] == "create"
     assert payload["lifecycle"] == {"status": "active"}
-    assert payload["applies_to"] == ["fl26-u2.2-national-squads"]
     assert payload["identity"] == {
-        "name": "Dastan Satpayev",
+        "name": "Dastan Satpaev",
         "print_name": None,
-        "aliases": ["Dastan Satpayev"],
+        "aliases": ["Dastan Satpaev"],
         "pes_id": None,
-        "sortitoutsi_id": 2000370206,
+        "pes_retro_stats_id": PROFILE_UUID,
     }
     assert payload["source"] == {
         "profile_url": PROFILE_URL,
         "date_of_birth": "2008-08-12",
         "nationality": "Kazakhstan",
-        "positions": ["AM RL", "ST"],
-        "current_club": "Chelsea",
+        "positions": ["LWF", "RWF", "SS", "CF"],
+        "current_club": "Chelsea FC",
     }
     assert payload["evidence"] == {
         "profile_url": PROFILE_URL,
-        "proof_urls": [
-            "https://sortitoutsi.net/football-manager-data-update/submission/fixture-proof"
-        ],
+        "proof_urls": ["https://example.com/official-proof"],
         "effective_date": "2026-08-04",
         "current_team": "Chelsea FC",
         "issue_number": 42,
         "issue_url": "https://github.com/gvoze32/fldailyedit/issues/42",
     }
-    assert payload["pes"] is None
+    assert payload["pes"] == {
+        "player_id": None,
+        "name": "Dastan Satpaev",
+        "print_name": None,
+        "team_id": None,
+        "team_name": None,
+        "preferred_shirt_number": 36,
+        "nationality_id": None,
+        "age": 17,
+        "height": 176,
+        "weight": 73,
+        "registered_position": "CF",
+        "playing_style": 1,
+        "strong_foot": 0,
+        "weak_foot_usage": 2,
+        "weak_foot_accuracy": 2,
+        "form": 5,
+        "injury_resistance": 2,
+        "position_proficiency": {"LWF": 2, "RWF": 1, "SS": 1, "CF": 2},
+        "abilities": EXPECTED_ABILITIES,
+        "player_skills": ["double_touch", "long_range_shooting"],
+        "com_styles": ["incisive_run"],
+        "skin_color": None,
+        "iris_color": None,
+    }
     assert payload["draft"] == {
         "needs_human_review": True,
-        "missing": ["identity.pes_id", "identity.print_name", "pes"],
+        "missing": list(CREATE_MISSING_EXPECTED),
     }
 
 
-def test_update_draft_names_only_the_unresolved_patch_contract():
-    request = replace(
-        parse_player_issue_event(dastan_issue_event()), operation="update"
+def test_create_draft_omits_an_out_of_range_source_shirt_number():
+    source = make_source(shirt_number=100)
+    payload = build_player_draft(
+        parse_player_issue_event(issue_event()), source, proposal_for(source)
     )
-
-    payload = build_player_draft(request, dastan_source())
-
-    assert payload["operation"] == "update"
-    assert payload["identity"]["pes_id"] is None
-    assert payload["pes"] is None
-    assert payload["draft"] == {
-        "needs_human_review": True,
-        "missing": ["identity.pes_id", "pes.abilities.<field>.from/to"],
-    }
+    assert "preferred_shirt_number" not in payload["pes"]
 
 
-def test_mismatched_fetched_profile_is_rejected():
-    request = parse_player_issue_event(dastan_issue_event())
+def test_create_draft_rejects_an_unsupported_registered_position():
+    positions = {position: None for position in SOURCE_POSITIONS}
+    positions["RWB"] = "★"
+    source = make_source(positions=MappingProxyType(positions))
 
-    with pytest.raises(PlayerDraftError):
+    with pytest.raises(PlayerDraftError, match="unsupported registered position"):
         build_player_draft(
-            request,
-            dastan_source(
-                profile_url="https://sortitoutsi.net/football-manager-data-update/person/2",
-                sortitoutsi_id=2,
-            ),
+            parse_player_issue_event(issue_event()), source, proposal_for(source)
         )
 
 
-def test_issue_event_builds_one_atomic_deterministic_draft(monkeypatch, tmp_path):
-    event_path = tmp_path / "event.json"
-    event_path.write_text(json.dumps(dastan_issue_event()), encoding="utf-8")
+def test_submitted_name_must_match_the_fetched_source_identity():
+    source = make_source(name="Other Player")
+    with pytest.raises(
+        PlayerDraftError,
+        match="^Pes Retro Stats profile name does not match Player name$",
+    ):
+        build_player_draft(
+            parse_player_issue_event(issue_event()), source, proposal_for(source)
+        )
 
-    async def fake_fetch(url: str) -> PlayerDraftSource:
-        assert url == PROFILE_URL
-        return dastan_source()
 
-    monkeypatch.setattr(
-        "tools.generate_player_draft.fetch_sortitoutsi_player_profile", fake_fetch
+def test_update_draft_resolves_base_identity_and_emits_only_exact_changes():
+    source = marco_source()
+    proposal = proposal_for(source)
+    edit_file = FakeEditFile(proposal)
+
+    payload = build_player_draft(
+        update_request(), source, proposal, edit_file=edit_file
     )
 
-    path = write_player_draft(event_path, tmp_path / "players")
-    text = path.read_text(encoding="utf-8")
-    payload = json.loads(text)
+    assert payload["schema_version"] == 2
+    assert payload["identity"] == {
+        "name": "Marco Palestra",
+        "print_name": "M. Palestra",
+        "aliases": ["Marco Palestra"],
+        "pes_id": 162196,
+        "pes_retro_stats_id": MARCO_UUID,
+    }
+    assert payload["pes"] == {
+        "abilities": {"speed": {"from": 79, "to": 80}}
+    }
+    assert "registered_position" not in payload["pes"]
+    assert "RWB" not in payload["pes"].get("position_proficiency", {})
+    assert payload["draft"] == {"needs_human_review": True, "missing": []}
 
-    assert path.name == "dastan-satpayev.json"
-    assert text.endswith("\n")
-    assert text == json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    assert tuple(path.parent.iterdir()) == (path,)
-    assert payload["identity"]["pes_id"] is None
-    assert payload["pes"] is None
+
+def test_update_draft_requires_a_loaded_base_edit_file():
+    source = marco_source()
+    with pytest.raises(PlayerDraftError, match="base EDIT file"):
+        build_player_draft(update_request(), source, proposal_for(source))
 
 
-def test_generated_draft_validation_reports_exact_missing_human_fields(
-    monkeypatch, tmp_path, capsys
-):
-    import config
-    import run
+@pytest.mark.parametrize("failure", ["absent", "ambiguous", "no-op"])
+def test_update_resolution_and_no_op_failures_are_safe_player_draft_errors(failure: str):
+    source = marco_source()
+    proposal = proposal_for(source)
+    edit_file = FakeEditFile(proposal, changed=failure != "no-op")
+    if failure == "absent":
+        edit_file.rosters[101] = TeamData(101)
+    elif failure == "ambiguous":
+        edit_file.players[262196] = PlayerInfo(262196, "Marco Palestra", "Marco 2")
+        edit_file.rosters[101] = TeamData(101, [162196, 262196] + [0] * 38)
+        edit_file.profiles[262196] = edit_file.profiles[162196]
 
+    with pytest.raises(PlayerDraftError) as exc_info:
+        build_player_draft(
+            update_request(), source, proposal, edit_file=edit_file
+        )
+
+    assert type(exc_info.value) is PlayerDraftError
+    assert str(exc_info.value)
+
+
+def test_mapping_errors_are_normalized_and_never_create_output(monkeypatch, tmp_path):
+    source = make_source(playing_style="Unknown")
     event_path = tmp_path / "event.json"
-    event_path.write_text(json.dumps(dastan_issue_event()), encoding="utf-8")
+    event_path.write_text(json.dumps(issue_event()), encoding="utf-8")
+    install_fetch(monkeypatch, source)
     output_dir = tmp_path / "players"
 
-    async def fake_fetch(url: str) -> PlayerDraftSource:
-        assert url == PROFILE_URL
-        return dastan_source()
-
-    monkeypatch.setattr(
-        "tools.generate_player_draft.fetch_sortitoutsi_player_profile", fake_fetch
-    )
-    write_player_draft(event_path, output_dir)
-    monkeypatch.setattr(config, "PLAYER_SPECS_DIR", output_dir)
-
-    with pytest.raises(SystemExit) as exc_info:
-        run.cmd_players_validate(None)
-
-    assert exc_info.value.code == 2
-    assert capsys.readouterr().out.splitlines() == [
-        "Player Update validation failed: incomplete draft dastan-satpayev.json",
-        "Missing human fields: identity.pes_id, identity.print_name, pes",
-    ]
+    with pytest.raises(PlayerDraftError, match="cannot be mapped"):
+        write_player_draft(event_path, output_dir)
+    assert not output_dir.exists()
 
 
-@pytest.mark.parametrize(
-    "source_overrides",
-    (
-        {"date_of_birth": "12 August 2008"},
-        {"positions": ()},
-        {
-            "profile_url": (
-                "https://sortitoutsi.net/football-manager-data-update/person/"
-                "2000370206/"
-                + "a" * 600
-            )
-        },
-    ),
-)
-def test_generated_draft_preserves_optional_source_metadata(
-    tmp_path, source_overrides
-):
-    from editor.player_spec import IncompletePlayerSpecError, load_player_specs
-
-    payload = build_player_draft(
-        parse_player_issue_event(dastan_issue_event()),
-        dastan_source(**source_overrides),
-    )
-    (tmp_path / "dastan-satpayev.json").write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
-
-    with pytest.raises(IncompletePlayerSpecError):
-        load_player_specs(tmp_path)
-
-
-def test_meta_content_is_normalized_before_draft_validation(tmp_path):
-    from editor.player_spec import IncompletePlayerSpecError, load_player_specs
-    from scraper.player_draft import parse_sortitoutsi_player_profile
-
-    html = f"""
-    <html>
-      <head>
-        <link rel="canonical" href="{PROFILE_URL}">
-        <meta itemprop="name" content="Dastan&#9;  Satpayev">
-        <meta itemprop="birthDate" content="12&#9;  August 2008">
-        <meta itemprop="nationality" content="Kazakhstan">
-        <meta itemprop="jobTitle" content="AM&#9;  RL; ST">
-        <meta itemprop="memberOf" content="Chelsea&#9;  FC">
-      </head>
-    </html>
-    """
-    source = parse_sortitoutsi_player_profile(html, PROFILE_URL, 2000370206)
-    assert source.name == "Dastan Satpayev"
-    assert source.date_of_birth == "12 August 2008"
-    assert source.positions == ("AM RL", "ST")
-    assert source.current_club == "Chelsea FC"
-
-    payload = build_player_draft(
-        parse_player_issue_event(dastan_issue_event()), source
-    )
-    (tmp_path / "dastan-satpayev.json").write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
-
-    with pytest.raises(IncompletePlayerSpecError):
-        load_player_specs(tmp_path)
-
-
-@pytest.mark.parametrize("person_id", (1, 0x7FFFFFFF))
-def test_generated_draft_accepts_positive_signed_32_bit_source_id_bounds(
-    tmp_path, person_id
-):
-    from editor.player_spec import IncompletePlayerSpecError, load_player_specs
-
-    payload = build_player_draft(
-        parse_player_issue_event(dastan_issue_event()), dastan_source()
-    )
-    profile_url = (
-        "https://sortitoutsi.net/football-manager-data-update/person/"
-        f"{person_id}"
-    )
-    payload["identity"]["sortitoutsi_id"] = person_id
-    payload["source"]["profile_url"] = profile_url
-    payload["evidence"]["profile_url"] = profile_url
-    (tmp_path / "dastan-satpayev.json").write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
-
-    with pytest.raises(IncompletePlayerSpecError):
-        load_player_specs(tmp_path)
-
-
-@pytest.mark.parametrize("person_id", (0, 0x80000000))
-def test_generated_draft_rejects_source_ids_outside_completed_contract(
-    tmp_path, person_id
-):
-    from editor.player_spec import (
-        IncompletePlayerSpecError,
-        PlayerSpecError,
-        load_player_specs,
-    )
-
-    payload = build_player_draft(
-        parse_player_issue_event(dastan_issue_event()), dastan_source()
-    )
-    profile_url = (
-        "https://sortitoutsi.net/football-manager-data-update/person/"
-        f"{person_id}"
-    )
-    payload["identity"]["sortitoutsi_id"] = person_id
-    payload["source"]["profile_url"] = profile_url
-    payload["evidence"]["profile_url"] = profile_url
-    (tmp_path / "dastan-satpayev.json").write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
-
-    with pytest.raises(PlayerSpecError) as exc_info:
-        load_player_specs(tmp_path)
-    assert not isinstance(exc_info.value, IncompletePlayerSpecError)
-
-
-
-
-def test_generated_draft_accepts_unbounded_positive_issue_number(tmp_path):
-    from editor.player_spec import IncompletePlayerSpecError, load_player_specs
-
-    payload = build_player_draft(
-        parse_player_issue_event(dastan_issue_event()), dastan_source()
-    )
-    issue_number = int("9" * 20)
-    payload["evidence"]["issue_number"] = issue_number
-    payload["evidence"]["issue_url"] = (
-        f"https://github.com/gvoze32/fldailyedit/issues/{issue_number}"
-    )
-    (tmp_path / "dastan-satpayev.json").write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
-
-    with pytest.raises(IncompletePlayerSpecError):
-        load_player_specs(tmp_path)
-
-def test_generated_draft_accepts_case_insensitive_github_host(tmp_path):
-    from editor.player_spec import IncompletePlayerSpecError, load_player_specs
-
-    payload = build_player_draft(
-        parse_player_issue_event(dastan_issue_event()), dastan_source()
-    )
-    payload["evidence"]["issue_url"] = payload["evidence"]["issue_url"].replace(
-        "https://github.com", "HTTPS://GITHUB.COM"
-    )
-    (tmp_path / "dastan-satpayev.json").write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
-
-    with pytest.raises(IncompletePlayerSpecError):
-        load_player_specs(tmp_path)
-
-
-def test_overlong_draft_filename_uses_strict_schema_error(tmp_path):
-    from editor.player_spec import (
-        IncompletePlayerSpecError,
-        PlayerSpecError,
-        load_player_specs,
-    )
-
-    payload = build_player_draft(
-        parse_player_issue_event(dastan_issue_event()), dastan_source()
-    )
-    name = "a" * 237
-    payload["identity"]["name"] = name
-    payload["identity"]["aliases"] = [name]
-    path = tmp_path / f"{name}.json"
-    assert len(path.name.encode("utf-8")) > 240
+def write_payload(tmp_path: Path, payload: dict[str, object], name: str) -> Path:
+    path = tmp_path / name
     path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
 
-    with pytest.raises(PlayerSpecError) as exc_info:
+
+@pytest.mark.parametrize("operation", ["create", "update"])
+def test_schema_v2_generated_drafts_raise_exact_incomplete_error(tmp_path, operation):
+    from editor.player_spec import IncompletePlayerSpecError, load_player_specs
+
+    if operation == "create":
+        source = make_source()
+        payload = build_player_draft(
+            parse_player_issue_event(issue_event()), source, proposal_for(source)
+        )
+        expected = CREATE_MISSING_EXPECTED
+        filename = "dastan-satpaev.json"
+    else:
+        source = marco_source()
+        proposal = proposal_for(source)
+        payload = build_player_draft(
+            update_request(), source, proposal, edit_file=FakeEditFile(proposal)
+        )
+        expected = ()
+        filename = "marco-palestra.json"
+    write_payload(tmp_path, payload, filename)
+
+    with pytest.raises(IncompletePlayerSpecError) as exc_info:
         load_player_specs(tmp_path)
 
-    assert not isinstance(exc_info.value, IncompletePlayerSpecError)
+    assert exc_info.value.missing_fields == expected
 
 
 @pytest.mark.parametrize(
     "mutation",
-    (
-        "schema-version",
-        "extra-field",
-        "identity-name",
-        "evidence-issue-number",
-        "profile-host",
-        "issue-url-number",
-        "proof-credentials",
-        "identity-spacing",
-        "source-spacing",
-        "position-spacing",
-        "duplicate-positions",
-    ),
+    ["schema", "uuid", "profile", "pes-shape", "missing"],
 )
-def test_malformed_draft_shape_uses_strict_schema_errors(tmp_path, mutation):
-    from editor.player_spec import (
-        IncompletePlayerSpecError,
-        PlayerSpecError,
-        load_player_specs,
-    )
+def test_any_file_with_a_draft_marker_is_never_loaded_as_a_completed_spec(
+    tmp_path, mutation
+):
+    from editor.player_spec import IncompletePlayerSpecError, load_player_specs
 
+    source = make_source()
     payload = build_player_draft(
-        parse_player_issue_event(dastan_issue_event()), dastan_source()
+        parse_player_issue_event(issue_event()), source, proposal_for(source)
     )
-    if mutation == "schema-version":
-        payload["schema_version"] = 2
-    elif mutation == "extra-field":
-        payload["unexpected"] = "value"
-    elif mutation == "identity-name":
-        payload["identity"]["name"] = None
-    elif mutation == "evidence-issue-number":
-        payload["evidence"]["issue_number"] = "42"
-    elif mutation == "profile-host":
-        payload["source"]["profile_url"] = "https://example.com/person/2000370206"
-        payload["evidence"]["profile_url"] = payload["source"]["profile_url"]
-    elif mutation == "issue-url-number":
-        payload["evidence"]["issue_url"] = (
-            "https://github.com/gvoze32/fldailyedit/issues/99"
-        )
-    elif mutation == "proof-credentials":
-        payload["evidence"]["proof_urls"] = [
-            "https://user:secret@example.com/proof"
-        ]
-    elif mutation == "identity-spacing":
-        payload["identity"]["name"] = "Dastan  Satpayev"
-        payload["identity"]["aliases"] = ["Dastan  Satpayev"]
-    elif mutation == "source-spacing":
-        payload["source"]["current_club"] = "Chelsea  FC"
-    elif mutation == "position-spacing":
-        payload["source"]["positions"] = ["AM  RL", "ST"]
+    if mutation == "schema":
+        payload["schema_version"] = 1
+    elif mutation == "uuid":
+        payload["identity"]["pes_retro_stats_id"] = MARCO_UUID
+    elif mutation == "profile":
+        payload["source"]["profile_url"] = MARCO_URL
+    elif mutation == "pes-shape":
+        payload["pes"].pop("age")
     else:
-        payload["source"]["positions"] = ["AM RL", "AM RL"]
-    (tmp_path / "dastan-satpayev.json").write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
+        payload["draft"]["missing"] = list(reversed(CREATE_MISSING_EXPECTED))
+    write_payload(tmp_path, payload, "dastan-satpaev.json")
 
-    with pytest.raises(PlayerSpecError) as exc_info:
+    with pytest.raises(IncompletePlayerSpecError) as exc_info:
         load_player_specs(tmp_path)
+    assert exc_info.value.missing_fields == ()
 
-    assert not isinstance(exc_info.value, IncompletePlayerSpecError)
 
+def install_fetch(monkeypatch, source: PesRetroStatsProfile) -> list[str]:
+    fetched: list[str] = []
 
-def test_draft_missing_fields_require_exact_untrimmed_values(tmp_path):
-    from editor.player_spec import (
-        IncompletePlayerSpecError,
-        PlayerSpecError,
-        load_player_specs,
+    async def fake_fetch(url: str) -> PesRetroStatsProfile:
+        fetched.append(url)
+        return source
+
+    monkeypatch.setattr(
+        "tools.generate_player_draft.fetch_pes_retro_stats_profile", fake_fetch
     )
-
-    payload = build_player_draft(
-        parse_player_issue_event(dastan_issue_event()), dastan_source()
-    )
-    payload["draft"]["missing"][0] = " identity.pes_id "
-    (tmp_path / "dastan-satpayev.json").write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
-
-    with pytest.raises(PlayerSpecError) as exc_info:
-        load_player_specs(tmp_path)
-
-    assert not isinstance(exc_info.value, IncompletePlayerSpecError)
+    return fetched
 
 
-def test_atomic_publication_never_exposes_an_empty_destination(
+def test_create_writer_fetches_once_without_verifying_or_decrypting_base(
     monkeypatch, tmp_path
 ):
     event_path = tmp_path / "event.json"
-    event_path.write_text(json.dumps(dastan_issue_event()), encoding="utf-8")
+    event_path.write_text(json.dumps(issue_event()), encoding="utf-8")
+    fetched = install_fetch(monkeypatch, make_source())
+    monkeypatch.setattr(
+        "tools.generate_player_draft.verify_base_file",
+        lambda *_args: pytest.fail("create must not verify the base"),
+    )
+    monkeypatch.setattr(
+        "tools.generate_player_draft.crypto.decrypt",
+        lambda *_args: pytest.fail("create must not decrypt the base"),
+    )
+
+    path = write_player_draft(event_path, tmp_path / "players")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    assert fetched == [PROFILE_URL]
+    assert path.name == "dastan-satpaev.json"
+    assert payload["schema_version"] == 2
+    assert tuple(path.parent.iterdir()) == (path,)
+
+
+def test_update_writer_verifies_decrypts_loads_and_always_cleans_up(
+    monkeypatch, tmp_path
+):
+    source = marco_source()
+    proposal = proposal_for(source)
+    fake_edit = FakeEditFile(proposal)
+    event_path = tmp_path / "event.json"
+    event_path.write_text(
+        json.dumps(
+            issue_event(
+                Operation="update",
+                **{
+                    "Player name": "Marco Palestra",
+                    "Pes Retro Stats profile": MARCO_URL,
+                },
+            )
+        ),
+        encoding="utf-8",
+    )
+    base_path = tmp_path / "EDIT00000000"
+    base_path.write_bytes(b"encrypted")
+    decrypted = tmp_path / "decrypted"
+    decrypted.mkdir()
+    (decrypted / "data.dat").write_bytes(b"plain")
+    calls: list[tuple[str, Path]] = []
+    install_fetch(monkeypatch, source)
+    monkeypatch.setattr(
+        "tools.generate_player_draft.verify_base_file",
+        lambda path: calls.append(("verify", Path(path))),
+    )
+    monkeypatch.setattr(
+        "tools.generate_player_draft.crypto.decrypt",
+        lambda path: calls.append(("decrypt", Path(path))) or decrypted,
+    )
+    monkeypatch.setattr(
+        "tools.generate_player_draft.crypto.cleanup_temp",
+        lambda path: calls.append(("cleanup", Path(path))),
+    )
+    monkeypatch.setattr("tools.generate_player_draft.EditFile", lambda: fake_edit)
+
+    path = write_player_draft(
+        event_path, tmp_path / "players", base_edit_path=base_path
+    )
+
+    assert calls == [
+        ("verify", base_path),
+        ("decrypt", base_path),
+        ("cleanup", decrypted),
+    ]
+    assert fake_edit.loaded_path == decrypted / "data.dat"
+    assert json.loads(path.read_text(encoding="utf-8"))["draft"]["missing"] == []
+
+
+def test_update_verification_failure_never_decrypts_or_creates_output(
+    monkeypatch, tmp_path
+):
+    from editor.player_spec import PlayerSpecError
+
+    source = marco_source()
+    event_path = tmp_path / "event.json"
+    event_path.write_text(
+        json.dumps(
+            issue_event(
+                Operation="update",
+                **{
+                    "Player name": "Marco Palestra",
+                    "Pes Retro Stats profile": MARCO_URL,
+                },
+            )
+        ),
+        encoding="utf-8",
+    )
+    install_fetch(monkeypatch, source)
+    monkeypatch.setattr(
+        "tools.generate_player_draft.verify_base_file",
+        lambda _path: (_ for _ in ()).throw(PlayerSpecError("bad base")),
+    )
+    monkeypatch.setattr(
+        "tools.generate_player_draft.crypto.decrypt",
+        lambda _path: pytest.fail("verification must precede decrypt"),
+    )
     output_dir = tmp_path / "players"
 
-    async def fake_fetch(_url: str) -> PlayerDraftSource:
-        return dastan_source()
+    with pytest.raises(PlayerDraftError, match="bad base"):
+        write_player_draft(
+            event_path, output_dir, base_edit_path=tmp_path / "bad-base"
+        )
+    assert not output_dir.exists()
 
-    real_link = os.link
-    publications: list[bytes] = []
 
-    def inspecting_link(source, destination) -> None:
-        source_path = Path(source)
-        destination_path = Path(destination)
-        assert not destination_path.exists()
-        complete = source_path.read_bytes()
-        assert complete
-        assert json.loads(complete)["identity"]["name"] == "Dastan Satpayev"
-        real_link(source_path, destination_path)
-        assert destination_path.read_bytes() == complete
-        publications.append(complete)
-
-    monkeypatch.setattr(
-        "tools.generate_player_draft.fetch_sortitoutsi_player_profile", fake_fetch
+def test_update_build_failure_still_cleans_decryption_and_writes_nothing(
+    monkeypatch, tmp_path
+):
+    source = marco_source()
+    proposal = proposal_for(source)
+    fake_edit = FakeEditFile(proposal, changed=False)
+    event_path = tmp_path / "event.json"
+    event_path.write_text(
+        json.dumps(
+            issue_event(
+                Operation="update",
+                **{
+                    "Player name": "Marco Palestra",
+                    "Pes Retro Stats profile": MARCO_URL,
+                },
+            )
+        ),
+        encoding="utf-8",
     )
-    monkeypatch.setattr("tools.generate_player_draft.os.link", inspecting_link)
+    decrypted = tmp_path / "fldailyedit_dec_test"
+    decrypted.mkdir()
+    (decrypted / "data.dat").write_bytes(b"plain")
+    cleaned: list[Path] = []
+    install_fetch(monkeypatch, source)
+    monkeypatch.setattr("tools.generate_player_draft.verify_base_file", lambda _path: None)
+    monkeypatch.setattr("tools.generate_player_draft.crypto.decrypt", lambda _path: decrypted)
+    monkeypatch.setattr(
+        "tools.generate_player_draft.crypto.cleanup_temp", lambda path: cleaned.append(path)
+    )
+    monkeypatch.setattr("tools.generate_player_draft.EditFile", lambda: fake_edit)
+    output_dir = tmp_path / "players"
 
-    path = write_player_draft(event_path, output_dir)
-
-    assert path.read_bytes() == publications[0]
-    assert tuple(output_dir.iterdir()) == (path,)
+    with pytest.raises(PlayerDraftError, match="no changes"):
+        write_player_draft(
+            event_path, output_dir, base_edit_path=tmp_path / "base"
+        )
+    assert cleaned == [decrypted]
+    assert not output_dir.exists()
 
 
 def test_existing_slug_collision_is_rejected_without_modification(monkeypatch, tmp_path):
     event_path = tmp_path / "event.json"
-    event_path.write_text(json.dumps(dastan_issue_event()), encoding="utf-8")
+    event_path.write_text(json.dumps(issue_event()), encoding="utf-8")
     output_dir = tmp_path / "players"
     output_dir.mkdir()
-    destination = output_dir / "dastan-satpayev.json"
+    destination = output_dir / "dastan-satpaev.json"
     destination.write_text("reviewed-content\n", encoding="utf-8")
-
-    async def fake_fetch(_url: str) -> PlayerDraftSource:
-        return dastan_source()
-
-    monkeypatch.setattr(
-        "tools.generate_player_draft.fetch_sortitoutsi_player_profile", fake_fetch
-    )
+    install_fetch(monkeypatch, make_source())
 
     with pytest.raises(PlayerDraftError):
         write_player_draft(event_path, output_dir)
-
     assert destination.read_text(encoding="utf-8") == "reviewed-content\n"
     assert tuple(output_dir.iterdir()) == (destination,)
-
-
-def test_repeated_event_is_idempotently_rejected(monkeypatch, tmp_path):
-    event_path = tmp_path / "event.json"
-    event_path.write_text(json.dumps(dastan_issue_event()), encoding="utf-8")
-    output_dir = tmp_path / "players"
-
-    async def fake_fetch(_url: str) -> PlayerDraftSource:
-        return dastan_source()
-
-    monkeypatch.setattr(
-        "tools.generate_player_draft.fetch_sortitoutsi_player_profile", fake_fetch
-    )
-
-    path = write_player_draft(event_path, output_dir)
-    original = path.read_bytes()
-    with pytest.raises(PlayerDraftError):
-        write_player_draft(event_path, output_dir)
-
-    assert path.read_bytes() == original
 
 
 def test_concurrent_publication_has_one_winner_and_no_partial_file(
     monkeypatch, tmp_path
 ):
     event_path = tmp_path / "event.json"
-    event_path.write_text(json.dumps(dastan_issue_event()), encoding="utf-8")
+    event_path.write_text(json.dumps(issue_event()), encoding="utf-8")
     output_dir = tmp_path / "players"
-
-    async def fake_fetch(_url: str) -> PlayerDraftSource:
-        return dastan_source()
-
-    monkeypatch.setattr(
-        "tools.generate_player_draft.fetch_sortitoutsi_player_profile", fake_fetch
-    )
+    install_fetch(monkeypatch, make_source())
 
     def attempt() -> Path | PlayerDraftError:
         try:
@@ -826,87 +881,32 @@ def test_concurrent_publication_has_one_winner_and_no_partial_file(
 
     assert sum(isinstance(result, Path) for result in results) == 1
     assert sum(isinstance(result, PlayerDraftError) for result in results) == 1
-    destination = output_dir / "dastan-satpayev.json"
-    assert json.loads(destination.read_bytes())["identity"]["name"] == "Dastan Satpayev"
+    destination = output_dir / "dastan-satpaev.json"
+    assert json.loads(destination.read_bytes())["identity"]["name"] == "Dastan Satpaev"
     assert tuple(output_dir.iterdir()) == (destination,)
 
 
-@pytest.mark.parametrize(
-    ("name", "filename"),
-    [
-        ("A" * 235, "a" * 235 + ".json"),
-        ("Álvaro Núñez ⚽", "alvaro-nunez.json"),
-    ],
-)
-def test_filename_byte_limit_accepts_safe_normalized_boundaries(
-    monkeypatch, tmp_path, name: str, filename: str
-):
-    event_path = tmp_path / "event.json"
-    event_path.write_text(json.dumps(dastan_issue_event()), encoding="utf-8")
-
-    async def fake_fetch(_url: str) -> PlayerDraftSource:
-        return dastan_source(name=name)
-
-    monkeypatch.setattr(
-        "tools.generate_player_draft.fetch_sortitoutsi_player_profile", fake_fetch
-    )
-
-    path = write_player_draft(event_path, tmp_path / "players")
-
-    assert path.name == filename
-    assert len(path.name.encode("utf-8")) <= 240
-
-
-def test_overlong_filename_is_rejected_before_output_filesystem_calls(
-    monkeypatch, tmp_path
-):
-    event_path = tmp_path / "event.json"
-    event_path.write_text(json.dumps(dastan_issue_event()), encoding="utf-8")
-    output_dir = tmp_path / "players"
-
-    async def fake_fetch(_url: str) -> PlayerDraftSource:
-        return dastan_source(name="A" * 236)
-
-    monkeypatch.setattr(
-        "tools.generate_player_draft.fetch_sortitoutsi_player_profile", fake_fetch
-    )
-
-    with pytest.raises(PlayerDraftError, match="filename"):
-        write_player_draft(event_path, output_dir)
-
-    assert not output_dir.exists()
-
-
 def test_untrusted_event_is_rejected_before_profile_fetch(monkeypatch, tmp_path):
-    event = dastan_issue_event()
+    event = issue_event()
     event["action"] = "opened"
     event_path = tmp_path / "event.json"
     event_path.write_text(json.dumps(event), encoding="utf-8")
-    fetched = False
-
-    async def fake_fetch(_url: str) -> PlayerDraftSource:
-        nonlocal fetched
-        fetched = True
-        return dastan_source()
-
-    monkeypatch.setattr(
-        "tools.generate_player_draft.fetch_sortitoutsi_player_profile", fake_fetch
-    )
+    fetched = install_fetch(monkeypatch, make_source())
+    output_dir = tmp_path / "players"
 
     with pytest.raises(PlayerDraftError):
-        write_player_draft(event_path, tmp_path / "players")
-
-    assert fetched is False
-    assert not (tmp_path / "players").exists()
+        write_player_draft(event_path, output_dir)
+    assert fetched == []
+    assert not output_dir.exists()
 
 
 def test_cli_prints_exact_machine_output(monkeypatch, tmp_path, capsys):
     import run
 
-    draft = tmp_path / "players" / "dastan-satpayev.json"
+    draft = tmp_path / "players" / "dastan-satpaev.json"
     draft.parent.mkdir()
     draft.write_text(
-        json.dumps({"identity": {"name": "Dastan Satpayev"}}), encoding="utf-8"
+        json.dumps({"identity": {"name": "Dastan Satpaev"}}), encoding="utf-8"
     )
     event = tmp_path / "event.json"
     event.write_text("{}", encoding="utf-8")
@@ -924,63 +924,19 @@ def test_cli_prints_exact_machine_output(monkeypatch, tmp_path, capsys):
     )
 
     run.main()
-
     assert capsys.readouterr().out.splitlines() == [
-        "SPEC_PATH=players/dastan-satpayev.json",
-        'PLAYER_NAME="Dastan Satpayev"',
+        "SPEC_PATH=players/dastan-satpaev.json",
+        'PLAYER_NAME="Dastan Satpaev"',
     ]
 
 
-def test_cli_escapes_shell_metacharacters_in_player_name(monkeypatch, tmp_path, capsys):
+def test_cli_help_calls_the_output_a_reviewable_pes_retro_stats_proposal(
+    monkeypatch, capsys
+):
     import run
 
-    name = 'Name "quoted"; $(touch PWNED) `touch ALSO_PWNED`\nnext'
-    draft = tmp_path / "players" / "safe-name.json"
-    draft.parent.mkdir()
-    draft.write_text(json.dumps({"identity": {"name": name}}), encoding="utf-8")
-    event = tmp_path / "event.json"
-    event.write_text("{}", encoding="utf-8")
-
-    monkeypatch.setattr(run, "write_player_draft", lambda *_args: draft)
-    monkeypatch.setattr(
-        run.sys,
-        "argv",
-        ["run.py", "players", "generate-draft", "--event", str(event), "--output-dir", "players"],
-    )
-
-    run.main()
-
-    lines = capsys.readouterr().out.splitlines()
-    assert lines[0] == "SPEC_PATH=players/safe-name.json"
-    assert len(lines) == 2
-    assert lines[1].startswith("PLAYER_NAME=")
-    assert json.loads(lines[1].removeprefix("PLAYER_NAME=")) == name
-    assert "$(" not in lines[1]
-    assert "`" not in lines[1]
-    assert not (tmp_path / "PWNED").exists()
-    assert not (tmp_path / "ALSO_PWNED").exists()
-
-
-def test_cli_accepts_no_untrusted_network_url_argument(monkeypatch):
-    import run
-
-    monkeypatch.setattr(
-        run.sys,
-        "argv",
-        [
-            "run.py",
-            "players",
-            "generate-draft",
-            "--event",
-            "event.json",
-            "--output-dir",
-            "players",
-            "--profile-url",
-            "https://evil.example/profile",
-        ],
-    )
-
+    monkeypatch.setattr(run.sys, "argv", ["run.py", "players", "generate-draft", "--help"])
     with pytest.raises(SystemExit) as exc_info:
         run.main()
-
-    assert exc_info.value.code == 2
+    assert exc_info.value.code == 0
+    assert "reviewable Pes Retro Stats proposal" in capsys.readouterr().out

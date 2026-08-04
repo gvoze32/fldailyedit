@@ -15,11 +15,20 @@ body:
       required: true
 
   - type: input
-    id: sortitoutsi_profile
+    id: player_name
     attributes:
-      label: SortitoutSI profile
-      description: Provide the canonical SortitoutSI person profile URL.
-      placeholder: https://sortitoutsi.net/football-manager-data-update/person/123456789
+      label: Player name
+      description: Enter the canonical player name exactly as shown on the Pes Retro Stats profile.
+      placeholder: Dastan Satpaev
+    validations:
+      required: true
+
+  - type: input
+    id: pes_retro_stats_profile
+    attributes:
+      label: Pes Retro Stats profile
+      description: Provide one canonical Pes Retro Stats player profile URL.
+      placeholder: https://pesretrostats.com/player/f77d9c27-dastan-satpaev
     validations:
       required: true
 
@@ -60,9 +69,9 @@ body:
       label: Confirmations
       description: Confirm every statement before submitting.
       options:
-      - label: I supplied source evidence.
+      - label: I supplied one canonical Pes Retro Stats player profile.
         required: true
-      - label: I did not derive PES ratings from Football Manager values.
+      - label: I understand autofilled PES values are unapproved proposals.
         required: true
       - label: I understand a maintainer must review the draft PR.
         required: true

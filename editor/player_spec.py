@@ -120,9 +120,6 @@ class SpecResult:
     reason: str
     diagnostic: str | None = None
 
-# Source-only generated drafts retain SortitoutSI identity until human completion.
-SORTITOUTSI_ID_MIN = 1
-SORTITOUTSI_ID_MAX = 0x7FFFFFFF
 
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
@@ -166,10 +163,7 @@ _DRAFT_EVIDENCE_FIELDS = frozenset(
         "issue_url",
     }
 )
-_DRAFT_PROFILE_URL_RE = re.compile(
-    r"https://(?:www\.)?sortitoutsi\.net/football-manager-data-update/person/"
-    r"(?P<person_id>[0-9]{1,20})(?:/[a-z0-9]+(?:-[a-z0-9]+)*)?\Z"
-)
+_DRAFT_PROFILE_URL_RE = _PES_RETRO_STATS_PROFILE_RE
 _DRAFT_ISSUE_PATH_RE = re.compile(
     r"/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/"
     r"(?P<issue_number>[1-9][0-9]*)\Z"
@@ -179,7 +173,7 @@ _IDENTITY_FIELDS = frozenset(
     {"name", "print_name", "aliases", "pes_id", "pes_retro_stats_id"}
 )
 _DRAFT_IDENTITY_FIELDS = frozenset(
-    {"name", "print_name", "aliases", "pes_id", "sortitoutsi_id"}
+    {"name", "print_name", "aliases", "pes_id", "pes_retro_stats_id"}
 )
 _EVIDENCE_FIELDS = frozenset(
     {"profile_url", "proof_urls", "effective_date", "reason"}
@@ -767,6 +761,93 @@ def _generated_draft_https_url(
     return url
 
 
+_CREATE_DRAFT_MISSING = (
+    "identity.pes_id",
+    "identity.print_name",
+    "pes.player_id",
+    "pes.print_name",
+    "pes.team_id",
+    "pes.team_name",
+    "pes.nationality_id",
+    "pes.skin_color",
+    "pes.iris_color",
+)
+
+
+def _validate_generated_create_pes(
+    value: object, identity_name: str, context: str
+) -> None:
+    pes = _object(value, context)
+    _validate_keys(pes, _CREATE_FIELDS, _CREATE_REQUIRED_FIELDS, context)
+    for field in (
+        "player_id",
+        "print_name",
+        "team_id",
+        "team_name",
+        "nationality_id",
+        "skin_color",
+        "iris_color",
+    ):
+        if pes[field] is not None:
+            raise PlayerSpecError(f"{context} {field} must be null")
+    if _validate_pes_string(_text(pes, "name", context), "name") != identity_name:
+        raise PlayerSpecError(f"{context} name must match identity name")
+
+    registered_position = _text(pes, "registered_position", context).upper()
+    if registered_position not in POSITION_NAMES:
+        raise PlayerSpecError(
+            f"{context} registered_position {registered_position!r} is unknown"
+        )
+    positions = _object(
+        pes.get("position_proficiency"), f"{context} position_proficiency"
+    )
+    unknown_positions = set(positions) - set(POSITION_NAMES)
+    if unknown_positions:
+        raise PlayerSpecError(
+            f"{context} position_proficiency has unknown positions: "
+            f"{sorted(unknown_positions)}"
+        )
+    for position in positions:
+        field = f"position_{position.lower()}"
+        _integer(
+            positions,
+            position,
+            0,
+            (1 << FIELD_SPECS[field].width) - 1,
+            f"{context} position_proficiency",
+        )
+    if positions.get(registered_position) != 2:
+        raise PlayerSpecError(
+            f"{context} registered_position must have position_proficiency 2"
+        )
+
+    abilities = _object(pes.get("abilities"), f"{context} abilities")
+    if set(abilities) != set(ABILITY_FIELDS):
+        raise PlayerSpecError(f"{context} abilities must contain every ability")
+    for field in ABILITY_FIELDS:
+        _integer(abilities, field, 40, 99, f"{context} abilities")
+
+    for field in (
+        "age",
+        "height",
+        "weight",
+        "playing_style",
+        "strong_foot",
+        "weak_foot_usage",
+        "weak_foot_accuracy",
+        "form",
+        "injury_resistance",
+    ):
+        _codec_integer(pes, field, context)
+    preferred_shirt_number = pes.get("preferred_shirt_number")
+    if preferred_shirt_number is not None:
+        _integer(pes, "preferred_shirt_number", 1, 99, context)
+    _named_values(
+        pes.get("player_skills"), f"{context} player_skills", PLAYER_SKILL_FIELDS
+    )
+    _named_values(pes.get("com_styles"), f"{context} com_styles", COM_STYLE_FIELDS)
+
+
 def _generated_draft_missing_fields(
     raw: Mapping[str, object], path: Path
 ) -> tuple[str, ...] | None:
@@ -774,10 +855,6 @@ def _generated_draft_missing_fields(
         return None
 
     context = f"player spec {path}"
-    expected_by_operation = {
-        "create": ("identity.pes_id", "identity.print_name", "pes"),
-        "update": ("identity.pes_id", "pes.abilities.<field>.from/to"),
-    }
     try:
         _validate_keys(
             raw,
@@ -785,12 +862,12 @@ def _generated_draft_missing_fields(
             _DRAFT_TOP_LEVEL_FIELDS,
             context,
         )
-        _integer(raw, "schema_version", 1, 1, context)
+        _integer(raw, "schema_version", 2, 2, context)
 
         operation = raw.get("operation")
-        if not isinstance(operation, str) or operation not in expected_by_operation:
+        if operation not in {"create", "update"}:
             raise PlayerSpecError(f"{context} operation must be create or update")
-        expected = expected_by_operation[operation]
+        expected = _CREATE_DRAFT_MISSING if operation == "create" else ()
 
         lifecycle_context = f"{context} lifecycle"
         lifecycle = _object(raw["lifecycle"], lifecycle_context)
@@ -820,24 +897,31 @@ def _generated_draft_missing_fields(
         name = _generated_source_text(
             identity["name"], f"{identity_context} name"
         )
-        if identity["print_name"] is not None or identity["pes_id"] is not None:
-            raise PlayerSpecError(
-                f"{identity_context} PES placeholders must be null"
-            )
+        if len(name.encode("utf-8")) > 60 or not normalize_player_identity(name):
+            raise PlayerSpecError(f"{identity_context} name is not canonical")
         if identity["aliases"] != [name]:
             raise PlayerSpecError(
-                f"{identity_context} aliases must contain the exact source name"
+                f"{identity_context} aliases must contain the exact submitted name"
             )
-        sortitoutsi_id = identity["sortitoutsi_id"]
-        if (
-            isinstance(sortitoutsi_id, bool)
-            or not isinstance(sortitoutsi_id, int)
-            or not (SORTITOUTSI_ID_MIN <= sortitoutsi_id <= SORTITOUTSI_ID_MAX)
-        ):
+        pes_retro_stats_id = _generated_draft_text(
+            identity["pes_retro_stats_id"],
+            f"{identity_context} pes_retro_stats_id",
+            36,
+        )
+        if not _PES_RETRO_STATS_UUID_RE.fullmatch(pes_retro_stats_id):
             raise PlayerSpecError(
-                f"{identity_context} sortitoutsi_id must be between "
-                f"{SORTITOUTSI_ID_MIN} and {SORTITOUTSI_ID_MAX}"
+                f"{identity_context} pes_retro_stats_id must be a canonical UUID"
             )
+        if operation == "create":
+            if identity["print_name"] is not None or identity["pes_id"] is not None:
+                raise PlayerSpecError(
+                    f"{identity_context} create PES placeholders must be null"
+                )
+        else:
+            _generated_source_text(
+                identity["print_name"], f"{identity_context} print_name"
+            )
+            _integer(identity, "pes_id", 1, 0xFFFFFFFF, identity_context)
 
         if path.stem != player_slug(name):
             raise PlayerSpecError(
@@ -862,11 +946,21 @@ def _generated_draft_missing_fields(
         profile_match = _DRAFT_PROFILE_URL_RE.fullmatch(source_profile)
         if (
             profile_match is None
-            or int(profile_match.group("person_id")) != sortitoutsi_id
+            or profile_match.group("prefix") != pes_retro_stats_id[:8]
         ):
             raise PlayerSpecError(
                 f"{source_context} profile_url must match the source identity"
             )
+        birth_date = _generated_source_text(
+            source["date_of_birth"], f"{source_context} date_of_birth"
+        )
+        if not _ISO_DATE_RE.fullmatch(birth_date):
+            raise PlayerSpecError(
+                f"{source_context} date_of_birth must use YYYY-MM-DD"
+            )
+        date.fromisoformat(birth_date)
+        for field in ("nationality", "current_club"):
+            _generated_source_text(source[field], f"{source_context} {field}")
         positions = source["positions"]
         if not isinstance(positions, list):
             raise PlayerSpecError(f"{source_context} positions must be a list")
@@ -878,10 +972,6 @@ def _generated_draft_missing_fields(
             raise PlayerSpecError(
                 f"{source_context} positions must not contain duplicates"
             )
-        for field in ("date_of_birth", "nationality", "current_club"):
-            value = source[field]
-            if value is not None:
-                _generated_source_text(value, f"{source_context} {field}")
 
         evidence_context = f"{context} evidence"
         evidence = _object(raw["evidence"], evidence_context)
@@ -916,10 +1006,7 @@ def _generated_draft_missing_fields(
         effective_date = _generated_draft_text(
             evidence["effective_date"], f"{evidence_context} effective_date", 10
         )
-        if (
-            evidence["effective_date"] != effective_date
-            or not _ISO_DATE_RE.fullmatch(effective_date)
-        ):
+        if not _ISO_DATE_RE.fullmatch(effective_date):
             raise PlayerSpecError(
                 f"{evidence_context} effective_date must use YYYY-MM-DD"
             )
@@ -955,8 +1042,13 @@ def _generated_draft_missing_fields(
             raise PlayerSpecError(
                 f"{evidence_context} profile_url must match source profile_url"
             )
-        if raw["pes"] is not None:
-            raise PlayerSpecError(f"{context} pes must be null")
+
+        if operation == "create":
+            _validate_generated_create_pes(
+                raw["pes"], name, f"{context} create PES proposal"
+            )
+        else:
+            _load_update(raw["pes"])
 
         draft_context = f"{context} draft"
         draft = _object(raw["draft"], draft_context)
@@ -976,7 +1068,7 @@ def _generated_draft_missing_fields(
             )
         return expected
     except (PlayerSpecError, ValueError):
-        return None
+        return ()
 
 
 def _load_one_spec(path: Path) -> PlayerSpec:

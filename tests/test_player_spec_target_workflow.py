@@ -8,7 +8,11 @@ from pathlib import Path
 import pytest
 
 
-WORKFLOW_PATH = Path(".github/workflows/player-spec-pr.yml")
+WORKFLOW_PATH = Path(".github/workflows/validate-player-update-pr.yml")
+
+
+def test_legacy_target_workflow_path_is_absent():
+    assert not Path(".github/workflows/player-spec-pr.yml").exists()
 
 
 def _step_script(name: str) -> str:

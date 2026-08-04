@@ -1777,7 +1777,7 @@ def _machine_path_value(value: str) -> str:
 
 
 def cmd_players_generate_draft(args) -> None:
-    """Generate one source-only draft from a trusted issue-event file."""
+    """Generate one reviewable Pes Retro Stats proposal from a trusted issue event."""
     output_dir = Path(args.output_dir)
     path = write_player_draft(Path(args.event), output_dir)
     try:
@@ -2077,7 +2077,9 @@ def main():
     )
     p_players_validate.set_defaults(func=cmd_players_validate)
     p_players_generate = players_sub.add_parser(
-        "generate-draft", help="Generate an incomplete Player Update from an issue event"
+        "generate-draft",
+        help="Generate a reviewable Pes Retro Stats proposal from an issue event",
+        description="Generate a reviewable Pes Retro Stats proposal from an issue event.",
     )
     p_players_generate.add_argument(
         "--event", required=True, help="Path to a trusted GitHub issue-event JSON file"
