@@ -23,6 +23,7 @@ _PERSON_PATH_RE = re.compile(
 _POSITION_SEPARATOR_RE = re.compile(r"\s*[,;|]\s*")
 _CHARSET_RE = re.compile(r"(?:^|;)\s*charset\s*=\s*[\"']?([^;\"'\s]+)", re.I)
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+_MAX_PERSON_ID_DIGITS = 20
 _UNAVAILABLE_MESSAGE = "SortitoutSI profile is unavailable"
 _INVALID_URL_MESSAGE = "Invalid SortitoutSI person URL"
 
@@ -47,7 +48,12 @@ class PlayerDraftSource:
 def parse_sortitoutsi_person_url(url: str) -> tuple[int, str]:
     """Validate and canonicalize a public SortitoutSI person URL."""
 
-    if not isinstance(url, str) or not url or url != url.strip():
+    if (
+        not isinstance(url, str)
+        or not url
+        or url != url.strip()
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in url)
+    ):
         raise DraftSourceError(_INVALID_URL_MESSAGE)
 
     try:
@@ -70,7 +76,13 @@ def parse_sortitoutsi_person_url(url: str) -> tuple[int, str]:
     if path_match is None:
         raise DraftSourceError(_INVALID_URL_MESSAGE)
 
-    person_id = int(path_match.group("person_id"))
+    person_id_text = path_match.group("person_id")
+    if len(person_id_text) > _MAX_PERSON_ID_DIGITS:
+        raise DraftSourceError(_INVALID_URL_MESSAGE)
+    try:
+        person_id = int(person_id_text)
+    except (ValueError, OverflowError):
+        raise DraftSourceError(_INVALID_URL_MESSAGE) from None
     canonical_url = urlunsplit(("https", host, parsed.path, "", ""))
     return person_id, canonical_url
 
@@ -192,16 +204,25 @@ def _is_person_object(value: dict[str, Any]) -> bool:
 
 
 def _structured_text(value: Any) -> str | None:
+    try:
+        return _structured_text_unchecked(value)
+    except RecursionError:
+        raise _unavailable() from None
+
+
+def _structured_text_unchecked(value: Any) -> str | None:
     if isinstance(value, str):
         normalized = _normalize_text(value)
         return normalized or None
     if isinstance(value, dict):
         for key in ("name", "@value"):
-            text = _structured_text(value.get(key))
+            text = _structured_text_unchecked(value.get(key))
             if text:
                 return text
     if isinstance(value, list):
-        values = [text for item in value if (text := _structured_text(item))]
+        values = [
+            text for item in value if (text := _structured_text_unchecked(item))
+        ]
         if values:
             return ", ".join(values)
     return None
@@ -261,20 +282,16 @@ def _unavailable() -> DraftSourceError:
     return DraftSourceError(_UNAVAILABLE_MESSAGE)
 
 
-def _profile_identity_urls(
-    parser: _ProfileHTMLParser,
-    person_objects: Iterable[dict[str, Any]],
-) -> list[str]:
-    urls = list(parser.canonical_urls)
-    for person in person_objects:
-        for key in ("@id", "url", "mainEntityOfPage"):
-            value = person.get(key)
-            if isinstance(value, str):
-                urls.append(value)
-            elif isinstance(value, dict):
-                nested_url = value.get("@id") or value.get("url")
-                if isinstance(nested_url, str):
-                    urls.append(nested_url)
+def _person_identity_urls(person: dict[str, Any]) -> list[str]:
+    urls: list[str] = []
+    for key in ("@id", "url", "mainEntityOfPage"):
+        value = person.get(key)
+        if isinstance(value, str):
+            urls.append(value)
+        elif isinstance(value, dict):
+            nested_url = value.get("@id") or value.get("url")
+            if isinstance(nested_url, str):
+                urls.append(nested_url)
     return urls
 
 
@@ -315,33 +332,56 @@ def parse_sortitoutsi_player_profile(
     try:
         parser.feed(html)
         parser.close()
-    except (UnicodeError, ValueError):
+    except (RecursionError, UnicodeError, ValueError):
         raise _unavailable() from None
 
     person_objects: list[dict[str, Any]] = []
-    for script in parser.json_ld_scripts:
-        try:
-            structured_data = json.loads(script)
-        except (json.JSONDecodeError, TypeError):
-            continue
-        person_objects.extend(
-            value for value in _iter_json_objects(structured_data) if _is_person_object(value)
-        )
+    try:
+        for script in parser.json_ld_scripts:
+            try:
+                structured_data = json.loads(script)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            person_objects.extend(
+                value
+                for value in _iter_json_objects(structured_data)
+                if _is_person_object(value)
+            )
+    except RecursionError:
+        raise _unavailable() from None
 
-    identity_urls = _profile_identity_urls(parser, person_objects)
-    if not identity_urls:
-        raise _unavailable()
-    identity_ids: list[int] = []
-    for identity_url in identity_urls:
+    has_page_identity = False
+    for identity_url in parser.canonical_urls:
         try:
             identity_id, _ = parse_sortitoutsi_person_url(identity_url)
         except DraftSourceError:
             raise _unavailable() from None
-        identity_ids.append(identity_id)
-    if any(identity_id != sortitoutsi_id for identity_id in identity_ids):
-        raise _unavailable()
+        if identity_id != sortitoutsi_id:
+            raise _unavailable()
+        has_page_identity = True
 
-    person = person_objects[0] if person_objects else {}
+    matching_people: list[dict[str, Any]] = []
+    for candidate in person_objects:
+        candidate_ids: list[int] = []
+        for identity_url in _person_identity_urls(candidate):
+            try:
+                identity_id, _ = parse_sortitoutsi_person_url(identity_url)
+            except DraftSourceError:
+                continue
+            candidate_ids.append(identity_id)
+        if sortitoutsi_id in candidate_ids:
+            if any(identity_id != sortitoutsi_id for identity_id in candidate_ids):
+                raise _unavailable()
+            matching_people.append(candidate)
+
+    if person_objects:
+        if len(matching_people) != 1:
+            raise _unavailable()
+        person = matching_people[0]
+    else:
+        person = {}
+    if not has_page_identity and not matching_people:
+        raise _unavailable()
     labeled = _labeled_values(parser)
     item_properties = {
         _normalized_label(name): value for name, value in parser.item_properties

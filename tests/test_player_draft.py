@@ -86,8 +86,9 @@ class _FakeContent:
 class _FakeResponse:
     def __init__(
         self,
-        body,
+        body=None,
         *,
+        chunks=None,
         url=PROFILE_URL,
         status=200,
         content_type="text/html; charset=utf-8",
@@ -95,19 +96,28 @@ class _FakeResponse:
         history=(),
     ):
         data = body.encode("utf-8") if isinstance(body, str) else body
-        self.content = _FakeContent((data,))
+        self.content = _FakeContent(tuple(chunks) if chunks is not None else (data,))
         self.url = url
         self.status = status
         self.history = history
         self.headers = {"Content-Type": content_type}
+        self.entered = False
+        self.exited = False
         if content_length is not None:
             self.headers["Content-Length"] = str(content_length)
 
     async def __aenter__(self):
+        self.entered = True
         return self
 
     async def __aexit__(self, exc_type, exc, traceback):
+        self.exited = True
         return False
+
+
+class _FakeRedirect:
+    def __init__(self, url):
+        self.url = url
 
 
 class _FakeSession:
@@ -115,14 +125,20 @@ class _FakeSession:
     options = None
     requested_url = None
     allow_redirects = None
+    last_instance = None
 
     def __init__(self, **options):
         type(self).options = options
+        type(self).last_instance = self
+        self.entered = False
+        self.exited = False
 
     async def __aenter__(self):
+        self.entered = True
         return self
 
     async def __aexit__(self, exc_type, exc, traceback):
+        self.exited = True
         return False
 
     def get(self, url, *, allow_redirects):
@@ -136,6 +152,7 @@ def _install_response(monkeypatch, response):
     _FakeSession.options = None
     _FakeSession.requested_url = None
     _FakeSession.allow_redirects = None
+    _FakeSession.last_instance = None
     monkeypatch.setattr(player_draft.aiohttp, "ClientSession", _FakeSession)
 
 
@@ -170,6 +187,25 @@ def test_parse_person_url_rejects_noncanonical_boundaries(url):
         parse_sortitoutsi_person_url(url)
 
 
+@pytest.mark.parametrize("control", ("\t", "\r", "\n", "\x00", "\x1f", "\x7f"))
+def test_parse_person_url_rejects_raw_ascii_control_characters(control):
+    url = PROFILE_URL.replace("/football-manager", f"/{control}football-manager")
+
+    with pytest.raises(DraftSourceError, match="Invalid SortitoutSI person URL"):
+        parse_sortitoutsi_person_url(url)
+
+
+@pytest.mark.parametrize("digit_count", (21, 5000))
+def test_parse_person_url_rejects_unbounded_numeric_ids(digit_count):
+    url = (
+        "https://sortitoutsi.net/football-manager-data-update/person/"
+        + ("9" * digit_count)
+    )
+
+    with pytest.raises(DraftSourceError, match="Invalid SortitoutSI person URL"):
+        parse_sortitoutsi_person_url(url)
+
+
 def test_parse_profile_extracts_structured_source_metadata_before_labeled_html():
     source = parse_sortitoutsi_player_profile(
         DASTAN_PROFILE_HTML,
@@ -197,6 +233,67 @@ def test_parse_profile_extracts_structured_source_metadata_before_labeled_html()
     )
     for inferred_field in ("ca", "pa", "abilities", "pes", "rating"):
         assert not hasattr(source, inferred_field)
+
+
+def test_parse_profile_selects_the_unique_person_with_the_requested_identity():
+    html = f"""
+    <html><head>
+      <link rel="canonical" href="{PROFILE_URL}">
+      <script type="application/ld+json">
+        {{
+          "@graph": [
+            {{
+              "@type": "Person",
+              "@id": "https://sortitoutsi.net/football-manager-data-update/person/111/unrelated",
+              "name": "Unrelated Person"
+            }},
+            {{
+              "@type": "Person",
+              "url": "{PROFILE_URL}/dastan-satpayev",
+              "name": "Dastan Satpayev",
+              "birthDate": "2008-08-12"
+            }}
+          ]
+        }}
+      </script>
+    </head><body></body></html>
+    """
+
+    source = parse_sortitoutsi_player_profile(html, PROFILE_URL, 2000370206)
+
+    assert source.name == "Dastan Satpayev"
+    assert source.date_of_birth == "2008-08-12"
+
+
+def test_parse_profile_rejects_ambiguous_people_with_the_requested_identity():
+    html = f"""
+    <html><head>
+      <link rel="canonical" href="{PROFILE_URL}">
+      <script type="application/ld+json">
+        {{
+          "@graph": [
+            {{"@type": "Person", "@id": "{PROFILE_URL}", "name": "First Person"}},
+            {{"@type": "Person", "url": "{PROFILE_URL}/second", "name": "Second Person"}}
+          ]
+        }}
+      </script>
+    </head><body></body></html>
+    """
+
+    with pytest.raises(DraftSourceError, match="^SortitoutSI profile is unavailable$"):
+        parse_sortitoutsi_player_profile(html, PROFILE_URL, 2000370206)
+
+
+def test_parse_profile_normalizes_recursive_json_ld_failure():
+    recursive_json = '{"@graph":' * 1200 + "[]" + "}" * 1200
+    html = (
+        f'<html><head><link rel="canonical" href="{PROFILE_URL}">'
+        f'<script type="application/ld+json">{recursive_json}</script>'
+        "</head><body><h1>Dastan Satpayev</h1></body></html>"
+    )
+
+    with pytest.raises(DraftSourceError, match="^SortitoutSI profile is unavailable$"):
+        parse_sortitoutsi_player_profile(html, PROFILE_URL, 2000370206)
 
 
 def test_parse_profile_falls_back_to_labeled_html_and_retains_source_text():
@@ -243,14 +340,18 @@ def test_parse_profile_rejects_mismatched_person_id():
 
 def test_fetch_uses_existing_headers_timeout_and_allowed_canonical_redirect(monkeypatch):
     redirected_url = PROFILE_URL + "/dastan-satpayev"
-    redirected_html = DASTAN_PROFILE_HTML.replace(
-        PROFILE_URL + "/dastan-satpayev",
-        redirected_url,
+    response = _FakeResponse(
+        DASTAN_PROFILE_HTML,
+        url=redirected_url,
+        history=(
+            _FakeRedirect(PROFILE_URL),
+            _FakeRedirect(
+                "https://www.sortitoutsi.net/football-manager-data-update/"
+                "person/2000370206/dastan-satpayev"
+            ),
+        ),
     )
-    _install_response(
-        monkeypatch,
-        _FakeResponse(redirected_html, url=redirected_url),
-    )
+    _install_response(monkeypatch, response)
 
     source = asyncio.run(fetch_sortitoutsi_player_profile(PROFILE_URL + "?from=test"))
 
@@ -260,29 +361,54 @@ def test_fetch_uses_existing_headers_timeout_and_allowed_canonical_redirect(monk
     assert _FakeSession.allow_redirects is True
     assert _FakeSession.options["headers"] == SORTITOUTSI_HEADERS
     assert _FakeSession.options["timeout"].total == 30
+    assert response.entered and response.exited
+    assert _FakeSession.last_instance.entered and _FakeSession.last_instance.exited
 
 
 @pytest.mark.parametrize(
     "response",
     (
-        _FakeResponse(DASTAN_PROFILE_HTML, url="https://evil.example/person/2000370206"),
         _FakeResponse(DASTAN_PROFILE_HTML, content_type="application/json"),
         _FakeResponse(DASTAN_PROFILE_HTML, status=503),
     ),
 )
-def test_fetch_rejects_off_host_redirect_non_html_and_http_error(monkeypatch, response):
+def test_fetch_rejects_non_html_and_http_error(monkeypatch, response):
     _install_response(monkeypatch, response)
 
     with pytest.raises(DraftSourceError, match="^SortitoutSI profile is unavailable$"):
         asyncio.run(fetch_sortitoutsi_player_profile(PROFILE_URL))
 
 
-def test_fetch_rejects_response_body_above_two_mibibytes(monkeypatch):
-    oversized = b"<html>" + (b"x" * (2 * 1024 * 1024)) + b"</html>"
-    _install_response(monkeypatch, _FakeResponse(oversized))
+def test_fetch_rejects_off_host_intermediate_redirect_with_allowed_final(monkeypatch):
+    response = _FakeResponse(
+        DASTAN_PROFILE_HTML,
+        url=PROFILE_URL + "/dastan-satpayev",
+        history=(
+            _FakeRedirect(PROFILE_URL),
+            _FakeRedirect(
+                "https://evil.example/football-manager-data-update/person/2000370206"
+            ),
+        ),
+    )
+    _install_response(monkeypatch, response)
 
     with pytest.raises(DraftSourceError, match="^SortitoutSI profile is unavailable$"):
         asyncio.run(fetch_sortitoutsi_player_profile(PROFILE_URL))
+
+    assert response.entered and response.exited
+    assert _FakeSession.last_instance.entered and _FakeSession.last_instance.exited
+
+
+def test_fetch_rejects_response_body_above_two_mibibytes(monkeypatch):
+    small_chunk = b"x" * (64 * 1024)
+    response = _FakeResponse(chunks=([small_chunk] * 32) + [b"x"])
+    _install_response(monkeypatch, response)
+
+    with pytest.raises(DraftSourceError, match="^SortitoutSI profile is unavailable$"):
+        asyncio.run(fetch_sortitoutsi_player_profile(PROFILE_URL))
+
+    assert response.entered and response.exited
+    assert _FakeSession.last_instance.entered and _FakeSession.last_instance.exited
 
 
 def test_fetch_rejects_declared_response_body_above_two_mibibytes(monkeypatch):
