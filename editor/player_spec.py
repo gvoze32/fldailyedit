@@ -108,6 +108,7 @@ class SpecResult:
     name: str
     status: str
     reason: str
+    diagnostic: str | None = None
 
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
@@ -445,7 +446,7 @@ def _load_create(value: object, identity: PlayerIdentity) -> CreatePlayerData:
     preferred_shirt_number = raw.get("preferred_shirt_number")
     if preferred_shirt_number is not None:
         preferred_shirt_number = _integer(
-            raw, "preferred_shirt_number", 1, 999, "create PES data"
+            raw, "preferred_shirt_number", 1, 99, "create PES data"
         )
 
     return CreatePlayerData(
@@ -697,12 +698,20 @@ def load_player_specs(
     return specs
 
 
-def _result(spec: PlayerSpec, status: str, reason: str, *, pes_id: int | None = None) -> SpecResult:
+def _result(
+    spec: PlayerSpec,
+    status: str,
+    reason: str,
+    *,
+    pes_id: int | None = None,
+    diagnostic: str | None = None,
+) -> SpecResult:
     return SpecResult(
         pes_id=spec.identity.pes_id if pes_id is None else pes_id,
         name=spec.identity.name,
         status=status,
         reason=reason,
+        diagnostic=diagnostic,
     )
 
 
@@ -838,6 +847,27 @@ def _decoded_patch_value(profile, entry: bytes, field: str) -> int:
     return _raw_codec_field(entry, field)
 
 
+def _required_update_markers(fields: set[str]) -> dict[str, int]:
+    markers: dict[str, int] = {}
+    if fields.intersection(ABILITY_FIELDS):
+        markers["edited_abilities"] = 1
+    if fields.intersection(
+        _UPDATE_DIRECT_FIELDS - {"registered_position", "playing_style"}
+    ):
+        markers["edited_basic_settings"] = 1
+    if "registered_position" in fields:
+        markers["edited_registered_position"] = 1
+    if any(field.startswith("position_") for field in fields):
+        markers["edited_playable_positions"] = 1
+    if "playing_style" in fields:
+        markers["edited_playing_style"] = 1
+    if any(field.startswith("skill_") for field in fields):
+        markers["edited_skills"] = 1
+    if any(field.startswith("com_style_") for field in fields):
+        markers["edited_com_styles"] = 1
+    return markers
+
+
 def _assess_update_state(
     edit_file: "EditFile",
     spec: PlayerSpec,
@@ -877,6 +907,12 @@ def _assess_update_state(
     if all_current:
         return _result(spec, "ready", "all_current"), entry
     if all_target:
+        markers = _required_update_markers(set(spec.patches))
+        if any(
+            _decoded_patch_value(profile, entry, field) != target
+            for field, target in markers.items()
+        ):
+            return _result(spec, "ready", "required_edit_marker_missing"), entry
         return _result(spec, "already_applied", "all_target"), entry
     return _result(spec, "conflict", "mixed_or_unexpected_values"), entry
 
@@ -893,21 +929,7 @@ def assess_update(
 
 def _effective_update_targets(spec: PlayerSpec) -> dict[str, int]:
     targets = {field: patch.target for field, patch in spec.patches.items()}
-    fields = set(spec.patches)
-    if fields.intersection(
-        _UPDATE_DIRECT_FIELDS - {"registered_position", "playing_style"}
-    ):
-        targets["edited_basic_settings"] = 1
-    if "registered_position" in fields:
-        targets["edited_registered_position"] = 1
-    if any(field.startswith("position_") for field in fields):
-        targets["edited_playable_positions"] = 1
-    if "playing_style" in fields:
-        targets["edited_playing_style"] = 1
-    if any(field.startswith("skill_") for field in fields):
-        targets["edited_skills"] = 1
-    if any(field.startswith("com_style_") for field in fields):
-        targets["edited_com_styles"] = 1
+    targets.update(_required_update_markers(set(spec.patches)))
     return targets
 
 
@@ -978,8 +1000,13 @@ def apply_player_spec(
             result = apply_update(edit_file, spec, all_players)
         else:
             result = _result(spec, "rejected", "unsupported_operation")
-    except Exception:
-        result = _result(spec, "rejected", "mutation_failed")
+    except Exception as exc:
+        result = _result(
+            spec,
+            "rejected",
+            "mutation_failed",
+            diagnostic=f"{type(exc).__name__}: {exc}",
+        )
 
     mutated = (
         edit_file._data != original_data

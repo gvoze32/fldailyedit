@@ -282,6 +282,36 @@ def test_create_values_obey_codec_widths_and_ability_range(tmp_path, path, value
         load_player_specs(tmp_path)
 
 
+@pytest.mark.parametrize("preferred_shirt_number", [1, 99])
+def test_create_preferred_shirt_number_accepts_allocator_boundaries(
+    tmp_path, preferred_shirt_number
+):
+    from editor.player_spec import load_player_specs
+
+    payload = valid_dastan_payload()
+    payload["pes"]["preferred_shirt_number"] = preferred_shirt_number
+    write_payload(tmp_path, "dastan-satpayev.json", payload)
+
+    spec = load_player_specs(tmp_path)[0]
+
+    assert spec.create is not None
+    assert spec.create.preferred_shirt_number == preferred_shirt_number
+
+
+@pytest.mark.parametrize("preferred_shirt_number", [0, 100])
+def test_create_preferred_shirt_number_rejects_values_outside_allocator_range(
+    tmp_path, preferred_shirt_number
+):
+    from editor.player_spec import PlayerSpecError, load_player_specs
+
+    payload = valid_dastan_payload()
+    payload["pes"]["preferred_shirt_number"] = preferred_shirt_number
+    write_payload(tmp_path, "dastan-satpayev.json", payload)
+
+    with pytest.raises(PlayerSpecError, match="preferred_shirt_number"):
+        load_player_specs(tmp_path)
+
+
 def test_validate_spec_set_rejects_normalized_aliases_and_sortitoutsi_ids(tmp_path):
     from editor.player_spec import PlayerSpecError, load_player_specs
 
@@ -806,6 +836,52 @@ def test_update_all_target_values_are_already_applied_without_mutation(tmp_path)
     assert bytes(edit_file._data) == before
 
 
+@pytest.mark.parametrize(
+    ("field", "current", "target", "required_marker"),
+    [
+        ("speed", 77, 80, "edited_abilities"),
+        ("nationality_id", 215, 216, "edited_basic_settings"),
+        ("skill_scissors_feint", 0, 1, "edited_skills"),
+    ],
+)
+def test_update_all_target_values_restore_missing_required_marker(
+    tmp_path,
+    field,
+    current,
+    target,
+    required_marker,
+):
+    from dataclasses import replace
+
+    from editor.player_codec import FIELD_SPECS, _read_field, patch_player_entry
+    from editor.player_spec import FieldPatch, apply_update
+
+    spec = replace(
+        marco_spec(tmp_path),
+        patches={field: FieldPatch(current=current, target=target)},
+    )
+    edit_file = make_player_spec_edit_file_with_palestra(**{field: target})
+    entry = edit_file.get_edited_player_entry(162196)
+    assert entry is not None
+    edit_file.replace_edited_player_entry(
+        162196,
+        patch_player_entry(entry, {required_marker: 0}),
+    )
+
+    result = apply_update(edit_file, spec, current_players(edit_file))
+
+    assert result.status == "updated"
+    updated_entry = edit_file.get_edited_player_entry(162196)
+    assert updated_entry is not None
+    assert _read_field(updated_entry, FIELD_SPECS[field]) == target
+    assert _read_field(updated_entry, FIELD_SPECS[required_marker]) == 1
+
+    before_second_run = bytes(edit_file._data)
+    second_result = apply_update(edit_file, spec, current_players(edit_file))
+    assert second_result.status == "already_applied"
+    assert bytes(edit_file._data) == before_second_run
+
+
 def test_update_mixed_current_and_target_values_conflict_without_mutation(tmp_path):
     from editor.player_spec import apply_update
 
@@ -1114,6 +1190,12 @@ def test_failed_mutation_rolls_back_only_that_spec(
         ("Dastan Satpayev", "created", "created_and_registered"),
         ("Marco Palestra", "rejected", expected_reason),
     ]
+    if failure_mode == "exception":
+        assert results[1].diagnostic == (
+            "RuntimeError: simulated backend failure"
+        )
+    else:
+        assert results[1].diagnostic is None
     assert edit_file.get_edited_player_entry(162196) == marco_before
     assert edit_file.get_team_roster(102).player_index(200000) != -1
     assert edit_file.get_all_players(include_base_db=False)[200000].name == (

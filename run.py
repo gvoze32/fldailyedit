@@ -1663,9 +1663,12 @@ def _print_player_spec_results(
 ) -> None:
     """Print deterministic semantic results and lifecycle/operation totals."""
     for result in results:
+        diagnostic = (
+            f"; diagnostic: {result.diagnostic}" if result.diagnostic else ""
+        )
         print(
             f"  {result.name} (PES ID {result.pes_id}): "
-            f"{result.status} ({result.reason})"
+            f"{result.status} ({result.reason}){diagnostic}"
         )
     counts = Counter(spec.lifecycle_status for spec in specs)
     operations = Counter(spec.operation for spec in specs)
@@ -1676,6 +1679,24 @@ def _print_player_spec_results(
         f"upstreamed={counts['upstreamed']}, retired={counts['retired']}, "
         f"create={operations['create']}, update={operations['update']}"
     )
+
+
+def _invalid_player_spec_validation_results(
+    specs: tuple[PlayerSpec, ...],
+    results: tuple[SpecResult, ...],
+    base_revision: str,
+) -> tuple[SpecResult, ...]:
+    invalid: list[SpecResult] = []
+    for spec, result in zip(specs, results, strict=True):
+        if spec.lifecycle_status in {"upstreamed", "retired"}:
+            valid = result.status == spec.lifecycle_status
+        elif base_revision not in spec.applies_to:
+            valid = result.status == "needs_review"
+        else:
+            valid = result.status in {"ready", "waiting"}
+        if not valid:
+            invalid.append(result)
+    return tuple(invalid)
 
 
 def _require_valid_edit(edit_file: EditFile, stage: str) -> None:
@@ -1712,6 +1733,17 @@ def cmd_players_validate(args) -> None:
         _require_valid_edit(edit_file, "Pristine base")
         results = _assess_player_specs(edit_file, specs, manifest.revision)
         _print_player_spec_results(specs, results)
+        invalid_results = _invalid_player_spec_validation_results(
+            specs,
+            results,
+            manifest.revision,
+        )
+        if invalid_results:
+            print(
+                "Player-spec semantic validation failed: "
+                f"{len(invalid_results)} current active spec(s) are invalid."
+            )
+            raise SystemExit(2)
     finally:
         crypto.cleanup_temp(decrypted)
 
@@ -1769,6 +1801,24 @@ def _verify_player_spec_output(output_path: Path) -> None:
         crypto.cleanup_temp(verified_decrypted)
 
 
+def _raise_for_player_spec_mutation_failures(
+    results: tuple[SpecResult, ...],
+) -> None:
+    failures = tuple(
+        result
+        for result in results
+        if result.status == "rejected" and result.reason == "mutation_failed"
+    )
+    if not failures:
+        return
+    print(
+        "Player-spec apply failed: "
+        f"{len(failures)} unexpected mutation error(s); "
+        "independent successful changes were preserved."
+    )
+    raise SystemExit(2)
+
+
 def cmd_players_apply(args) -> None:
     """Apply reviewed specs in an explicit locked save transaction."""
     manifest = load_base_manifest()
@@ -1818,6 +1868,7 @@ def cmd_players_apply(args) -> None:
         )
         if not changed_results:
             print("No player-spec changes to apply; no backup or output was written.")
+            _raise_for_player_spec_mutation_failures(results)
             return
 
         _require_valid_edit(edit_file, "Modified save")
@@ -1857,6 +1908,7 @@ def cmd_players_apply(args) -> None:
             f"Applied {len(audit_records)} player specs to {output_path}. "
             f"Backup: {backup_path}"
         )
+        _raise_for_player_spec_mutation_failures(results)
     finally:
         if decrypted is not None:
             crypto.cleanup_temp(decrypted)

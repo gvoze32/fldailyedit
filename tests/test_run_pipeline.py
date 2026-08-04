@@ -3,6 +3,10 @@
 from argparse import Namespace
 from types import SimpleNamespace
 
+import hashlib
+
+import pytest
+
 from editor.models import TeamData
 from scraper.models import MatchedTransfer, Transfer
 
@@ -304,6 +308,122 @@ def test_players_validate_rejects_wrong_pristine_base_digest_before_decrypt(
         raise AssertionError("wrong pristine-base digest must exit")
 
 
+def _prepare_players_validate_result(
+    monkeypatch,
+    tmp_path,
+    *,
+    result_status,
+    result_reason,
+    lifecycle_status="active",
+    applies_to=("expected-revision",),
+):
+    import run
+    from editor.player_spec import BaseManifest, SpecResult
+
+    base = tmp_path / "EDIT00000000"
+    base.write_bytes(b"pristine")
+    decrypted = tmp_path / "decrypted-validate"
+    decrypted.mkdir()
+    (decrypted / "data.dat").write_bytes(b"decrypted")
+    spec = SimpleNamespace(
+        lifecycle_status=lifecycle_status,
+        operation="update",
+        applies_to=applies_to,
+    )
+
+    class FakeEditFile:
+        def load(self, _path):
+            return None
+
+        def validate_integrity(self):
+            return {"valid": True, "errors": [], "warnings": [], "metrics": {}}
+
+    monkeypatch.setattr(run.config, "BASE_EDIT_PATH", base, raising=False)
+    monkeypatch.setattr(
+        run,
+        "load_base_manifest",
+        lambda: BaseManifest(
+            "expected-revision",
+            hashlib.sha256(b"pristine").hexdigest(),
+        ),
+    )
+    monkeypatch.setattr(run, "load_player_specs", lambda: (spec,))
+    monkeypatch.setattr(run, "validate_spec_set", lambda _specs: None)
+    monkeypatch.setattr(
+        run,
+        "_assess_player_specs",
+        lambda *_args: (
+            SpecResult(162196, "Marco Palestra", result_status, result_reason),
+        ),
+    )
+    monkeypatch.setattr(run, "EditFile", FakeEditFile)
+    monkeypatch.setattr(run.crypto, "decrypt", lambda _path: decrypted)
+    monkeypatch.setattr(run.crypto, "cleanup_temp", lambda _path: None)
+
+    return run.cmd_players_validate
+
+
+@pytest.mark.parametrize(
+    ("result_status", "result_reason"),
+    [
+        ("already_applied", "matching_player_exists"),
+        ("conflict", "mixed_or_unexpected_values"),
+        ("rejected", "pes_id_missing"),
+    ],
+)
+def test_players_validate_rejects_invalid_current_active_state(
+    monkeypatch,
+    tmp_path,
+    capsys,
+    result_status,
+    result_reason,
+):
+    command = _prepare_players_validate_result(
+        monkeypatch,
+        tmp_path,
+        result_status=result_status,
+        result_reason=result_reason,
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        command(Namespace())
+
+    assert exc_info.value.code == 2
+    output = capsys.readouterr().out
+    assert result_status in output
+    assert "semantic validation failed" in output
+
+
+@pytest.mark.parametrize(
+    ("result_status", "result_reason", "lifecycle_status", "applies_to"),
+    [
+        ("ready", "eligible", "active", ("expected-revision",)),
+        ("waiting", "destination_roster_full", "active", ("expected-revision",)),
+        ("needs_review", "base_revision_not_reviewed", "active", ("old-revision",)),
+        ("upstreamed", "included upstream", "upstreamed", ("expected-revision",)),
+        ("retired", "historical record", "retired", ("expected-revision",)),
+    ],
+)
+def test_players_validate_permits_applicable_and_history_states(
+    monkeypatch,
+    tmp_path,
+    result_status,
+    result_reason,
+    lifecycle_status,
+    applies_to,
+):
+    command = _prepare_players_validate_result(
+        monkeypatch,
+        tmp_path,
+        result_status=result_status,
+        result_reason=result_reason,
+        lifecycle_status=lifecycle_status,
+        applies_to=applies_to,
+    )
+
+    command(Namespace())
+
+
 def test_players_parser_dispatches_nested_apply(monkeypatch):
     import run
 
@@ -432,6 +552,153 @@ def test_players_apply_no_change_writes_nothing(monkeypatch, tmp_path, capsys):
     assert output.exists() is False
     assert source.read_bytes() == b"encrypted"
     assert "needs_review" in capsys.readouterr().out
+
+
+def _prepare_players_apply_results(monkeypatch, tmp_path, results):
+    import run
+    from editor.player_spec import BaseManifest, load_player_specs
+
+    calls = []
+    source = tmp_path / "EDIT00000000"
+    output = tmp_path / "updated"
+    source.write_bytes(b"encrypted")
+    decrypted = tmp_path / "decrypted-apply-results"
+    decrypted.mkdir()
+    (decrypted / "data.dat").write_bytes(b"decrypted")
+    result_ids = {result.pes_id for result in results}
+    specs = tuple(
+        spec for spec in load_player_specs() if spec.identity.pes_id in result_ids
+    )
+
+    class FakeEditFile:
+        def load(self, _path):
+            return None
+
+        def get_all_players(self, include_base_db=True):
+            return {}
+
+        def validate_integrity(self):
+            calls.append("validate")
+            return {"valid": True, "errors": [], "warnings": [], "metrics": {}}
+
+        def save(self, _path):
+            calls.append("save")
+
+    def encrypt(_decrypted, destination):
+        calls.append("encrypt")
+        destination.write_bytes(b"encrypted-output")
+
+    monkeypatch.setattr(run, "EditFile", FakeEditFile)
+    monkeypatch.setattr(
+        run,
+        "load_base_manifest",
+        lambda: BaseManifest("expected-revision", "0" * 64),
+    )
+    monkeypatch.setattr(run, "load_player_specs", lambda: specs)
+    monkeypatch.setattr(run, "validate_spec_set", lambda _specs: None)
+    monkeypatch.setattr(run, "apply_player_specs", lambda *_args: results)
+    monkeypatch.setattr(run.crypto, "decrypt", lambda _path: decrypted)
+    monkeypatch.setattr(run.crypto, "encrypt", encrypt)
+    monkeypatch.setattr(run.crypto, "cleanup_temp", lambda _path: None)
+    monkeypatch.setattr(
+        run.backup_mod,
+        "create_backup",
+        lambda _path: calls.append("backup") or tmp_path / "backup",
+    )
+    monkeypatch.setattr(
+        run,
+        "_verify_player_spec_output",
+        lambda _path: calls.append("verify"),
+    )
+    monkeypatch.setattr(
+        run.transfer_logger,
+        "log_transfer",
+        lambda **_record: calls.append("audit"),
+    )
+    monkeypatch.setattr(run.transfer_logger, "read_log", lambda _scope: [])
+    monkeypatch.setattr(
+        run.transfer_logger,
+        "save_reports",
+        lambda _records: calls.append("report"),
+    )
+
+    def invoke():
+        run.cmd_players_apply(
+            Namespace(
+                edit_file=str(source),
+                output=str(output),
+                in_place=False,
+                base_revision="expected-revision",
+            )
+        )
+
+    return invoke, calls, source, output
+
+
+def test_players_apply_failure_only_batch_exits_nonzero_without_output(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    from editor.player_spec import SpecResult
+
+    invoke, calls, source, output = _prepare_players_apply_results(
+        monkeypatch,
+        tmp_path,
+        (
+            SpecResult(
+                162196,
+                "Marco Palestra",
+                "rejected",
+                "mutation_failed",
+            ),
+        ),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        invoke()
+
+    assert exc_info.value.code == 2
+    assert calls == ["validate"]
+    assert source.read_bytes() == b"encrypted"
+    assert output.exists() is False
+    assert "mutation_failed" in capsys.readouterr().out
+
+
+def test_players_apply_mixed_success_and_mutation_failure_persists_verified_success(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    from editor.player_spec import SpecResult
+
+    invoke, calls, _source, output = _prepare_players_apply_results(
+        monkeypatch,
+        tmp_path,
+        (
+            SpecResult(162196, "Marco Palestra", "updated", "patched"),
+            SpecResult(200000, "Dastan Satpayev", "rejected", "mutation_failed"),
+        ),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        invoke()
+
+    assert exc_info.value.code == 2
+    assert calls == [
+        "validate",
+        "validate",
+        "backup",
+        "save",
+        "encrypt",
+        "verify",
+        "audit",
+        "report",
+    ]
+    assert output.read_bytes() == b"encrypted-output"
+    rendered = capsys.readouterr().out
+    assert "mutation_failed" in rendered
+    assert "Applied 1 player specs" in rendered
 
 
 def test_players_apply_audits_and_rebuilds_same_save_reports_after_roundtrip(
