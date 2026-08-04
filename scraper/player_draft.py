@@ -117,7 +117,7 @@ class _ProfileHTMLParser(HTMLParser):
 
         if tag == "meta":
             item_property = attributes.get("itemprop")
-            content = attributes.get("content")
+            content = _normalize_text(attributes.get("content") or "")
             if item_property and content:
                 self.item_properties.append((item_property, content))
 

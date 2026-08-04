@@ -493,6 +493,39 @@ def test_generated_draft_preserves_optional_source_metadata(
         load_player_specs(tmp_path)
 
 
+def test_meta_content_is_normalized_before_draft_validation(tmp_path):
+    from editor.player_spec import IncompletePlayerSpecError, load_player_specs
+    from scraper.player_draft import parse_sortitoutsi_player_profile
+
+    html = f"""
+    <html>
+      <head>
+        <link rel="canonical" href="{PROFILE_URL}">
+        <meta itemprop="name" content="Dastan&#9;  Satpayev">
+        <meta itemprop="birthDate" content="12&#9;  August 2008">
+        <meta itemprop="nationality" content="Kazakhstan">
+        <meta itemprop="jobTitle" content="AM&#9;  RL; ST">
+        <meta itemprop="memberOf" content="Chelsea&#9;  FC">
+      </head>
+    </html>
+    """
+    source = parse_sortitoutsi_player_profile(html, PROFILE_URL, 2000370206)
+    assert source.name == "Dastan Satpayev"
+    assert source.date_of_birth == "12 August 2008"
+    assert source.positions == ("AM RL", "ST")
+    assert source.current_club == "Chelsea FC"
+
+    payload = build_player_draft(
+        parse_player_issue_event(dastan_issue_event()), source
+    )
+    (tmp_path / "dastan-satpayev.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+
+    with pytest.raises(IncompletePlayerSpecError):
+        load_player_specs(tmp_path)
+
+
 @pytest.mark.parametrize("person_id", (0, int("9" * 20)))
 def test_generated_draft_accepts_source_id_bounds(tmp_path, person_id):
     from editor.player_spec import IncompletePlayerSpecError, load_player_specs
