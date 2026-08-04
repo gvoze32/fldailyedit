@@ -148,6 +148,9 @@ and PES data. Create updates contain a proposed complete player record and
 destination roster data. Existing-player updates contain only supported values
 that differ from the verified base; every change records literal `from` and
 `to` values.
+Supported update groups are abilities, position proficiency, playing style,
+player skills, COM styles, nationality, physical/basic settings, and
+registered position.
 
 ### Simple issue path
 
