@@ -56,6 +56,10 @@ from scraper.fotmob import (
     fetch_transfers_for_club_names,
     fetch_major_clubs_transfers_safely,
 )
+from tools.generate_player_draft import (
+    PlayerDraftError,
+    write_player_draft,
+)
 from scraper.matcher import NameMatcher
 from scraper.models import MatchedTransfer
 from scraper.sortitoutsi import fetch_sortitoutsi_transfers
@@ -1748,6 +1752,42 @@ def cmd_players_validate(args) -> None:
         crypto.cleanup_temp(decrypted)
 
 
+def _machine_json_string(value: str) -> str:
+    """Encode untrusted text as one inert JSON string value."""
+    return (
+        json.dumps(value, ensure_ascii=True)
+        .replace("$", "\\u0024")
+        .replace("`", "\\u0060")
+    )
+
+
+def _machine_path_value(value: str) -> str:
+    """Keep simple paths readable and JSON-encode every other path."""
+    if value and all(
+        character.isascii() and (character.isalnum() or character in "._/-")
+        for character in value
+    ):
+        return value
+    return _machine_json_string(value)
+
+
+def cmd_players_generate_draft(args) -> None:
+    """Generate one source-only draft from a trusted issue-event file."""
+    output_dir = Path(args.output_dir)
+    path = write_player_draft(Path(args.event), output_dir)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        player_name = payload["identity"]["name"]
+    except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise PlayerDraftError("generated draft has no valid player name") from exc
+    if not isinstance(player_name, str) or not player_name:
+        raise PlayerDraftError("generated draft has no valid player name")
+
+    display_path = (output_dir / path.name).as_posix()
+    print(f"SPEC_PATH={_machine_path_value(display_path)}")
+    print(f"PLAYER_NAME={_machine_json_string(player_name)}")
+
+
 def _player_spec_audit_record(
     spec: PlayerSpec,
     result: SpecResult,
@@ -2027,6 +2067,16 @@ def main():
         "validate", help="Validate player specs against the pristine base"
     )
     p_players_validate.set_defaults(func=cmd_players_validate)
+    p_players_generate = players_sub.add_parser(
+        "generate-draft", help="Generate an incomplete player spec from an issue event"
+    )
+    p_players_generate.add_argument(
+        "--event", required=True, help="Path to a trusted GitHub issue-event JSON file"
+    )
+    p_players_generate.add_argument(
+        "--output-dir", required=True, help="Directory for the generated player draft"
+    )
+    p_players_generate.set_defaults(func=cmd_players_generate_draft)
     p_players_apply = players_sub.add_parser(
         "apply", help="Apply reviewed player specs to an EDIT file"
     )
@@ -2140,6 +2190,9 @@ def main():
             raise SystemExit(2) from exc
         except EditLockError as exc:
             print(f"\n❌ Concurrent run rejected: {exc}")
+            raise SystemExit(2) from exc
+        except PlayerDraftError as exc:
+            print(f"Player draft generation failed: {exc}", file=sys.stderr)
             raise SystemExit(2) from exc
     else:
         parser.print_help()
