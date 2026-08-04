@@ -20,27 +20,161 @@
     "proof_urls": [
       "https://pesretrostats.com/player/0ce2dbde-marco-palestra"
     ],
-    "effective_date": "2026-07-25",
-    "reason": "Pes Retro Stats profile reviewed for attribute proposal"
+    "effective_date": "2026-08-04",
+    "reason": "Refreshed from the reviewed Pes Retro Stats profile after its player data changed"
   },
   "pes": {
     "abilities": {
-      "speed": {
-        "from": 77,
-        "to": 80
-      },
       "acceleration": {
         "from": 75,
-        "to": 77
+        "to": 85
       },
-      "defensive_awareness": {
-        "from": 61,
-        "to": 62
+      "aggression": {
+        "from": 68,
+        "to": 71
+      },
+      "attacking_awareness": {
+        "from": 65,
+        "to": 72
+      },
+      "balance": {
+        "from": 67,
+        "to": 70
+      },
+      "ball_control": {
+        "from": 70,
+        "to": 80
       },
       "ball_winning": {
         "from": 59,
-        "to": 60
+        "to": 69
+      },
+      "curl": {
+        "from": 62,
+        "to": 72
+      },
+      "defensive_awareness": {
+        "from": 61,
+        "to": 65
+      },
+      "dribbling": {
+        "from": 69,
+        "to": 86
+      },
+      "finishing": {
+        "from": 56,
+        "to": 64
+      },
+      "heading": {
+        "from": 63,
+        "to": 70
+      },
+      "jump": {
+        "from": 72,
+        "to": 81
+      },
+      "kicking_power": {
+        "from": 70,
+        "to": 79
+      },
+      "lofted_pass": {
+        "from": 72,
+        "to": 83
+      },
+      "low_pass": {
+        "from": 74,
+        "to": 72
+      },
+      "physical_contact": {
+        "from": 66,
+        "to": 77
+      },
+      "place_kicking": {
+        "from": 60,
+        "to": 63
+      },
+      "speed": {
+        "from": 77,
+        "to": 90
+      },
+      "stamina": {
+        "from": 71,
+        "to": 85
+      },
+      "tight_possession": {
+        "from": 63,
+        "to": 81
       }
+    },
+    "age": {
+      "from": 20,
+      "to": 21
+    },
+    "com_styles": {
+      "early_cross": {
+        "from": 1,
+        "to": 0
+      },
+      "mazing_run": {
+        "from": 0,
+        "to": 1
+      },
+      "speeding_bullet": {
+        "from": 0,
+        "to": 1
+      }
+    },
+    "form": {
+      "from": 4,
+      "to": 3
+    },
+    "height": {
+      "from": 180,
+      "to": 186
+    },
+    "player_skills": {
+      "cut_behind_and_turn": {
+        "from": 0,
+        "to": 1
+      },
+      "scissors_feint": {
+        "from": 0,
+        "to": 1
+      },
+      "sombrero": {
+        "from": 0,
+        "to": 1
+      },
+      "step_on_skill_control": {
+        "from": 0,
+        "to": 1
+      }
+    },
+    "position_proficiency": {
+      "LB": {
+        "from": 1,
+        "to": 0
+      },
+      "LMF": {
+        "from": 1,
+        "to": 0
+      },
+      "RWF": {
+        "from": 1,
+        "to": 0
+      }
+    },
+    "weak_foot_accuracy": {
+      "from": 1,
+      "to": 3
+    },
+    "weak_foot_usage": {
+      "from": 0,
+      "to": 3
+    },
+    "weight": {
+      "from": 68,
+      "to": 80
     }
   }
 }
