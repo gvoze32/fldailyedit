@@ -37,3 +37,8 @@ reference/
 # Agent work artifacts
 .superpowers/
 docs/superpowers/
+MEMORY.md
+
+# Native build products
+vendor/pesXdecrypter/decrypter21
+vendor/pesXdecrypter/encrypter21
