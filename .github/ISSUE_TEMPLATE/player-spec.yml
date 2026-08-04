@@ -1,0 +1,68 @@
+name: Player specification request
+description: Request a source-backed draft for maintainer review, not an approved player.
+title: "[Player spec]: "
+labels: ["player-spec"]
+body:
+  - type: dropdown
+    id: operation
+    attributes:
+      label: Operation
+      description: Choose whether this draft creates or updates a player specification.
+      options:
+        - create
+        - update
+    validations:
+      required: true
+
+  - type: input
+    id: sortitoutsi_profile
+    attributes:
+      label: SortitoutSI profile
+      description: Provide the canonical SortitoutSI person profile URL.
+      placeholder: https://sortitoutsi.net/football-manager-data-update/person/123456789
+    validations:
+      required: true
+
+  - type: input
+    id: current_team
+    attributes:
+      label: Current team
+      description: Enter the player's current team as supported by the evidence.
+    validations:
+      required: true
+
+  - type: input
+    id: effective_date
+    attributes:
+      label: Effective date
+      description: Enter the evidence date in YYYY-MM-DD format.
+      placeholder: "2026-08-04"
+    validations:
+      required: true
+
+  - type: textarea
+    id: proof_urls
+    attributes:
+      label: Proof URLs
+      description: Enter one HTTPS evidence URL per line (maximum 10).
+    validations:
+      required: true
+
+  - type: textarea
+    id: contributor_notes
+    attributes:
+      label: Contributor notes
+      description: Add optional context for the reviewing maintainer.
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      description: Confirm every statement before submitting.
+      options:
+      - label: I supplied source evidence.
+        required: true
+      - label: I did not derive PES ratings from Football Manager values.
+        required: true
+      - label: I understand a maintainer must review the draft PR.
+        required: true

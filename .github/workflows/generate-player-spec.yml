@@ -1,0 +1,186 @@
+name: Generate player specification draft
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  generate:
+    if: github.event.label.name == 'generate-player-draft'
+    concurrency: player-draft-${{ github.event.issue.number }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: true
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install project
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -e .
+
+      - name: Read safe issue number
+        id: event
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import secrets
+          from pathlib import Path
+
+          event = json.loads(
+              Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8")
+          )
+          issue_number = event.get("issue", {}).get("number")
+          if (
+              isinstance(issue_number, bool)
+              or not isinstance(issue_number, int)
+              or issue_number <= 0
+          ):
+              raise SystemExit("issue number must be a positive integer")
+
+          value = str(issue_number)
+          delimiter = f"ghadelimiter_{secrets.token_hex(16)}"
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              output.write(
+                  f"issue_number<<{delimiter}\n{value}\n{delimiter}\n"
+              )
+          PY
+
+      - name: Reuse an existing draft PR
+        id: existing
+        env:
+          BRANCH_NAME: player-draft/issue-${{ steps.event.outputs.issue_number }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.event.outputs.issue_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr_url="$(
+            gh pr list \
+              --head "$BRANCH_NAME" \
+              --state all \
+              --limit 1 \
+              --json url \
+              --jq '.[0].url // empty'
+          )"
+          if [[ -n "$pr_url" ]]; then
+            COMMENT_BODY="Draft player specification: $pr_url"
+            gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
+          fi
+
+          python - "$pr_url" <<'PY'
+          import os
+          import secrets
+          import sys
+          from pathlib import Path
+
+          value = sys.argv[1]
+          delimiter = f"ghadelimiter_{secrets.token_hex(16)}"
+          while delimiter in value.splitlines():
+              delimiter = f"ghadelimiter_{secrets.token_hex(16)}"
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              output.write(f"pr_url<<{delimiter}\n{value}\n{delimiter}\n")
+          PY
+
+      - name: Generate player specification
+        if: steps.existing.outputs.pr_url == ''
+        id: generate
+        shell: bash
+        run: |
+          set -euo pipefail
+          machine_output="$RUNNER_TEMP/player-draft-machine-output"
+          python run.py players generate-draft --event "$GITHUB_EVENT_PATH" --output-dir players > "$machine_output"
+
+          python - "$machine_output" <<'PY'
+          import json
+          import os
+          import re
+          import secrets
+          import sys
+          from pathlib import Path
+
+          lines = Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+          if len(lines) != 2:
+              raise SystemExit("generator must emit exactly two machine-output lines")
+          if not lines[0].startswith("SPEC_PATH="):
+              raise SystemExit("generator did not emit SPEC_PATH first")
+          if not lines[1].startswith("PLAYER_NAME="):
+              raise SystemExit("generator did not emit PLAYER_NAME second")
+
+          raw_path = lines[0].removeprefix("SPEC_PATH=")
+          spec_path = json.loads(raw_path) if raw_path.startswith('"') else raw_path
+          player_name = json.loads(lines[1].removeprefix("PLAYER_NAME="))
+          if not isinstance(spec_path, str) or not re.fullmatch(
+              r"players/[a-z0-9]+(?:-[a-z0-9]+)*\.json", spec_path
+          ):
+              raise SystemExit("generator emitted a non-canonical specification path")
+          if not isinstance(player_name, str) or not player_name or "\x00" in player_name:
+              raise SystemExit("generator emitted an invalid player name")
+
+          output_path = Path(os.environ["GITHUB_OUTPUT"])
+          for name, value in (
+              ("spec_path", spec_path),
+              ("player_name", player_name),
+          ):
+              delimiter = f"ghadelimiter_{secrets.token_hex(16)}"
+              while delimiter in value.splitlines():
+                  delimiter = f"ghadelimiter_{secrets.token_hex(16)}"
+              with output_path.open("a", encoding="utf-8") as output:
+                  output.write(f"{name}<<{delimiter}\n{value}\n{delimiter}\n")
+          PY
+
+      - name: Commit and open draft PR
+        if: steps.existing.outputs.pr_url == ''
+        env:
+          BRANCH_NAME: player-draft/issue-${{ steps.event.outputs.issue_number }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.event.outputs.issue_number }}
+          PLAYER_NAME: ${{ steps.generate.outputs.player_name }}
+          SPEC_PATH: ${{ steps.generate.outputs.spec_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git switch --create "$BRANCH_NAME"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- "$SPEC_PATH"
+
+          staged_path="$(git diff --cached --name-only)"
+          if [[ "$staged_path" != "$SPEC_PATH" ]]; then
+            printf '%s\n' "refusing to commit any path except $SPEC_PATH" >&2
+            exit 1
+          fi
+
+          git commit -m "player: draft $PLAYER_NAME"
+          git push --set-upstream origin "$BRANCH_NAME"
+          pr_url="$(
+            gh pr create \
+              --draft \
+              --head "$BRANCH_NAME" \
+              --base "$DEFAULT_BRANCH" \
+              --title "player: draft $PLAYER_NAME" \
+              --body "Closes #$ISSUE_NUMBER"
+          )"
+          COMMENT_BODY="Draft player specification: $pr_url"
+          gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
