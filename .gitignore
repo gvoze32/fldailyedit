@@ -33,3 +33,7 @@ Thumbs.db
 
 # Reference
 reference/
+
+# Agent work artifacts
+.superpowers/
+docs/superpowers/
