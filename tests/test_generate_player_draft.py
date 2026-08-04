@@ -462,6 +462,59 @@ def test_generated_draft_validation_reports_exact_missing_human_fields(
     ]
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    ("schema-version", "extra-field", "identity-name", "evidence-issue-number"),
+)
+def test_malformed_draft_shape_uses_strict_schema_errors(tmp_path, mutation):
+    from editor.player_spec import (
+        IncompletePlayerSpecError,
+        PlayerSpecError,
+        load_player_specs,
+    )
+
+    payload = build_player_draft(
+        parse_player_issue_event(dastan_issue_event()), dastan_source()
+    )
+    if mutation == "schema-version":
+        payload["schema_version"] = 2
+    elif mutation == "extra-field":
+        payload["unexpected"] = "value"
+    elif mutation == "identity-name":
+        payload["identity"]["name"] = None
+    else:
+        payload["evidence"]["issue_number"] = "42"
+    (tmp_path / "dastan-satpayev.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+
+    with pytest.raises(PlayerSpecError) as exc_info:
+        load_player_specs(tmp_path)
+
+    assert not isinstance(exc_info.value, IncompletePlayerSpecError)
+
+
+def test_draft_missing_fields_require_exact_untrimmed_values(tmp_path):
+    from editor.player_spec import (
+        IncompletePlayerSpecError,
+        PlayerSpecError,
+        load_player_specs,
+    )
+
+    payload = build_player_draft(
+        parse_player_issue_event(dastan_issue_event()), dastan_source()
+    )
+    payload["draft"]["missing"][0] = " identity.pes_id "
+    (tmp_path / "dastan-satpayev.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+
+    with pytest.raises(PlayerSpecError) as exc_info:
+        load_player_specs(tmp_path)
+
+    assert not isinstance(exc_info.value, IncompletePlayerSpecError)
+
+
 def test_atomic_publication_never_exposes_an_empty_destination(
     monkeypatch, tmp_path
 ):
