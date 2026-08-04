@@ -1,4 +1,3 @@
-import hashlib
 import json
 import struct
 
@@ -15,7 +14,7 @@ PALESTRA_ENTRY = bytes.fromhex(
 
 def valid_marco_payload():
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "operation": "update",
         "lifecycle": {"status": "active"},
         "applies_to": [REVISION],
@@ -23,15 +22,15 @@ def valid_marco_payload():
             "name": "Marco Palestra",
             "aliases": ["Marco Palestra"],
             "pes_id": 162196,
-            "sortitoutsi_id": 2000136198,
+            "pes_retro_stats_id": "0ce2dbde-9cd9-423c-a90a-35b07df6a967",
         },
         "evidence": {
-            "profile_url": "https://sortitoutsi.net/football-manager-data-update/person/2000136198",
+            "profile_url": "https://pesretrostats.com/player/0ce2dbde-marco-palestra",
             "proof_urls": [
-                "https://sortitoutsi.net/football-manager-data-update/attributes/submission/526121"
+                "https://pesretrostats.com/player/0ce2dbde-marco-palestra"
             ],
             "effective_date": "2026-07-25",
-            "reason": "Approved attribute submission",
+            "reason": "Pes Retro Stats profile reviewed for attribute proposal",
         },
         "pes": {
             "abilities": {
@@ -46,7 +45,7 @@ def valid_marco_payload():
 
 def valid_dastan_payload():
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "operation": "create",
         "lifecycle": {
             "status": "active",
@@ -54,30 +53,25 @@ def valid_dastan_payload():
         },
         "applies_to": [REVISION],
         "identity": {
-            "name": "Dastan Satpayev",
-            "print_name": "SATPAYEV",
-            "aliases": [
-                "Dastan Satpayev",
-                "Dastan Sätpayev",
-                "Dastan Satpaev",
-            ],
+            "name": "Dastan Satpaev",
+            "print_name": "SATPAEV",
+            "aliases": ["Dastan Satpaev"],
             "pes_id": 200000,
-            "sortitoutsi_id": 2000370206,
+            "pes_retro_stats_id": "f77d9c27-8f02-4dbe-b877-4c13724a4886",
         },
         "evidence": {
-            "profile_url": "https://sortitoutsi.net/football-manager-data-update/person/2000370206",
+            "profile_url": "https://pesretrostats.com/player/f77d9c27-dastan-satpaev",
             "proof_urls": [
-                "https://sortitoutsi.net/football-manager-2026/person/2000370206/dastan-satpayev",
                 "https://qjl.kz/en/news/official-dastan-satpayev-signed-a-contract-with-chelsea",
                 "https://www.chelseafc.com/en/news/article/chelsea-squad-numbers-2026-pre-season-tour-confirmed",
             ],
             "effective_date": "2026-08-04",
-            "reason": "Chelsea included Satpayev in its 2026 pre-season squad before his contractual transfer date.",
+            "reason": "Chelsea included Satpaev in its 2026 pre-season squad before his contractual transfer date.",
         },
         "pes": {
             "player_id": 200000,
-            "name": "Dastan Satpayev",
-            "print_name": "SATPAYEV",
+            "name": "Dastan Satpaev",
+            "print_name": "SATPAEV",
             "team_id": 102,
             "team_name": "Chelsea FC",
             "preferred_shirt_number": 36,
@@ -132,36 +126,33 @@ def write_payload(directory, filename, payload):
     (directory / filename).write_text(json.dumps(payload), encoding="utf-8")
 
 
-def test_base_manifest_matches_bundled_edit():
-    from editor.player_spec import load_base_manifest
+def test_verify_base_file_matches_bundled_edit():
+    from editor.player_spec import verify_base_file
 
-    manifest = load_base_manifest()
-    digest = hashlib.sha256()
-    with open("base/EDIT00000000", "rb") as bundled:
-        for chunk in iter(lambda: bundled.read(1024 * 1024), b""):
-            digest.update(chunk)
-    actual = digest.hexdigest()
+    manifest = verify_base_file("base/EDIT00000000")
+
     assert manifest.revision == REVISION
-    assert manifest.sha256 == actual
 
 
-def test_base_manifest_rejects_unknown_keys_and_malformed_digest(tmp_path):
-    from editor.player_spec import PlayerSpecError, load_base_manifest
+def test_verify_base_file_rejects_mismatch_and_malformed_manifest(tmp_path):
+    from editor.player_spec import PlayerSpecError, verify_base_file
 
+    edit_file = tmp_path / "EDIT00000000"
+    edit_file.write_bytes(b"wrong base")
     manifest = tmp_path / "base_manifest.json"
     manifest.write_text(
-        json.dumps({"revision": REVISION, "sha256": "not-a-digest", "extra": True}),
+        json.dumps({"revision": REVISION, "sha256": "0" * 64}),
         encoding="utf-8",
     )
-    with pytest.raises(PlayerSpecError, match="base manifest"):
-        load_base_manifest(manifest)
+    with pytest.raises(PlayerSpecError, match="digest mismatch"):
+        verify_base_file(edit_file, manifest)
 
     manifest.write_text(
         json.dumps({"revision": REVISION, "sha256": "not-a-digest"}),
         encoding="utf-8",
     )
     with pytest.raises(PlayerSpecError, match="sha256"):
-        load_base_manifest(manifest)
+        verify_base_file(edit_file, manifest)
 
 
 def test_load_specs_rejects_filename_identity_and_duplicate_ids(tmp_path):
@@ -176,21 +167,70 @@ def test_load_specs_rejects_filename_identity_and_duplicate_ids(tmp_path):
     duplicate = valid_dastan_payload()
     duplicate["identity"]["pes_id"] = 162196
     duplicate["pes"]["player_id"] = 162196
-    write_payload(tmp_path, "dastan-satpayev.json", duplicate)
+    write_payload(tmp_path, "dastan-satpaev.json", duplicate)
     with pytest.raises(PlayerSpecError, match="PES ID"):
         load_player_specs(tmp_path)
 
-@pytest.mark.parametrize("sortitoutsi_id", (0, 0x80000000))
-def test_completed_specs_reject_ids_outside_positive_signed_32_bit_range(
-    tmp_path, sortitoutsi_id
+def test_completed_specs_reject_schema_version_1(tmp_path):
+    from editor.player_spec import PlayerSpecError, load_player_specs
+
+    payload = valid_marco_payload()
+    payload["schema_version"] = 1
+    write_payload(tmp_path, "marco-palestra.json", payload)
+
+    with pytest.raises(PlayerSpecError, match="schema_version"):
+        load_player_specs(tmp_path)
+
+
+def test_completed_specs_reject_sortitoutsi_id(tmp_path):
+    from editor.player_spec import PlayerSpecError, load_player_specs
+
+    payload = valid_marco_payload()
+    payload["identity"]["sortitoutsi_id"] = 2000136198
+    write_payload(tmp_path, "marco-palestra.json", payload)
+
+    with pytest.raises(PlayerSpecError, match="sortitoutsi_id"):
+        load_player_specs(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "pes_retro_stats_id",
+    (
+        "not-a-uuid",
+        "0CE2DBDE-9CD9-423C-A90A-35B07DF6A967",
+    ),
+)
+def test_completed_specs_reject_noncanonical_pes_retro_stats_uuid(
+    tmp_path, pes_retro_stats_id
 ):
     from editor.player_spec import PlayerSpecError, load_player_specs
 
     payload = valid_marco_payload()
-    payload["identity"]["sortitoutsi_id"] = sortitoutsi_id
+    payload["identity"]["pes_retro_stats_id"] = pes_retro_stats_id
     write_payload(tmp_path, "marco-palestra.json", payload)
 
-    with pytest.raises(PlayerSpecError, match="sortitoutsi_id"):
+    with pytest.raises(PlayerSpecError, match="pes_retro_stats_id"):
+        load_player_specs(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "profile_url",
+    (
+        "https://pesretrostats.com/player/f77d9c27-marco-palestra",
+        "https://www.pesretrostats.com/player/0ce2dbde-marco-palestra",
+        "https://pesretrostats.com/player/0ce2dbde/Marco-Palestra",
+    ),
+)
+def test_completed_specs_require_canonical_matching_pes_retro_stats_profile(
+    tmp_path, profile_url
+):
+    from editor.player_spec import PlayerSpecError, load_player_specs
+
+    payload = valid_marco_payload()
+    payload["evidence"]["profile_url"] = profile_url
+    write_payload(tmp_path, "marco-palestra.json", payload)
+
+    with pytest.raises(PlayerSpecError, match="profile_url"):
         load_player_specs(tmp_path)
 
 
@@ -212,7 +252,7 @@ def test_create_identity_rejects_embedded_c0_and_del_before_serialization(
         controlled = value[:1] + control + value[1:]
         payload["identity"][field] = controlled
         payload["pes"][field] = controlled
-    write_payload(tmp_path, "dastan-satpayev.json", payload)
+    write_payload(tmp_path, "dastan-satpaev.json", payload)
 
     with pytest.raises(PlayerSpecError, match="canonical text"):
         load_player_specs(tmp_path)
@@ -220,9 +260,9 @@ def test_create_identity_rejects_embedded_c0_and_del_before_serialization(
 @pytest.mark.parametrize(
     ("field", "controlled"),
     (
-        ("name", "Dastan Satpayev\n"),
-        ("print_name", "\tSATPAYEV"),
-        ("aliases", "Dastan Satpayev\r"),
+        ("name", "Dastan Satpaev\n"),
+        ("print_name", "\tSATPAEV"),
+        ("aliases", "Dastan Satpaev\r"),
     ),
 )
 def test_identity_rejects_boundary_controls_instead_of_trimming_them(
@@ -236,7 +276,7 @@ def test_identity_rejects_boundary_controls_instead_of_trimming_them(
     else:
         payload["identity"][field] = controlled
         payload["pes"][field] = controlled
-    write_payload(tmp_path, "dastan-satpayev.json", payload)
+    write_payload(tmp_path, "dastan-satpaev.json", payload)
 
     with pytest.raises(PlayerSpecError, match="canonical text"):
         load_player_specs(tmp_path)
@@ -258,22 +298,21 @@ def test_valid_create_and_update_specs_load_in_filename_order(tmp_path):
     from editor.player_spec import FieldPatch, load_player_specs
 
     write_payload(tmp_path, "marco-palestra.json", valid_marco_payload())
-    write_payload(tmp_path, "dastan-satpayev.json", valid_dastan_payload())
+    write_payload(tmp_path, "dastan-satpaev.json", valid_dastan_payload())
     (tmp_path / "ignored.txt").write_text("not json", encoding="utf-8")
 
     specs = load_player_specs(tmp_path)
 
     assert tuple(spec.path.name for spec in specs) == (
-        "dastan-satpayev.json",
+        "dastan-satpaev.json",
         "marco-palestra.json",
     )
     dastan, marco = specs
     assert dastan.create is not None
     assert dastan.create.abilities["finishing"] == 79
-    assert dastan.identity.aliases == (
-        "Dastan Satpayev",
-        "Dastan Sätpayev",
-        "Dastan Satpaev",
+    assert dastan.identity.aliases == ("Dastan Satpaev",)
+    assert dastan.identity.pes_retro_stats_id == (
+        "f77d9c27-8f02-4dbe-b877-4c13724a4886"
     )
     assert marco.create is None
     assert marco.patches["speed"] == FieldPatch(current=77, target=80)
@@ -340,7 +379,7 @@ def test_create_values_obey_codec_widths_and_ability_range(tmp_path, path, value
     for key in path[:-1]:
         target = target[key]
     target[path[-1]] = value
-    write_payload(tmp_path, "dastan-satpayev.json", payload)
+    write_payload(tmp_path, "dastan-satpaev.json", payload)
     with pytest.raises(PlayerSpecError, match=message):
         load_player_specs(tmp_path)
 
@@ -353,7 +392,7 @@ def test_create_preferred_shirt_number_accepts_allocator_boundaries(
 
     payload = valid_dastan_payload()
     payload["pes"]["preferred_shirt_number"] = preferred_shirt_number
-    write_payload(tmp_path, "dastan-satpayev.json", payload)
+    write_payload(tmp_path, "dastan-satpaev.json", payload)
 
     spec = load_player_specs(tmp_path)[0]
 
@@ -369,40 +408,47 @@ def test_create_preferred_shirt_number_rejects_values_outside_allocator_range(
 
     payload = valid_dastan_payload()
     payload["pes"]["preferred_shirt_number"] = preferred_shirt_number
-    write_payload(tmp_path, "dastan-satpayev.json", payload)
+    write_payload(tmp_path, "dastan-satpaev.json", payload)
 
     with pytest.raises(PlayerSpecError, match="preferred_shirt_number"):
         load_player_specs(tmp_path)
 
 
-def test_validate_spec_set_rejects_normalized_aliases_and_sortitoutsi_ids(tmp_path):
+def test_validate_spec_set_rejects_normalized_aliases_and_pes_retro_stats_ids(
+    tmp_path,
+):
     from editor.player_spec import PlayerSpecError, load_player_specs
 
     marco = valid_marco_payload()
     dastan = valid_dastan_payload()
     dastan["identity"]["aliases"].append("Márco Palestra")
     write_payload(tmp_path, "marco-palestra.json", marco)
-    write_payload(tmp_path, "dastan-satpayev.json", dastan)
+    write_payload(tmp_path, "dastan-satpaev.json", dastan)
     with pytest.raises(PlayerSpecError, match="alias"):
         load_player_specs(tmp_path)
 
-    dastan["identity"]["aliases"] = ["Dastan Satpayev"]
-    dastan["identity"]["sortitoutsi_id"] = 2000136198
-    write_payload(tmp_path, "dastan-satpayev.json", dastan)
-    with pytest.raises(PlayerSpecError, match="SortitoutSI ID"):
+    dastan["identity"]["aliases"] = ["Dastan Satpaev"]
+    dastan["identity"]["pes_retro_stats_id"] = (
+        "0ce2dbde-9cd9-423c-a90a-35b07df6a967"
+    )
+    dastan["evidence"]["profile_url"] = (
+        "https://pesretrostats.com/player/0ce2dbde-dastan-satpaev"
+    )
+    write_payload(tmp_path, "dastan-satpaev.json", dastan)
+    with pytest.raises(PlayerSpecError, match="Pes Retro Stats ID"):
         load_player_specs(tmp_path)
 
 
 def test_player_slug_normalizes_unicode_to_ascii_tokens():
     from editor.player_spec import player_slug
 
-    assert player_slug("  Dastan Sätpayev -- U-21  ") == "dastan-satpayev-u-21"
+    assert player_slug("  Dastan Sätpaev -- U-21  ") == "dastan-satpaev-u-21"
 
 
 def dastan_spec(tmp_path):
     from editor.player_spec import load_player_specs
 
-    write_payload(tmp_path, "dastan-satpayev.json", valid_dastan_payload())
+    write_payload(tmp_path, "dastan-satpaev.json", valid_dastan_payload())
     return next(
         spec for spec in load_player_specs(tmp_path) if spec.identity.pes_id == 200000
     )
@@ -1143,7 +1189,7 @@ def test_waiting_create_does_not_block_valid_update(tmp_path):
     )
 
     assert [(result.name, result.status) for result in results] == [
-        ("Dastan Satpayev", "waiting"),
+        ("Dastan Satpaev", "waiting"),
         ("Marco Palestra", "updated"),
     ]
     assert edit_file.get_player_ability_profile(162196).abilities["speed"] == 80
@@ -1168,11 +1214,11 @@ def test_update_before_eligible_create_keeps_cache_mapping_safe(tmp_path):
 
     assert [(result.name, result.status) for result in results] == [
         ("Marco Palestra", "updated"),
-        ("Dastan Satpayev", "created"),
+        ("Dastan Satpaev", "created"),
     ]
     assert all(result.diagnostic is None for result in results)
     assert edit_file.get_all_players(include_base_db=False)[200000].name == (
-        "Dastan Satpayev"
+        "Dastan Satpaev"
     )
 
 
@@ -1192,7 +1238,7 @@ def test_conflict_does_not_block_independent_waiting_spec_and_order_is_determini
     )
 
     assert [(result.name, result.status) for result in results] == [
-        ("Dastan Satpayev", "waiting"),
+        ("Dastan Satpaev", "waiting"),
         ("Marco Palestra", "conflict"),
     ]
     assert bytes(edit_file._data) == before
@@ -1206,19 +1252,19 @@ def test_created_player_is_visible_to_later_identity_assessment(tmp_path):
     first = dastan_spec(tmp_path)
     second = replace(
         first,
-        path=tmp_path / "z-satpayev.json",
+        path=tmp_path / "z-satpaev.json",
         identity=replace(
             first.identity,
-            name="SATPAYEV",
+            name="SATPAEV",
             print_name="OTHER",
             aliases=("Different Prospect",),
             pes_id=200001,
-            sortitoutsi_id=2000370207,
+            pes_retro_stats_id="f77d9c28-8f02-4dbe-b877-4c13724a4886",
         ),
         create=replace(
             first.create,
             player_id=200001,
-            name="SATPAYEV",
+            name="SATPAEV",
             print_name="OTHER",
             preferred_shirt_number=37,
         ),
@@ -1278,7 +1324,7 @@ def test_failed_mutation_rolls_back_only_that_spec(
     )
 
     assert [(result.name, result.status, result.reason) for result in results] == [
-        ("Dastan Satpayev", "created", "created_and_registered"),
+        ("Dastan Satpaev", "created", "created_and_registered"),
         ("Marco Palestra", "rejected", expected_reason),
     ]
     if failure_mode == "exception":
@@ -1290,7 +1336,7 @@ def test_failed_mutation_rolls_back_only_that_spec(
     assert edit_file.get_edited_player_entry(162196) == marco_before
     assert edit_file.get_team_roster(102).player_index(200000) != -1
     assert edit_file.get_all_players(include_base_db=False)[200000].name == (
-        "Dastan Satpayev"
+        "Dastan Satpaev"
     )
 
 
@@ -1313,7 +1359,7 @@ def test_batch_is_a_byte_for_byte_noop_when_no_spec_changes(tmp_path):
     )
 
     assert [(result.name, result.status) for result in results] == [
-        ("Dastan Satpayev", "waiting"),
+        ("Dastan Satpaev", "waiting"),
         ("Marco Palestra", "already_applied"),
     ]
     assert bytes(edit_file._data) == before

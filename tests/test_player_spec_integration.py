@@ -25,7 +25,7 @@ def test_bundled_base_batch_survives_encryption_roundtrip(tmp_path):
             edit_file.get_all_players(),
         )
         assert {result.name: result.status for result in results} == {
-            "Dastan Satpayev": "waiting",
+            "Dastan Satpaev": "waiting",
             "Marco Palestra": "updated",
         }
         assert edit_file.validate_integrity()["valid"] is True
@@ -74,8 +74,16 @@ def test_bundled_base_create_survives_encryption_roundtrip(tmp_path):
         verified = EditFile()
         verified.load(reopened / "data.dat")
         assert verified.validate_integrity()["valid"] is True
-        assert verified.get_team_roster(102).player_index(200000) != -1
-        assert verified.get_all_players()[200000].name == "Dastan Satpayev"
+        players = verified.get_all_players()
+        roster = verified.get_team_roster(102)
+        assert roster.player_index(200000) != -1
+        assert players[200000].name == "Dastan Satpaev"
+        assert players[200000].print_name == "SATPAEV"
+        assert [
+            players[player_id].name
+            for player_id in roster.roster
+            if player_id == 200000
+        ] == ["Dastan Satpaev"]
         before_rerun = bytes(verified._data)
         rerun = apply_player_spec(
             verified,

@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "operation": "update",
   "lifecycle": {
     "status": "active"
@@ -13,15 +13,15 @@
       "Marco Palestra"
     ],
     "pes_id": 162196,
-    "sortitoutsi_id": 2000136198
+    "pes_retro_stats_id": "0ce2dbde-9cd9-423c-a90a-35b07df6a967"
   },
   "evidence": {
-    "profile_url": "https://sortitoutsi.net/football-manager-data-update/person/2000136198",
+    "profile_url": "https://pesretrostats.com/player/0ce2dbde-marco-palestra",
     "proof_urls": [
-      "https://sortitoutsi.net/football-manager-data-update/attributes/submission/526121"
+      "https://pesretrostats.com/player/0ce2dbde-marco-palestra"
     ],
     "effective_date": "2026-07-25",
-    "reason": "Approved attribute submission"
+    "reason": "Pes Retro Stats profile reviewed for attribute proposal"
   },
   "pes": {
     "abilities": {

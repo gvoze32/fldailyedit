@@ -36,6 +36,7 @@ from editor.editfile import COMPETITION_SECTION_SIZE, EditFile
 from editor import logger as transfer_logger
 from editor.player_spec import (
     PlayerSpec,
+    PlayerSpecError,
     IncompletePlayerSpecError,
     SpecResult,
     apply_player_specs,
@@ -44,6 +45,7 @@ from editor.player_spec import (
     load_base_manifest,
     load_player_specs,
     validate_spec_set,
+    verify_base_file,
 )
 from editor.locking import EditFileLock, EditLockError
 from editor.player_catalog import PlayerCatalogError, load_id_name_text
@@ -1716,18 +1718,15 @@ def _require_valid_edit(edit_file: EditFile, stage: str) -> None:
 
 def cmd_players_validate(args) -> None:
     """Validate the pristine digest, global specs, and semantic applicability."""
-    manifest = load_base_manifest()
     base_path = Path(config.BASE_EDIT_PATH)
     if not base_path.exists():
         print(f"Pristine base not found: {base_path}")
         raise SystemExit(2)
-    actual_digest = _sha256_file(base_path)
-    if actual_digest != manifest.sha256:
-        print(
-            "Pristine base digest mismatch: "
-            f"expected {manifest.sha256}, found {actual_digest}"
-        )
-        raise SystemExit(2)
+    try:
+        manifest = verify_base_file(base_path)
+    except PlayerSpecError as exc:
+        print(f"Pristine base verification failed: {exc}")
+        raise SystemExit(2) from exc
 
     try:
         specs = load_player_specs()
@@ -1828,7 +1827,7 @@ def _player_spec_audit_record(
         "shirt_number": shirt_number,
         "roster_action": "create" if result.status == "created" else "update",
         "save_scope": save_scope,
-        "sortitoutsi_player_id": spec.identity.sortitoutsi_id,
+        "pes_retro_stats_player_id": spec.identity.pes_retro_stats_id,
         "sources": ("player_spec",),
         "source_urls": (spec.evidence.profile_url,),
         "proof_urls": spec.evidence.proof_urls,

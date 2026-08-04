@@ -37,7 +37,7 @@ def _entries():
 
 def _player_spec_create_entry():
     return {
-        "player_name": "Dastan Satpayev",
+        "player_name": "Dastan Satpaev",
         "position": "CF",
         "from_team": "Missing from FL26 database",
         "to_team": "Chelsea FC",
@@ -86,7 +86,7 @@ def test_reports_label_current_player_spec_creation_consistently():
 
     assert "Club transfers (1)" in markdown
     assert "Player creations (1)" in markdown
-    assert "Dastan Satpayev" in markdown
+    assert "Dastan Satpaev" in markdown
     assert "Reviewed Player Update" in markdown
     assert "Reviewed Player Update" in html
     assert "Reviewed player spec" not in markdown
@@ -159,7 +159,7 @@ def test_transfer_history_is_scoped_per_output_save(monkeypatch, tmp_path):
 def test_reports_classify_player_specs_separately_from_club_transfers():
     player_spec_entries = [
         {
-            "player_name": "Dastan Satpayev",
+            "player_name": "Dastan Satpaev",
             "position": "CF",
             "from_team": "Missing from FL26 database",
             "to_team": "Chelsea FC",
@@ -216,7 +216,11 @@ def test_log_transfer_persists_player_spec_field_changes(monkeypatch, tmp_path):
         transfer_type="player_spec_update",
         roster_action="update",
         field_changes=changes,
+        pes_retro_stats_player_id="0ce2dbde-9cd9-423c-a90a-35b07df6a967",
     )
 
     entry = read_log()[0]
     assert entry["field_changes"] == changes
+    assert entry["pes_retro_stats_player_id"] == (
+        "0ce2dbde-9cd9-423c-a90a-35b07df6a967"
+    )

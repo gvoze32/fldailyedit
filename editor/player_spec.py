@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import date
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -58,7 +59,7 @@ class PlayerIdentity:
     print_name: str | None
     aliases: tuple[str, ...]
     pes_id: int
-    sortitoutsi_id: int
+    pes_retro_stats_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,11 +120,19 @@ class SpecResult:
     reason: str
     diagnostic: str | None = None
 
-
+# Source-only generated drafts retain SortitoutSI identity until human completion.
 SORTITOUTSI_ID_MIN = 1
 SORTITOUTSI_ID_MAX = 0x7FFFFFFF
 
+
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
+_PES_RETRO_STATS_UUID_RE = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z"
+)
+_PES_RETRO_STATS_PROFILE_RE = re.compile(
+    r"https://pesretrostats\.com/player/(?P<prefix>[0-9a-f]{8})-"
+    r"[a-z0-9]+(?:-[a-z0-9]+)*\Z"
+)
 _ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
 _TOP_LEVEL_FIELDS = frozenset(
     {
@@ -167,6 +176,9 @@ _DRAFT_ISSUE_PATH_RE = re.compile(
 )
 _LIFECYCLE_FIELDS = frozenset({"status", "reason", "superseded_by"})
 _IDENTITY_FIELDS = frozenset(
+    {"name", "print_name", "aliases", "pes_id", "pes_retro_stats_id"}
+)
+_DRAFT_IDENTITY_FIELDS = frozenset(
     {"name", "print_name", "aliases", "pes_id", "sortitoutsi_id"}
 )
 _EVIDENCE_FIELDS = frozenset(
@@ -362,10 +374,32 @@ def load_base_manifest(path: str | Path | None = None) -> BaseManifest:
         raise PlayerSpecError("base manifest sha256 must be 64 lowercase hexadecimal characters")
     return BaseManifest(revision=revision, sha256=sha256)
 
+def verify_base_file(
+    edit_path: str | Path,
+    manifest_path: str | Path | None = None,
+) -> BaseManifest:
+    """Return the manifest after streaming and verifying the base-file digest."""
+    manifest = load_base_manifest(manifest_path)
+    path = Path(edit_path)
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        raise PlayerSpecError(f"could not read base file {path}: {exc}") from exc
+    actual = digest.hexdigest()
+    if actual != manifest.sha256:
+        raise PlayerSpecError(
+            "base file digest mismatch: "
+            f"expected {manifest.sha256}, found {actual}"
+        )
+    return manifest
+
 
 def _load_identity(value: object) -> PlayerIdentity:
     raw = _object(value, "identity")
-    required = frozenset({"name", "aliases", "pes_id", "sortitoutsi_id"})
+    required = frozenset({"name", "aliases", "pes_id", "pes_retro_stats_id"})
     _validate_keys(raw, _IDENTITY_FIELDS, required, "identity")
     raw_name = raw.get("name")
     if isinstance(raw_name, str):
@@ -390,24 +424,33 @@ def _load_identity(value: object) -> PlayerIdentity:
         normalize_player_identity(alias) for alias in aliases
     }:
         raise PlayerSpecError("identity aliases must include the canonical name")
+    pes_retro_stats_id = _text(raw, "pes_retro_stats_id", "identity")
+    if not _PES_RETRO_STATS_UUID_RE.fullmatch(pes_retro_stats_id):
+        raise PlayerSpecError(
+            "identity pes_retro_stats_id must be a canonical lowercase UUID"
+        )
     return PlayerIdentity(
         name=name,
         print_name=print_name,
         aliases=aliases,
         pes_id=_integer(raw, "pes_id", 1, 0xFFFFFFFF, "identity"),
-        sortitoutsi_id=_integer(
-            raw,
-            "sortitoutsi_id",
-            SORTITOUTSI_ID_MIN,
-            SORTITOUTSI_ID_MAX,
-            "identity",
-        ),
+        pes_retro_stats_id=pes_retro_stats_id,
     )
 
 
-def _load_evidence(value: object) -> Evidence:
+def _load_evidence(value: object, identity: PlayerIdentity) -> Evidence:
     raw = _object(value, "evidence")
     _validate_keys(raw, _EVIDENCE_FIELDS, _EVIDENCE_FIELDS, "evidence")
+    profile_url = _https_url(raw.get("profile_url"), "evidence profile_url")
+    profile_match = _PES_RETRO_STATS_PROFILE_RE.fullmatch(profile_url)
+    if (
+        profile_match is None
+        or profile_match.group("prefix") != identity.pes_retro_stats_id[:8]
+    ):
+        raise PlayerSpecError(
+            "evidence profile_url must be the canonical Pes Retro Stats profile "
+            "for identity pes_retro_stats_id"
+        )
     proof_raw = raw.get("proof_urls")
     if not isinstance(proof_raw, list) or not proof_raw:
         raise PlayerSpecError("evidence proof_urls must be a non-empty list")
@@ -425,7 +468,7 @@ def _load_evidence(value: object) -> Evidence:
     except ValueError as exc:
         raise PlayerSpecError("evidence effective_date must be a valid date") from exc
     return Evidence(
-        profile_url=_https_url(raw.get("profile_url"), "evidence profile_url"),
+        profile_url=profile_url,
         proof_urls=proof_urls,
         effective_date=effective_date,
         reason=_text(raw, "reason", "evidence"),
@@ -754,8 +797,8 @@ def _generated_draft_missing_fields(
         identity = _object(raw["identity"], identity_context)
         _validate_keys(
             identity,
-            _IDENTITY_FIELDS,
-            _IDENTITY_FIELDS,
+            _DRAFT_IDENTITY_FIELDS,
+            _DRAFT_IDENTITY_FIELDS,
             identity_context,
         )
         name = _generated_source_text(
@@ -927,7 +970,7 @@ def _load_one_spec(path: Path) -> PlayerSpec:
         raise IncompletePlayerSpecError(path, missing_fields)
     _validate_keys(raw, _TOP_LEVEL_FIELDS, _TOP_LEVEL_FIELDS, f"player spec {path}")
 
-    schema_version = _integer(raw, "schema_version", 1, 1, f"player spec {path}")
+    schema_version = _integer(raw, "schema_version", 2, 2, f"player spec {path}")
     operation = _text(raw, "operation", f"player spec {path}")
     if operation not in {"create", "update"}:
         raise PlayerSpecError(f"player spec {path} operation must be create or update")
@@ -964,7 +1007,7 @@ def _load_one_spec(path: Path) -> PlayerSpec:
         raise PlayerSpecError(
             f"player spec filename {path.name!r} does not match identity name {identity.name!r}"
         )
-    evidence = _load_evidence(raw.get("evidence"))
+    evidence = _load_evidence(raw.get("evidence"), identity)
 
     if operation == "create":
         create = _load_create(raw.get("pes"), identity)
@@ -991,7 +1034,7 @@ def _load_one_spec(path: Path) -> PlayerSpec:
 def validate_spec_set(specs: tuple[PlayerSpec, ...]) -> None:
     """Reject identities that are ambiguous across player spec files."""
     pes_ids: dict[int, Path] = {}
-    sortitoutsi_ids: dict[int, Path] = {}
+    pes_retro_stats_ids: dict[str, Path] = {}
     aliases: dict[str, Path] = {}
     for spec in specs:
         identity = spec.identity
@@ -1000,13 +1043,13 @@ def validate_spec_set(specs: tuple[PlayerSpec, ...]) -> None:
                 f"duplicate PES ID {identity.pes_id} in {pes_ids[identity.pes_id]} and {spec.path}"
             )
         pes_ids[identity.pes_id] = spec.path
-        if identity.sortitoutsi_id in sortitoutsi_ids:
+        if identity.pes_retro_stats_id in pes_retro_stats_ids:
             raise PlayerSpecError(
-                "duplicate SortitoutSI ID "
-                f"{identity.sortitoutsi_id} in "
-                f"{sortitoutsi_ids[identity.sortitoutsi_id]} and {spec.path}"
+                "duplicate Pes Retro Stats ID "
+                f"{identity.pes_retro_stats_id} in "
+                f"{pes_retro_stats_ids[identity.pes_retro_stats_id]} and {spec.path}"
             )
-        sortitoutsi_ids[identity.sortitoutsi_id] = spec.path
+        pes_retro_stats_ids[identity.pes_retro_stats_id] = spec.path
         for alias in identity.aliases:
             normalized = normalize_player_identity(alias)
             if normalized in aliases and aliases[normalized] != spec.path:

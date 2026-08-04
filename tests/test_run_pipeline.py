@@ -3,7 +3,6 @@
 from argparse import Namespace
 from types import SimpleNamespace
 
-import hashlib
 
 import pytest
 
@@ -356,10 +355,11 @@ def _prepare_players_validate_result(
     monkeypatch.setattr(run.config, "BASE_EDIT_PATH", base, raising=False)
     monkeypatch.setattr(
         run,
-        "load_base_manifest",
-        lambda: BaseManifest(
-            "expected-revision",
-            hashlib.sha256(b"pristine").hexdigest(),
+        "verify_base_file",
+        lambda path: (
+            BaseManifest("expected-revision", "irrelevant")
+            if path == base
+            else (_ for _ in ()).throw(AssertionError("unexpected base path"))
         ),
     )
     monkeypatch.setattr(run, "load_player_specs", lambda: (spec,))
@@ -692,7 +692,7 @@ def test_players_apply_mixed_success_and_mutation_failure_persists_verified_succ
         tmp_path,
         (
             SpecResult(162196, "Marco Palestra", "updated", "patched"),
-            SpecResult(200000, "Dastan Satpayev", "rejected", "mutation_failed"),
+            SpecResult(200000, "Dastan Satpaev", "rejected", "mutation_failed"),
         ),
     )
 
@@ -842,6 +842,10 @@ def test_players_apply_audits_and_rebuilds_same_save_reports_after_roundtrip(
         if isinstance(call, tuple) and call[0] == "audit"
     )
     assert audit["transfer_type"] == "player_spec_update"
+    assert audit["pes_retro_stats_player_id"] == (
+        "0ce2dbde-9cd9-423c-a90a-35b07df6a967"
+    )
+    assert "sortitoutsi_player_id" not in audit
     assert audit["field_changes"] == [
         {"field": "speed", "from": 77, "to": 80},
         {"field": "acceleration", "from": 75, "to": 77},

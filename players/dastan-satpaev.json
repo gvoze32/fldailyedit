@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "operation": "create",
   "lifecycle": {
     "status": "active",
@@ -9,30 +9,27 @@
     "fl26-u2.2-national-squads"
   ],
   "identity": {
-    "name": "Dastan Satpayev",
-    "print_name": "SATPAYEV",
+    "name": "Dastan Satpaev",
+    "print_name": "SATPAEV",
     "aliases": [
-      "Dastan Satpayev",
-      "Dastan Sätpayev",
       "Dastan Satpaev"
     ],
     "pes_id": 200000,
-    "sortitoutsi_id": 2000370206
+    "pes_retro_stats_id": "f77d9c27-8f02-4dbe-b877-4c13724a4886"
   },
   "evidence": {
-    "profile_url": "https://sortitoutsi.net/football-manager-data-update/person/2000370206",
+    "profile_url": "https://pesretrostats.com/player/f77d9c27-dastan-satpaev",
     "proof_urls": [
-      "https://sortitoutsi.net/football-manager-2026/person/2000370206/dastan-satpayev",
       "https://qjl.kz/en/news/official-dastan-satpayev-signed-a-contract-with-chelsea",
       "https://www.chelseafc.com/en/news/article/chelsea-squad-numbers-2026-pre-season-tour-confirmed"
     ],
     "effective_date": "2026-08-04",
-    "reason": "Chelsea included Satpayev in its 2026 pre-season squad before his contractual transfer date."
+    "reason": "Chelsea included Satpaev in its 2026 pre-season squad before his contractual transfer date."
   },
   "pes": {
     "player_id": 200000,
-    "name": "Dastan Satpayev",
-    "print_name": "SATPAYEV",
+    "name": "Dastan Satpaev",
+    "print_name": "SATPAEV",
     "team_id": 102,
     "team_name": "Chelsea FC",
     "preferred_shirt_number": 36,
