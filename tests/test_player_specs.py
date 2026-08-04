@@ -310,14 +310,18 @@ def dastan_spec(tmp_path):
     from editor.player_spec import load_player_specs
 
     write_payload(tmp_path, "dastan-satpayev.json", valid_dastan_payload())
-    return load_player_specs(tmp_path)[0]
+    return next(
+        spec for spec in load_player_specs(tmp_path) if spec.identity.pes_id == 200000
+    )
 
 
 def marco_spec(tmp_path):
     from editor.player_spec import load_player_specs
 
     write_payload(tmp_path, "marco-palestra.json", valid_marco_payload())
-    return load_player_specs(tmp_path)[0]
+    return next(
+        spec for spec in load_player_specs(tmp_path) if spec.identity.pes_id == 162196
+    )
 
 
 def make_player_spec_edit_file(roster_size: int):
@@ -428,6 +432,31 @@ def make_player_spec_edit_file_with_palestra(**updates):
     edit_file._data = entry + bytearray(appearance)
     edit_file.player_start = 0
     edit_file.player_count = 1
+    return edit_file
+
+
+def make_combined_fixture(chelsea_roster_size: int, **updates):
+    from editor.editfile import (
+        HEADER_SIZE,
+        PE_PLAYER_NAME,
+        PE_PRINT_NAME,
+        PLAYER_APPEARANCE_SIZE,
+        PLAYER_ENTRY_SIZE,
+    )
+    from editor.player_codec import patch_player_entry
+
+    edit_file = make_player_spec_edit_file(roster_size=chelsea_roster_size)
+    entry = bytearray(patch_player_entry(PALESTRA_ENTRY, updates))
+    entry[PE_PLAYER_NAME : PE_PLAYER_NAME + 15] = b"Marco Palestra\0"
+    entry[PE_PRINT_NAME : PE_PRINT_NAME + 9] = b"PALESTRA\0"
+    appearance = bytes(
+        (index * 3 + 7) % 256 for index in range(PLAYER_APPEARANCE_SIZE)
+    )
+    edit_file._data[HEADER_SIZE : HEADER_SIZE + PLAYER_ENTRY_SIZE] = entry
+    edit_file._data[
+        HEADER_SIZE + PLAYER_ENTRY_SIZE :
+        HEADER_SIZE + PLAYER_ENTRY_SIZE + PLAYER_APPEARANCE_SIZE
+    ] = appearance
     return edit_file
 
 
@@ -886,3 +915,191 @@ def test_update_activates_the_matching_edit_category(
     assert entry is not None
     assert _read_field(entry, FIELD_SPECS[field]) == target
     assert _read_field(entry, FIELD_SPECS[edited_flag]) == 1
+
+
+def test_new_base_revision_skips_old_spec_before_mutation(tmp_path, monkeypatch):
+    from editor.player_spec import apply_player_spec
+
+    edit_file = make_player_spec_edit_file_with_palestra()
+    before = bytes(edit_file._data)
+    monkeypatch.setattr(
+        edit_file,
+        "get_edited_player_entry",
+        lambda *args: pytest.fail("incompatible specs must not inspect save records"),
+    )
+
+    class InaccessiblePlayers(dict):
+        def get(self, *args, **kwargs):
+            pytest.fail("incompatible specs must not inspect save identities")
+
+    result = apply_player_spec(
+        edit_file,
+        marco_spec(tmp_path),
+        "fl26-u2.3",
+        InaccessiblePlayers(),
+    )
+
+    assert (result.status, result.reason) == (
+        "needs_review",
+        "base_revision_not_reviewed",
+    )
+    assert bytes(edit_file._data) == before
+
+
+@pytest.mark.parametrize(
+    ("lifecycle_status", "lifecycle_reason"),
+    [
+        ("upstreamed", "Included by the upstream database"),
+        ("retired", "Historical record only"),
+    ],
+)
+def test_inactive_lifecycle_is_reported_before_revision_or_save_access(
+    tmp_path,
+    monkeypatch,
+    lifecycle_status,
+    lifecycle_reason,
+):
+    from dataclasses import replace
+
+    from editor.player_spec import apply_player_spec
+
+    edit_file = make_player_spec_edit_file_with_palestra()
+    spec = replace(
+        marco_spec(tmp_path),
+        lifecycle_status=lifecycle_status,
+        lifecycle_reason=lifecycle_reason,
+    )
+    monkeypatch.setattr(
+        edit_file,
+        "get_edited_player_entry",
+        lambda *args: pytest.fail("inactive specs must not inspect save records"),
+    )
+
+    class InaccessiblePlayers(dict):
+        def get(self, *args, **kwargs):
+            pytest.fail("inactive specs must not inspect save identities")
+
+    result = apply_player_spec(
+        edit_file,
+        spec,
+        "unreviewed-revision",
+        InaccessiblePlayers(),
+    )
+
+    assert (result.status, result.reason) == (
+        lifecycle_status,
+        lifecycle_reason,
+    )
+
+
+def test_waiting_create_does_not_block_valid_update(tmp_path):
+    from editor.player_spec import apply_player_specs
+
+    edit_file = make_combined_fixture(chelsea_roster_size=40)
+    results = apply_player_specs(
+        edit_file,
+        (dastan_spec(tmp_path), marco_spec(tmp_path)),
+        REVISION,
+        current_players(edit_file),
+    )
+
+    assert [(result.name, result.status) for result in results] == [
+        ("Dastan Satpayev", "waiting"),
+        ("Marco Palestra", "updated"),
+    ]
+    assert edit_file.get_player_ability_profile(162196).abilities["speed"] == 80
+
+
+def test_conflict_does_not_block_independent_waiting_spec_and_order_is_deterministic(
+    tmp_path,
+):
+    from editor.player_spec import apply_player_specs
+
+    edit_file = make_combined_fixture(chelsea_roster_size=40, speed=79)
+    before = bytes(edit_file._data)
+    results = apply_player_specs(
+        edit_file,
+        (marco_spec(tmp_path), dastan_spec(tmp_path)),
+        REVISION,
+        current_players(edit_file),
+    )
+
+    assert [(result.name, result.status) for result in results] == [
+        ("Dastan Satpayev", "waiting"),
+        ("Marco Palestra", "conflict"),
+    ]
+    assert bytes(edit_file._data) == before
+
+
+@pytest.mark.parametrize(
+    ("failure_mode", "expected_reason"),
+    [
+        ("rejected", "backend_rejected"),
+        ("exception", "mutation_failed"),
+    ],
+)
+def test_failed_mutation_rolls_back_only_that_spec(
+    tmp_path,
+    monkeypatch,
+    failure_mode,
+    expected_reason,
+):
+    import editor.player_spec as player_spec
+    from editor.editfile import HEADER_SIZE
+
+    edit_file = make_combined_fixture(chelsea_roster_size=39)
+    marco_before = edit_file.get_edited_player_entry(162196)
+
+    def fail_update(mutating_file, spec, all_players):
+        mutating_file._data[HEADER_SIZE] ^= 0xFF
+        if failure_mode == "exception":
+            raise RuntimeError("simulated backend failure")
+        return player_spec.SpecResult(
+            pes_id=spec.identity.pes_id,
+            name=spec.identity.name,
+            status="rejected",
+            reason="backend_rejected",
+        )
+
+    monkeypatch.setattr(player_spec, "apply_update", fail_update)
+    results = player_spec.apply_player_specs(
+        edit_file,
+        (marco_spec(tmp_path), dastan_spec(tmp_path)),
+        REVISION,
+        current_players(edit_file),
+    )
+
+    assert [(result.name, result.status, result.reason) for result in results] == [
+        ("Dastan Satpayev", "created", "created_and_registered"),
+        ("Marco Palestra", "rejected", expected_reason),
+    ]
+    assert edit_file.get_edited_player_entry(162196) == marco_before
+    assert edit_file.get_team_roster(102).player_index(200000) != -1
+    assert edit_file.get_all_players(include_base_db=False)[200000].name == (
+        "Dastan Satpayev"
+    )
+
+
+def test_batch_is_a_byte_for_byte_noop_when_no_spec_changes(tmp_path):
+    from editor.player_spec import apply_player_specs
+
+    edit_file = make_combined_fixture(
+        chelsea_roster_size=40,
+        speed=80,
+        acceleration=77,
+        defensive_awareness=62,
+        ball_winning=60,
+    )
+    before = bytes(edit_file._data)
+    results = apply_player_specs(
+        edit_file,
+        (marco_spec(tmp_path), dastan_spec(tmp_path)),
+        REVISION,
+        current_players(edit_file),
+    )
+
+    assert [(result.name, result.status) for result in results] == [
+        ("Dastan Satpayev", "waiting"),
+        ("Marco Palestra", "already_applied"),
+    ]
+    assert bytes(edit_file._data) == before

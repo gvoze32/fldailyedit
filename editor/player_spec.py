@@ -927,3 +927,91 @@ def apply_update(
     patched_entry = patch_player_entry(entry, targets)
     edit_file.replace_edited_player_entry(spec.identity.pes_id, patched_entry)
     return _result(spec, "updated", "patched")
+
+
+def _restore_spec_mutation(
+    edit_file: "EditFile",
+    original_data: bytes,
+    original_catalog_report: object,
+    original_transferred_ids: set[int],
+    had_player_cache: bool,
+    original_player_cache: object,
+) -> None:
+    edit_file._data = bytearray(original_data)
+    edit_file._parse_header()
+    edit_file._calculate_offsets()
+    edit_file.player_catalog_report = original_catalog_report
+    edit_file.transferred_player_ids.clear()
+    edit_file.transferred_player_ids.update(original_transferred_ids)
+    if had_player_cache:
+        edit_file._player_cache = original_player_cache
+    elif hasattr(edit_file, "_player_cache"):
+        del edit_file._player_cache
+
+
+def apply_player_spec(
+    edit_file: "EditFile",
+    spec: PlayerSpec,
+    base_revision: str,
+    all_players: Mapping[int, "PlayerInfo"],
+) -> SpecResult:
+    """Apply one lifecycle-compatible spec with mutation isolation."""
+    if spec.lifecycle_status != "active":
+        return _result(
+            spec,
+            spec.lifecycle_status,
+            spec.lifecycle_reason or f"lifecycle_{spec.lifecycle_status}",
+        )
+    if base_revision not in spec.applies_to:
+        return _result(spec, "needs_review", "base_revision_not_reviewed")
+
+    original_data = bytes(edit_file._data)
+    original_catalog_report = edit_file.player_catalog_report
+    original_transferred_ids = set(edit_file.transferred_player_ids)
+    had_player_cache = hasattr(edit_file, "_player_cache")
+    original_player_cache = getattr(edit_file, "_player_cache", None)
+
+    try:
+        if spec.operation == "create":
+            result = apply_create(edit_file, spec, all_players)
+        elif spec.operation == "update":
+            result = apply_update(edit_file, spec, all_players)
+        else:
+            result = _result(spec, "rejected", "unsupported_operation")
+    except Exception:
+        result = _result(spec, "rejected", "mutation_failed")
+
+    mutated = (
+        edit_file._data != original_data
+        or edit_file.player_catalog_report != original_catalog_report
+        or edit_file.transferred_player_ids != original_transferred_ids
+        or hasattr(edit_file, "_player_cache") != had_player_cache
+        or (
+            had_player_cache
+            and getattr(edit_file, "_player_cache", None) is not original_player_cache
+        )
+    )
+    if result.status == "rejected" and mutated:
+        _restore_spec_mutation(
+            edit_file,
+            original_data,
+            original_catalog_report,
+            original_transferred_ids,
+            had_player_cache,
+            original_player_cache,
+        )
+    return result
+
+
+def apply_player_specs(
+    edit_file: "EditFile",
+    specs: tuple[PlayerSpec, ...],
+    base_revision: str,
+    all_players: Mapping[int, "PlayerInfo"],
+) -> tuple[SpecResult, ...]:
+    """Apply independent specs in deterministic filename order."""
+    ordered_specs = sorted(specs, key=lambda spec: spec.path.name)
+    return tuple(
+        apply_player_spec(edit_file, spec, base_revision, all_players)
+        for spec in ordered_specs
+    )

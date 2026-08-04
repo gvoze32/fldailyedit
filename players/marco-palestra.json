@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "operation": "update",
+  "lifecycle": {
+    "status": "active"
+  },
+  "applies_to": [
+    "fl26-u2.2-national-squads"
+  ],
+  "identity": {
+    "name": "Marco Palestra",
+    "aliases": [
+      "Marco Palestra"
+    ],
+    "pes_id": 162196,
+    "sortitoutsi_id": 2000136198
+  },
+  "evidence": {
+    "profile_url": "https://sortitoutsi.net/football-manager-data-update/person/2000136198",
+    "proof_urls": [
+      "https://sortitoutsi.net/football-manager-data-update/attributes/submission/526121"
+    ],
+    "effective_date": "2026-07-25",
+    "reason": "Approved attribute submission"
+  },
+  "pes": {
+    "abilities": {
+      "speed": {
+        "from": 77,
+        "to": 80
+      },
+      "acceleration": {
+        "from": 75,
+        "to": 77
+      },
+      "defensive_awareness": {
+        "from": 61,
+        "to": 62
+      },
+      "ball_winning": {
+        "from": 59,
+        "to": 60
+      }
+    }
+  }
+}

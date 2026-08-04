@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "operation": "create",
+  "lifecycle": {
+    "status": "active",
+    "reason": "Missing from bundled FL26 base"
+  },
+  "applies_to": [
+    "fl26-u2.2-national-squads"
+  ],
+  "identity": {
+    "name": "Dastan Satpayev",
+    "print_name": "SATPAYEV",
+    "aliases": [
+      "Dastan Satpayev",
+      "Dastan Sätpayev",
+      "Dastan Satpaev"
+    ],
+    "pes_id": 200000,
+    "sortitoutsi_id": 2000370206
+  },
+  "evidence": {
+    "profile_url": "https://sortitoutsi.net/football-manager-data-update/person/2000370206",
+    "proof_urls": [
+      "https://sortitoutsi.net/football-manager-2026/person/2000370206/dastan-satpayev",
+      "https://qjl.kz/en/news/official-dastan-satpayev-signed-a-contract-with-chelsea",
+      "https://www.chelseafc.com/en/news/article/chelsea-squad-numbers-2026-pre-season-tour-confirmed"
+    ],
+    "effective_date": "2026-08-04",
+    "reason": "Chelsea included Satpayev in its 2026 pre-season squad before his contractual transfer date."
+  },
+  "pes": {
+    "player_id": 200000,
+    "name": "Dastan Satpayev",
+    "print_name": "SATPAYEV",
+    "team_id": 102,
+    "team_name": "Chelsea FC",
+    "preferred_shirt_number": 36,
+    "nationality_id": 216,
+    "age": 17,
+    "height": 176,
+    "weight": 73,
+    "registered_position": "CF",
+    "playing_style": 1,
+    "strong_foot": 0,
+    "weak_foot_usage": 2,
+    "weak_foot_accuracy": 2,
+    "form": 5,
+    "injury_resistance": 2,
+    "position_proficiency": {
+      "LWF": 2,
+      "RWF": 2,
+      "SS": 1,
+      "CF": 2
+    },
+    "abilities": {
+      "attacking_awareness": 76,
+      "ball_control": 74,
+      "dribbling": 75,
+      "tight_possession": 72,
+      "low_pass": 68,
+      "lofted_pass": 65,
+      "finishing": 79,
+      "heading": 68,
+      "place_kicking": 65,
+      "curl": 70,
+      "speed": 80,
+      "acceleration": 82,
+      "kicking_power": 77,
+      "jump": 70,
+      "physical_contact": 68,
+      "balance": 78,
+      "stamina": 72,
+      "defensive_awareness": 42,
+      "ball_winning": 43,
+      "aggression": 70,
+      "gk_awareness": 40,
+      "catching": 40,
+      "clearing": 40,
+      "reflexes": 40,
+      "gk_reach": 40
+    },
+    "player_skills": [],
+    "com_styles": [],
+    "skin_color": 2,
+    "iris_color": 1
+  }
+}
