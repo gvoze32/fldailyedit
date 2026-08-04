@@ -38,6 +38,7 @@ reference/
 .superpowers/
 docs/superpowers/
 MEMORY.md
+.worktrees/
 
 # Native build products
 vendor/pesXdecrypter/decrypter21
