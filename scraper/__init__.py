@@ -11,6 +11,13 @@ from scraper.player_draft import (
     parse_sortitoutsi_person_url,
     parse_sortitoutsi_player_profile,
 )
+from scraper.pes_retro_stats import (
+    PesRetroStatsError,
+    PesRetroStatsProfile,
+    fetch_pes_retro_stats_profile,
+    parse_pes_retro_stats_profile,
+    parse_pes_retro_stats_url,
+)
 
 __all__ = [
     "FotmobScraper",
@@ -23,4 +30,9 @@ __all__ = [
     "fetch_sortitoutsi_player_profile",
     "parse_sortitoutsi_person_url",
     "parse_sortitoutsi_player_profile",
+    "PesRetroStatsError",
+    "PesRetroStatsProfile",
+    "fetch_pes_retro_stats_profile",
+    "parse_pes_retro_stats_profile",
+    "parse_pes_retro_stats_url",
 ]
