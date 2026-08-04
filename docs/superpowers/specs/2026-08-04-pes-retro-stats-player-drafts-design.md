@@ -10,7 +10,7 @@ The generated values are proposals, not approval. A Player Update becomes effect
 
 The integration assumes the project has explicit permission from the Pes Retro Stats owner to fetch public player profile pages programmatically. It does not use private or undocumented API endpoints.
 
-Each issue event may fetch only the single profile URL supplied by the contributor. The workflow does not crawl the sitemap, search the site, enumerate players, or use browser automation.
+Each issue event must supply one canonical player name and may fetch only the single profile URL supplied by the contributor. The workflow does not crawl the sitemap, search the site, enumerate players, or use browser automation. The submitted name must match the normalized `name` in the profile payload; the generator never invents aliases.
 
 Accepted profile URLs must:
 
@@ -30,8 +30,8 @@ Accepted profile URLs must:
 - Generated `create` proposals
 - Generated `update` diffs against the configured base revision
 - Player Update schema migration from version 1 to version 2
-- Existing Marco Palestra and Dastan Satpayev Player Updates
-- Workflow copy, validator messages, exports, tests, and README Player Update documentation
+- Existing Marco Palestra and Dastan Satpaev Player Updates
+- Workflow files renamed to `.github/workflows/generate-player-update.yml` and `.github/workflows/validate-player-update-pr.yml`, plus workflow copy, validator messages, exports, tests, and README Player Update documentation
 
 ### Excluded
 
@@ -60,10 +60,12 @@ The parser reads the server-rendered Next.js flight payload and collects structu
 
 The following identities must agree:
 
-1. the eight-character ID prefix in the requested URL;
-2. the canonical URL in the response;
-3. the first eight characters of the full player UUID in the payload; and
-4. the single player record used for the draft.
+1. the required canonical player name submitted in the issue;
+2. the normalized `name` in the payload;
+3. the eight-character ID prefix in the requested URL;
+4. the canonical URL in the response;
+5. the first eight characters of the full player UUID in the payload; and
+6. the single player record used for the draft.
 
 A missing record, multiple distinct candidate records, identity mismatch, unknown field type, or schema drift is an error. The adapter never emits a partially parsed source model.
 
@@ -118,7 +120,7 @@ Every ability must be an integer in the codec's accepted range. The source must 
 
 ### Enums and collections
 
-Position grades, playing-style names, strong-foot values, injury-tolerance values, skill codes, and COM-style names use explicit source-to-codec tables. Unknown values are errors rather than silently ignored values. A profile must identify exactly one registered position supported by the codec. Unsupported auxiliary positions such as CWP/LWB/RWB may not become registered Player Update positions.
+Position grades, playing-style names, strong-foot values, injury-tolerance values, skill codes, and COM-style names use explicit source-to-codec tables. Unknown values are errors rather than silently ignored values. A `create` profile must identify exactly one registered position supported by the codec. For `update`, an unsupported registered position such as CWP/LWB/RWB and its unsupported proficiency field are omitted without remapping; all other supported proposal fields remain available.
 
 Source display scales that differ from the encoded PES 2021 scale use named, tested conversion functions. Values are range-checked after conversion. No clamping is permitted.
 
@@ -142,7 +144,7 @@ There is no compatibility alias for `sortitoutsi_id`. All Player Update callers 
 
 A `create` draft pre-populates every source-derived field:
 
-- name and aliases;
+- the required submitted canonical name, after exact normalized agreement with the source; aliases default to that name only and are never inferred;
 - age, height, and weight;
 - registered position and position proficiency;
 - playing style;
@@ -167,9 +169,9 @@ The partial generated representation is valid only as a draft. Completed schema 
 
 An `update` draft needs current base values. The generator workflow therefore compiles `pesXdecrypter`, verifies the configured base manifest, decrypts the bundled base, and resolves the submitted player against that exact revision.
 
-Matching is fail-closed. The generator may use normalized canonical name/full name, submitted current team, nationality, birth-derived age, and position as evidence, but it must resolve exactly one current player. An ambiguous or absent match produces no draft.
+Matching is fail-closed. The generator uses the required submitted canonical name, submitted current team, source identity, birth-derived age, and supported position evidence, and it must resolve exactly one current player. An ambiguous or absent match produces no draft.
 
-For each source-derived field, the generator compares the decoded base value with the mapped Pes Retro Stats target. It emits only changed fields as literal `from` and `to` pairs in the existing update groups. Equal fields are omitted. Zero differences is a controlled no-op and does not create an empty or misleading draft PR.
+For each source-derived field supported by the codec, the generator compares the decoded base value with the mapped Pes Retro Stats target. It emits only changed fields as literal `from` and `to` pairs in the existing update groups. Equal fields and unsupported registered/position fields are omitted. Zero differences is a controlled no-op and does not create an empty or misleading draft PR.
 
 The reviewer may edit or remove any proposed difference before approval.
 
@@ -177,7 +179,7 @@ The reviewer may edit or remove any proposed difference before approval.
 
 Autofill does not change the repository's approval boundary:
 
-1. A contributor submits one Pes Retro Stats profile and supporting evidence.
+1. A contributor submits the canonical player name, one Pes Retro Stats profile, and supporting evidence.
 2. A maintainer applies the exact generator label.
 3. The workflow opens one draft PR containing one generated Player Update.
 4. The draft remains intentionally invalid for completed-spec validation while `draft.needs_human_review` and `draft.missing` are present.
@@ -189,18 +191,21 @@ No fetched value is written directly to an edit file by the generator.
 
 ## Existing Player Update migration
 
-The two current files migrate to schema version 2 without changing their approved gameplay values.
+The two current files migrate to schema version 2 without changing their approved gameplay attributes.
 
 ### Marco Palestra
 
 - Profile: `https://pesretrostats.com/player/0ce2dbde-marco-palestra`
 - UUID: `0ce2dbde-9cd9-423c-a90a-35b07df6a967`
 
-### Dastan Satpayev
+### Dastan Satpaev
 
+- Rename `players/dastan-satpayev.json` to `players/dastan-satpaev.json`.
+- Change canonical identity name and serialized PES name to `Dastan Satpaev`.
+- Change print name to `SATPAEV`.
+- Keep only `Dastan Satpaev` as the default alias; no spelling variants are inferred.
 - Profile: `https://pesretrostats.com/player/f77d9c27-dastan-satpaev`
 - UUID: `f77d9c27-8f02-4dbe-b877-4c13724a4886`
-- Add source spelling `Dastan Satpaev` as an identity alias while retaining `Dastan Satpayev` as the repository's canonical identity.
 
 All SortitoutSI IDs and URLs are removed from these Player Update files. Existing official non-SortitoutSI proof URLs remain. The migration does not alter already reviewed ability, position, style, skill, physical, or appearance values.
 
@@ -230,15 +235,16 @@ Offline automated coverage must include:
 - bounded response handling and cleanup on fetch failures;
 - minimal Next.js payload parsing with one valid record;
 - missing, duplicated, malformed, and mismatched records;
+- submitted-name agreement and rejection of automatic aliases;
 - every ability mapping;
-- every supported position grade, playing style, foot, injury value, skill code, and COM style;
+- every supported position grade, playing style, foot, injury value, skill code, and COM style, plus omission of unsupported update positions without remapping;
 - scale conversions and range boundaries;
 - create draft prefill and exact `draft.missing` output;
 - update base matching and exact changed-field diff output;
 - absent, ambiguous, no-op, and base-revision failure paths;
 - schema version 2 strictness and rejection of `sortitoutsi_id` in Player Updates;
-- migrated Marco and Dastan files;
-- issue-template and workflow configuration; and
+- migrated Marco and Dastan files, including the canonical Dastan filename/name change;
+- issue-template configuration and both renamed workflow files;
 - unchanged SortitoutSI transfer behavior.
 
 Implementation smoke verification must also:
