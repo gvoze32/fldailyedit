@@ -424,6 +424,14 @@ def _load_identity(value: object) -> PlayerIdentity:
         normalize_player_identity(alias) for alias in aliases
     }:
         raise PlayerSpecError("identity aliases must include the canonical name")
+    raw_pes_retro_stats_id = raw.get("pes_retro_stats_id")
+    if (
+        isinstance(raw_pes_retro_stats_id, str)
+        and raw_pes_retro_stats_id != raw_pes_retro_stats_id.strip()
+    ):
+        raise PlayerSpecError(
+            "identity pes_retro_stats_id must not have surrounding whitespace"
+        )
     pes_retro_stats_id = _text(raw, "pes_retro_stats_id", "identity")
     if not _PES_RETRO_STATS_UUID_RE.fullmatch(pes_retro_stats_id):
         raise PlayerSpecError(
@@ -441,7 +449,15 @@ def _load_identity(value: object) -> PlayerIdentity:
 def _load_evidence(value: object, identity: PlayerIdentity) -> Evidence:
     raw = _object(value, "evidence")
     _validate_keys(raw, _EVIDENCE_FIELDS, _EVIDENCE_FIELDS, "evidence")
-    profile_url = _https_url(raw.get("profile_url"), "evidence profile_url")
+    raw_profile_url = raw.get("profile_url")
+    if (
+        isinstance(raw_profile_url, str)
+        and raw_profile_url != raw_profile_url.strip()
+    ):
+        raise PlayerSpecError(
+            "evidence profile_url must not have surrounding whitespace"
+        )
+    profile_url = _https_url(raw_profile_url, "evidence profile_url")
     profile_match = _PES_RETRO_STATS_PROFILE_RE.fullmatch(profile_url)
     if (
         profile_match is None

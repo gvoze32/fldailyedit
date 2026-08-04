@@ -233,6 +233,34 @@ def test_completed_specs_require_canonical_matching_pes_retro_stats_profile(
     with pytest.raises(PlayerSpecError, match="profile_url"):
         load_player_specs(tmp_path)
 
+@pytest.mark.parametrize(
+    ("pes_retro_stats_id", "profile_url", "message"),
+    (
+        (
+            " 0ce2dbde-9cd9-423c-a90a-35b07df6a967",
+            "https://pesretrostats.com/player/0ce2dbde-marco-palestra",
+            "pes_retro_stats_id",
+        ),
+        (
+            "0ce2dbde-9cd9-423c-a90a-35b07df6a967",
+            " https://pesretrostats.com/player/0ce2dbde-marco-palestra",
+            "profile_url",
+        ),
+    ),
+)
+def test_completed_specs_reject_whitespace_wrapped_source_identity(
+    tmp_path, pes_retro_stats_id, profile_url, message
+):
+    from editor.player_spec import PlayerSpecError, load_player_specs
+
+    payload = valid_marco_payload()
+    payload["identity"]["pes_retro_stats_id"] = pes_retro_stats_id
+    payload["evidence"]["profile_url"] = profile_url
+    write_payload(tmp_path, "marco-palestra.json", payload)
+
+    with pytest.raises(PlayerSpecError, match=message):
+        load_player_specs(tmp_path)
+
 
 @pytest.mark.parametrize(
     ("field", "control"),
