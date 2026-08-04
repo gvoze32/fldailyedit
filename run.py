@@ -1851,7 +1851,8 @@ def cmd_players_apply(args) -> None:
         ]
         for record in audit_records:
             transfer_logger.log_transfer(**record)
-        transfer_logger.save_reports(audit_records)
+        report_records = transfer_logger.read_log(save_scope)
+        transfer_logger.save_reports(report_records)
         print(
             f"Applied {len(audit_records)} player specs to {output_path}. "
             f"Backup: {backup_path}"

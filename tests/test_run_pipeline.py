@@ -434,7 +434,7 @@ def test_players_apply_no_change_writes_nothing(monkeypatch, tmp_path, capsys):
     assert "needs_review" in capsys.readouterr().out
 
 
-def test_players_apply_audits_only_after_successful_output_roundtrip(
+def test_players_apply_audits_and_rebuilds_same_save_reports_after_roundtrip(
     monkeypatch, tmp_path
 ):
     import run
@@ -443,6 +443,24 @@ def test_players_apply_audits_only_after_successful_output_roundtrip(
     calls = []
     source = tmp_path / "EDIT00000000"
     output = tmp_path / "updated"
+    report_dir = tmp_path / "reports"
+    save_scope = str(output.resolve())
+    logged_records = [
+        {
+            "player_name": "Transfer Player",
+            "player_id": 100001,
+            "from_team": "Club A",
+            "from_team_id": 1,
+            "to_team": "Club B",
+            "to_team_id": 2,
+            "confidence": 100.0,
+            "transfer_type": "transfer",
+            "dry_run": False,
+            "roster_action": "move",
+            "save_scope": save_scope,
+        }
+    ]
+    save_reports = run.transfer_logger.save_reports
     source.write_bytes(b"encrypted")
     input_dir = tmp_path / "decrypted-input"
     verify_dir = tmp_path / "decrypted-verify"
@@ -480,6 +498,23 @@ def test_players_apply_audits_only_after_successful_output_roundtrip(
     def fake_encrypt(_source_path, output_path):
         calls.append("encrypt")
         output_path.write_bytes(b"encrypted-output")
+    def fake_log_transfer(**record):
+        calls.append(("audit", record))
+        logged_records.append(record)
+
+    def fake_read_log(requested_save_scope):
+        assert requested_save_scope == save_scope
+        calls.append(("read-log", requested_save_scope))
+        return list(logged_records)
+
+    def save_combined_reports(records):
+        calls.append(("report", records))
+        save_reports(
+            records,
+            output_dir=report_dir,
+            write_github_summary=False,
+        )
+
 
     monkeypatch.setattr(run, "EditFile", FakeEditFile)
     monkeypatch.setattr(
@@ -501,15 +536,12 @@ def test_players_apply_audits_only_after_successful_output_roundtrip(
     monkeypatch.setattr(
         run.backup_mod, "create_backup", lambda _path: calls.append("backup")
     )
-    monkeypatch.setattr(
-        run.transfer_logger,
-        "log_transfer",
-        lambda **record: calls.append(("audit", record)),
-    )
+    monkeypatch.setattr(run.transfer_logger, "log_transfer", fake_log_transfer)
+    monkeypatch.setattr(run.transfer_logger, "read_log", fake_read_log)
     monkeypatch.setattr(
         run.transfer_logger,
         "save_reports",
-        lambda records: calls.append(("report", records)),
+        save_combined_reports,
     )
 
     run.cmd_players_apply(
@@ -539,6 +571,11 @@ def test_players_apply_audits_only_after_successful_output_roundtrip(
     report_index = next(index for index, call in enumerate(calls) if isinstance(call, tuple) and call[0] == "report")
     assert max(index for index, call in enumerate(calls) if call == "validate") < audit_index
     assert audit_index < report_index
+    markdown = (report_dir / "transfer_summary.md").read_text(encoding="utf-8")
+    html = (report_dir / "transfer_summary.html").read_text(encoding="utf-8")
+    for report in (markdown, html):
+        assert "Transfer Player" in report
+        assert "Marco Palestra" in report
 
 
 def _assert_players_apply_aborts_for_backup_race(
