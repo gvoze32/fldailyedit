@@ -7,7 +7,7 @@ import textwrap
 from pathlib import Path
 
 
-FORM_PATH = Path(".github/ISSUE_TEMPLATE/player-spec.yml")
+FORM_PATH = Path(".github/ISSUE_TEMPLATE/player-update.yml")
 WORKFLOW_PATH = Path(".github/workflows/generate-player-update.yml")
 CI_PATH = Path(".github/workflows/ci.yml")
 PLAYER_TARGET_PATH = Path(".github/workflows/validate-player-update-pr.yml")
@@ -329,7 +329,8 @@ def test_generate_workflow_compiles_decrypter_before_generation():
     assert text.index(compile_step) < text.index("      - name: Generate Player Update")
 
 
-def test_legacy_workflow_paths_are_absent():
+def test_legacy_user_facing_paths_are_absent():
+    assert not Path(".github/ISSUE_TEMPLATE/player-spec.yml").exists()
     assert not Path(".github/workflows/generate-player-spec.yml").exists()
     assert not Path(".github/workflows/player-spec-pr.yml").exists()
 

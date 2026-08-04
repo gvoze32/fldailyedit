@@ -154,7 +154,7 @@ registered position.
 
 ### Simple issue path
 
-1. Open the [player update issue form](.github/ISSUE_TEMPLATE/player-spec.yml).
+1. Open the [player update issue form](.github/ISSUE_TEMPLATE/player-update.yml).
    Enter the `Player name` exactly as shown on one canonical `Pes Retro Stats
    profile`, provide the proof URLs, and wait for a maintainer to apply the
    exact `generate-player-draft` label.
