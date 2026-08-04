@@ -299,11 +299,11 @@ def test_generate_workflow_is_label_gated_and_minimally_privileged():
 def test_generate_workflow_uses_trusted_event_file_and_exact_machine_output():
     text = WORKFLOW_PATH.read_text(encoding="utf-8")
 
-    assert "actions/checkout@v4" in text
+    assert "actions/checkout@v7" in text
     assert "ref: ${{ github.event.repository.default_branch }}" in text
     assert "persist-credentials: true" in text
     assert "fetch-depth: 0" in text
-    assert "actions/setup-python@v5" in text
+    assert "actions/setup-python@v7" in text
     assert 'python-version: "3.13"' in text
     assert "python -m pip install -e ." in text
     assert 'python run.py players generate-draft --event "$GITHUB_EVENT_PATH" --output-dir players' in text
@@ -311,6 +311,21 @@ def test_generate_workflow_uses_trusted_event_file_and_exact_machine_output():
     assert 'startswith("PLAYER_NAME=")' in text
     assert 'os.environ["GITHUB_OUTPUT"]' in text
     assert 'f"{name}<<{delimiter}\\n{value}\\n{delimiter}\\n"' in text
+
+
+def test_workflows_use_latest_official_action_majors():
+    versions: dict[str, set[str]] = {}
+
+    for path in Path(".github/workflows").glob("*.yml"):
+        text = path.read_text(encoding="utf-8")
+        for action, version in re.findall(r"uses:\s+actions/([^@\s]+)@(\S+)", text):
+            versions.setdefault(action, set()).add(version)
+
+    assert versions == {
+        "checkout": {"v7"},
+        "setup-python": {"v7"},
+        "upload-artifact": {"v7"},
+    }
 
 
 def test_generate_workflow_compiles_decrypter_before_generation():
