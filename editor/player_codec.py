@@ -208,8 +208,15 @@ class PlayerAbilityProfile:
     registered_position: str
     registered_position_id: int
     playing_style: int
+    strong_foot: int
+    weak_foot_usage: int
+    weak_foot_accuracy: int
+    form: int
+    injury_resistance: int
     abilities: Mapping[str, int]
     position_proficiency: Mapping[str, int]
+    player_skills: tuple[str, ...]
+    com_styles: tuple[str, ...]
 
 
 def _build_field_specs() -> dict[str, FieldSpec]:
@@ -341,10 +348,21 @@ def decode_player_entry(entry: bytes | bytearray) -> PlayerAbilityProfile:
         registered_position=position,
         registered_position_id=position_id,
         playing_style=values["playing_style"],
+        strong_foot=values["strong_foot"],
+        weak_foot_usage=values["weak_foot_usage"],
+        weak_foot_accuracy=values["weak_foot_accuracy"],
+        form=values["form"],
+        injury_resistance=values["injury_resistance"],
         abilities={name: values[name] for name in ABILITY_FIELDS},
         position_proficiency={
             label: values[field_name] for label, field_name in _POSITION_FIELDS
         },
+        player_skills=tuple(
+            name for name in PLAYER_SKILL_FIELDS if values[f"skill_{name}"]
+        ),
+        com_styles=tuple(
+            name for name in COM_STYLE_FIELDS if values[f"com_style_{name}"]
+        ),
     )
 
 

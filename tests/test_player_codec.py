@@ -57,6 +57,46 @@ def test_decode_player_entry_reads_pes21_bitfields():
         "LWF": 0,
     }
 
+def test_decode_player_entry_exposes_every_draft_comparison_field():
+    from editor.player_codec import (
+        COM_STYLE_FIELDS,
+        PLAYER_SKILL_FIELDS,
+        decode_player_entry,
+    )
+
+    profile = decode_player_entry(PALESTRA_ENTRY)
+
+    assert profile.strong_foot in {0, 1}
+    assert 0 <= profile.weak_foot_usage <= 3
+    assert 0 <= profile.weak_foot_accuracy <= 3
+    assert 0 <= profile.form <= 7
+    assert 0 <= profile.injury_resistance <= 3
+    assert set(profile.player_skills) <= set(PLAYER_SKILL_FIELDS)
+    assert set(profile.com_styles) <= set(COM_STYLE_FIELDS)
+
+
+def test_decode_player_entry_lists_enabled_skills_in_canonical_order():
+    from editor.player_codec import (
+        COM_STYLE_FIELDS,
+        PLAYER_SKILL_FIELDS,
+        decode_player_entry,
+        patch_player_entry,
+    )
+
+    updates = {f"skill_{name}": 0 for name in PLAYER_SKILL_FIELDS}
+    updates.update({f"com_style_{name}": 0 for name in COM_STYLE_FIELDS})
+    updates.update(
+        {
+            "skill_double_touch": 1,
+            "com_style_incisive_run": 1,
+        }
+    )
+    patched = patch_player_entry(PALESTRA_ENTRY, updates)
+    profile = decode_player_entry(patched)
+
+    assert profile.player_skills == ("double_touch",)
+    assert profile.com_styles == ("incisive_run",)
+
 
 
 def test_patch_player_entry_changes_only_requested_bitfields():
