@@ -712,3 +712,100 @@ def test_players_apply_audits_only_after_successful_output_roundtrip(
     report_index = next(index for index, call in enumerate(calls) if isinstance(call, tuple) and call[0] == "report")
     assert max(index for index, call in enumerate(calls) if call == "validate") < audit_index
     assert audit_index < report_index
+
+
+def _assert_players_apply_aborts_for_backup_race(
+    monkeypatch, tmp_path, mutation_target
+):
+    import run
+    from editor.player_spec import BaseManifest, SpecResult, load_player_specs
+
+    calls = []
+    source = tmp_path / "EDIT00000000"
+    output = tmp_path / "updated"
+    source.write_bytes(b"input-before")
+    output.write_bytes(b"output-before")
+    decrypted = tmp_path / "decrypted-race"
+    decrypted.mkdir()
+    (decrypted / "data.dat").write_bytes(b"decrypted")
+    marco = next(
+        spec for spec in load_player_specs() if spec.identity.name == "Marco Palestra"
+    )
+
+    class FakeEditFile:
+        def load(self, _path):
+            return None
+
+        def get_all_players(self, include_base_db=True):
+            return {}
+
+        def validate_integrity(self):
+            return {"valid": True, "errors": [], "warnings": [], "metrics": {}}
+
+        def save(self, _path):
+            calls.append("save")
+
+    def mutate_during_backup(_path):
+        calls.append("backup")
+        target = source if mutation_target == "input" else output
+        target.write_bytes(f"{mutation_target}-after".encode())
+        return tmp_path / "backup"
+
+    monkeypatch.setattr(run, "EditFile", FakeEditFile)
+    monkeypatch.setattr(
+        run,
+        "load_base_manifest",
+        lambda: BaseManifest("expected-revision", "0" * 64),
+    )
+    monkeypatch.setattr(run, "load_player_specs", lambda: (marco,))
+    monkeypatch.setattr(
+        run,
+        "apply_player_specs",
+        lambda *_args: (
+            SpecResult(162196, "Marco Palestra", "updated", "patched"),
+        ),
+    )
+    monkeypatch.setattr(run.crypto, "decrypt", lambda _path: decrypted)
+    monkeypatch.setattr(
+        run.crypto, "encrypt", lambda *_args: calls.append("encrypt")
+    )
+    monkeypatch.setattr(run.crypto, "cleanup_temp", lambda _path: None)
+    monkeypatch.setattr(run.backup_mod, "create_backup", mutate_during_backup)
+    monkeypatch.setattr(
+        run.transfer_logger,
+        "log_transfer",
+        lambda **_record: calls.append("audit"),
+    )
+    monkeypatch.setattr(
+        run.transfer_logger,
+        "save_reports",
+        lambda _records: calls.append("report"),
+    )
+
+    try:
+        run.cmd_players_apply(
+            Namespace(
+                edit_file=str(source),
+                output=str(output),
+                in_place=False,
+                base_revision="expected-revision",
+            )
+        )
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("backup-time concurrent replacement must abort apply")
+
+    assert calls == ["backup"]
+
+
+def test_players_apply_aborts_when_input_changes_during_backup(
+    monkeypatch, tmp_path
+):
+    _assert_players_apply_aborts_for_backup_race(monkeypatch, tmp_path, "input")
+
+
+def test_players_apply_aborts_when_existing_output_changes_during_backup(
+    monkeypatch, tmp_path
+):
+    _assert_players_apply_aborts_for_backup_race(monkeypatch, tmp_path, "output")

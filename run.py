@@ -1982,6 +1982,7 @@ def cmd_players_apply(args) -> None:
             return
 
         _require_valid_edit(edit_file, "Modified save")
+        backup_path = backup_mod.create_backup(edit_path)
         if _sha256_file(edit_path) != input_digest:
             print("Input EDIT file changed while player specs were processing.")
             raise SystemExit(2)
@@ -1993,7 +1994,6 @@ def cmd_players_apply(args) -> None:
                 print("Output EDIT file changed; concurrent output was preserved.")
                 raise SystemExit(2)
 
-        backup_path = backup_mod.create_backup(edit_path)
         edit_file.save(data_file)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         crypto.encrypt(decrypted, output_path)
