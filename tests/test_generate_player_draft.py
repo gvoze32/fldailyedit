@@ -19,9 +19,9 @@ from tools.generate_player_draft import (
 PROFILE_URL = (
     "https://sortitoutsi.net/football-manager-data-update/person/2000370206"
 )
-CONFIRMATIONS = """- [x] I supplied source evidence.
-- [x] I did not derive PES ratings from Football Manager values.
-- [x] I understand a maintainer must review the draft PR."""
+CONFIRMATIONS = """- [X] I supplied source evidence.
+- [X] I did not derive PES ratings from Football Manager values.
+- [X] I understand a maintainer must review the draft PR."""
 HEADINGS = (
     "Operation",
     "SortitoutSI profile",
@@ -76,9 +76,9 @@ Missing from the reviewed FL26 base.
 
 ### Confirmations
 
-- [x] I supplied source evidence.
-- [x] I did not derive PES ratings from Football Manager values.
-- [x] I understand a maintainer must review the draft PR.
+- [X] I supplied source evidence.
+- [X] I did not derive PES ratings from Football Manager values.
+- [X] I understand a maintainer must review the draft PR.
 """
 
 
@@ -204,13 +204,15 @@ def test_malformed_or_nonexact_headings_are_rejected(body: str):
 @pytest.mark.parametrize(
     "confirmations",
     [
-        CONFIRMATIONS.replace("- [x]", "- [ ]", 1),
+        CONFIRMATIONS.replace("- [X]", "- [ ]", 1),
         CONFIRMATIONS.replace(
-            "- [x] I supplied source evidence.\n", "", 1
+            "- [X] I supplied source evidence.\n", "", 1
         ),
-        CONFIRMATIONS + "\n- [x] I also request automatic approval.",
-        CONFIRMATIONS + "\n- [x] I supplied source evidence.",
+        CONFIRMATIONS + "\n- [X] I also request automatic approval.",
+        CONFIRMATIONS + "\n- [X] I supplied source evidence.",
         "\n".join(reversed(CONFIRMATIONS.splitlines())),
+        CONFIRMATIONS.replace("[X]", "[x]"),
+        CONFIRMATIONS.replace("[X]", "[x]", 1),
     ],
 )
 def test_confirmations_require_three_exact_checked_lines(confirmations: str):

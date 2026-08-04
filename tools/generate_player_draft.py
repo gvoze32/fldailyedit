@@ -24,9 +24,9 @@ from scraper.player_draft import (
 
 _LABEL = "generate-player-draft"
 _CONFIRMATIONS = (
-    "- [x] I supplied source evidence.",
-    "- [x] I did not derive PES ratings from Football Manager values.",
-    "- [x] I understand a maintainer must review the draft PR.",
+    "- [X] I supplied source evidence.",
+    "- [X] I did not derive PES ratings from Football Manager values.",
+    "- [X] I understand a maintainer must review the draft PR.",
 )
 _HEADINGS = (
     "Operation",
