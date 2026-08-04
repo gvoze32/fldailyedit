@@ -26,6 +26,7 @@ data/transfer_log.jsonl
 data/cron.log
 *.bak.*
 .pytest_cache/
+tests/
 
 # OS
 .DS_Store
