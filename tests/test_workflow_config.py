@@ -9,6 +9,8 @@ from pathlib import Path
 
 FORM_PATH = Path(".github/ISSUE_TEMPLATE/player-spec.yml")
 WORKFLOW_PATH = Path(".github/workflows/generate-player-spec.yml")
+CI_PATH = Path(".github/workflows/ci.yml")
+
 
 EXPECTED_FIELDS = (
     ("dropdown", "operation", "Operation"),
@@ -419,3 +421,62 @@ def test_generate_workflow_does_not_put_untrusted_event_data_in_shell_structure(
     assert run_blocks
     assert all("${{ github.event.issue" not in block for block in run_blocks)
     assert text.count("shell: bash") == len(run_blocks)
+
+
+def test_ci_keeps_the_python_matrix_and_validates_specs_in_every_matrix_job():
+    text = CI_PATH.read_text(encoding="utf-8")
+    matrix_job = text.split("\n  test:\n", 1)[1].split("\n  player-spec-pr:\n", 1)[0]
+
+    assert 'python-version: ["3.10", "3.11", "3.12", "3.13"]' in matrix_job
+    assert "os: [ubuntu-latest, macos-latest]" in matrix_job
+    assert "python run.py players validate" in matrix_job
+
+
+def test_player_spec_pr_job_runs_on_every_pull_request_with_trusted_base_history():
+    text = CI_PATH.read_text(encoding="utf-8")
+    job = text.split("\n  player-spec-pr:\n", 1)[1]
+
+    assert "\n  pull_request:\n    branches: [main]\n" in text
+    assert "paths:" not in text.split("\n  pull_request:\n", 1)[1].split(
+        "\n  workflow_dispatch:", 1
+    )[0]
+    assert "if: github.event_name == 'pull_request'" in job
+    assert "fetch-depth: 0" in job
+    assert "GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}" in job
+    assert 'git fetch --no-tags origin "$GITHUB_BASE_SHA"' in job
+
+
+def test_player_spec_pr_job_uses_exact_three_dot_filter_and_trusted_base_guard():
+    text = CI_PATH.read_text(encoding="utf-8")
+    job = text.split("\n  player-spec-pr:\n", 1)[1]
+
+    assert (
+        'git diff --name-status --diff-filter=ACDMRTUXB '
+        '"$GITHUB_BASE_SHA...HEAD" -- > "$CHANGES_FILE"'
+    ) in job
+    assert (
+        'git show "${GITHUB_BASE_SHA}:tools/check_player_spec_pr.py" '
+        '> "$TRUSTED_GUARD"'
+    ) in job
+    guard = 'python "$TRUSTED_GUARD" --changes-file "$CHANGES_FILE"'
+    validator = "python run.py players validate"
+    assert guard in job
+    assert validator in job
+    assert job.index(guard) < job.index(validator)
+
+
+def test_pull_request_ci_avoids_privileged_or_issue_contexts():
+    text = CI_PATH.read_text(encoding="utf-8")
+
+    assert "pull_request_target" not in text
+    assert "github.event.issue" not in text
+    assert "${{ github.event.pull_request.head" not in text
+
+
+def test_generated_draft_pr_warns_that_semantic_validation_must_fail():
+    text = WORKFLOW_PATH.read_text(encoding="utf-8").lower()
+
+    assert (
+        "semantic validation must fail until a human fills every required value"
+        in text
+    )

@@ -262,13 +262,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          printf -v PR_BODY \
+            'Closes #%s\n\nSemantic validation must fail until a human fills every required value.' \
+            "$ISSUE_NUMBER"
           pr_url="$(
             gh pr create \
               --draft \
               --head "$BRANCH_NAME" \
               --base "$DEFAULT_BRANCH" \
               --title "player: draft $PLAYER_NAME" \
-              --body "Closes #$ISSUE_NUMBER"
+              --body "$PR_BODY"
           )"
           COMMENT_BODY="Draft player specification: $pr_url"
           gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
