@@ -140,43 +140,51 @@ both workflows, first run the transfer command against an output save, then run
 
 ## Player Updates
 
-Each reviewed Player Update is one JSON file per player under `players/`. The
-engine accepts schema version 1 with an `operation` (`create` or `update`), a
-lifecycle (`active`, `upstreamed`, or `retired`), exact `applies_to` base
-revisions, stable player identity, cited evidence, and PES data. New-player
-updates contain the complete player record and destination roster data.
-Existing-player updates may patch the whitelisted groups: abilities,
-position proficiency, playing style, player skills, COM styles, nationality,
-and physical/basic settings. The registered position is also whitelisted. Every
-patch requires literal `from` and `to` values.
+Each reviewed Player Update is one schema-version-2 JSON file per player under
+`players/`. It records an `operation` (`create` or `update`), a lifecycle
+(`active`, `upstreamed`, or `retired`), exact `applies_to` base revisions,
+stable player identity, the Pes Retro Stats source snapshot, cited evidence,
+and PES data. Create updates contain a proposed complete player record and
+destination roster data. Existing-player updates contain only supported values
+that differ from the verified base; every change records literal `from` and
+`to` values.
 
 ### Simple issue path
 
-1. Open the [player update issue form](.github/ISSUE_TEMPLATE/player-spec.yml),
-   provide the profile and proof URLs, and wait for a maintainer to apply the
+1. Open the [player update issue form](.github/ISSUE_TEMPLATE/player-spec.yml).
+   Enter the `Player name` exactly as shown on one canonical `Pes Retro Stats
+   profile`, provide the proof URLs, and wait for a maintainer to apply the
    exact `generate-player-draft` label.
-2. The configured generator workflow opens a draft PR containing one
-   intentionally incomplete `players/<player-slug>.json` file. Source text is
-   data, not approved PES values.
-3. A contributor or maintainer replaces every listed placeholder with explicit
-   PES values. Update files must also state the expected current (`from`) value
-   for every proposed (`to`) value.
-4. CI accepts a Player Update only when the PR adds or modifies exactly one
-   canonical player JSON path and the shared semantic validator succeeds.
-5. Merging the PR is the approval state. There is no separate `approved` flag
-   in the JSON file.
+2. The configured generator workflow fetches that profile and opens a draft PR
+   containing one schema-version-2 `players/<player-slug>.json` proposal. It
+   derives the source snapshot, identity, physical settings, position data,
+   abilities, playing style, skills, and COM styles from the profile.
+3. For a create, only game-local values unavailable from the source remain
+   listed in `draft.missing`: the PES IDs and print names for the identity and
+   player, team ID and name, nationality ID, skin color, and iris color. A
+   contributor or maintainer must supply them. For an update, the generator
+   resolves the player in the verified base and emits only actual `from`/`to`
+   differences. A source position unsupported by PES 2021, such as `RWB`, is
+   omitted rather than remapped, including from the registered-position change.
+4. A contributor and maintainer review every generated value as an unapproved
+   proposal. CI accepts a Player Update only when the PR adds or modifies
+   exactly one canonical player JSON path and the shared semantic validator
+   succeeds.
+5. Merging the PR remains the human approval state. There is no separate
+   `approved` flag in the JSON file.
 
-The generated draft is expected to fail validation until all human fields named
-by its `draft.missing` list have been completed and the draft-only metadata has
-been removed.
+The generated create draft is expected to fail validation until all local
+fields named by its `draft.missing` list have been completed and the draft-only
+metadata has been removed.
 
 ### Direct one-file PR path
 
 An advanced contributor may skip the issue-generated draft and directly open a
 PR that adds or modifies exactly one `players/<player-slug>.json` file. Supply
-the same cited evidence, explicit PES values, expected baselines, lifecycle,
-and exact base revision, then run `python run.py players validate` before
-requesting review. Keep other code or documentation changes out of that PR.
+the same source snapshot, cited evidence, reviewed PES values, expected update
+baselines, lifecycle, and exact base revision, then run
+`python run.py players validate` before requesting review. Keep other code or
+documentation changes out of that PR.
 
 Application is always an explicit command and requires the exact revision from
 `data/base_manifest.json`; a revision mismatch fails before decrypting the
@@ -215,8 +223,8 @@ cumulative history again.
 
 FotMob provides the primary transfer history and squad metadata. Wikipedia
 seasonal lists, enabled SortitoutSI transfer submissions, and verified dated
-Transfermarkt records supplement or confirm transfer routes. Approved
-SortitoutSI ability submissions provide CA changes for read-only stat proposals.
+Transfermarkt records supplement or confirm transfer routes. Pes Retro Stats
+profiles provide source-derived, unapproved proposals for Player Update drafts.
 
 Records from different sources are reconciled without discarding their dates,
 IDs, citations, or proof links. Undated, future-effective, conflicting, or
