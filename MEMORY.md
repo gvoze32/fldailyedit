@@ -310,14 +310,66 @@ fldailyedit/
 - Player contributions are one JSON file per player in `players/`. Specs declare
   schema version 1, `create` or `update`, lifecycle state, exact `applies_to`
   revisions, identity, evidence, and complete creation data or literal ability
-  `from`/`to` patches.
+  `from`/`to` patches. A merge is the approval state; specs have no separate
+  approval flag.
+- The community entry points are
+  `.github/ISSUE_TEMPLATE/player-spec.yml` and direct one-file PRs. The issue
+  path waits for the exact maintainer-applied `generate-player-draft` label;
+  `tools/generate_player_draft.py`, invoked by
+  `players generate-draft`, emits one deterministic, intentionally incomplete
+  JSON file. Humans must fill every `draft.missing` PES field and expected
+  baseline before shared validation can pass.
+- `.github/workflows/generate-player-spec.yml` owns the labeled issue-to-draft
+  path. It checks out the default branch, derives
+  `player-draft/issue-<positive-integer>` from parsed event JSON, and can commit
+  only the emitted canonical spec path. Its only permissions are
+  `contents: write`, `pull-requests: write`, and `issues: write`.
+- `.github/workflows/player-spec-pr.yml` is the narrow, base-owned
+  `pull_request_target` exception. It has only `contents: read`, checks out and
+  installs the trusted base SHA, fetches the advertised head object without
+  checking it out, accepts only one added or modified canonical player JSON
+  path, and materializes that blob as JSON data after the guard. It has no
+  secrets, write operations, head checkout, or head code execution.
+  `.github/workflows/generate-player-spec.yml` and ordinary
+  `.github/workflows/ci.yml` must not use `pull_request_target`.
+- Threat model: issue bodies, contributor text, URLs, branch state, PR metadata,
+  and head blobs are untrusted. Event text is read from `GITHUB_EVENT_PATH` by
+  Python and serialized as JSON data; it is never interpolated directly into
+  shell. The exact label, positive numeric issue number, canonical path, base
+  ancestry, and one-file PR boundary are validated before any write or semantic
+  validation. No contributor-controlled code is executed by the target
+  workflow.
+- Exact local validation commands:
+
+  ```bash
+  .venv/bin/python run.py players validate
+  .venv/bin/python -m pytest -q
+
+  # Use when actionlint is installed:
+  actionlint .github/workflows/generate-player-spec.yml \
+    .github/workflows/ci.yml \
+    .github/workflows/player-spec-pr.yml
+
+  # Otherwise, safe-load every workflow and run GitHub-specific assertions:
+  ruby -e 'require "yaml"; ARGV.each { |p| YAML.safe_load(File.read(p), permitted_classes: [], permitted_symbols: [], aliases: false) }' \
+    .github/workflows/generate-player-spec.yml \
+    .github/workflows/ci.yml \
+    .github/workflows/player-spec-pr.yml
+  .venv/bin/python -m pytest -q \
+    tests/test_workflow_config.py \
+    tests/test_player_spec_target_workflow.py \
+    tests/test_player_spec_pr.py
+  ```
+
 - `players validate` checks the pristine digest, the global spec set, and
-  semantic applicability. `players apply` requires the exact manifest revision
+  semantic applicability. Generated drafts exit nonzero and name their exact
+  missing human fields. `players apply` requires the exact manifest revision
   and uses a locked, backed-up, integrity-verified save transaction.
 - On an official base update, update the save and `base_manifest.json` together,
-  then review each active spec for the new revision. Unreviewed specs report
-  `needs_review`; official-base inclusions become `upstreamed`, and obsolete
-  contributions become `retired`.
+  keep historical specs, and review each active spec for the new revision.
+  Specs without a matching revision remain inactive and report `needs_review`;
+  official-base inclusions become `upstreamed`, and obsolete contributions
+  become `retired`.
 - FotMob is the transfer source. There is no legacy per-league scrape config.
 - Loans, permanent transfers, releases, signings, and shirt-number observations
   use one chronological roster planner.

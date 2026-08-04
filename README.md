@@ -147,17 +147,48 @@ revisions, stable player identity, cited evidence, and PES data. Creation specs
 contain the complete player record and destination roster data. Update specs
 contain explicit ability patches with literal `from` and `to` values.
 
-Run `python run.py players validate` before review. Application is always an
-explicit command and requires the exact revision from
+### Simple issue path
+
+1. Open the [player-spec issue form](.github/ISSUE_TEMPLATE/player-spec.yml),
+   provide the profile and proof URLs, and wait for a maintainer to apply the
+   exact `generate-player-draft` label.
+2. The configured generator workflow opens a draft PR containing one
+   intentionally incomplete `players/<player-slug>.json` file. Source text is
+   data, not approved PES values.
+3. A contributor or maintainer replaces every listed placeholder with explicit
+   PES values. Update specs must also state the expected current (`from`) value
+   for every proposed (`to`) value.
+4. CI accepts a player-spec change only when the PR adds or modifies exactly one
+   canonical player JSON path and the shared semantic validator succeeds.
+5. Merging the PR is the approval state. There is no separate `approved` flag
+   in the JSON file.
+
+The generated draft is expected to fail validation until all human fields named
+by its `draft.missing` list have been completed and the draft-only metadata has
+been removed.
+
+### Direct one-file PR path
+
+An advanced contributor may skip the issue-generated draft and directly open a
+PR that adds or modifies exactly one `players/<player-slug>.json` file. Supply
+the same cited evidence, explicit PES values, expected baselines, lifecycle,
+and exact base revision, then run `python run.py players validate` before
+requesting review. Keep other code or documentation changes out of that PR.
+
+Application is always an explicit command and requires the exact revision from
 `data/base_manifest.json`; a revision mismatch fails before decrypting the
 target save.
 
+### Revision lifecycle
+
 When the official base changes, update `base/EDIT00000000` and
-`data/base_manifest.json` together. Every active spec must then be reviewed for
-the new revision before adding it to `applies_to`. Mark a spec `upstreamed` when
-the official base includes its change, or `retired` when it no longer applies.
-Until that review is complete, the engine reports the spec as `needs_review`
-and does not apply it.
+`data/base_manifest.json` together. Keep historical specs in `players/`; do not
+delete them merely because the revision changed. An active spec whose
+`applies_to` list does not contain the new revision is inactive: validation
+reports `needs_review` and application skips it. After review, add the new
+revision only when the spec still applies, mark it `upstreamed` when the
+official base includes its change, or mark it `retired` when it no longer
+applies.
 
 Common `run` options:
 
