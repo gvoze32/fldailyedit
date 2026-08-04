@@ -56,6 +56,7 @@ For an on-demand run or a custom club list, fork the repository and use
 - Lineups and game plans affected by roster changes
 - Transfer reports and JSON Lines audit logs
 - Daily prebuilt saves through GitHub Actions
+- Reviewed player creations and attribute corrections through explicit player-spec commands
 
 The updater does not overwrite a shirt number already used by another squad
 member. It also checks the player's current club before applying a move.
@@ -100,6 +101,15 @@ python run.py run --dry-run --edit-file base/EDIT00000000
 # Validate an existing save
 python run.py validate --edit-file base/EDIT00000000
 
+# Validate one-file-per-player specs against the pristine base revision
+python run.py players validate
+
+# Apply reviewed specs explicitly to an existing output save
+python run.py players apply \
+  --base-revision fl26-u2.2-national-squads \
+  --edit-file output/EDIT00000000 \
+  --in-place
+
 # Apply all effective transfers available through today
 python run.py run --window auto
 
@@ -115,11 +125,39 @@ python run.py run --help
 
 | Command | Purpose |
 |---|---|
-| `run` | Collect, match, and apply transfers |
+| `run` | Apply verified transfers only |
+| `players validate` | Validate all player specs against the pristine base |
+| `players apply` | Apply reviewed player specs explicitly to one save |
 | `log` | Show recently applied transfers |
 | `inspect` | Inspect teams, player counts, and save offsets |
 | `validate` | Check roster registrations and game-plan mappings |
 | `repair` | Repair a legacy base using reference saves |
+
+
+`run` handles transfers only: it never loads or applies player specs. To combine
+both workflows, first run the transfer command against an output save, then run
+`players apply --in-place` against that same save.
+
+## Player-spec contributions
+
+Each reviewed contribution is one JSON file per player under `players/`. The
+engine accepts schema version 1 with an `operation` (`create` or `update`), a
+lifecycle (`active`, `upstreamed`, or `retired`), exact `applies_to` base
+revisions, stable player identity, cited evidence, and PES data. Creation specs
+contain the complete player record and destination roster data. Update specs
+contain explicit ability patches with literal `from` and `to` values.
+
+Run `python run.py players validate` before review. Application is always an
+explicit command and requires the exact revision from
+`data/base_manifest.json`; a revision mismatch fails before decrypting the
+target save.
+
+When the official base changes, update `base/EDIT00000000` and
+`data/base_manifest.json` together. Every active spec must then be reviewed for
+the new revision before adding it to `applies_to`. Mark a spec `upstreamed` when
+the official base includes its change, or `retired` when it no longer applies.
+Until that review is complete, the engine reports the spec as `needs_review`
+and does not apply it.
 
 Common `run` options:
 
@@ -142,8 +180,9 @@ cumulative history again.
 ## Transfer sources
 
 FotMob provides the primary transfer history and squad metadata. Wikipedia
-seasonal lists, enabled Sortitoutsi submissions, and verified dated
-Transfermarkt records supplement or confirm transfer routes.
+seasonal lists, enabled SortitoutSI transfer submissions, and verified dated
+Transfermarkt records supplement or confirm transfer routes. Approved
+SortitoutSI ability submissions provide CA changes for read-only stat proposals.
 
 Records from different sources are reconciled without discarding their dates,
 IDs, citations, or proof links. Undated, future-effective, conflicting, or

@@ -17,7 +17,9 @@ Build an automated system (daily cron) that:
 6. Auto-backs up the old file before overwriting
 7. Logs all changes for auditing/rollback
 
-**Scope:** Player transfers ONLY (club A → club B). NO player stats/ability editing.
+**Scope:** `run` automates transfers only. Reviewed player creations and ability
+patches are revision-scoped JSON specs applied only through the explicit
+`players validate` and `players apply` commands.
 
 **Tech stack:** Python, subprocess for pesXdecrypter binary, modular structure (scraper/ and editor/ independent).
 
@@ -265,7 +267,7 @@ FotMob names vs FL26 database names will differ:
 fldailyedit/
 ├── MEMORY.md                # THIS FILE — project context for AI continuity
 ├── config.py                # Central config (paths, thresholds, URLs)
-├── run.py                   # Main CLI entry point (full pipeline)
+├── run.py                   # Transfer CLI + explicit player-spec commands
 ├── pyproject.toml           # Python project + dependencies
 ├── scraper/
 │   ├── __init__.py
@@ -278,14 +280,18 @@ fldailyedit/
 │   ├── editfile.py          # Binary edit file reader/writer + validation
 │   ├── backup.py            # Timestamped backup management
 │   ├── player_catalog.py    # Current FL26 catalog + roster coverage gate
+│   ├── player_codec.py      # PES21/FL26 player decode and serialization
+│   ├── player_spec.py       # Revision-scoped spec validation and apply engine
 │   ├── locking.py           # Per-output cross-process lock
 │   ├── logger.py            # Structured transfer logging (JSONL)
 │   └── models.py            # TeamData / PlayerInfo dataclasses
 ├── data/
 │   ├── team_aliases.json    # FotMob → FL26 team name mapping
 │   ├── name_overrides.json  # Player name manual overrides
+│   ├── base_manifest.json   # Exact official-base revision and SHA-256
 │   ├── FL2622wc_players.txt # Canonical Update 2.2 player-name reference
 │   └── players.csv          # Roster-only legacy-ID fallback
+├── players/                 # One reviewed JSON contribution per player
 ├── tests/                   # Unit, regression, and pipeline tests
 ├── vendor/
 │   └── pesXdecrypter/       # Compiled decrypter/encrypter binary
@@ -296,8 +302,22 @@ fldailyedit/
 
 ## 9. Operational State
 
-- The canonical input is `base/EDIT00000000`; successful default runs continue
-  from `output/EDIT00000000` unless `--from-base` is explicit.
+- The canonical pristine input is `base/EDIT00000000`; its exact revision and
+  SHA-256 are recorded in `data/base_manifest.json`.
+- `run` handles transfers only and never loads or applies player specs. Scheduled
+  workflows copy the pristine base to `output/EDIT00000000`, apply transfers
+  there in place, then explicitly run `players apply` against the same file.
+- Player contributions are one JSON file per player in `players/`. Specs declare
+  schema version 1, `create` or `update`, lifecycle state, exact `applies_to`
+  revisions, identity, evidence, and complete creation data or literal ability
+  `from`/`to` patches.
+- `players validate` checks the pristine digest, the global spec set, and
+  semantic applicability. `players apply` requires the exact manifest revision
+  and uses a locked, backed-up, integrity-verified save transaction.
+- On an official base update, update the save and `base_manifest.json` together,
+  then review each active spec for the new revision. Unreviewed specs report
+  `needs_review`; official-base inclusions become `upstreamed`, and obsolete
+  contributions become `retired`.
 - FotMob is the transfer source. There is no legacy per-league scrape config.
 - Loans, permanent transfers, releases, signings, and shirt-number observations
   use one chronological roster planner.

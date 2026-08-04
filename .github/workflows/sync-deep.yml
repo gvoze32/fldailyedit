@@ -32,15 +32,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .
 
-      - name: Run Transfer Sync
+      - name: Validate Base and Apply Updates
         id: run_sync
         run: |
           python run.py validate --edit-file base/EDIT00000000
+          python run.py players validate
+          mkdir -p output
+          cp base/EDIT00000000 output/EDIT00000000
           python run.py run \
             --window auto \
             --deep \
-            --edit-file base/EDIT00000000 \
-            --output output/EDIT00000000
+            --edit-file output/EDIT00000000 \
+            --in-place
+          python run.py players apply \
+            --base-revision fl26-u2.2-national-squads \
+            --edit-file output/EDIT00000000 \
+            --in-place
 
       - name: Upload Updated Save File & Visual Reports
         if: always()

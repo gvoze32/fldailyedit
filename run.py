@@ -14,7 +14,7 @@ Workflow:
     2. Decrypt and validate the edit file (pesXdecrypter)
     3. Load the current FL26 catalog and roster state
     4. Match identities and plan safe roster actions
-    5. Apply verified transfers and curated players, validate, re-encrypt, and log
+    5. Apply verified transfers, validate, re-encrypt, and log
 """
 import argparse
 import hashlib
@@ -33,13 +33,6 @@ import config
 from editor import backup as backup_mod
 from editor import crypto
 from editor.editfile import COMPETITION_SECTION_SIZE, EditFile
-from editor.curated_player import (
-    CuratedPlayer,
-    CuratedPlayerResult,
-    apply_curated_player,
-    assess_curated_player,
-    load_curated_players,
-)
 from editor import logger as transfer_logger
 from editor.player_spec import (
     PlayerSpec,
@@ -1223,96 +1216,19 @@ def _match_and_plan_transfers(
     return roster_plan, fully_matched, save_scope
 
 
-def _plan_curated_players(
-    edit_file: EditFile,
-    players: tuple[CuratedPlayer, ...],
-    roster_plan: list[PlannedRosterAction],
-) -> list[CuratedPlayerResult]:
-    """Assess curated creations against the roster state after planned actions."""
-    current_players = getattr(edit_file, "_player_cache", {})
-    relevant_team_ids = {player.team_id for player in players}
-    current_sizes: dict[int, int] = {}
-    projected_sizes: dict[int, int] = {}
-    for team_id in relevant_team_ids:
-        roster = edit_file.get_team_roster(team_id)
-        if roster is not None:
-            current_sizes[team_id] = len(roster.roster)
-            projected_sizes[team_id] = len(roster.roster)
-
-    for item in roster_plan:
-        if item.action not in {"move", "add", "release"}:
-            continue
-        destination = item.match.to_team_id
-        if item.overflow_player_id and destination in projected_sizes:
-            projected_sizes[destination] -= 1
-        if item.action in {"move", "release"}:
-            source = item.current_team_id
-            if source in projected_sizes:
-                projected_sizes[source] -= 1
-        if item.action in {"move", "add"} and destination in projected_sizes:
-            projected_sizes[destination] += 1
-
-    results: list[CuratedPlayerResult] = []
-    for player in players:
-        result = assess_curated_player(
-            edit_file,
-            player,
-            current_players,
-            projected_roster_size=projected_sizes.get(player.team_id),
-        )
-        results.append(result)
-        if result.status == "ready":
-            projected_sizes[player.team_id] += 1
-    return results
 
 
-def _curated_audit_record(
-    player: CuratedPlayer,
-    save_scope: str,
-    shirt_number: int | None,
-) -> dict:
-    """Build the shared JSONL and visual-report record for one creation."""
-    return {
-        "player_name": player.name,
-        "player_id": player.player_id,
-        "from_team": "Missing from FL26 database",
-        "from_team_id": 0,
-        "to_team": player.team_name,
-        "to_team_id": player.team_id,
-        "confidence": 100.0,
-        "transfer_type": "curated_player_creation",
-        "dry_run": False,
-        "position": player.registered_position,
-        "fee": "",
-        "market_value": 0,
-        "transfer_date": player.effective_date_override.isoformat(),
-        "previous_shirt_number": None,
-        "shirt_number": shirt_number,
-        "roster_action": "create",
-        "save_scope": save_scope,
-        "fotmob_player_id": None,
-        "sortitoutsi_player_id": player.sortitoutsi_id,
-        "transfermarkt_player_id": None,
-        "transfermarkt_from_club_id": None,
-        "transfermarkt_to_club_id": None,
-        "transfermarkt_transfer_id": None,
-        "sources": ("curated_manifest",),
-        "source_urls": player.sources,
-        "proof_urls": player.sources,
-    }
 
 
 def _print_dry_run(
     edit_file: EditFile,
     roster_plan,
-    curated_plan: list[CuratedPlayerResult] | None = None,
 ) -> None:
-    """Render planned roster actions and curated creations without mutating."""
+    """Render planned roster actions without mutating."""
     print("\n🔍 DRY-RUN — checking each match against the current roster:")
     would_apply = 0
     already_current = 0
     safety_skipped = 0
-    curated_waiting = 0
     for planned_action in roster_plan:
         match = planned_action.match
         action = planned_action.action
@@ -1358,29 +1274,10 @@ def _print_dry_run(
                 f"{planned_action.overflow_player_id} from team {match.to_team_id}"
             )
         print(f"  WOULD {action.upper()}: {match}")
-    for result in curated_plan or []:
-        if result.status == "ready":
-            would_apply += 1
-            print(
-                f"  WOULD CREATE: {result.name} (PES ID {result.player_id}) "
-                f"and register to team {result.team_id}"
-            )
-        elif result.status == "waiting":
-            curated_waiting += 1
-            print(
-                f"  CURATED WAITING ({result.reason}): {result.name} "
-                f"(PES ID {result.player_id})"
-            )
-        else:
-            already_current += 1
-            print(
-                f"  CURATED ALREADY PRESENT ({result.reason}): {result.name} "
-                f"(PES ID {result.player_id})"
-            )
     print(
         f"\nDry-run complete. Would apply: {would_apply}, "
-        f"already current: {already_current}, safety-skipped: {safety_skipped}, "
-        f"curated waiting: {curated_waiting}. No files were written."
+        f"already current: {already_current}, safety-skipped: {safety_skipped}. "
+        "No files were written."
     )
 
 
@@ -1408,7 +1305,7 @@ def _find_shirt_number_conflict(
 
 
 def cmd_run(args):
-    """Main pipeline for verified transfers and curated missing players."""
+    """Main pipeline for verified transfers."""
     dry_run = args.dry_run
     edit_path, output_path = _resolve_run_paths(args)
     threshold = args.threshold or config.MATCH_THRESHOLD_PLAYER
@@ -1422,7 +1319,8 @@ def cmd_run(args):
     transfers = _scrape_run_transfers(args)
 
     if not transfers:
-        print("No verified transfers found; checking curated missing players.")
+        print("No verified transfers found. Nothing to apply.")
+        return
 
     if dry_run and not edit_path.exists():
         print("\n⚠ Dry-run mode without edit file — showing scraped data only.")
@@ -1486,28 +1384,18 @@ def cmd_run(args):
             output_path,
             allow_overflow_release=allow_overflow_release,
         )
-        curated_players = load_curated_players()
-        curated_plan = _plan_curated_players(ef, curated_players, roster_plan)
 
         run_records = []
         if dry_run:
-            _print_dry_run(ef, roster_plan, curated_plan)
+            _print_dry_run(ef, roster_plan)
             return
 
         actionable_roster = any(
             item.action in {"move", "add", "release", "shirt_update"}
             for item in roster_plan
         )
-        actionable_curated = any(
-            result.status == "ready" for result in curated_plan
-        )
-        if not actionable_roster and not actionable_curated:
-            for result in curated_plan:
-                print(
-                    f"  CURATED {result.status.upper()} ({result.reason}): "
-                    f"{result.name} (PES ID {result.player_id})"
-                )
-            print("\nNo effective roster or curated-player changes to apply. Exiting.")
+        if not actionable_roster:
+            print("\nNo effective transfer or shirt-number changes to apply. Exiting.")
             return
 
         # Create backup before modifying
@@ -1522,7 +1410,6 @@ def cmd_run(args):
         safety_skipped = 0
         original_data = bytes(ef._data)
         pending_logs = []
-        pending_curated_logs = []
 
         for planned_action in roster_plan:
             m = planned_action.match
@@ -1619,56 +1506,11 @@ def cmd_run(args):
                 )
                 sys.exit(2)
 
-        curated_created = 0
-        curated_waiting = 0
-        for player, planned_result in zip(curated_players, curated_plan):
-            if planned_result.status != "ready":
-                if planned_result.status == "waiting":
-                    curated_waiting += 1
-                    print(
-                        f"  ⏳ Curated waiting {player.name}: "
-                        f"{planned_result.reason}"
-                    )
-                continue
-            try:
-                result = apply_curated_player(
-                    ef,
-                    player,
-                    getattr(ef, "_player_cache", {}),
-                )
-            except Exception as exc:
-                ef._data = bytearray(original_data)
-                print(
-                    f"  ✗ Failed to create curated player {player.name}: {exc}; "
-                    "entire batch rolled back"
-                )
-                sys.exit(2)
-            if result.status != "created":
-                ef._data = bytearray(original_data)
-                print(
-                    f"  ✗ Curated player state changed during the run "
-                    f"({player.name}: {result.reason}); entire batch rolled back"
-                )
-                sys.exit(2)
-            curated_created += 1
-            audit_record = _curated_audit_record(
-                player,
-                save_scope,
-                ef.get_player_shirt_number(player.team_id, player.player_id),
-            )
-            pending_curated_logs.append(audit_record)
-            run_records.append(audit_record.copy())
-            print(
-                f"  ✓ Created {player.name} (PES ID {player.player_id}) "
-                f"and registered to {player.team_name}"
-            )
 
         print(
             f"\n  Transfers applied: {transfer_applied}, "
             f"shirt numbers changed: {shirt_numbers_applied}, "
-            f"curated players created: {curated_created}, "
-            f"already current: {unchanged}, safety-skipped: {safety_skipped}, "
-            f"curated waiting: {curated_waiting}"
+            f"already current: {unchanged}, safety-skipped: {safety_skipped}"
         )
 
         post_integrity = ef.validate_integrity()
@@ -1744,8 +1586,6 @@ def cmd_run(args):
                 source_urls=m.transfer.source_urls,
                 proof_urls=m.transfer.proof_urls,
             )
-        for audit_record in pending_curated_logs:
-            transfer_logger.log_transfer(**audit_record)
 
 
         # Save visual reports
@@ -1753,8 +1593,7 @@ def cmd_run(args):
 
         print(
             f"\n✅ Done! {transfer_applied} transfers applied; "
-            f"{shirt_numbers_applied} shirt numbers changed; "
-            f"{curated_created} curated players created."
+            f"{shirt_numbers_applied} shirt numbers changed."
         )
         if output_path.resolve() != edit_path.resolve():
             print(f"   Input (base/pristine):   {edit_path}")
@@ -2093,7 +1932,7 @@ def main():
 
     # run (default)
     p_run = sub.add_parser(
-        "run", help="Apply verified transfers and curated missing players"
+        "run", help="Apply verified transfers"
     )
     p_run.add_argument("--dry-run", action="store_true", help="Don't modify the edit file")
     run_source = p_run.add_mutually_exclusive_group()
