@@ -1,4 +1,6 @@
 import json
+import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import fields, replace
 from pathlib import Path
 
@@ -17,6 +19,9 @@ from tools.generate_player_draft import (
 PROFILE_URL = (
     "https://sortitoutsi.net/football-manager-data-update/person/2000370206"
 )
+CONFIRMATIONS = """- [x] I supplied source evidence.
+- [x] I did not derive PES ratings from Football Manager values.
+- [x] I understand a maintainer must review the draft PR."""
 HEADINGS = (
     "Operation",
     "SortitoutSI profile",
@@ -24,6 +29,7 @@ HEADINGS = (
     "Effective date",
     "Proof URLs",
     "Contributor notes",
+    "Confirmations",
 )
 
 
@@ -38,9 +44,42 @@ def issue_body(**overrides: str) -> str:
             "submission/fixture-proof"
         ),
         "Contributor notes": "Missing from the reviewed FL26 base.",
+        "Confirmations": CONFIRMATIONS,
     }
     values.update(overrides)
     return "\n\n".join(f"### {heading}\n\n{values[heading]}" for heading in HEADINGS) + "\n"
+
+
+RENDERED_TASK3_FORM_BODY = """### Operation
+
+create
+
+### SortitoutSI profile
+
+https://sortitoutsi.net/football-manager-data-update/person/2000370206
+
+### Current team
+
+Chelsea FC
+
+### Effective date
+
+2026-08-04
+
+### Proof URLs
+
+https://sortitoutsi.net/football-manager-data-update/submission/fixture-proof
+
+### Contributor notes
+
+Missing from the reviewed FL26 base.
+
+### Confirmations
+
+- [x] I supplied source evidence.
+- [x] I did not derive PES ratings from Football Manager values.
+- [x] I understand a maintainer must review the draft PR.
+"""
 
 
 def dastan_issue_event() -> dict[str, object]:
@@ -105,6 +144,16 @@ def test_exact_issue_event_parses_to_request():
     )
 
 
+def test_real_task3_rendered_form_fixture_matches_parser_contract():
+    event = dastan_issue_event()
+    mutate_issue(event, "body", RENDERED_TASK3_FORM_BODY)
+
+    request = parse_player_issue_event(event)
+
+    assert request.issue_number == 42
+    assert request.operation == "create"
+
+
 @pytest.mark.parametrize(
     ("mutation", "value"),
     [
@@ -147,6 +196,26 @@ def test_untrusted_event_metadata_is_rejected(mutation: str, value: object):
 def test_malformed_or_nonexact_headings_are_rejected(body: str):
     event = dastan_issue_event()
     mutate_issue(event, "body", body)
+
+    with pytest.raises(PlayerDraftError):
+        parse_player_issue_event(event)
+
+
+@pytest.mark.parametrize(
+    "confirmations",
+    [
+        CONFIRMATIONS.replace("- [x]", "- [ ]", 1),
+        CONFIRMATIONS.replace(
+            "- [x] I supplied source evidence.\n", "", 1
+        ),
+        CONFIRMATIONS + "\n- [x] I also request automatic approval.",
+        CONFIRMATIONS + "\n- [x] I supplied source evidence.",
+        "\n".join(reversed(CONFIRMATIONS.splitlines())),
+    ],
+)
+def test_confirmations_require_three_exact_checked_lines(confirmations: str):
+    event = dastan_issue_event()
+    mutate_issue(event, "body", issue_body(Confirmations=confirmations))
 
     with pytest.raises(PlayerDraftError):
         parse_player_issue_event(event)
@@ -361,6 +430,41 @@ def test_issue_event_builds_one_atomic_deterministic_draft(monkeypatch, tmp_path
     assert payload["pes"] is None
 
 
+def test_atomic_publication_never_exposes_an_empty_destination(
+    monkeypatch, tmp_path
+):
+    event_path = tmp_path / "event.json"
+    event_path.write_text(json.dumps(dastan_issue_event()), encoding="utf-8")
+    output_dir = tmp_path / "players"
+
+    async def fake_fetch(_url: str) -> PlayerDraftSource:
+        return dastan_source()
+
+    real_link = os.link
+    publications: list[bytes] = []
+
+    def inspecting_link(source, destination) -> None:
+        source_path = Path(source)
+        destination_path = Path(destination)
+        assert not destination_path.exists()
+        complete = source_path.read_bytes()
+        assert complete
+        assert json.loads(complete)["identity"]["name"] == "Dastan Satpayev"
+        real_link(source_path, destination_path)
+        assert destination_path.read_bytes() == complete
+        publications.append(complete)
+
+    monkeypatch.setattr(
+        "tools.generate_player_draft.fetch_sortitoutsi_player_profile", fake_fetch
+    )
+    monkeypatch.setattr("tools.generate_player_draft.os.link", inspecting_link)
+
+    path = write_player_draft(event_path, output_dir)
+
+    assert path.read_bytes() == publications[0]
+    assert tuple(output_dir.iterdir()) == (path,)
+
+
 def test_existing_slug_collision_is_rejected_without_modification(monkeypatch, tmp_path):
     event_path = tmp_path / "event.json"
     event_path.write_text(json.dumps(dastan_issue_event()), encoding="utf-8")
@@ -401,6 +505,82 @@ def test_repeated_event_is_idempotently_rejected(monkeypatch, tmp_path):
         write_player_draft(event_path, output_dir)
 
     assert path.read_bytes() == original
+
+
+def test_concurrent_publication_has_one_winner_and_no_partial_file(
+    monkeypatch, tmp_path
+):
+    event_path = tmp_path / "event.json"
+    event_path.write_text(json.dumps(dastan_issue_event()), encoding="utf-8")
+    output_dir = tmp_path / "players"
+
+    async def fake_fetch(_url: str) -> PlayerDraftSource:
+        return dastan_source()
+
+    monkeypatch.setattr(
+        "tools.generate_player_draft.fetch_sortitoutsi_player_profile", fake_fetch
+    )
+
+    def attempt() -> Path | PlayerDraftError:
+        try:
+            return write_player_draft(event_path, output_dir)
+        except PlayerDraftError as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = tuple(executor.map(lambda _index: attempt(), range(2)))
+
+    assert sum(isinstance(result, Path) for result in results) == 1
+    assert sum(isinstance(result, PlayerDraftError) for result in results) == 1
+    destination = output_dir / "dastan-satpayev.json"
+    assert json.loads(destination.read_bytes())["identity"]["name"] == "Dastan Satpayev"
+    assert tuple(output_dir.iterdir()) == (destination,)
+
+
+@pytest.mark.parametrize(
+    ("name", "filename"),
+    [
+        ("A" * 235, "a" * 235 + ".json"),
+        ("Álvaro Núñez ⚽", "alvaro-nunez.json"),
+    ],
+)
+def test_filename_byte_limit_accepts_safe_normalized_boundaries(
+    monkeypatch, tmp_path, name: str, filename: str
+):
+    event_path = tmp_path / "event.json"
+    event_path.write_text(json.dumps(dastan_issue_event()), encoding="utf-8")
+
+    async def fake_fetch(_url: str) -> PlayerDraftSource:
+        return dastan_source(name=name)
+
+    monkeypatch.setattr(
+        "tools.generate_player_draft.fetch_sortitoutsi_player_profile", fake_fetch
+    )
+
+    path = write_player_draft(event_path, tmp_path / "players")
+
+    assert path.name == filename
+    assert len(path.name.encode("utf-8")) <= 240
+
+
+def test_overlong_filename_is_rejected_before_output_filesystem_calls(
+    monkeypatch, tmp_path
+):
+    event_path = tmp_path / "event.json"
+    event_path.write_text(json.dumps(dastan_issue_event()), encoding="utf-8")
+    output_dir = tmp_path / "players"
+
+    async def fake_fetch(_url: str) -> PlayerDraftSource:
+        return dastan_source(name="A" * 236)
+
+    monkeypatch.setattr(
+        "tools.generate_player_draft.fetch_sortitoutsi_player_profile", fake_fetch
+    )
+
+    with pytest.raises(PlayerDraftError, match="filename"):
+        write_player_draft(event_path, output_dir)
+
+    assert not output_dir.exists()
 
 
 def test_untrusted_event_is_rejected_before_profile_fetch(monkeypatch, tmp_path):

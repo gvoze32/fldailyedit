@@ -23,6 +23,11 @@ from scraper.player_draft import (
 
 
 _LABEL = "generate-player-draft"
+_CONFIRMATIONS = (
+    "- [x] I supplied source evidence.",
+    "- [x] I did not derive PES ratings from Football Manager values.",
+    "- [x] I understand a maintainer must review the draft PR.",
+)
 _HEADINGS = (
     "Operation",
     "SortitoutSI profile",
@@ -30,7 +35,9 @@ _HEADINGS = (
     "Effective date",
     "Proof URLs",
     "Contributor notes",
+    "Confirmations",
 )
+_MAX_FILENAME_BYTES = 240
 _HEADING_RE = re.compile(r"^### ([^\r\n]+)$")
 _GITHUB_ISSUE_PATH_RE = re.compile(
     r"^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/([1-9][0-9]*)$"
@@ -105,6 +112,18 @@ def _parse_form_body(body: object) -> dict[str, str]:
     if tuple(sections) != _HEADINGS:
         raise PlayerDraftError("issue form must contain every exact heading once")
     return {heading: "\n".join(lines).strip() for heading, lines in sections.items()}
+
+
+def _draft_filename(name: str) -> str:
+    slug = player_slug(name)
+    if not slug:
+        raise PlayerDraftError("fetched player name cannot produce a safe filename")
+    filename = f"{slug}.json"
+    if len(filename.encode("utf-8")) > _MAX_FILENAME_BYTES:
+        raise PlayerDraftError(
+            f"player draft filename exceeds {_MAX_FILENAME_BYTES} UTF-8 bytes"
+        )
+    return filename
 
 
 def _https_url(value: str, context: str) -> str:
@@ -224,6 +243,12 @@ def parse_player_issue_event(event: Mapping[str, object]) -> PlayerDraftRequest:
     if len(notes) > 2_000:
         raise PlayerDraftError("contributor notes exceed 2000 characters")
 
+    confirmations = tuple(sections["Confirmations"].splitlines())
+    if confirmations != _CONFIRMATIONS:
+        raise PlayerDraftError(
+            "confirmations must contain the three exact checked statements in order"
+        )
+
     return PlayerDraftRequest(
         operation=operation,
         profile_url=profile_url,
@@ -255,9 +280,7 @@ def build_player_draft(
     ):
         raise PlayerDraftError("fetched source profile does not match the request")
 
-    slug = player_slug(source.name)
-    if not slug:
-        raise PlayerDraftError("fetched player name cannot produce a safe filename")
+    _draft_filename(source.name)
 
     missing = (
         ["identity.pes_id", "identity.print_name", "pes"]
@@ -306,7 +329,6 @@ def _load_event(event_path: Path) -> Mapping[str, object]:
 
 def _write_exclusive_atomic(destination: Path, content: str) -> None:
     temporary_path: Path | None = None
-    reserved = False
     try:
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -322,24 +344,9 @@ def _write_exclusive_atomic(destination: Path, content: str) -> None:
             os.fsync(temporary.fileno())
 
         try:
-            descriptor = os.open(
-                destination,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                0o644,
-            )
+            os.link(temporary_path, destination)
         except FileExistsError:
             raise PlayerDraftError(f"player draft already exists: {destination}") from None
-        else:
-            os.close(descriptor)
-            reserved = True
-
-        temporary_path.replace(destination)
-        temporary_path = None
-        reserved = False
-    except Exception:
-        if reserved:
-            destination.unlink(missing_ok=True)
-        raise
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
@@ -357,15 +364,13 @@ def write_player_draft(event_path: Path, output_dir: Path) -> Path:
         raise
     except Exception as exc:
         raise PlayerDraftError(f"cannot fetch player profile: {exc}") from exc
+    filename = _draft_filename(source.name)
     payload = build_player_draft(request, source)
 
-    slug = player_slug(source.name)
-    if not slug:
-        raise PlayerDraftError("fetched player name cannot produce a safe filename")
     output_dir.mkdir(parents=True, exist_ok=True)
     if not output_dir.is_dir():
         raise PlayerDraftError(f"output directory is not a directory: {output_dir}")
-    destination = output_dir / f"{slug}.json"
+    destination = output_dir / filename
     content = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     _write_exclusive_atomic(destination, content)
     return destination
