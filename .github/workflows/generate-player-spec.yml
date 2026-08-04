@@ -21,6 +21,7 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: true
+          fetch-depth: 0
 
       - name: Set up Python 3.13
         uses: actions/setup-python@v5
@@ -68,6 +69,7 @@ jobs:
         id: existing
         env:
           BRANCH_NAME: player-draft/issue-${{ steps.event.outputs.issue_number }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ steps.event.outputs.issue_number }}
@@ -100,6 +102,7 @@ jobs:
                   raise SystemExit("pull request response must contain an object")
               repository = os.environ["GITHUB_REPOSITORY"]
               branch_name = os.environ["BRANCH_NAME"]
+              default_branch = os.environ["DEFAULT_BRANCH"]
               head = pull.get("head", {})
               base = pull.get("base", {})
               if (
@@ -108,6 +111,7 @@ jobs:
                   or head.get("repo", {}).get("full_name") != repository
                   or head.get("ref") != branch_name
                   or base.get("repo", {}).get("full_name") != repository
+                  or base.get("ref") != default_branch
               ):
                   raise SystemExit("refusing a cross-repository or mismatched pull request")
               value = pull.get("html_url")

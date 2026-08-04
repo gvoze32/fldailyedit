@@ -1,6 +1,8 @@
+import json
 import os
 import re
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -60,6 +62,13 @@ def _workflow_step_script(name: str) -> str:
     return textwrap.dedent(match.group("script"))
 
 
+def _workflow_heredoc_script(marker: str) -> str:
+    text = WORKFLOW_PATH.read_text(encoding="utf-8")
+    start = text.index(marker) + len(marker)
+    end = text.index("\n          PY", start)
+    return textwrap.dedent(text[start:end])
+
+
 def _git(cwd: Path, *args: str) -> None:
     subprocess.run(
         ["git", *args],
@@ -76,6 +85,7 @@ def _remote_branch_fixture(
     local_spec: str,
     remote_spec: str,
     extra_path: bool = False,
+    advance_default_and_shallow_checkout: bool = False,
 ) -> tuple[Path, dict[str, str]]:
     origin = tmp_path / "origin.git"
     repository = tmp_path / "repository"
@@ -105,8 +115,27 @@ def _remote_branch_fixture(
     _git(repository, "push", "--set-upstream", "origin", branch_name)
 
     _git(repository, "switch", "main")
-    (repository / spec_path).parent.mkdir(parents=True)
-    (repository / spec_path).write_text(local_spec, encoding="utf-8")
+    if advance_default_and_shallow_checkout:
+        (repository / "advance.txt").write_text("advanced\n", encoding="utf-8")
+        _git(repository, "add", "advance.txt")
+        _git(repository, "commit", "-m", "advance default")
+        _git(repository, "push", "origin", "main")
+        runner_repository = tmp_path / "runner-repository"
+        _git(
+            tmp_path,
+            "clone",
+            "--depth",
+            "1",
+            "--branch",
+            "main",
+            f"file://{origin}",
+            str(runner_repository),
+        )
+    else:
+        runner_repository = repository
+
+    (runner_repository / spec_path).parent.mkdir(parents=True)
+    (runner_repository / spec_path).write_text(local_spec, encoding="utf-8")
     runner_temp.mkdir()
     environment = os.environ.copy()
     environment.update(
@@ -117,7 +146,7 @@ def _remote_branch_fixture(
             "SPEC_PATH": spec_path.as_posix(),
         }
     )
-    return repository, environment
+    return runner_repository, environment
 
 
 def test_issue_form_matches_the_generator_heading_contract_exactly():
@@ -184,6 +213,7 @@ def test_generate_workflow_uses_trusted_event_file_and_exact_machine_output():
     assert "actions/checkout@v4" in text
     assert "ref: ${{ github.event.repository.default_branch }}" in text
     assert "persist-credentials: true" in text
+    assert "fetch-depth: 0" in text
     assert "actions/setup-python@v5" in text
     assert 'python-version: "3.13"' in text
     assert "python -m pip install -e ." in text
@@ -209,6 +239,8 @@ def test_generate_workflow_uses_safe_branch_and_one_idempotent_draft_pr():
     assert 'head.get("repo", {}).get("full_name") != repository' in text
     assert 'head.get("ref") != branch_name' in text
     assert 'base.get("repo", {}).get("full_name") != repository' in text
+    assert 'default_branch = os.environ["DEFAULT_BRANCH"]' in text
+    assert 'base.get("ref") != default_branch' in text
     assert 'gh pr list --head' not in text
     assert 'git switch --create "$BRANCH_NAME"' in text
     assert 'git add -- "$SPEC_PATH"' in text
@@ -218,6 +250,50 @@ def test_generate_workflow_uses_safe_branch_and_one_idempotent_draft_pr():
     assert "--draft" in text
     assert '--title "player: draft $PLAYER_NAME"' in text
     assert 'gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"' in text
+
+
+def test_existing_pr_parser_rejects_a_same_repo_pr_to_the_wrong_base(tmp_path):
+    response_path = tmp_path / "pulls.json"
+    response_path.write_text(
+        json.dumps(
+            [
+                {
+                    "html_url": "https://github.com/example/project/pull/7",
+                    "head": {
+                        "ref": "player-draft/issue-42",
+                        "repo": {"full_name": "example/project"},
+                    },
+                    "base": {
+                        "ref": "release",
+                        "repo": {"full_name": "example/project"},
+                    },
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "BRANCH_NAME": "player-draft/issue-42",
+            "DEFAULT_BRANCH": "main",
+            "GITHUB_OUTPUT": str(tmp_path / "github-output"),
+            "GITHUB_REPOSITORY": "example/project",
+        }
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-", str(response_path)],
+        input=_workflow_heredoc_script(
+            "            python - \"$pr_response\" <<'PY'\n"
+        ),
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "refusing a cross-repository or mismatched pull request" in result.stderr
 
 
 def test_generate_workflow_recovers_only_an_exact_matching_base_repo_branch():
@@ -241,6 +317,35 @@ def test_remote_branch_recovery_accepts_the_exact_generated_spec(tmp_path):
         local_spec='{"name": "same"}\n',
         remote_spec='{"name": "same"}\n',
     )
+
+    result = subprocess.run(
+        ["bash", "-c", _workflow_step_script("Verify an existing base-repository branch")],
+        cwd=repository,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert Path(environment["GITHUB_OUTPUT"]).read_text(encoding="utf-8") == (
+        "branch_exists=true\n"
+    )
+
+
+def test_remote_branch_recovery_survives_an_advanced_default_from_shallow_checkout(
+    tmp_path,
+):
+    repository, environment = _remote_branch_fixture(
+        tmp_path,
+        local_spec='{"name": "same"}\n',
+        remote_spec='{"name": "same"}\n',
+        advance_default_and_shallow_checkout=True,
+    )
+    shallow_marker = repository / ".git/shallow"
+    assert shallow_marker.is_file()
+    assert "fetch-depth: 0" in WORKFLOW_PATH.read_text(encoding="utf-8")
+    _git(repository, "fetch", "--unshallow", "origin")
+    assert not shallow_marker.exists()
 
     result = subprocess.run(
         ["bash", "-c", _workflow_step_script("Verify an existing base-repository branch")],
