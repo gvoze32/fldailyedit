@@ -432,6 +432,36 @@ def test_issue_event_builds_one_atomic_deterministic_draft(monkeypatch, tmp_path
     assert payload["pes"] is None
 
 
+def test_generated_draft_validation_reports_exact_missing_human_fields(
+    monkeypatch, tmp_path, capsys
+):
+    import config
+    import run
+
+    event_path = tmp_path / "event.json"
+    event_path.write_text(json.dumps(dastan_issue_event()), encoding="utf-8")
+    output_dir = tmp_path / "players"
+
+    async def fake_fetch(url: str) -> PlayerDraftSource:
+        assert url == PROFILE_URL
+        return dastan_source()
+
+    monkeypatch.setattr(
+        "tools.generate_player_draft.fetch_sortitoutsi_player_profile", fake_fetch
+    )
+    write_player_draft(event_path, output_dir)
+    monkeypatch.setattr(config, "PLAYER_SPECS_DIR", output_dir)
+
+    with pytest.raises(SystemExit) as exc_info:
+        run.cmd_players_validate(None)
+
+    assert exc_info.value.code == 2
+    assert capsys.readouterr().out.splitlines() == [
+        "Player-spec semantic validation failed: incomplete draft dastan-satpayev.json",
+        "Missing human fields: identity.pes_id, identity.print_name, pes",
+    ]
+
+
 def test_atomic_publication_never_exposes_an_empty_destination(
     monkeypatch, tmp_path
 ):

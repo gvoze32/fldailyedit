@@ -31,6 +31,15 @@ class PlayerSpecError(ValueError):
     """Raised when a player specification is malformed or ambiguous."""
 
 
+class IncompletePlayerSpecError(PlayerSpecError):
+    """Raised when generated draft placeholders still need human review."""
+
+    def __init__(self, path: Path, missing_fields: tuple[str, ...]) -> None:
+        super().__init__(f"incomplete draft {path.name}")
+        self.path = path
+        self.missing_fields = missing_fields
+
+
 @dataclass(frozen=True, slots=True)
 class BaseManifest:
     revision: str
@@ -124,6 +133,7 @@ _TOP_LEVEL_FIELDS = frozenset(
         "pes",
     }
 )
+_DRAFT_FIELDS = frozenset({"needs_human_review", "missing"})
 _LIFECYCLE_FIELDS = frozenset({"status", "reason", "superseded_by"})
 _IDENTITY_FIELDS = frozenset(
     {"name", "print_name", "aliases", "pes_id", "sortitoutsi_id"}
@@ -591,8 +601,41 @@ def _load_update(value: object) -> Mapping[str, FieldPatch]:
     return MappingProxyType(patches)
 
 
+def _generated_draft_missing_fields(
+    raw: Mapping[str, object], path: Path
+) -> tuple[str, ...] | None:
+    if "draft" not in raw:
+        return None
+
+    context = f"player spec {path} draft"
+    draft = _object(raw["draft"], context)
+    _validate_keys(draft, _DRAFT_FIELDS, _DRAFT_FIELDS, context)
+    if draft["needs_human_review"] is not True:
+        raise PlayerSpecError(f"{context} needs_human_review must be true")
+
+    operation = raw.get("operation")
+    expected_by_operation = {
+        "create": ("identity.pes_id", "identity.print_name", "pes"),
+        "update": ("identity.pes_id", "pes.abilities.<field>.from/to"),
+    }
+    if not isinstance(operation, str) or operation not in expected_by_operation:
+        raise PlayerSpecError(
+            f"player spec {path} operation must be create or update"
+        )
+    expected = expected_by_operation[operation]
+    missing = _string_list(draft["missing"], f"{context} missing")
+    if missing != expected:
+        raise PlayerSpecError(
+            f"{context} missing must exactly match {list(expected)}"
+        )
+    return expected
+
+
 def _load_one_spec(path: Path) -> PlayerSpec:
     raw = _object(_read_json(path, "player spec"), f"player spec {path}")
+    missing_fields = _generated_draft_missing_fields(raw, path)
+    if missing_fields is not None:
+        raise IncompletePlayerSpecError(path, missing_fields)
     _validate_keys(raw, _TOP_LEVEL_FIELDS, _TOP_LEVEL_FIELDS, f"player spec {path}")
 
     schema_version = _integer(raw, "schema_version", 1, 1, f"player spec {path}")

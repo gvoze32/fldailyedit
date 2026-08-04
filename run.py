@@ -36,6 +36,7 @@ from editor.editfile import COMPETITION_SECTION_SIZE, EditFile
 from editor import logger as transfer_logger
 from editor.player_spec import (
     PlayerSpec,
+    IncompletePlayerSpecError,
     SpecResult,
     apply_player_specs,
     assess_create,
@@ -1728,8 +1729,13 @@ def cmd_players_validate(args) -> None:
         )
         raise SystemExit(2)
 
-    specs = load_player_specs()
-    validate_spec_set(specs)
+    try:
+        specs = load_player_specs()
+        validate_spec_set(specs)
+    except IncompletePlayerSpecError as exc:
+        print(f"Player-spec semantic validation failed: incomplete draft {exc.path.name}")
+        print(f"Missing human fields: {', '.join(exc.missing_fields)}")
+        raise SystemExit(2) from exc
     decrypted = crypto.decrypt(base_path)
     try:
         edit_file = EditFile()
