@@ -240,12 +240,8 @@ def _flight_values(scripts: Iterable[str]) -> Iterable[Any]:
             try:
                 value, end = decoder.raw_decode(encoded)
             except (json.JSONDecodeError, RecursionError):
-                if row_match.group("label") == "21":
-                    raise _unavailable() from None
                 continue
             if encoded[end:].strip():
-                if row_match.group("label") == "21":
-                    raise _unavailable()
                 continue
             yield value
 

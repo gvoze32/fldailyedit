@@ -192,6 +192,21 @@ def test_parser_normalizes_a_complete_record_into_immutable_values():
         profile.name = "Changed"
 
 
+def test_parser_ignores_non_json_flight_rows_when_profile_label_changes():
+    flight_rows = "21:I[33370,[]]\n22:" + json.dumps(valid_profile_record())
+    html = (
+        '<link rel="canonical" href="'
+        + PROFILE_URL
+        + '"><script>self.__next_f.push('
+        + json.dumps([1, flight_rows])
+        + ")</script>"
+    )
+
+    profile = parse_pes_retro_stats_profile(html, PROFILE_URL, "0ce2dbde")
+
+    assert profile.name == "Marco Palestra"
+
+
 def test_parser_deduplicates_identical_complete_records():
     record = valid_profile_record()
     profile = parse_pes_retro_stats_profile(

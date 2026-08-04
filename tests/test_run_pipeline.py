@@ -71,7 +71,7 @@ def test_players_help_uses_player_update_language(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert "Validate or apply revision-scoped Player Updates" in output
     assert "Validate Player Updates against the pristine base" in output
-    assert "Generate an incomplete Player Update from an issue event" in output
+    assert "Generate a reviewable Pes Retro Stats proposal from an issue event" in output
     assert "Apply reviewed Player Updates to an EDIT file" in output
 
 
