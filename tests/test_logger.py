@@ -35,6 +35,20 @@ def _entries():
     ]
 
 
+def _curated_entry():
+    return {
+        "player_name": "Dastan Satpayev",
+        "position": "CF",
+        "from_team": "Missing from FL26 database",
+        "to_team": "Chelsea FC",
+        "transfer_type": "curated_player_creation",
+        "shirt_number": 36,
+        "confidence": 100.0,
+        "roster_action": "create",
+        "dry_run": False,
+    }
+
+
 def test_markdown_separates_transfers_from_shirt_numbers():
     report = generate_markdown_report(_entries())
 
@@ -47,7 +61,7 @@ def test_markdown_separates_transfers_from_shirt_numbers():
 def test_github_summary_keeps_detailed_metrics_without_tables():
     report = generate_markdown_report(_entries(), include_table=False)
 
-    assert "| **2** | **1** | 0 | 1 | **1** | 0 |" in report
+    assert "| **2** | **1** | **0** | **0** | 0 | 1 | **1** | 0 |" in report
     assert "Club transfers (1)" not in report
 
 
@@ -61,6 +75,20 @@ def test_html_report_has_distinct_sections_and_escapes_values():
     assert "Kit numbers only. No club movement." in report
     assert "Player &lt;script&gt;" in report
     assert "Player <script>" not in report
+
+
+def test_reports_separate_curated_player_creation_from_transfers():
+    entries = _entries() + [_curated_entry()]
+
+    markdown = generate_markdown_report(entries)
+    html = generate_html_report(entries)
+
+    assert "Club transfers (1)" in markdown
+    assert "Player creations (1)" in markdown
+    assert "Dastan Satpayev" in markdown
+    assert "Player creations" in html
+    assert "Player created" in html
+    assert "Dastan Satpayev" in html
 
 
 def test_transfer_history_is_scoped_per_output_save(monkeypatch, tmp_path):
@@ -112,3 +140,69 @@ def test_transfer_history_is_scoped_per_output_save(monkeypatch, tmp_path):
     assert read_log(save_scope="save-a")[0]["proof_urls"] == [
         "https://example.test/proof"
     ]
+
+
+def test_reports_classify_player_specs_separately_from_club_transfers():
+    player_spec_entries = [
+        {
+            "player_name": "Dastan Satpayev",
+            "position": "CF",
+            "from_team": "Missing from FL26 database",
+            "to_team": "Chelsea FC",
+            "transfer_type": "player_spec_create",
+            "shirt_number": 36,
+            "confidence": 100.0,
+            "roster_action": "create",
+            "dry_run": False,
+        },
+        {
+            "player_name": "Marco Palestra",
+            "from_team": "",
+            "to_team": "",
+            "transfer_type": "player_spec_update",
+            "field_changes": [
+                {"field": "speed", "from": 77, "to": 80},
+                {"field": "acceleration", "from": 75, "to": 77},
+            ],
+            "confidence": 100.0,
+            "roster_action": "update",
+            "dry_run": False,
+        },
+    ]
+    entries = _entries() + player_spec_entries
+
+    markdown = generate_markdown_report(entries)
+    html = generate_html_report(entries)
+
+    assert "Club transfers (1)" in markdown
+    assert "Player creations (1)" in markdown
+    assert "Player updates (1)" in markdown
+    assert "| **4** | **1** | **1** | **1** | 0 | 1 | **1** | 0 |" in markdown
+    assert "speed: 77 -> 80" in markdown
+    assert "acceleration: 75 -> 77" in markdown
+    assert "Player creations" in html
+    assert "Player updates" in html
+    assert "speed: 77 -> 80" in html
+    assert "Marco Palestra" not in markdown.split("### Club transfers (1)", 1)[1].split("###", 1)[0]
+
+
+def test_log_transfer_persists_player_spec_field_changes(monkeypatch, tmp_path):
+    import config
+
+    monkeypatch.setattr(config, "TRANSFER_LOG_FILE", tmp_path / "transfers.jsonl")
+    changes = [{"field": "speed", "from": 77, "to": 80}]
+
+    log_transfer(
+        player_name="Marco Palestra",
+        player_id=162196,
+        from_team="",
+        from_team_id=0,
+        to_team="",
+        to_team_id=0,
+        transfer_type="player_spec_update",
+        roster_action="update",
+        field_changes=changes,
+    )
+
+    entry = read_log()[0]
+    assert entry["field_changes"] == changes

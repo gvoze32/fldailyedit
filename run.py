@@ -3,7 +3,7 @@
 FL Daily Edit — Main Entry Point
 
 Usage:
-    python run.py run --dry-run                       # Scrape + match only, no file changes
+    python run.py run --dry-run                       # Preview all changes; write nothing
     python run.py run --edit-file /path/to/EDIT00000000
     python run.py inspect --edit-file /path/to/EDIT00000000
     python run.py validate --edit-file /path/to/EDIT00000000
@@ -14,7 +14,7 @@ Workflow:
     2. Decrypt and validate the edit file (pesXdecrypter)
     3. Load the current FL26 catalog and roster state
     4. Match identities and plan safe roster actions
-    5. Apply the batch, validate, re-encrypt, and log it
+    5. Apply verified transfers and curated players, validate, re-encrypt, and log
 """
 import argparse
 import hashlib
@@ -33,7 +33,24 @@ import config
 from editor import backup as backup_mod
 from editor import crypto
 from editor.editfile import COMPETITION_SECTION_SIZE, EditFile
+from editor.curated_player import (
+    CuratedPlayer,
+    CuratedPlayerResult,
+    apply_curated_player,
+    assess_curated_player,
+    load_curated_players,
+)
 from editor import logger as transfer_logger
+from editor.player_spec import (
+    PlayerSpec,
+    SpecResult,
+    apply_player_specs,
+    assess_create,
+    assess_update,
+    load_base_manifest,
+    load_player_specs,
+    validate_spec_set,
+)
 from editor.locking import EditFileLock, EditLockError
 from editor.player_catalog import PlayerCatalogError, load_id_name_text
 from scraper.fotmob import (
@@ -54,6 +71,8 @@ from scraper.wikipedia import fetch_wikipedia_transfers
 from scraper.transfermarkt import fetch_transfermarkt_transfers
 
 logger = logging.getLogger(__name__)
+if not hasattr(config, "BASE_EDIT_PATH"):
+    config.BASE_EDIT_PATH = config.EDIT_FILE_PATH
 UNRESOLVED_TEAM_ID = -1
 _NON_CLUB_LABELS = {"", "free agent", "without club", "unattached", "career break", "retired"}
 
@@ -804,6 +823,8 @@ def cmd_inspect(args):
         crypto.cleanup_temp(temp_dir)
 
 
+
+
 def cmd_validate(args):
     """Validate an encrypted FL26 edit file and return a shell-friendly status."""
     edit_path = Path(args.edit_file)
@@ -1202,12 +1223,96 @@ def _match_and_plan_transfers(
     return roster_plan, fully_matched, save_scope
 
 
-def _print_dry_run(edit_file: EditFile, roster_plan) -> None:
-    """Render planned actions without mutating or writing the EDIT file."""
+def _plan_curated_players(
+    edit_file: EditFile,
+    players: tuple[CuratedPlayer, ...],
+    roster_plan: list[PlannedRosterAction],
+) -> list[CuratedPlayerResult]:
+    """Assess curated creations against the roster state after planned actions."""
+    current_players = getattr(edit_file, "_player_cache", {})
+    relevant_team_ids = {player.team_id for player in players}
+    current_sizes: dict[int, int] = {}
+    projected_sizes: dict[int, int] = {}
+    for team_id in relevant_team_ids:
+        roster = edit_file.get_team_roster(team_id)
+        if roster is not None:
+            current_sizes[team_id] = len(roster.roster)
+            projected_sizes[team_id] = len(roster.roster)
+
+    for item in roster_plan:
+        if item.action not in {"move", "add", "release"}:
+            continue
+        destination = item.match.to_team_id
+        if item.overflow_player_id and destination in projected_sizes:
+            projected_sizes[destination] -= 1
+        if item.action in {"move", "release"}:
+            source = item.current_team_id
+            if source in projected_sizes:
+                projected_sizes[source] -= 1
+        if item.action in {"move", "add"} and destination in projected_sizes:
+            projected_sizes[destination] += 1
+
+    results: list[CuratedPlayerResult] = []
+    for player in players:
+        result = assess_curated_player(
+            edit_file,
+            player,
+            current_players,
+            projected_roster_size=projected_sizes.get(player.team_id),
+        )
+        results.append(result)
+        if result.status == "ready":
+            projected_sizes[player.team_id] += 1
+    return results
+
+
+def _curated_audit_record(
+    player: CuratedPlayer,
+    save_scope: str,
+    shirt_number: int | None,
+) -> dict:
+    """Build the shared JSONL and visual-report record for one creation."""
+    return {
+        "player_name": player.name,
+        "player_id": player.player_id,
+        "from_team": "Missing from FL26 database",
+        "from_team_id": 0,
+        "to_team": player.team_name,
+        "to_team_id": player.team_id,
+        "confidence": 100.0,
+        "transfer_type": "curated_player_creation",
+        "dry_run": False,
+        "position": player.registered_position,
+        "fee": "",
+        "market_value": 0,
+        "transfer_date": player.effective_date_override.isoformat(),
+        "previous_shirt_number": None,
+        "shirt_number": shirt_number,
+        "roster_action": "create",
+        "save_scope": save_scope,
+        "fotmob_player_id": None,
+        "sortitoutsi_player_id": player.sortitoutsi_id,
+        "transfermarkt_player_id": None,
+        "transfermarkt_from_club_id": None,
+        "transfermarkt_to_club_id": None,
+        "transfermarkt_transfer_id": None,
+        "sources": ("curated_manifest",),
+        "source_urls": player.sources,
+        "proof_urls": player.sources,
+    }
+
+
+def _print_dry_run(
+    edit_file: EditFile,
+    roster_plan,
+    curated_plan: list[CuratedPlayerResult] | None = None,
+) -> None:
+    """Render planned roster actions and curated creations without mutating."""
     print("\n🔍 DRY-RUN — checking each match against the current roster:")
     would_apply = 0
     already_current = 0
     safety_skipped = 0
+    curated_waiting = 0
     for planned_action in roster_plan:
         match = planned_action.match
         action = planned_action.action
@@ -1253,10 +1358,29 @@ def _print_dry_run(edit_file: EditFile, roster_plan) -> None:
                 f"{planned_action.overflow_player_id} from team {match.to_team_id}"
             )
         print(f"  WOULD {action.upper()}: {match}")
+    for result in curated_plan or []:
+        if result.status == "ready":
+            would_apply += 1
+            print(
+                f"  WOULD CREATE: {result.name} (PES ID {result.player_id}) "
+                f"and register to team {result.team_id}"
+            )
+        elif result.status == "waiting":
+            curated_waiting += 1
+            print(
+                f"  CURATED WAITING ({result.reason}): {result.name} "
+                f"(PES ID {result.player_id})"
+            )
+        else:
+            already_current += 1
+            print(
+                f"  CURATED ALREADY PRESENT ({result.reason}): {result.name} "
+                f"(PES ID {result.player_id})"
+            )
     print(
         f"\nDry-run complete. Would apply: {would_apply}, "
-        f"already current: {already_current}, safety-skipped: {safety_skipped}. "
-        "No files were written."
+        f"already current: {already_current}, safety-skipped: {safety_skipped}, "
+        f"curated waiting: {curated_waiting}. No files were written."
     )
 
 
@@ -1284,7 +1408,7 @@ def _find_shirt_number_conflict(
 
 
 def cmd_run(args):
-    """Main pipeline — scrape, match, apply transfers."""
+    """Main pipeline for verified transfers and curated missing players."""
     dry_run = args.dry_run
     edit_path, output_path = _resolve_run_paths(args)
     threshold = args.threshold or config.MATCH_THRESHOLD_PLAYER
@@ -1298,8 +1422,7 @@ def cmd_run(args):
     transfers = _scrape_run_transfers(args)
 
     if not transfers:
-        print("No transfers found. Exiting.")
-        return
+        print("No verified transfers found; checking curated missing players.")
 
     if dry_run and not edit_path.exists():
         print("\n⚠ Dry-run mode without edit file — showing scraped data only.")
@@ -1363,14 +1486,28 @@ def cmd_run(args):
             output_path,
             allow_overflow_release=allow_overflow_release,
         )
-
-        if not fully_matched:
-            print("\nNo fully matched transfers to apply. Exiting.")
-            return
+        curated_players = load_curated_players()
+        curated_plan = _plan_curated_players(ef, curated_players, roster_plan)
 
         run_records = []
         if dry_run:
-            _print_dry_run(ef, roster_plan)
+            _print_dry_run(ef, roster_plan, curated_plan)
+            return
+
+        actionable_roster = any(
+            item.action in {"move", "add", "release", "shirt_update"}
+            for item in roster_plan
+        )
+        actionable_curated = any(
+            result.status == "ready" for result in curated_plan
+        )
+        if not actionable_roster and not actionable_curated:
+            for result in curated_plan:
+                print(
+                    f"  CURATED {result.status.upper()} ({result.reason}): "
+                    f"{result.name} (PES ID {result.player_id})"
+                )
+            print("\nNo effective roster or curated-player changes to apply. Exiting.")
             return
 
         # Create backup before modifying
@@ -1385,6 +1522,7 @@ def cmd_run(args):
         safety_skipped = 0
         original_data = bytes(ef._data)
         pending_logs = []
+        pending_curated_logs = []
 
         for planned_action in roster_plan:
             m = planned_action.match
@@ -1481,10 +1619,56 @@ def cmd_run(args):
                 )
                 sys.exit(2)
 
+        curated_created = 0
+        curated_waiting = 0
+        for player, planned_result in zip(curated_players, curated_plan):
+            if planned_result.status != "ready":
+                if planned_result.status == "waiting":
+                    curated_waiting += 1
+                    print(
+                        f"  ⏳ Curated waiting {player.name}: "
+                        f"{planned_result.reason}"
+                    )
+                continue
+            try:
+                result = apply_curated_player(
+                    ef,
+                    player,
+                    getattr(ef, "_player_cache", {}),
+                )
+            except Exception as exc:
+                ef._data = bytearray(original_data)
+                print(
+                    f"  ✗ Failed to create curated player {player.name}: {exc}; "
+                    "entire batch rolled back"
+                )
+                sys.exit(2)
+            if result.status != "created":
+                ef._data = bytearray(original_data)
+                print(
+                    f"  ✗ Curated player state changed during the run "
+                    f"({player.name}: {result.reason}); entire batch rolled back"
+                )
+                sys.exit(2)
+            curated_created += 1
+            audit_record = _curated_audit_record(
+                player,
+                save_scope,
+                ef.get_player_shirt_number(player.team_id, player.player_id),
+            )
+            pending_curated_logs.append(audit_record)
+            run_records.append(audit_record.copy())
+            print(
+                f"  ✓ Created {player.name} (PES ID {player.player_id}) "
+                f"and registered to {player.team_name}"
+            )
+
         print(
             f"\n  Transfers applied: {transfer_applied}, "
             f"shirt numbers changed: {shirt_numbers_applied}, "
-            f"already current: {unchanged}, safety-skipped: {safety_skipped}"
+            f"curated players created: {curated_created}, "
+            f"already current: {unchanged}, safety-skipped: {safety_skipped}, "
+            f"curated waiting: {curated_waiting}"
         )
 
         post_integrity = ef.validate_integrity()
@@ -1560,13 +1744,17 @@ def cmd_run(args):
                 source_urls=m.transfer.source_urls,
                 proof_urls=m.transfer.proof_urls,
             )
+        for audit_record in pending_curated_logs:
+            transfer_logger.log_transfer(**audit_record)
+
 
         # Save visual reports
         transfer_logger.save_reports(run_records)
 
         print(
             f"\n✅ Done! {transfer_applied} transfers applied; "
-            f"{shirt_numbers_applied} shirt numbers changed."
+            f"{shirt_numbers_applied} shirt numbers changed; "
+            f"{curated_created} curated players created."
         )
         if output_path.resolve() != edit_path.resolve():
             print(f"   Input (base/pristine):   {edit_path}")
@@ -1579,6 +1767,259 @@ def cmd_run(args):
 
     finally:
         crypto.cleanup_temp(temp_dir)
+        output_lock.release()
+
+
+def _decrypted_data_file(decrypted_path: Path) -> Path:
+    """Resolve data.dat from either a decrypted directory or direct test fixture."""
+    decrypted_path = Path(decrypted_path)
+    if decrypted_path.is_file():
+        return decrypted_path
+    data_file = decrypted_path / "data.dat"
+    if data_file.exists():
+        return data_file
+    dat_files = list(decrypted_path.glob("*.dat"))
+    if not dat_files:
+        raise FileNotFoundError(f"No decrypted .dat file found in {decrypted_path}")
+    return max(dat_files, key=lambda path: path.stat().st_size)
+
+
+def _assess_player_specs(
+    edit_file: EditFile,
+    specs: tuple[PlayerSpec, ...],
+    base_revision: str,
+) -> tuple[SpecResult, ...]:
+    """Assess every spec against one revision without mutating the edit file."""
+    all_players = edit_file.get_all_players()
+    results = []
+    for spec in sorted(specs, key=lambda item: item.path.name):
+        if spec.lifecycle_status != "active":
+            results.append(
+                SpecResult(
+                    spec.identity.pes_id,
+                    spec.identity.name,
+                    spec.lifecycle_status,
+                    spec.lifecycle_reason or f"lifecycle_{spec.lifecycle_status}",
+                )
+            )
+        elif base_revision not in spec.applies_to:
+            results.append(
+                SpecResult(
+                    spec.identity.pes_id,
+                    spec.identity.name,
+                    "needs_review",
+                    "base_revision_not_reviewed",
+                )
+            )
+        elif spec.operation == "create":
+            results.append(assess_create(edit_file, spec, all_players))
+        else:
+            results.append(assess_update(edit_file, spec, all_players))
+    return tuple(results)
+
+
+def _print_player_spec_results(
+    specs: tuple[PlayerSpec, ...],
+    results: tuple[SpecResult, ...],
+) -> None:
+    """Print deterministic semantic results and lifecycle/operation totals."""
+    for result in results:
+        print(
+            f"  {result.name} (PES ID {result.pes_id}): "
+            f"{result.status} ({result.reason})"
+        )
+    counts = Counter(spec.lifecycle_status for spec in specs)
+    operations = Counter(spec.operation for spec in specs)
+    result_counts = Counter(result.status for result in results)
+    print(
+        "Player specs: "
+        f"active={counts['active']}, needs-review={result_counts['needs_review']}, "
+        f"upstreamed={counts['upstreamed']}, retired={counts['retired']}, "
+        f"create={operations['create']}, update={operations['update']}"
+    )
+
+
+def _require_valid_edit(edit_file: EditFile, stage: str) -> None:
+    report = edit_file.validate_integrity()
+    if report["valid"]:
+        return
+    print(f"{stage} failed FL26 integrity validation; no audits were written.")
+    for error in report["errors"][:20]:
+        print(f"  - {error}")
+    raise SystemExit(2)
+
+
+def cmd_players_validate(args) -> None:
+    """Validate the pristine digest, global specs, and semantic applicability."""
+    manifest = load_base_manifest()
+    base_path = Path(config.BASE_EDIT_PATH)
+    if not base_path.exists():
+        print(f"Pristine base not found: {base_path}")
+        raise SystemExit(2)
+    actual_digest = _sha256_file(base_path)
+    if actual_digest != manifest.sha256:
+        print(
+            "Pristine base digest mismatch: "
+            f"expected {manifest.sha256}, found {actual_digest}"
+        )
+        raise SystemExit(2)
+
+    specs = load_player_specs()
+    validate_spec_set(specs)
+    decrypted = crypto.decrypt(base_path)
+    try:
+        edit_file = EditFile()
+        edit_file.load(_decrypted_data_file(decrypted))
+        _require_valid_edit(edit_file, "Pristine base")
+        results = _assess_player_specs(edit_file, specs, manifest.revision)
+        _print_player_spec_results(specs, results)
+    finally:
+        crypto.cleanup_temp(decrypted)
+
+
+def _player_spec_audit_record(
+    spec: PlayerSpec,
+    result: SpecResult,
+    edit_file: EditFile,
+    save_scope: str,
+) -> dict:
+    """Build a non-transfer audit record for one applied player spec."""
+    field_changes = [
+        {"field": field, "from": patch.current, "to": patch.target}
+        for field, patch in spec.patches.items()
+    ]
+    create = spec.create
+    shirt_number = None
+    if create is not None:
+        get_shirt_number = getattr(edit_file, "get_player_shirt_number", None)
+        if get_shirt_number is not None:
+            shirt_number = get_shirt_number(create.team_id, result.pes_id)
+    return {
+        "player_name": result.name,
+        "player_id": result.pes_id,
+        "from_team": "Missing from FL26 database" if create is not None else "",
+        "from_team_id": 0,
+        "to_team": create.team_name if create is not None else "",
+        "to_team_id": create.team_id if create is not None else 0,
+        "confidence": 100.0,
+        "transfer_type": (
+            "player_spec_create" if result.status == "created" else "player_spec_update"
+        ),
+        "dry_run": False,
+        "position": create.registered_position if create is not None else "",
+        "transfer_date": spec.evidence.effective_date.isoformat(),
+        "shirt_number": shirt_number,
+        "roster_action": "create" if result.status == "created" else "update",
+        "save_scope": save_scope,
+        "sortitoutsi_player_id": spec.identity.sortitoutsi_id,
+        "sources": ("player_spec",),
+        "source_urls": (spec.evidence.profile_url,),
+        "proof_urls": spec.evidence.proof_urls,
+        "field_changes": field_changes,
+    }
+
+
+def _verify_player_spec_output(output_path: Path) -> None:
+    """Decrypt the encrypted result and reject it unless integrity survives."""
+    verified_decrypted = crypto.decrypt(output_path)
+    try:
+        verified = EditFile()
+        verified.load(_decrypted_data_file(verified_decrypted))
+        _require_valid_edit(verified, "Encrypted output")
+    finally:
+        crypto.cleanup_temp(verified_decrypted)
+
+
+def cmd_players_apply(args) -> None:
+    """Apply reviewed specs in an explicit locked save transaction."""
+    manifest = load_base_manifest()
+    if args.base_revision != manifest.revision:
+        print(
+            f"Base revision mismatch: expected {manifest.revision}, "
+            f"received {args.base_revision}"
+        )
+        raise SystemExit(2)
+
+    edit_path = Path(args.edit_file)
+    output_path = edit_path if args.in_place else Path(args.output)
+    if not edit_path.exists():
+        print(f"Edit file not found: {edit_path}")
+        raise SystemExit(2)
+
+    specs = load_player_specs()
+    validate_spec_set(specs)
+    output_lock = EditFileLock(output_path)
+    output_lock.acquire()
+    decrypted = None
+    try:
+        input_digest = _sha256_file(edit_path)
+        same_input_output = output_path.resolve() == edit_path.resolve()
+        output_existed = output_path.exists()
+        output_digest = (
+            input_digest
+            if same_input_output
+            else _sha256_file(output_path) if output_existed else None
+        )
+
+        decrypted = crypto.decrypt(edit_path)
+        edit_file = EditFile()
+        data_file = _decrypted_data_file(decrypted)
+        edit_file.load(data_file)
+        _require_valid_edit(edit_file, "Input save")
+
+        results = apply_player_specs(
+            edit_file,
+            specs,
+            manifest.revision,
+            edit_file.get_all_players(),
+        )
+        _print_player_spec_results(specs, results)
+        changed_results = tuple(
+            result for result in results if result.status in {"created", "updated"}
+        )
+        if not changed_results:
+            print("No player-spec changes to apply; no backup or output was written.")
+            return
+
+        _require_valid_edit(edit_file, "Modified save")
+        if _sha256_file(edit_path) != input_digest:
+            print("Input EDIT file changed while player specs were processing.")
+            raise SystemExit(2)
+        if not same_input_output:
+            output_changed = output_path.exists() != output_existed
+            if output_existed and output_path.exists():
+                output_changed = _sha256_file(output_path) != output_digest
+            if output_changed:
+                print("Output EDIT file changed; concurrent output was preserved.")
+                raise SystemExit(2)
+
+        backup_path = backup_mod.create_backup(edit_path)
+        edit_file.save(data_file)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        crypto.encrypt(decrypted, output_path)
+        _verify_player_spec_output(output_path)
+
+        specs_by_id = {spec.identity.pes_id: spec for spec in specs}
+        save_scope = str(output_path.resolve())
+        audit_records = [
+            _player_spec_audit_record(
+                specs_by_id[result.pes_id],
+                result,
+                edit_file,
+                save_scope,
+            )
+            for result in changed_results
+        ]
+        for record in audit_records:
+            transfer_logger.log_transfer(**record)
+        transfer_logger.save_reports(audit_records)
+        print(
+            f"Applied {len(audit_records)} player specs to {output_path}. "
+            f"Backup: {backup_path}"
+        )
+    finally:
+        if decrypted is not None:
+            crypto.cleanup_temp(decrypted)
         output_lock.release()
 
 
@@ -1651,7 +2092,9 @@ def main():
     sub = parser.add_subparsers(dest="command")
 
     # run (default)
-    p_run = sub.add_parser("run", help="Scrape + match + apply transfers")
+    p_run = sub.add_parser(
+        "run", help="Apply verified transfers and curated missing players"
+    )
     p_run.add_argument("--dry-run", action="store_true", help="Don't modify the edit file")
     run_source = p_run.add_mutually_exclusive_group()
     run_source.add_argument("--edit-file", type=str, help="Path to input EDIT00000000")
@@ -1680,6 +2123,37 @@ def main():
         help="Allow releasing a displayed overflow candidate when a roster is full",
     )
     p_run.set_defaults(func=cmd_run)
+
+    # explicit player-spec workflow
+    p_players = sub.add_parser(
+        "players", help="Validate or apply revision-scoped player specs"
+    )
+    players_sub = p_players.add_subparsers(
+        dest="players_command", required=True
+    )
+    p_players_validate = players_sub.add_parser(
+        "validate", help="Validate player specs against the pristine base"
+    )
+    p_players_validate.set_defaults(func=cmd_players_validate)
+    p_players_apply = players_sub.add_parser(
+        "apply", help="Apply reviewed player specs to an EDIT file"
+    )
+    p_players_apply.add_argument(
+        "--base-revision",
+        required=True,
+        help="Exact base-manifest revision reviewed by the caller",
+    )
+    p_players_apply.add_argument(
+        "--edit-file", required=True, help="Path to input EDIT00000000"
+    )
+    player_target = p_players_apply.add_mutually_exclusive_group(required=True)
+    player_target.add_argument(
+        "-o", "--output", help="Path to output updated EDIT00000000"
+    )
+    player_target.add_argument(
+        "--in-place", action="store_true", help="Overwrite the input EDIT file"
+    )
+    p_players_apply.set_defaults(func=cmd_players_apply)
 
     # schedule
     p_sched = sub.add_parser("schedule", help="Run transfers continuously on a timer")
@@ -1723,6 +2197,7 @@ def main():
     p_inspect.add_argument("--edit-file", type=str, required=True, help="Path to edit00000000")
     p_inspect.set_defaults(func=cmd_inspect)
 
+
     # validate
     p_validate = sub.add_parser("validate", help="Validate an encrypted FL26 edit file")
     p_validate.add_argument("--edit-file", type=str, required=True, help="Path to edit00000000")
@@ -1751,7 +2226,8 @@ def main():
 
     # Pre-parse argv: if first arg is a flag or omitted, default to 'run'
     subcommands = {
-        "run", "schedule", "cron", "inspect", "validate", "repair", "log", "-h", "--help"
+        "run", "players", "schedule", "cron", "inspect", "validate", "repair", "log",
+        "-h", "--help",
     }
     if len(sys.argv) > 1 and sys.argv[1] not in subcommands:
         sys.argv.insert(1, "run")
