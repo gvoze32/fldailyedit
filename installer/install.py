@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path, PurePosixPath
 from uuid import uuid4
-from typing import BinaryIO, Callable
+from typing import Any, BinaryIO, Callable
 
 from installer.catalog import ReleaseRecord
 
@@ -71,6 +71,239 @@ class _RollbackOutcome:
         if self.recovery_path is not None:
             artifacts.append(f"recovery copy: {self.recovery_path}")
         return "; ".join(artifacts)
+
+@dataclass(frozen=True, slots=True)
+class _WindowsHandleSnapshot:
+    device: int
+    inode: int
+    size: int
+    sha256: str
+    is_regular: bool
+    is_reparse: bool
+
+
+class _WindowsHandleAdapter:
+    def __init__(self, backend: Any | None = None) -> None:
+        self._backend = (
+            _CtypesWindowsBackend() if backend is None else backend
+        )
+
+    def _verified_snapshot(self, handle: object) -> _WindowsHandleSnapshot:
+        snapshot = self._backend.inspect_handle(handle)
+        if not snapshot.is_regular or snapshot.is_reparse:
+            raise OSError(
+                "Windows recovery handle is not a regular non-reparse file"
+            )
+        return snapshot
+
+    def snapshot(self, source: Path) -> _WindowsHandleSnapshot:
+        handle = self._backend.open_source(source)
+        try:
+            return self._verified_snapshot(handle)
+        finally:
+            self._backend.close_handle(handle)
+
+    def move_verified_no_replace(
+        self,
+        source: Path,
+        target: Path,
+        expected: _WindowsHandleSnapshot,
+    ) -> None:
+        handle = self._backend.open_source(source)
+        try:
+            actual = self._verified_snapshot(handle)
+            if actual != expected:
+                raise OSError(
+                    "Windows recovery source changed before publication"
+                )
+            self._backend.rename_handle_no_replace(handle, target)
+        finally:
+            self._backend.close_handle(handle)
+
+
+class _CtypesWindowsBackend:
+    _GENERIC_READ = 0x80000000
+    _DELETE = 0x00010000
+    _FILE_SHARE_READ = 0x00000001
+    _OPEN_EXISTING = 3
+    _FILE_ATTRIBUTE_DIRECTORY = 0x10
+    _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+    _FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+    _FILE_FLAG_SEQUENTIAL_SCAN = 0x08000000
+    _FILE_TYPE_DISK = 0x0001
+    _FILE_BEGIN = 0
+    _FILE_RENAME_INFO = 3
+
+    def __init__(self) -> None:
+        if os.name != "nt":
+            raise OSError("Windows handle adapter is unavailable")
+        import ctypes
+        from ctypes import wintypes
+
+        self._ctypes = ctypes
+        self._wintypes = wintypes
+        self._kernel32 = ctypes.WinDLL(
+            "kernel32", use_last_error=True
+        )
+
+        class ByHandleFileInformation(ctypes.Structure):
+            _fields_ = [
+                ("dwFileAttributes", wintypes.DWORD),
+                ("ftCreationTime", wintypes.FILETIME),
+                ("ftLastAccessTime", wintypes.FILETIME),
+                ("ftLastWriteTime", wintypes.FILETIME),
+                ("dwVolumeSerialNumber", wintypes.DWORD),
+                ("nFileSizeHigh", wintypes.DWORD),
+                ("nFileSizeLow", wintypes.DWORD),
+                ("nNumberOfLinks", wintypes.DWORD),
+                ("nFileIndexHigh", wintypes.DWORD),
+                ("nFileIndexLow", wintypes.DWORD),
+            ]
+
+        self._file_information = ByHandleFileInformation
+        self._invalid_handle = ctypes.c_void_p(-1).value
+        self._kernel32.CreateFileW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        ]
+        self._kernel32.CreateFileW.restype = wintypes.HANDLE
+        self._kernel32.GetFileInformationByHandle.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(ByHandleFileInformation),
+        ]
+        self._kernel32.GetFileInformationByHandle.restype = wintypes.BOOL
+        self._kernel32.GetFileType.argtypes = [wintypes.HANDLE]
+        self._kernel32.GetFileType.restype = wintypes.DWORD
+        self._kernel32.ReadFile.argtypes = [
+            wintypes.HANDLE,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD),
+            wintypes.LPVOID,
+        ]
+        self._kernel32.ReadFile.restype = wintypes.BOOL
+        self._kernel32.SetFileInformationByHandle.argtypes = [
+            wintypes.HANDLE,
+            ctypes.c_int,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+        ]
+        self._kernel32.SetFileInformationByHandle.restype = wintypes.BOOL
+        self._kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        self._kernel32.CloseHandle.restype = wintypes.BOOL
+
+    def _raise_last_error(self) -> None:
+        raise self._ctypes.WinError(self._ctypes.get_last_error())
+
+    def open_source(self, source: Path) -> object:
+        handle = self._kernel32.CreateFileW(
+            os.path.abspath(source),
+            self._GENERIC_READ | self._DELETE,
+            self._FILE_SHARE_READ,
+            None,
+            self._OPEN_EXISTING,
+            self._FILE_FLAG_OPEN_REPARSE_POINT
+            | self._FILE_FLAG_SEQUENTIAL_SCAN,
+            None,
+        )
+        if handle == self._invalid_handle:
+            self._raise_last_error()
+        return handle
+
+    def inspect_handle(self, handle: object) -> _WindowsHandleSnapshot:
+        information = self._file_information()
+        if not self._kernel32.GetFileInformationByHandle(
+            handle, self._ctypes.byref(information)
+        ):
+            self._raise_last_error()
+        file_type = self._kernel32.GetFileType(handle)
+        is_regular = (
+            file_type == self._FILE_TYPE_DISK
+            and not (
+                information.dwFileAttributes
+                & self._FILE_ATTRIBUTE_DIRECTORY
+            )
+        )
+        is_reparse = bool(
+            information.dwFileAttributes
+            & self._FILE_ATTRIBUTE_REPARSE_POINT
+        )
+        digest = hashlib.sha256()
+        total = 0
+        buffer = self._ctypes.create_string_buffer(_CHUNK_BYTES)
+        while True:
+            read_count = self._wintypes.DWORD()
+            if not self._kernel32.ReadFile(
+                handle,
+                buffer,
+                _CHUNK_BYTES,
+                self._ctypes.byref(read_count),
+                None,
+            ):
+                self._raise_last_error()
+            if read_count.value == 0:
+                break
+            chunk = buffer.raw[: read_count.value]
+            total += len(chunk)
+            digest.update(chunk)
+        reported_size = (
+            information.nFileSizeHigh << 32
+        ) | information.nFileSizeLow
+        if total != reported_size:
+            raise OSError("Windows recovery handle changed while hashing")
+        return _WindowsHandleSnapshot(
+            information.dwVolumeSerialNumber,
+            (information.nFileIndexHigh << 32)
+            | information.nFileIndexLow,
+            reported_size,
+            digest.hexdigest(),
+            is_regular,
+            is_reparse,
+        )
+
+    def rename_handle_no_replace(
+        self, handle: object, target: Path
+    ) -> None:
+        target_name = os.path.abspath(target)
+        name_length = len(target_name)
+        ctypes = self._ctypes
+        wintypes = self._wintypes
+
+        class FileRenameInformation(ctypes.Structure):
+            _fields_ = [
+                ("ReplaceIfExists", wintypes.BOOLEAN),
+                ("RootDirectory", wintypes.HANDLE),
+                ("FileNameLength", wintypes.DWORD),
+                ("FileName", wintypes.WCHAR * name_length),
+            ]
+
+        information = FileRenameInformation()
+        information.ReplaceIfExists = False
+        information.RootDirectory = None
+        information.FileNameLength = len(
+            target_name.encode("utf-16-le")
+        )
+        information.FileName = target_name
+        if not self._kernel32.SetFileInformationByHandle(
+            handle,
+            self._FILE_RENAME_INFO,
+            self._ctypes.byref(information),
+            self._ctypes.sizeof(information),
+        ):
+            self._raise_last_error()
+
+    def close_handle(self, handle: object) -> None:
+        self._kernel32.CloseHandle(handle)
+
+
+_WINDOWS_ADAPTER: _WindowsHandleAdapter | None = (
+    _WindowsHandleAdapter() if _WINDOWS else None
+)
 
 
 def _is_reparse_status(path_status: os.stat_result) -> bool:
@@ -478,17 +711,10 @@ def _stage_archive(
 
 
 def _move_no_replace(source: Path, target: Path) -> bool:
-    source_status = source.lstat()
-    if (
-        _is_reparse_status(source_status)
-        or not stat.S_ISREG(source_status.st_mode)
-    ):
-        raise OSError("no-replace source is not a regular file")
-    if _WINDOWS:
-        os.rename(source, target)
-        return False
-    os.link(source, target, follow_symlinks=False)
-    return True
+    raise OSError(
+        "Path-based recovery publication is disabled; Windows handle-bound "
+        "recovery is required"
+    )
 
 
 def _quarantine_target(target: Path) -> Path:
@@ -580,18 +806,12 @@ def _restore_after_failed_commit(
 
         if quarantined_snapshot != installed_snapshot:
             preserve_recovery = recovery_path is not None
-            try:
-                source_retained = _move_no_replace(quarantine_path, target)
-            except OSError:
-                source_retained = True
-            if not source_retained:
-                quarantine_path = None
             raise InstallError(
                 "recovery_failed",
-                "A concurrent save was quarantined and preserved; manual "
-                f"recovery is required. Target: {target}; "
-                f"quarantine: {quarantine_path}; backup: {backup_path}; "
-                f"recovery copy: {recovery_path}",
+                "A concurrent or mismatched save was quarantined and will "
+                "not be republished; manual recovery is required. "
+                f"Target: {target}; quarantine: {quarantine_path}; "
+                f"backup: {backup_path}; recovery copy: {recovery_path}",
                 stage=InstallStage.RESTORING,
             )
 
@@ -608,42 +828,40 @@ def _restore_after_failed_commit(
 
         if recovery_path is None:
             raise OSError("verified recovery copy is unavailable")
-        recovery_snapshot = _capture_target(
-            recovery_path, InstallStage.RESTORING
-        )
-        try:
-            source_retained = _move_no_replace(recovery_path, target)
-        except OSError as error:
+        if not _WINDOWS or _WINDOWS_ADAPTER is None:
             preserve_recovery = True
             raise InstallError(
                 "recovery_failed",
-                "The original save could not be restored without overwriting "
-                f"a concurrent file; manual recovery is required. Target: "
-                f"{target}; quarantine: {quarantine_path}; backup: "
-                f"{backup_path}; recovery copy: {recovery_path}",
+                "Automatic post-commit recovery is unavailable on this "
+                "platform; manual recovery is required. "
+                f"Target: {target}; quarantine: {quarantine_path}; "
+                f"backup: {backup_path}; recovery copy: {recovery_path}",
                 stage=InstallStage.RESTORING,
-            ) from error
-        if source_retained:
-            preserve_recovery = True
-        else:
-            recovery_path = None
-        try:
-            _assert_target_matches(
-                target, recovery_snapshot, InstallStage.RESTORING
             )
-        except InstallError as error:
+        try:
+            recovery_snapshot = _WINDOWS_ADAPTER.snapshot(recovery_path)
+            _WINDOWS_ADAPTER.move_verified_no_replace(
+                recovery_path,
+                target,
+                recovery_snapshot,
+            )
+            recovery_path = None
+            restored_snapshot = _WINDOWS_ADAPTER.snapshot(target)
+            if restored_snapshot != recovery_snapshot:
+                raise OSError(
+                    "restored Windows target no longer matches recovery handle"
+                )
+        except OSError as error:
             preserve_recovery = recovery_path is not None
             raise InstallError(
                 "recovery_failed",
-                "The restored target changed after no-clobber publication; "
+                "Windows handle-bound no-replace recovery failed closed; "
                 f"manual recovery is required. Target: {target}; quarantine: "
                 f"{quarantine_path}; backup: {backup_path}; recovery copy: "
                 f"{recovery_path}",
                 stage=InstallStage.RESTORING,
             ) from error
-        return _RollbackOutcome(
-            quarantine_path, backup_path, recovery_path
-        )
+        return _RollbackOutcome(quarantine_path, backup_path, None)
     except InstallError as error:
         preserve_recovery = (
             preserve_recovery

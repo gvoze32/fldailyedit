@@ -612,9 +612,14 @@ def test_final_verification_mismatch_restores_verified_backup_atomically(
     with pytest.raises(InstallError) as caught:
         _install(archive_path, destination, record)
 
-    assert caught.value.code == "install_verification_failed"
-    assert caught.value.stage is InstallStage.VERIFYING_INSTALL
-    assert target.read_bytes() == original
+    if install_module._WINDOWS:
+        assert caught.value.code == "install_verification_failed"
+        assert caught.value.stage is InstallStage.VERIFYING_INSTALL
+        assert target.read_bytes() == original
+    else:
+        assert caught.value.code == "recovery_failed"
+        assert caught.value.stage is InstallStage.RESTORING
+        assert not target.exists()
     assert len(replace_calls) == 1
     backup = (
         destination
@@ -877,58 +882,16 @@ def test_rollback_preserves_concurrent_target_when_original_was_absent(
     assert not (destination / "FLDailyEditBackups").exists()
     assert list(destination.glob(".fldailyedit-*.tmp")) == []
 
-@pytest.mark.parametrize("windows_semantics", [False, True])
-def test_no_replace_move_restores_only_to_an_absent_target(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    windows_semantics: bool,
-) -> None:
+def test_path_based_recovery_publication_is_disabled(tmp_path: Path) -> None:
     source = tmp_path / "recovery"
     target = tmp_path / SAVE_NAME
     source.write_bytes(b"original")
-    real_rename = os.rename
 
-    def windows_rename(source_path: Path, target_path: Path) -> None:
-        if Path(target_path).exists():
-            raise FileExistsError("target exists")
-        real_rename(source_path, target_path)
-
-    monkeypatch.setattr(install_module, "_WINDOWS", windows_semantics)
-    if windows_semantics:
-        monkeypatch.setattr(install_module.os, "rename", windows_rename)
-
-    install_module._move_no_replace(source, target)
-
-    assert source.exists() is (not windows_semantics)
-    assert target.read_bytes() == b"original"
-
-
-@pytest.mark.parametrize("windows_semantics", [False, True])
-def test_no_replace_move_never_clobbers_an_existing_target(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    windows_semantics: bool,
-) -> None:
-    source = tmp_path / "recovery"
-    target = tmp_path / SAVE_NAME
-    source.write_bytes(b"original")
-    target.write_bytes(b"concurrent")
-    real_rename = os.rename
-
-    def windows_rename(source_path: Path, target_path: Path) -> None:
-        if Path(target_path).exists():
-            raise FileExistsError("target exists")
-        real_rename(source_path, target_path)
-
-    monkeypatch.setattr(install_module, "_WINDOWS", windows_semantics)
-    if windows_semantics:
-        monkeypatch.setattr(install_module.os, "rename", windows_rename)
-
-    with pytest.raises(FileExistsError):
+    with pytest.raises(OSError):
         install_module._move_no_replace(source, target)
 
     assert source.read_bytes() == b"original"
-    assert target.read_bytes() == b"concurrent"
+    assert not target.exists()
 
 
 def test_quarantine_preserves_target_replaced_after_last_absent_rollback_check(
@@ -1014,58 +977,6 @@ def test_quarantine_preserves_target_replaced_after_last_backup_rollback_check(
     assert surviving.read_bytes() == concurrent
     assert backup.read_bytes() == b"original"
 
-def test_posix_no_replace_retains_source_across_destination_race(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    source = tmp_path / "recovery"
-    target = tmp_path / SAVE_NAME
-    source.write_bytes(b"original")
-    real_link = os.link
-    observed_follow_symlinks: list[bool | None] = []
-
-    def race_after_link(
-        source_path: Path,
-        target_path: Path,
-        *,
-        follow_symlinks: bool | None = None,
-    ) -> None:
-        observed_follow_symlinks.append(follow_symlinks)
-        real_link(
-            source_path,
-            target_path,
-            follow_symlinks=bool(follow_symlinks),
-        )
-        Path(target_path).unlink()
-        Path(target_path).write_bytes(b"concurrent")
-
-    monkeypatch.setattr(install_module, "_WINDOWS", False)
-    monkeypatch.setattr(install_module.os, "link", race_after_link)
-
-    install_module._move_no_replace(source, target)
-
-    assert observed_follow_symlinks == [False]
-    assert source.read_bytes() == b"original"
-    assert target.read_bytes() == b"concurrent"
-
-
-def test_no_replace_rejects_symlink_source_without_publication(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    escaped = tmp_path / "escaped"
-    escaped.write_bytes(b"external")
-    source = tmp_path / "recovery"
-    source.symlink_to(escaped)
-    target = tmp_path / SAVE_NAME
-    monkeypatch.setattr(install_module, "_WINDOWS", False)
-
-    with pytest.raises(OSError):
-        install_module._move_no_replace(source, target)
-
-    assert source.is_symlink()
-    assert escaped.read_bytes() == b"external"
-    assert not target.exists()
 
 
 def test_unverified_symlink_quarantine_is_never_republished(
@@ -1174,3 +1085,230 @@ def test_repeated_failed_installs_leave_discoverable_quarantines(
         any(str(quarantine) in detail for detail in observed_errors)
         for quarantine in quarantines
     )
+
+def test_windows_handle_adapter_rejects_changed_identity_type_size_and_hash() -> None:
+    expected = install_module._WindowsHandleSnapshot(
+        device=11,
+        inode=22,
+        size=8,
+        sha256="a" * 64,
+        is_regular=True,
+        is_reparse=False,
+    )
+    unsafe_snapshots = [
+        replace(expected, inode=23),
+        replace(expected, size=9),
+        replace(expected, sha256="b" * 64),
+        replace(expected, is_regular=False),
+        replace(expected, is_reparse=True),
+    ]
+
+    for unsafe in unsafe_snapshots:
+        class Backend:
+            def __init__(self) -> None:
+                self.snapshots = [expected, unsafe]
+                self.renamed: list[tuple[object, Path]] = []
+
+            def open_source(self, path: Path) -> object:
+                return object()
+
+            def inspect_handle(self, handle: object):
+                return self.snapshots.pop(0)
+
+            def rename_handle_no_replace(
+                self, handle: object, target: Path
+            ) -> None:
+                self.renamed.append((handle, target))
+
+            def close_handle(self, handle: object) -> None:
+                pass
+
+        backend = Backend()
+        adapter = install_module._WindowsHandleAdapter(backend)
+        snapshot = adapter.snapshot(Path("recovery"))
+
+        with pytest.raises(OSError):
+            adapter.move_verified_no_replace(
+                Path("recovery"),
+                Path(SAVE_NAME),
+                snapshot,
+            )
+
+        assert backend.renamed == []
+
+
+def test_windows_handle_adapter_renames_exact_verified_handle_no_replace() -> None:
+    expected = install_module._WindowsHandleSnapshot(
+        device=11,
+        inode=22,
+        size=8,
+        sha256="a" * 64,
+        is_regular=True,
+        is_reparse=False,
+    )
+
+    class Backend:
+        def __init__(self) -> None:
+            self.handles: list[object] = []
+            self.renamed: list[tuple[object, Path]] = []
+            self.closed: list[object] = []
+
+        def open_source(self, path: Path) -> object:
+            handle = object()
+            self.handles.append(handle)
+            return handle
+
+        def inspect_handle(self, handle: object):
+            return expected
+
+        def rename_handle_no_replace(
+            self, handle: object, target: Path
+        ) -> None:
+            self.renamed.append((handle, target))
+
+        def close_handle(self, handle: object) -> None:
+            self.closed.append(handle)
+
+    backend = Backend()
+    adapter = install_module._WindowsHandleAdapter(backend)
+    snapshot = adapter.snapshot(Path("recovery"))
+    adapter.move_verified_no_replace(
+        Path("recovery"),
+        Path(SAVE_NAME),
+        snapshot,
+    )
+
+    assert backend.renamed == [(backend.handles[1], Path(SAVE_NAME))]
+    assert backend.closed == backend.handles
+
+
+def test_non_windows_rollback_never_publishes_recovery_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive_path, destination, record = _setup(tmp_path)
+    target = destination / SAVE_NAME
+    target.write_bytes(b"original")
+    real_hash = install_module._file_sha256
+
+    def wrong_installed_hash(path: Path) -> str:
+        if path == target:
+            return "0" * 64
+        return real_hash(path)
+
+    def unexpected_publish(*args, **kwargs):
+        raise AssertionError("non-Windows rollback must not publish a source")
+
+    monkeypatch.setattr(install_module, "_WINDOWS", False)
+    monkeypatch.setattr(install_module, "_file_sha256", wrong_installed_hash)
+    monkeypatch.setattr(install_module, "_move_no_replace", unexpected_publish)
+
+    with pytest.raises(InstallError) as caught:
+        _install(archive_path, destination, record)
+
+    backup = (
+        destination
+        / "FLDailyEditBackups"
+        / "EDIT00000000.20260806T123456Z.bak"
+    )
+    quarantines = list(destination.glob(".fldailyedit-quarantine-*"))
+    recoveries = list(destination.glob(".fldailyedit-*.tmp"))
+    assert caught.value.code == "recovery_failed"
+    assert not target.exists()
+    assert len(quarantines) == 1
+    assert len(recoveries) == 1
+    assert str(backup) in str(caught.value)
+    assert str(quarantines[0]) in str(caught.value)
+    assert str(recoveries[0]) in str(caught.value)
+
+
+def test_mismatched_quarantine_is_never_republished(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive_path, destination, record = _setup(tmp_path)
+    target = destination / SAVE_NAME
+    concurrent = b"concurrent quarantine bytes"
+    real_hash = install_module._file_sha256
+    real_assert = install_module._assert_rollback_ownership
+    ownership_checks = 0
+
+    def wrong_installed_hash(path: Path) -> str:
+        if path == target:
+            return "0" * 64
+        return real_hash(path)
+
+    def replace_after_check(*args, **kwargs) -> None:
+        nonlocal ownership_checks
+        real_assert(*args, **kwargs)
+        ownership_checks += 1
+        if ownership_checks == 2:
+            target.write_bytes(concurrent)
+
+    monkeypatch.setattr(install_module, "_WINDOWS", True)
+    monkeypatch.setattr(install_module, "_file_sha256", wrong_installed_hash)
+    monkeypatch.setattr(
+        install_module, "_assert_rollback_ownership", replace_after_check
+    )
+
+    with pytest.raises(InstallError) as caught:
+        _install(archive_path, destination, record)
+
+    quarantines = list(destination.glob(".fldailyedit-quarantine-*"))
+    assert caught.value.code == "recovery_failed"
+    assert not target.exists()
+    assert len(quarantines) == 1
+    assert quarantines[0].read_bytes() == concurrent
+    assert str(quarantines[0]) in str(caught.value)
+
+
+def test_windows_fake_restores_verified_backup_through_handle_adapter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive_path, destination, record = _setup(tmp_path)
+    target = destination / SAVE_NAME
+    target.write_bytes(b"original")
+    real_hash = install_module._file_sha256
+
+    class Adapter:
+        def __init__(self) -> None:
+            self.moves: list[tuple[Path, Path, tuple[int, str]]] = []
+
+        def snapshot(self, path: Path) -> tuple[int, str]:
+            return path.stat().st_size, real_hash(path)
+
+        def move_verified_no_replace(
+            self,
+            source: Path,
+            destination_path: Path,
+            expected: tuple[int, str],
+        ) -> None:
+            assert self.snapshot(source) == expected
+            if destination_path.exists():
+                raise FileExistsError("target exists")
+            self.moves.append((source, destination_path, expected))
+            os.rename(source, destination_path)
+
+    adapter = Adapter()
+
+    def fail_first_target_hash(path: Path) -> str:
+        if path == target:
+            monkeypatch.setattr(
+                install_module, "_file_sha256", real_hash
+            )
+            return "0" * 64
+        return real_hash(path)
+
+    monkeypatch.setattr(install_module, "_WINDOWS", True)
+    monkeypatch.setattr(install_module, "_WINDOWS_ADAPTER", adapter)
+    monkeypatch.setattr(
+        install_module, "_file_sha256", fail_first_target_hash
+    )
+
+    with pytest.raises(InstallError) as caught:
+        _install(archive_path, destination, record)
+
+    assert caught.value.code == "install_verification_failed"
+    assert target.read_bytes() == b"original"
+    assert len(adapter.moves) == 1
