@@ -15,6 +15,9 @@ SYNC_WORKFLOW_PATHS = (
     Path(".github/workflows/sync-fast.yml"),
     Path(".github/workflows/sync-deep.yml"),
 )
+INSTALLER_WORKFLOW_PATH = Path(".github/workflows/build-installer.yml")
+INSTALLER_SPEC_PATH = Path("FLDailyEditInstaller.spec")
+PYPROJECT_PATH = Path("pyproject.toml")
 README_PATH = Path("README.md")
 
 
@@ -797,3 +800,106 @@ def test_readme_lists_every_whitelisted_update_patch_group_and_pair_contract():
         assert group in contribution_section
     assert "`from`" in contribution_section
     assert "`to`" in contribution_section
+
+
+
+def test_installer_build_metadata_discovers_package_and_pins_pyinstaller():
+    text = PYPROJECT_PATH.read_text(encoding="utf-8")
+    package_find = text.split("[tool.setuptools.packages.find]", 1)[1].split(
+        "\n[", 1
+    )[0]
+    include_line = re.search(r"(?m)^include = \[(.+)\]$", package_find)
+    assert include_line is not None
+    assert "installer*" in re.findall(r'"([^"]+)"', include_line.group(1))
+
+    dependency_block = text.split("installer-build = [", 1)[1].split("]", 1)[0]
+    assert re.findall(r'"([^"]+)"', dependency_block) == ["pyinstaller>=6.14,<7"]
+
+
+def test_installer_spec_is_one_file_windowed_and_excludes_sensitive_payloads():
+    text = INSTALLER_SPEC_PATH.read_text(encoding="utf-8")
+
+    assert "Analysis(" in text
+    assert '["installer/__main__.py"]' in text
+    assert 'pathex=["."]' in text
+    assert "EXE(" in text
+    assert 'name="FLDailyEditInstaller"' in text
+    assert "console=False" in text
+    assert "debug=False" in text
+    assert "strip=False" in text
+    assert "upx=False" in text
+    assert "COLLECT(" not in text
+
+    lowered = text.lower()
+    for forbidden in (
+        "edit00000000",
+        "transfer_summary",
+        "credentials",
+        "pesxdecrypter",
+    ):
+        assert forbidden not in lowered
+
+
+def test_installer_workflow_builds_tests_and_smoke_tests_on_windows():
+    text = INSTALLER_WORKFLOW_PATH.read_text(encoding="utf-8")
+    build = text.split("\n  publish:\n", 1)[0]
+
+    assert "workflow_dispatch:" in text
+    assert "branches: [main]" in text
+    for path_filter in (
+        "installer/**",
+        "tests/test_installer_*.py",
+        "tests/test_release_asset.py",
+        "FLDailyEditInstaller.spec",
+        "pyproject.toml",
+        ".github/workflows/build-installer.yml",
+    ):
+        assert path_filter in text
+
+    assert "runs-on: windows-latest" in build
+    assert 'python-version: "3.12"' in build
+    assert 'python -m pip install -e ".[installer-build]"' in build
+    assert 'python -m pip install -e ".[dev]"' in build
+    for test_path in (
+        "tests/test_installer_catalog.py",
+        "tests/test_installer_paths.py",
+        "tests/test_installer_install.py",
+        "tests/test_installer_app.py",
+        "tests/test_release_asset.py",
+        "tests/test_workflow_config.py",
+    ):
+        assert test_path in build
+    assert "pyinstaller --clean --noconfirm FLDailyEditInstaller.spec" in build
+    assert (
+        'Start-Process -FilePath "dist\\FLDailyEditInstaller.exe" '
+        '-ArgumentList "--self-test" -Wait -PassThru'
+    ) in build
+    assert "if ($process.ExitCode -ne 0)" in build
+    assert 'throw "Installer self-test exited $($process.ExitCode)"' in build
+    assert (
+        'Get-FileHash -Path "dist\\FLDailyEditInstaller.exe" -Algorithm SHA256'
+        in build
+    )
+    assert "uses: actions/upload-artifact@v7" in build
+    assert "retention-days: 1" in build
+
+
+def test_installer_publish_job_is_serialized_and_uploads_exact_release_assets():
+    text = INSTALLER_WORKFLOW_PATH.read_text(encoding="utf-8")
+    publish = "\n  publish:\n" + text.split("\n  publish:\n", 1)[1]
+
+    assert "needs: build" in publish
+    assert "runs-on: ubuntu-latest" in publish
+    assert "contents: write" in publish
+    assert "group: fldailyedit-latest-release" in publish
+    assert "cancel-in-progress: false" in publish
+    assert "uses: actions/download-artifact@v8" in publish
+    assert (
+        "gh release upload latest "
+        "release-payload/FLDailyEditInstaller.exe "
+        "release-payload/FLDailyEditInstaller.exe.sha256 --clobber"
+    ) in publish
+
+    actions = re.findall(r"(?m)^\s*uses:\s+([^@\s]+)@", text)
+    assert actions
+    assert all(action.startswith("actions/") for action in actions)

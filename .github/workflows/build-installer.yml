@@ -1,0 +1,85 @@
+name: Build Windows Installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "installer/**"
+      - "tests/test_installer_*.py"
+      - "tests/test_release_asset.py"
+      - "FLDailyEditInstaller.spec"
+      - "pyproject.toml"
+      - ".github/workflows/build-installer.yml"
+
+jobs:
+  build:
+    name: Test and package Windows installer
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install build dependencies
+        run: |
+          python -m pip install -e ".[installer-build]"
+          python -m pip install -e ".[dev]"
+      - name: Run installer and release tests
+        run: >-
+          python -m pytest
+          tests/test_installer_catalog.py
+          tests/test_installer_paths.py
+          tests/test_installer_install.py
+          tests/test_installer_app.py
+          tests/test_release_asset.py
+          tests/test_workflow_config.py
+          -q
+      - name: Run source self-test
+        run: python -m installer --self-test
+      - name: Build one-file installer
+        run: pyinstaller --clean --noconfirm FLDailyEditInstaller.spec
+      - name: Smoke-test packaged installer
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath "dist\FLDailyEditInstaller.exe" -ArgumentList "--self-test" -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Installer self-test exited $($process.ExitCode)"
+          }
+      - name: Generate SHA-256 checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash -Path "dist\FLDailyEditInstaller.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  FLDailyEditInstaller.exe" | Set-Content -Path "dist\FLDailyEditInstaller.exe.sha256" -Encoding ascii
+      - name: Upload internal build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: installer-${{ github.run_id }}
+          path: |
+            dist/FLDailyEditInstaller.exe
+            dist/FLDailyEditInstaller.exe.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish Windows installer
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: fldailyedit-latest-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: installer-${{ github.run_id }}
+          path: release-payload
+      - name: Publish rolling release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view latest >/dev/null 2>&1 || gh release create latest --title "Latest FL Daily Edit" --notes "Validated FL Daily Edit release assets."
+          gh release upload latest release-payload/FLDailyEditInstaller.exe release-payload/FLDailyEditInstaller.exe.sha256 --clobber
