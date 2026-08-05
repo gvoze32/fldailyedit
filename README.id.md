@@ -1,4 +1,4 @@
-[![English](https://img.shields.io/badge/%F0%9F%87%AC%F0%9F%87%A7_English-012169?style=flat-square)](README.md) [![Bahasa Indonesia](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%A9_Bahasa_Indonesia-ce1126?style=flat-square)](README.id.md) [![Español LATAM](https://img.shields.io/badge/%F0%9F%87%B2%F0%9F%87%BD_Espa%C3%B1ol_LATAM-006847?style=flat-square)](README.es-419.md) [![العربية](https://img.shields.io/badge/%F0%9F%87%AA%F0%9F%87%AC_%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A%D8%A9-ce1126?style=flat-square)](README.ar.md) [![简体中文](https://img.shields.io/badge/%F0%9F%87%A8%F0%9F%87%B3_%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-de2910?style=flat-square)](README.zh-CN.md) [![Italiano](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%B9_Italiano-009246?style=flat-square)](README.it.md) [![Русский](https://img.shields.io/badge/%F0%9F%87%B7%F0%9F%87%BA_%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-d52b1e?style=flat-square)](README.ru.md)
+[![English](https://img.shields.io/badge/%F0%9F%87%AC%F0%9F%87%A7_English-012169?style=flat-square)](README.md) [![Bahasa Indonesia](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%A9_Bahasa_Indonesia-ce1126?style=flat-square)](README.id.md) [![Español LATAM](https://img.shields.io/badge/%F0%9F%87%B2%F0%9F%87%BD_Espa%C3%B1ol_LATAM-006847?style=flat-square)](README.es-419.md) [![Português (Brasil)](https://img.shields.io/badge/%F0%9F%87%A7%F0%9F%87%B7_Portugu%C3%AAs_%28Brasil%29-009c3b?style=flat-square)](README.pt-BR.md) [![العربية](https://img.shields.io/badge/%F0%9F%87%AA%F0%9F%87%AC_%F0%9F%87%B8%F0%9F%87%A6_%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A%D8%A9-ce1126?style=flat-square)](README.ar.md) [![简体中文](https://img.shields.io/badge/%F0%9F%87%A8%F0%9F%87%B3_%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-de2910?style=flat-square)](README.zh-CN.md) [![Italiano](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%B9_Italiano-009246?style=flat-square)](README.it.md) [![Русский](https://img.shields.io/badge/%F0%9F%87%B7%F0%9F%87%BA_%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-d52b1e?style=flat-square)](README.ru.md)
 
 # FL Daily Edit
 
@@ -61,6 +61,14 @@ repositori ini dan gunakan **Run workflow** dari tab Actions.
 
 Updater tidak menimpa nomor seragam yang sudah digunakan oleh anggota skuad lain.
 Updater juga memeriksa klub pemain saat ini sebelum menerapkan perpindahan.
+
+## Roadmap / Sedang dikerjakan
+
+Item berikut masih direncanakan dan belum diimplementasikan:
+
+1. **Pulihkan integritas output** — selidiki dan perbaiki kerusakan pada `EDIT00000000` yang saat ini dihasilkan, lalu perkuat validasi dan pemeriksaan round-trip sebelum output dianggap telah diperbaiki.
+2. **Installer/downloader GUI Windows** — sediakan `.exe` yang mudah digunakan pemula untuk memandu proses pengunduhan dan pemasangan option file, dengan pilihan **Fast** dan **Deep** yang jelas.
+3. **Beberapa base tervalidasi** — dukung pembuatan option file yang sesuai dari base terpisah dan tervalidasi untuk **SP Football Life 2026**, **vanilla eFootball PES 2021**, dan **UML** setelah file base tersebut diberikan dan divalidasi.
 
 ## Keamanan dan keterbatasan
 

@@ -1,4 +1,4 @@
-[![English](https://img.shields.io/badge/%F0%9F%87%AC%F0%9F%87%A7_English-012169?style=flat-square)](README.md) [![Bahasa Indonesia](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%A9_Bahasa_Indonesia-ce1126?style=flat-square)](README.id.md) [![Español LATAM](https://img.shields.io/badge/%F0%9F%87%B2%F0%9F%87%BD_Espa%C3%B1ol_LATAM-006847?style=flat-square)](README.es-419.md) [![العربية](https://img.shields.io/badge/%F0%9F%87%AA%F0%9F%87%AC_%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A%D8%A9-ce1126?style=flat-square)](README.ar.md) [![简体中文](https://img.shields.io/badge/%F0%9F%87%A8%F0%9F%87%B3_%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-de2910?style=flat-square)](README.zh-CN.md) [![Italiano](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%B9_Italiano-009246?style=flat-square)](README.it.md) [![Русский](https://img.shields.io/badge/%F0%9F%87%B7%F0%9F%87%BA_%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-d52b1e?style=flat-square)](README.ru.md)
+[![English](https://img.shields.io/badge/%F0%9F%87%AC%F0%9F%87%A7_English-012169?style=flat-square)](README.md) [![Bahasa Indonesia](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%A9_Bahasa_Indonesia-ce1126?style=flat-square)](README.id.md) [![Español LATAM](https://img.shields.io/badge/%F0%9F%87%B2%F0%9F%87%BD_Espa%C3%B1ol_LATAM-006847?style=flat-square)](README.es-419.md) [![Português (Brasil)](https://img.shields.io/badge/%F0%9F%87%A7%F0%9F%87%B7_Portugu%C3%AAs_%28Brasil%29-009c3b?style=flat-square)](README.pt-BR.md) [![العربية](https://img.shields.io/badge/%F0%9F%87%AA%F0%9F%87%AC_%F0%9F%87%B8%F0%9F%87%A6_%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A%D8%A9-ce1126?style=flat-square)](README.ar.md) [![简体中文](https://img.shields.io/badge/%F0%9F%87%A8%F0%9F%87%B3_%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-de2910?style=flat-square)](README.zh-CN.md) [![Italiano](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%B9_Italiano-009246?style=flat-square)](README.it.md) [![Русский](https://img.shields.io/badge/%F0%9F%87%B7%F0%9F%87%BA_%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-d52b1e?style=flat-square)](README.ru.md)
 
 # FL Daily Edit
 
@@ -48,6 +48,14 @@ GitHub Actions 每天都会生成更新后的存档和转会报告。
 - 通过显式 Player Update 命令处理经审核的球员创建和属性修正
 
 更新程序不会覆盖已被队内其他球员使用的球衣号码。在执行转会前，它还会检查球员当前所属俱乐部。
+
+## 路线图 / 进行中的工作
+
+以下项目仍在规划中，尚未实现：
+
+1. **恢复输出完整性** — 调查并修复当前生成的 `EDIT00000000` 损坏问题，然后加强验证和往返检查，确认无误后再将输出视为已修复。
+2. **Windows 图形界面安装器/下载器** — 提供适合新手的 `.exe`，引导用户下载并安装 option file，并明确提供 **Fast** 和 **Deep** 两种选择。
+3. **多个已验证基础文件** — 在相应基础文件提供并通过验证后，支持从独立且经过验证的基础文件为 **SP Football Life 2026**、**vanilla eFootball PES 2021** 和 **UML** 创建匹配的 option file。
 
 ## 安全性与限制
 

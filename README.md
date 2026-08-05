@@ -1,4 +1,4 @@
-[![English](https://img.shields.io/badge/%F0%9F%87%AC%F0%9F%87%A7_English-012169?style=flat-square)](README.md) [![Bahasa Indonesia](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%A9_Bahasa_Indonesia-ce1126?style=flat-square)](README.id.md) [![Español LATAM](https://img.shields.io/badge/%F0%9F%87%B2%F0%9F%87%BD_Espa%C3%B1ol_LATAM-006847?style=flat-square)](README.es-419.md) [![العربية](https://img.shields.io/badge/%F0%9F%87%AA%F0%9F%87%AC_%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A%D8%A9-ce1126?style=flat-square)](README.ar.md) [![简体中文](https://img.shields.io/badge/%F0%9F%87%A8%F0%9F%87%B3_%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-de2910?style=flat-square)](README.zh-CN.md) [![Italiano](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%B9_Italiano-009246?style=flat-square)](README.it.md) [![Русский](https://img.shields.io/badge/%F0%9F%87%B7%F0%9F%87%BA_%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-d52b1e?style=flat-square)](README.ru.md)
+[![English](https://img.shields.io/badge/%F0%9F%87%AC%F0%9F%87%A7_English-012169?style=flat-square)](README.md) [![Bahasa Indonesia](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%A9_Bahasa_Indonesia-ce1126?style=flat-square)](README.id.md) [![Español LATAM](https://img.shields.io/badge/%F0%9F%87%B2%F0%9F%87%BD_Espa%C3%B1ol_LATAM-006847?style=flat-square)](README.es-419.md) [![Português (Brasil)](https://img.shields.io/badge/%F0%9F%87%A7%F0%9F%87%B7_Portugu%C3%AAs_%28Brasil%29-009c3b?style=flat-square)](README.pt-BR.md) [![العربية](https://img.shields.io/badge/%F0%9F%87%AA%F0%9F%87%AC_%F0%9F%87%B8%F0%9F%87%A6_%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A%D8%A9-ce1126?style=flat-square)](README.ar.md) [![简体中文](https://img.shields.io/badge/%F0%9F%87%A8%F0%9F%87%B3_%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-de2910?style=flat-square)](README.zh-CN.md) [![Italiano](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%B9_Italiano-009246?style=flat-square)](README.it.md) [![Русский](https://img.shields.io/badge/%F0%9F%87%B7%F0%9F%87%BA_%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-d52b1e?style=flat-square)](README.ru.md)
 
 # FL Daily Edit
 
@@ -62,6 +62,14 @@ For an on-demand run or a custom club list, fork the repository and use
 
 The updater does not overwrite a shirt number already used by another squad
 member. It also checks the player's current club before applying a move.
+
+## Roadmap / Work in progress
+
+These items are planned and are not implemented yet:
+
+1. **Restore output integrity** — investigate and repair corruption in the currently generated `EDIT00000000`, then strengthen validation and round-trip checks before considering the output fixed.
+2. **Windows GUI installer/downloader** — provide a beginner-friendly `.exe` that guides users through downloading and installing an option file, with explicit **Fast** and **Deep** choices.
+3. **Multiple validated bases** — support creating matching option files from separate validated bases for **SP Football Life 2026**, **vanilla eFootball PES 2021**, and **UML** after those base files are supplied and validated.
 
 ## Safety and limitations
 
