@@ -7,6 +7,9 @@
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+> [!WARNING]
+> **مشكلة معروفة / قيد الإصلاح**: يواجه ملف الحفظ `EDIT00000000` الذي يتم إنشاؤه حالياً خطأ/تلفاً عند تحميله داخل اللعبة (الرجوع إلى الإعدادات الافتراضية). نحن نعمل بنشاط على إصلاح سلامة ملف الحفظ.
+
 يحدّث FL Daily Edit قوائم الفرق في SP Football Life 2026 وeFootball PES 2021 من خلال
 تطبيق الانتقالات الواقعية على ملف حفظ `EDIT00000000`.
 

@@ -5,6 +5,9 @@
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+> [!WARNING]
+> **Известная проблема / В процессе исправления**: Созданный файл сохранения `EDIT00000000` в настоящее время содержит ошибку/поврежден при загрузке в игре (сброс к настройкам по умолчанию). Мы активно работаем над исправлением целостности файла.
+
 FL Daily Edit обновляет составы команд в SP Football Life 2026 и eFootball PES 2021,
 применяя реальные трансферы к файлу сохранения `EDIT00000000`.
 

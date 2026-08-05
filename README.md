@@ -5,6 +5,9 @@
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+> [!WARNING]
+> **Known Issue / Work in Progress**: The generated `EDIT00000000` save file is currently encountering a bug/corruption issue when loaded in-game (falling back to default). We are actively investigating and fixing the save file integrity.
+
 FL Daily Edit updates SP Football Life 2026 and eFootball PES 2021 squads by
 applying real-world transfers to an `EDIT00000000` save file.
 

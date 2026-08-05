@@ -5,6 +5,9 @@
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+> [!WARNING]
+> **Problema noto / In fase di risoluzione**: Il file di salvataggio `EDIT00000000` generato presenta attualmente un bug/corruzione al caricamento nel gioco (ritorno ai dati predefiniti). Stiamo lavorando attivamente per ripristinare la piena integrità del salvataggio.
+
 FL Daily Edit aggiorna le rose di SP Football Life 2026 ed eFootball PES 2021
 applicando i trasferimenti reali a un file di salvataggio `EDIT00000000`.
 

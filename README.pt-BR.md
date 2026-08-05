@@ -5,6 +5,9 @@
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+> [!WARNING]
+> **Problema conhecido / Em correção**: O arquivo de save `EDIT00000000` gerado atualmente apresenta um bug/corrupção ao ser carregado no jogo (revertendo para o padrão). Estamos trabalhando ativamente para corrigir a integridade do arquivo.
+
 O FL Daily Edit atualiza os elencos do SP Football Life 2026 e do eFootball PES 2021 aplicando transferências do mundo real a um arquivo de edição `EDIT00000000`.
 
 ## Compatibilidade

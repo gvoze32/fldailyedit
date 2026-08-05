@@ -5,6 +5,9 @@
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+> [!WARNING]
+> **Masalah yang Diketahui / Sedang Diperbaiki**: File save `EDIT00000000` yang dihasilkan saat ini masih mengalami bug/corrupt saat dibuka di dalam game (fallback ke default). Masalah integritas save file ini sedang dalam proses perbaikan.
+
 FL Daily Edit memperbarui skuad SP Football Life 2026 dan eFootball PES 2021
 dengan menerapkan transfer dunia nyata ke file save `EDIT00000000`.
 

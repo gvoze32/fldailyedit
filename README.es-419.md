@@ -5,6 +5,9 @@
 [![Versión de Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Licencia: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+> [!WARNING]
+> **Problema conocido / En proceso de corrección**: El archivo de guardado `EDIT00000000` generado actualmente presenta un error/corrupción al cargarse en el juego (volviendo a los valores predeterminados). Estamos trabajando activamente en corregir la integridad del archivo.
+
 FL Daily Edit actualiza las plantillas de SP Football Life 2026 y eFootball PES 2021 mediante
 la aplicación de transferencias reales a un archivo guardado `EDIT00000000`.
 

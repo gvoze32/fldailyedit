@@ -5,6 +5,9 @@
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+> [!WARNING]
+> **已知问题 / 正在修复中**：生成的 `EDIT00000000` 存档文件目前在游戏中加载时存在 bug/损坏（导致回退到默认设置）。我们正在全力修复存档完整性问题。
+
 FL Daily Edit 通过将现实世界中的转会应用到 `EDIT00000000` 存档文件，更新 SP Football Life 2026 和 eFootball PES 2021 的阵容。
 
 ## 兼容性
