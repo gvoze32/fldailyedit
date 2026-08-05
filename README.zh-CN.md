@@ -79,31 +79,31 @@ cd ../..
 ## 常用命令
 
 ```bash
-# 预览更改，但不写入存档
+# Preview changes without writing a save
 python run.py run --dry-run --edit-file base/EDIT00000000
 
-# 验证现有存档
+# Validate an existing save
 python run.py validate --edit-file base/EDIT00000000
 
-# 对照原始基础版本，验证每名球员一个文件的更新
+# Validate one-file-per-player updates against the pristine base revision
 python run.py players validate
 
-# 将经审核的 Player Update 显式应用到现有输出存档
+# Apply reviewed Player Updates explicitly to an existing output save
 python run.py players apply \
   --base-revision fl26-u2.2-national-squads \
   --edit-file output/EDIT00000000 \
   --in-place
 
-# 应用截至今天所有已生效且可用的转会
+# Apply all effective transfers available through today
 python run.py run --window auto
 
-# 从随附的基础存档重新构建
+# Rebuild from the bundled base
 python run.py run --from-base --window auto
 
-# 原地更新指定存档
+# Update a specific save in place
 python run.py run --edit-file /path/to/EDIT00000000 --in-place
 
-# 显示 run 的所有选项
+# Show every run option
 python run.py run --help
 ```
 
