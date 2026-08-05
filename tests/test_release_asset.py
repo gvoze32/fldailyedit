@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import stat
 import subprocess
 import sys
@@ -101,6 +102,50 @@ def test_package_record_is_byte_deterministic(tmp_path: Path) -> None:
     )
 
     assert second_archive.read_bytes() == first_bytes
+
+
+def test_package_record_rolls_back_pair_when_second_publish_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    save_path = tmp_path / "EDIT00000000"
+    output_dir = tmp_path / "release"
+    save_path.write_bytes(b"old consistent save")
+    archive_path, record_path = package_record(
+        save_path,
+        output_dir,
+        target_id=TARGET_ID,
+        target_name=TARGET_NAME,
+        channel=Channel.FAST,
+        generated_at=GENERATED_AT,
+    )
+    old_archive = archive_path.read_bytes()
+    old_record = record_path.read_bytes()
+    save_path.write_bytes(b"new save that must not publish alone")
+    real_replace = os.replace
+    replace_calls = 0
+
+    def fail_second_replace(source: str | Path, destination: str | Path) -> None:
+        nonlocal replace_calls
+        replace_calls += 1
+        if replace_calls == 2:
+            raise OSError("simulated record publication failure")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", fail_second_replace)
+
+    with pytest.raises(OSError, match="record publication failure"):
+        package_record(
+            save_path,
+            output_dir,
+            target_id=TARGET_ID,
+            target_name=TARGET_NAME,
+            channel=Channel.FAST,
+            generated_at=datetime(2026, 8, 6, 4, 5, 6, tzinfo=timezone.utc),
+        )
+
+    assert archive_path.read_bytes() == old_archive
+    assert record_path.read_bytes() == old_record
+    assert set(output_dir.iterdir()) == {archive_path, record_path}
 
 
 def test_package_record_clamps_pre_1980_zip_timestamp(tmp_path: Path) -> None:

@@ -3,7 +3,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import shutil
 import sys
+import tempfile
 import zipfile
 from collections.abc import Sequence
 from datetime import datetime, timezone
@@ -45,6 +48,72 @@ def _json_bytes(value: object) -> bytes:
     )
 
 
+def _new_sibling_temp(destination: Path) -> Path:
+    descriptor, raw_path = tempfile.mkstemp(
+        prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent
+    )
+    os.close(descriptor)
+    return Path(raw_path)
+
+
+def _fsync_file(path: Path) -> None:
+    with path.open("r+b") as output:
+        os.fsync(output.fileno())
+
+
+def _write_fsynced(path: Path, payload: bytes) -> None:
+    with path.open("wb") as output:
+        output.write(payload)
+        output.flush()
+        os.fsync(output.fileno())
+
+
+def _backup_file(path: Path) -> Path | None:
+    if not path.exists():
+        return None
+    backup_path = _new_sibling_temp(path)
+    try:
+        with path.open("rb") as source, backup_path.open("wb") as backup:
+            shutil.copyfileobj(source, backup)
+            backup.flush()
+            os.fsync(backup.fileno())
+    except BaseException:
+        backup_path.unlink(missing_ok=True)
+        raise
+    return backup_path
+
+
+def _publish_pair(staged_paths: tuple[tuple[Path, Path], ...]) -> None:
+    backups: list[Path | None] = []
+    try:
+        for _, final_path in staged_paths:
+            backups.append(_backup_file(final_path))
+        for staged_path, final_path in staged_paths:
+            os.replace(staged_path, final_path)
+    except BaseException:
+        rollback_error: BaseException | None = None
+        for (_, final_path), backup_path in reversed(
+            tuple(zip(staged_paths, backups))
+        ):
+            try:
+                if backup_path is None:
+                    final_path.unlink(missing_ok=True)
+                else:
+                    os.replace(backup_path, final_path)
+            except BaseException as error:
+                if rollback_error is None:
+                    rollback_error = error
+        if rollback_error is not None:
+            raise RuntimeError("release asset rollback failed") from rollback_error
+        raise
+    finally:
+        for staged_path, _ in staged_paths:
+            staged_path.unlink(missing_ok=True)
+        for backup_path in backups:
+            if backup_path is not None:
+                backup_path.unlink(missing_ok=True)
+
+
 def package_record(
     save_path: Path,
     output_dir: Path,
@@ -72,50 +141,66 @@ def package_record(
         raise CatalogError("invalid_record", "save must not be empty")
     output_dir.mkdir(parents=True, exist_ok=True)
     archive_path = output_dir / asset_name
-
-    member_time = max(generated_utc, _ZIP_MINIMUM)
-    member = zipfile.ZipInfo(
-        _SAVE_MEMBER_NAME,
-        date_time=(
-            member_time.year,
-            member_time.month,
-            member_time.day,
-            member_time.hour,
-            member_time.minute,
-            member_time.second,
-        ),
-    )
-    member.create_system = 3
-    member.external_attr = 0o100644 << 16
-    member.compress_type = zipfile.ZIP_DEFLATED
-
-    with zipfile.ZipFile(
-        archive_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
-    ) as archive:
-        archive.writestr(member, save_bytes)
-
-    archive_bytes = archive_path.read_bytes()
-    record = {
-        "target_id": target_id,
-        "target_name": target_name,
-        "channel": channel.value,
-        "generated_at": (
-            f"{generated_utc.year:04d}-{generated_utc.month:02d}-"
-            f"{generated_utc.day:02d}T{generated_utc.hour:02d}:"
-            f"{generated_utc.minute:02d}:{generated_utc.second:02d}Z"
-        ),
-        "asset_name": asset_name,
-        "download_url": (
-            f"https://github.com/{REPOSITORY}/releases/download/"
-            f"{RELEASE_TAG}/{asset_name}"
-        ),
-        "archive_size": len(archive_bytes),
-        "archive_sha256": _sha256(archive_bytes),
-        "save_size": len(save_bytes),
-        "save_sha256": _sha256(save_bytes),
-    }
     record_path = output_dir / "record.json"
-    record_path.write_bytes(_json_bytes(record))
+    staged_archive = _new_sibling_temp(archive_path)
+    staged_record = _new_sibling_temp(record_path)
+
+    try:
+        member_time = max(generated_utc, _ZIP_MINIMUM)
+        member = zipfile.ZipInfo(
+            _SAVE_MEMBER_NAME,
+            date_time=(
+                member_time.year,
+                member_time.month,
+                member_time.day,
+                member_time.hour,
+                member_time.minute,
+                member_time.second,
+            ),
+        )
+        member.create_system = 3
+        member.external_attr = 0o100644 << 16
+        member.compress_type = zipfile.ZIP_DEFLATED
+
+        with zipfile.ZipFile(
+            staged_archive,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=9,
+        ) as archive:
+            archive.writestr(member, save_bytes)
+        _fsync_file(staged_archive)
+
+        archive_bytes = staged_archive.read_bytes()
+        record = {
+            "target_id": target_id,
+            "target_name": target_name,
+            "channel": channel.value,
+            "generated_at": (
+                f"{generated_utc.year:04d}-{generated_utc.month:02d}-"
+                f"{generated_utc.day:02d}T{generated_utc.hour:02d}:"
+                f"{generated_utc.minute:02d}:{generated_utc.second:02d}Z"
+            ),
+            "asset_name": asset_name,
+            "download_url": (
+                f"https://github.com/{REPOSITORY}/releases/download/"
+                f"{RELEASE_TAG}/{asset_name}"
+            ),
+            "archive_size": len(archive_bytes),
+            "archive_sha256": _sha256(archive_bytes),
+            "save_size": len(save_bytes),
+            "save_sha256": _sha256(save_bytes),
+        }
+        _write_fsynced(staged_record, _json_bytes(record))
+        _publish_pair(
+            (
+                (staged_archive, archive_path),
+                (staged_record, record_path),
+            )
+        )
+    finally:
+        staged_archive.unlink(missing_ok=True)
+        staged_record.unlink(missing_ok=True)
     return archive_path, record_path
 
 
