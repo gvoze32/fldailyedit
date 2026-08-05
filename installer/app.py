@@ -1459,12 +1459,17 @@ class InstallerApplication:
                     "No compatible updates are available."
                 )
         for channel, button in self._record_buttons.items():
-            button.configure(
-                state=(
-                    "normal"
-                    if channel.value in self._records_by_channel
-                    else "disabled"
+            record = self._records_by_channel.get(channel.value)
+            title = UI_COPY[f"{channel.value}_title"]
+            if record is not None:
+                generated_at = record.generated_at.astimezone(timezone.utc)
+                title = (
+                    f"{title} — Generated "
+                    f"{generated_at:%Y-%m-%d %H:%M} UTC"
                 )
+            button.configure(
+                state="normal" if record is not None else "disabled",
+                text=title,
             )
         self._record_var.set(
             state.selected_record.channel.value

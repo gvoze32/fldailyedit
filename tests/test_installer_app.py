@@ -5,7 +5,7 @@ import json
 import threading
 import zipfile
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
@@ -51,12 +51,13 @@ def _record(
     channel: Channel = Channel.FAST,
     *,
     target_id: str = GameTarget.FL26.value,
+    generated_at: datetime = GENERATED_AT,
 ) -> ReleaseRecord:
     return ReleaseRecord(
         target_id=target_id,
         target_name="Football Life 2026",
         channel=channel,
-        generated_at=GENERATED_AT,
+        generated_at=generated_at,
         asset_name=f"fldailyedit-{channel.value}.zip",
         download_url=f"https://github.com/example/{channel.value}.zip",
         archive_size=100,
@@ -1165,3 +1166,86 @@ def test_worker_downloads_backs_up_and_installs_end_to_end(
         "https://github.com/gvoze32/fldailyedit/releases/download/latest/catalog.json",
         archive_url,
     ]
+
+
+class _UpdateViewVar:
+    def __init__(self) -> None:
+        self.value = ""
+
+    def set(self, value: str) -> None:
+        self.value = value
+
+
+class _UpdateViewButton:
+    def __init__(self) -> None:
+        self.options: dict[str, str] = {}
+
+    def configure(self, **options: str) -> None:
+        self.options.update(options)
+
+
+def _update_view_for(
+    catalog: Catalog,
+) -> tuple[installer_app.InstallerApplication, dict[Channel, _UpdateViewButton]]:
+    controller = InstallerController()
+    controller.set_catalog(catalog)
+    application = object.__new__(installer_app.InstallerApplication)
+    application._catalog_status_var = _UpdateViewVar()
+    application._record_var = _UpdateViewVar()
+    buttons = {
+        Channel.FAST: _UpdateViewButton(),
+        Channel.DEEP: _UpdateViewButton(),
+    }
+    application._record_buttons = buttons
+
+    application._render_update(controller.state)
+
+    return application, buttons
+
+
+def test_update_view_shows_each_release_generation_in_utc_beside_its_channel() -> None:
+    fast = _record(
+        Channel.FAST,
+        generated_at=datetime(2026, 8, 6, 1, 2, tzinfo=timezone.utc),
+    )
+    deep = _record(
+        Channel.DEEP,
+        generated_at=datetime(
+            2026,
+            8,
+            6,
+            4,
+            30,
+            tzinfo=timezone(timedelta(hours=5, minutes=30)),
+        ),
+    )
+
+    application, buttons = _update_view_for(Catalog(1, (fast, deep)))
+
+    assert application._records_by_channel == {
+        Channel.FAST.value: fast,
+        Channel.DEEP.value: deep,
+    }
+    assert buttons[Channel.FAST].options == {
+        "state": "normal",
+        "text": "Fast — Recommended — Generated 2026-08-06 01:02 UTC",
+    }
+    assert buttons[Channel.DEEP].options == {
+        "state": "normal",
+        "text": "Deep — Expanded coverage — Generated 2026-08-05 23:00 UTC",
+    }
+
+
+def test_update_view_keeps_static_choice_copy_when_release_is_unavailable() -> None:
+    fast = _record(Channel.FAST)
+
+    _, buttons = _update_view_for(Catalog(1, (fast,)))
+
+    assert buttons[Channel.FAST].options == {
+        "state": "normal",
+        "text": "Fast — Recommended — Generated 2026-08-06 00:00 UTC",
+    }
+    assert buttons[Channel.DEEP].options == {
+        "state": "disabled",
+        "text": "Deep — Expanded coverage",
+    }
