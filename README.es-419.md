@@ -96,31 +96,31 @@ cd ../..
 ## Comandos comunes
 
 ```bash
-# Previsualizar los cambios sin escribir un archivo guardado
+# Preview changes without writing a save
 python run.py run --dry-run --edit-file base/EDIT00000000
 
-# Validar un archivo guardado existente
+# Validate an existing save
 python run.py validate --edit-file base/EDIT00000000
 
-# Validar las actualizaciones de un archivo por jugador con la revisión base intacta
+# Validate one-file-per-player updates against the pristine base revision
 python run.py players validate
 
-# Aplicar explícitamente las Player Updates revisadas a un archivo guardado de salida existente
+# Apply reviewed Player Updates explicitly to an existing output save
 python run.py players apply \
   --base-revision fl26-u2.2-national-squads \
   --edit-file output/EDIT00000000 \
   --in-place
 
-# Aplicar todas las transferencias vigentes disponibles hasta hoy
+# Apply all effective transfers available through today
 python run.py run --window auto
 
-# Reconstruir a partir de la base incluida
+# Rebuild from the bundled base
 python run.py run --from-base --window auto
 
-# Actualizar un archivo guardado específico en el mismo lugar
+# Update a specific save in place
 python run.py run --edit-file /path/to/EDIT00000000 --in-place
 
-# Mostrar todas las opciones de ejecución
+# Show every run option
 python run.py run --help
 ```
 
