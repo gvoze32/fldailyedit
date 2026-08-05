@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 WIKIPEDIA_API_URL = "https://en.wikipedia.org/w/api.php"
 WIKIPEDIA_HEADERS = {
-    "User-Agent": "fldailyedit/0.1 (PES transfer updater; contact via project repository)",
+    "User-Agent": "FLDailyEdit/0.1 (https://github.com/gvoze32/fldailyedit)",
     "Accept": "application/json",
 }
 

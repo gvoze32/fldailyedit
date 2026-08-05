@@ -51,9 +51,10 @@ Der Updater überschreibt keine Trikotnummer, die bereits von einem anderen Kade
 
 ## Roadmap / In Arbeit
 
-Folgender Punkt ist geplant und noch nicht implementiert:
+Diese Punkte sind geplant und in Arbeit:
 
-1. **Mehrere validierte Basisdateien** — Unterstützung für separate, validierte Basisdateien für **SP Football Life 2026**, **vanilla eFootball PES 2021** und **UML**.
+1. **Lokaler Update-Modus & Multi-Base-Unterstützung im GUI** — Ausführung der Update-Pipeline direkt in der Installer-Benutzeroberfläche auf dem PC des Benutzers zur Aktualisierung eigener Speicherstände für verschiedene Zielversionen (**SP Football Life 2026**, **vanilla eFootball PES 2021** und **UML**).
+2. **Integrierter Pes Retro Stats Konverter & OVR-Rechner** — Vollständige Integration der Attributkonvertierung und positionsgewichteten Gesamtwert-Berechnung in Pipeline und Workflow (das aktuelle Skript in `tools/` dient als vorläufiger Prototyp).
 
 ## Sicherheit und Einschränkungen
 

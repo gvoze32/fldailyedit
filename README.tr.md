@@ -51,9 +51,10 @@ Güncelleyici, başka bir oyuncu tarafından kullanılan forma numarasının üz
 
 ## Yol Haritası / Devam Eden Çalışmalar
 
-Planlanan ancak henüz tamamlanmamış özellik:
+Planlanan ve geliştirilmekte olan özellikler:
 
-1. **Çoklu doğrulanmış temel dosyalar** — **SP Football Life 2026**, **vanilla eFootball PES 2021** ve **UML** için ayrı doğrulanmış temel dosyaları desteklemek.
+1. **Arayüzde Yerel Güncelleme Modu ve Çoklu Temel Dosya Desteği** — güncelleme sürecini doğrudan kullanıcının bilgisayarındaki yükleyici arayüzünden çalıştırarak kullanıcıların kendi kayıt dosyalarını desteklenen sürümler (**SP Football Life 2026**, **vanilla eFootball PES 2021** ve **UML**) arasında güncellemelerini sağlamak.
+2. **Entegre Pes Retro Stats Dönüştürücü ve OVR Hesaplayıcı** — özellik dönüştürme ve mevki ağırlıklı genel yetenek (OVR) hesaplama motorunun iş akışına ve sürece tam entegrasyonu (`tools/` dizinindeki mevcut betik geçici bir prototiptir).
 
 ## Güvenlik ve Sınırlamalar
 

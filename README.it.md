@@ -61,9 +61,10 @@ prima di applicare un trasferimento.
 
 ## Roadmap / Lavori in corso
 
-Questo elemento è pianificato e non è ancora stato implementato:
+Questi elementi sono pianificati e in corso di sviluppo:
 
-1. **Più basi convalidate** — supportare la creazione di option file corrispondenti da basi separate e convalidate per **SP Football Life 2026**, **vanilla eFootball PES 2021** e **UML**, dopo che i relativi file di base saranno stati forniti e convalidati.
+1. **Modalità di aggiornamento locale e supporto multi-base nella GUI** — eseguire la pipeline di aggiornamento direttamente dall'interfaccia grafica dell'installer sul PC dell'utente per aggiornare i propri salvataggi su diverse versioni supportate (**SP Football Life 2026**, **vanilla eFootball PES 2021** e **UML**).
+2. **Convertitore Pes Retro Stats e calcolatore OVR integrato** — integrazione completa del motore di conversione degli attributi e del calcolo dell'overall rating (OVR) ponderato per ruolo nella pipeline e nel flusso di lavoro (lo script attuale in `tools/` è un prototipo iniziale).
 
 ## Sicurezza e limitazioni
 

@@ -51,9 +51,10 @@ L'outil n'écrase pas un numéro de maillot déjà utilisé par un autre membre 
 
 ## Feuille de route / En cours de développement
 
-Cet élément est planifié et n’est pas encore implémenté :
+Ces éléments sont planifiés et en cours de développement :
 
-1. **Multiples bases validées** — prendre en charge la création d'option files à partir de bases distinctes et validées pour **SP Football Life 2026**, **eFootball PES 2021 vanilla** et **UML** une fois ces bases fournies et validées.
+1. **Mode de mise à jour locale et support multi-bases dans l'interface graphique** — exécuter le pipeline de mise à jour directement depuis l'interface de l'installateur sur le PC de l'utilisateur pour mettre à jour ses propres sauvegardes sur différentes versions cibles (**SP Football Life 2026**, **vanilla eFootball PES 2021** et **UML**).
+2. **Convertisseur Pes Retro Stats et calculateur d'OVR intégré** — intégration complète du moteur de conversion d'attributs et de calcul de note globale (OVR) pondérée selon le poste dans le pipeline et le flux de travail (le script actuel dans `tools/` sert de prototype initial).
 
 ## Sécurité et limitations
 

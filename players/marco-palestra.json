@@ -21,45 +21,33 @@
       "https://pesretrostats.com/player/0ce2dbde-marco-palestra"
     ],
     "effective_date": "2026-08-04",
-    "reason": "Refreshed from the reviewed Pes Retro Stats profile after its player data changed"
+    "reason": "Full FL26 attribute correction based on the reviewed Pes Retro Stats profile"
   },
   "pes": {
     "abilities": {
-      "acceleration": {
-        "from": 75,
-        "to": 85
-      },
-      "aggression": {
-        "from": 68,
-        "to": 71
-      },
       "attacking_awareness": {
         "from": 65,
         "to": 72
-      },
-      "balance": {
-        "from": 67,
-        "to": 70
       },
       "ball_control": {
         "from": 70,
         "to": 80
       },
-      "ball_winning": {
-        "from": 59,
-        "to": 69
-      },
-      "curl": {
-        "from": 62,
-        "to": 72
-      },
-      "defensive_awareness": {
-        "from": 61,
-        "to": 65
-      },
       "dribbling": {
         "from": 69,
         "to": 86
+      },
+      "tight_possession": {
+        "from": 63,
+        "to": 81
+      },
+      "low_pass": {
+        "from": 74,
+        "to": 72
+      },
+      "lofted_pass": {
+        "from": 72,
+        "to": 83
       },
       "finishing": {
         "from": 56,
@@ -69,41 +57,53 @@
         "from": 63,
         "to": 70
       },
-      "jump": {
-        "from": 72,
-        "to": 81
-      },
-      "kicking_power": {
-        "from": 70,
-        "to": 79
-      },
-      "lofted_pass": {
-        "from": 72,
-        "to": 83
-      },
-      "low_pass": {
-        "from": 74,
-        "to": 72
-      },
-      "physical_contact": {
-        "from": 66,
-        "to": 77
-      },
       "place_kicking": {
         "from": 60,
         "to": 63
+      },
+      "curl": {
+        "from": 62,
+        "to": 72
       },
       "speed": {
         "from": 77,
         "to": 90
       },
+      "acceleration": {
+        "from": 75,
+        "to": 85
+      },
+      "kicking_power": {
+        "from": 70,
+        "to": 79
+      },
+      "jump": {
+        "from": 72,
+        "to": 81
+      },
+      "physical_contact": {
+        "from": 66,
+        "to": 77
+      },
+      "balance": {
+        "from": 67,
+        "to": 70
+      },
       "stamina": {
         "from": 71,
         "to": 85
       },
-      "tight_possession": {
-        "from": 63,
-        "to": 81
+      "defensive_awareness": {
+        "from": 61,
+        "to": 65
+      },
+      "ball_winning": {
+        "from": 59,
+        "to": 69
+      },
+      "aggression": {
+        "from": 68,
+        "to": 71
       }
     },
     "age": {
@@ -134,6 +134,10 @@
     },
     "player_skills": {
       "cut_behind_and_turn": {
+        "from": 0,
+        "to": 1
+      },
+      "pinpoint_crossing": {
         "from": 0,
         "to": 1
       },
@@ -178,3 +182,4 @@
     }
   }
 }
+

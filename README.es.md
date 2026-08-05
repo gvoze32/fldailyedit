@@ -60,9 +60,10 @@ plantilla. También verifica el club actual del jugador antes de aplicar un movi
 
 ## Hoja de ruta / Trabajo en curso
 
-Este elemento está planificado y todavía no se ha implementado:
+Estos elementos están planificados y en desarrollo:
 
-1. **Múltiples bases validadas** — permitir la creación de option files correspondientes a bases separadas y validadas para **SP Football Life 2026**, **vanilla eFootball PES 2021** y **UML**, una vez que esos archivos base se proporcionen y validen.
+1. **Modo de actualización local y soporte multi-base en la GUI** — ejecutar el pipeline de actualización directamente desde la interfaz gráfica del instalador en el PC del usuario, permitiendo actualizar partidas guardadas propias para varias versiones (**SP Football Life 2026**, **vanilla eFootball PES 2021** y **UML**).
+2. **Conversor de Pes Retro Stats y calculador de OVR integrado** — integración completa del motor de conversión de atributos y cálculo de valoración general (OVR) ponderada por posición en el pipeline y flujo de trabajo (el script en `tools/` es actualmente un prototipo inicial).
 
 ## Seguridad y limitaciones
 

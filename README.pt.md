@@ -51,9 +51,10 @@ O atualizador não substitui um número de camisa que já esteja sendo usado por
 
 ## Roteiro / Trabalho em andamento
 
-Este item está planejado e ainda não foi implementado:
+Estes itens estão planejados e em desenvolvimento:
 
-1. **Múltiplas bases validadas** — permitir a criação de option files correspondentes a bases validadas separadamente para **SP Football Life 2026**, **vanilla eFootball PES 2021** e **UML**, depois que esses arquivos-base forem fornecidos e validados.
+1. **Modo de Atualização Local e Suporte Multi-Base na GUI** — executar o pipeline de atualização diretamente pela interface do instalador no PC do usuário para atualizar os próprios arquivos de salvamento em várias versões suportadas (**SP Football Life 2026**, **vanilla eFootball PES 2021** e **UML**).
+2. **Conversor Pes Retro Stats e Calculadora de OVR Integrada** — integração completa do mecanismo de conversão de atributos e cálculo de overall rating (OVR) ponderado por posição no pipeline e fluxo de trabalho (o script atual em `tools/` funciona como um protótipo inicial).
 
 ## Segurança e limitações
 
