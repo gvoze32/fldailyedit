@@ -17,6 +17,7 @@ from installer.catalog import (
     fetch_catalog as default_fetch_catalog,
 )
 from installer.install import (
+    InstallError,
     InstallResult,
     InstallStage,
     install_archive as default_install_archive,
@@ -393,11 +394,13 @@ class InstallerWorker:
             if self._install_pending:
                 raise RuntimeError("an installation is already pending")
             self._install_pending = True
+            self._commit_started = False
             self._cancel_requested.clear()
         self._commands.put(_Install(record, location))
 
     def cancel(self) -> None:
-        self._cancel_requested.set()
+        with self._state_lock:
+            self._cancel_requested.set()
 
     def close(self, timeout: float | None = 2.0) -> None:
         with self._state_lock:
@@ -413,7 +416,11 @@ class InstallerWorker:
         thread.join(timeout)
 
     def _cancelled(self) -> bool:
-        return self._cancel_requested.is_set() and not self._commit_started
+        with self._state_lock:
+            return (
+                self._cancel_requested.is_set()
+                and not self._commit_started
+            )
 
     def _emit_download_progress(self, downloaded: int, total: int) -> None:
         self.events.put(
@@ -427,12 +434,23 @@ class InstallerWorker:
 
     def _emit_install_progress(self, stage: InstallStage) -> None:
         stage_value = stage.value if isinstance(stage, InstallStage) else str(stage)
-        if stage_value == InstallStage.REPLACING.value:
-            self._commit_started = True
+        with self._state_lock:
+            if (
+                stage_value == InstallStage.REPLACING.value
+                and not self._commit_started
+            ):
+                if self._cancel_requested.is_set():
+                    raise InstallError(
+                        "cancelled",
+                        "Installation was cancelled",
+                        stage=InstallStage.REPLACING,
+                    )
+                self._commit_started = True
+            commit_started = self._commit_started
         self.events.put(
             ProgressChanged(
                 stage=stage_value,
-                commit_started=self._commit_started,
+                commit_started=commit_started,
             )
         )
 
@@ -441,7 +459,6 @@ class InstallerWorker:
         record: ReleaseRecord,
         location: SaveLocation,
     ) -> InstallResult:
-        self._commit_started = False
         with TemporaryDirectory(prefix="fldailyedit-installer-") as temporary:
             archive_path = Path(temporary) / "download.zip"
             self._download_archive(
@@ -479,9 +496,9 @@ class InstallerWorker:
             try:
                 result = self._perform_install(command.record, command.location)
             except Exception as error:
-                self.events.put(WorkerFailed(error))
+                terminal_event: InstallCompleted | WorkerFailed = WorkerFailed(error)
             else:
-                self.events.put(InstallCompleted(result))
-            finally:
-                with self._state_lock:
-                    self._install_pending = False
+                terminal_event = InstallCompleted(result)
+            with self._state_lock:
+                self._install_pending = False
+            self.events.put(terminal_event)

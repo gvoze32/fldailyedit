@@ -525,3 +525,148 @@ def test_commit_boundary_is_propagated_and_cancellation_is_ignored_after_it(
         assert cancellation_values == [False, False]
     finally:
         worker.close()
+
+
+def test_cancellation_wins_if_requested_before_replacing_handoff(
+    tmp_path: Path,
+) -> None:
+    before_replacing = Event()
+    continue_to_replacing = Event()
+    replacement_started = Event()
+    save_directory = tmp_path / "save"
+    save_directory.mkdir()
+    record = _record()
+    location = SaveLocation(GameTarget.FL26, "Football Life 2026", save_directory)
+    result = InstallResult(save_directory / "EDIT00000000", None, "b" * 64)
+
+    def fake_download(
+        _record: ReleaseRecord,
+        destination: Path,
+        *,
+        progress: object,
+        cancelled: object,
+    ) -> None:
+        destination.write_bytes(b"archive")
+
+    def install_with_precommit_window(
+        _archive_path: Path,
+        _destination: Path,
+        _record: ReleaseRecord,
+        *,
+        now: object,
+        progress: object,
+        cancelled: object,
+    ) -> InstallResult:
+        assert callable(progress)
+        assert callable(cancelled)
+        assert cancelled() is False
+        before_replacing.set()
+        assert continue_to_replacing.wait(2.0)
+        progress(InstallStage.REPLACING)
+        replacement_started.set()
+        return result
+
+    worker = InstallerWorker(
+        download_archive=fake_download,
+        install_archive=install_with_precommit_window,
+    )
+    observed: list[ProgressChanged | InstallCompleted | WorkerFailed] = []
+    try:
+        worker.install(record, location)
+        assert before_replacing.wait(2.0)
+        worker.cancel()
+        continue_to_replacing.set()
+        deadline = monotonic() + 2.0
+        while monotonic() < deadline:
+            event = worker.events.get(timeout=deadline - monotonic())
+            observed.append(event)
+            if isinstance(event, (InstallCompleted, WorkerFailed)):
+                break
+        else:
+            raise AssertionError("worker did not emit a terminal event")
+
+        assert isinstance(observed[-1], WorkerFailed)
+        assert isinstance(observed[-1].error, InstallError)
+        assert observed[-1].error.code == "cancelled"
+        assert observed[-1].error.stage is InstallStage.REPLACING
+        assert replacement_started.is_set() is False
+        assert not any(
+            isinstance(event, ProgressChanged)
+            and event.stage == InstallStage.REPLACING.value
+            for event in observed
+        )
+    finally:
+        continue_to_replacing.set()
+        worker.close()
+
+
+def test_terminal_event_is_published_after_pending_state_is_cleared(
+    tmp_path: Path,
+) -> None:
+    class TerminalGateQueue:
+        def __init__(self) -> None:
+            self._events: SimpleQueue[
+                CatalogLoaded | InstallCompleted | ProgressChanged | WorkerFailed
+            ] = SimpleQueue()
+            self.terminal_published = Event()
+            self.release_publisher = Event()
+
+        def put(
+            self,
+            event: CatalogLoaded | InstallCompleted | ProgressChanged | WorkerFailed,
+        ) -> None:
+            self._events.put(event)
+            if isinstance(event, (InstallCompleted, WorkerFailed)):
+                self.terminal_published.set()
+                assert self.release_publisher.wait(2.0)
+
+        def get(
+            self,
+            block: bool = True,
+            timeout: float | None = None,
+        ) -> CatalogLoaded | InstallCompleted | ProgressChanged | WorkerFailed:
+            return self._events.get(block=block, timeout=timeout)
+
+    save_directory = tmp_path / "save"
+    save_directory.mkdir()
+    record = _record()
+    location = SaveLocation(GameTarget.FL26, "Football Life 2026", save_directory)
+    result = InstallResult(save_directory / "EDIT00000000", None, "b" * 64)
+
+    def fake_download(
+        _record: ReleaseRecord,
+        destination: Path,
+        *,
+        progress: object,
+        cancelled: object,
+    ) -> None:
+        destination.write_bytes(b"archive")
+
+    def fake_install(
+        _archive_path: Path,
+        _destination: Path,
+        _record: ReleaseRecord,
+        **_kwargs: object,
+    ) -> InstallResult:
+        return result
+
+    worker = InstallerWorker(
+        download_archive=fake_download,
+        install_archive=fake_install,
+    )
+    gate = TerminalGateQueue()
+    worker.events = gate  # type: ignore[assignment]
+    try:
+        worker.install(record, location)
+        first = gate.get(timeout=2.0)
+        assert first == InstallCompleted(result)
+        assert gate.terminal_published.wait(2.0)
+
+        worker.install(record, location)
+        gate.release_publisher.set()
+        second = gate.get(timeout=2.0)
+
+        assert second == InstallCompleted(result)
+    finally:
+        gate.release_publisher.set()
+        worker.close()
