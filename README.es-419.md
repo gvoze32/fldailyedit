@@ -1,0 +1,263 @@
+[![English](https://img.shields.io/badge/%F0%9F%87%AC%F0%9F%87%A7_English-012169?style=flat-square)](README.md) [![Bahasa Indonesia](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%A9_Bahasa_Indonesia-ce1126?style=flat-square)](README.id.md) [![Español LATAM](https://img.shields.io/badge/%F0%9F%87%B2%F0%9F%87%BD_Espa%C3%B1ol_LATAM-006847?style=flat-square)](README.es-419.md) [![العربية](https://img.shields.io/badge/%F0%9F%87%AA%F0%9F%87%AC_%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A%D8%A9-ce1126?style=flat-square)](README.ar.md) [![简体中文](https://img.shields.io/badge/%F0%9F%87%A8%F0%9F%87%B3_%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-de2910?style=flat-square)](README.zh-CN.md) [![Italiano](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%B9_Italiano-009246?style=flat-square)](README.it.md) [![Русский](https://img.shields.io/badge/%F0%9F%87%B7%F0%9F%87%BA_%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-d52b1e?style=flat-square)](README.ru.md)
+
+# FL Daily Edit
+
+[![Versión de Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![Licencia: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+FL Daily Edit actualiza las plantillas de SP Football Life 2026 y eFootball PES 2021 mediante
+la aplicación de transferencias reales a un archivo guardado `EDIT00000000`.
+
+## Compatibilidad
+
+La base incluida está destinada a **SP Football Life 2026**. Requiere:
+
+- Football Life 26 Update 2.2
+- SmokePatch's National Squads Update
+
+No es compatible con UML, versiones anteriores de FL26 ni instalaciones sin
+la actualización de selecciones nacionales. Se debe iniciar una nueva carrera de Liga Máster o Ser una Leyenda
+después de instalar el archivo guardado.
+
+La [base incluida](base/EDIT00000000) es
+[Gondowan's Mid-Summer EDIT](https://www.reddit.com/r/SPFootballLife/comments/1v7z782/release_gondowans_midsummer_edit_file_more_than/),
+con fecha del 27 de julio de 2026. Incluye más de 500 transferencias, valoraciones,
+posiciones y dorsales actualizados, regresos de préstamos, directores técnicos, alineaciones y cambios por ascensos
+o descensos. No crea jugadores ni agrega clubes ascendidos desde terceras
+divisiones.
+
+## Descargar el archivo guardado más reciente
+
+GitHub Actions genera cada día un archivo guardado actualizado e informes de transferencias.
+
+> [!NOTE]
+> GitHub requiere iniciar sesión antes de descargar los artefactos del flujo de trabajo.
+
+1. Abrir la ejecución exitosa más reciente de
+   [Deep Sync](https://github.com/gvoze32/fldailyedit/actions/workflows/sync-deep.yml)
+   o [Fast Sync](https://github.com/gvoze32/fldailyedit/actions/workflows/sync-fast.yml).
+2. Descargar `updated-fl-save-and-reports.zip` desde la sección **Artifacts**.
+3. Extraer `EDIT00000000`.
+4. Crear una copia de seguridad del archivo guardado actual y luego copiar el archivo extraído en el
+   directorio correspondiente:
+
+| Juego | Directorio de archivos guardados en Windows |
+|---|---|
+| SP Football Life 2026 | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\` |
+| eFootball PES 2021 | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\<user_id>\save\` |
+
+Para ejecutar el proceso cuando se necesite o usar una lista personalizada de clubes, se debe bifurcar el repositorio y usar
+**Run workflow** en la pestaña Actions.
+
+## Qué actualiza
+
+- Transferencias, liberaciones, préstamos y regresos de préstamos
+- Dorsales disponibles a partir de los datos de plantillas de FotMob
+- Identidades de jugadores verificadas con la plantilla actual de FL26
+- Alineaciones y planes de juego afectados por cambios en las plantillas
+- Informes de transferencias y registros de auditoría JSON Lines
+- Archivos guardados precompilados a diario mediante GitHub Actions
+- Creaciones de jugadores y correcciones de atributos revisadas mediante comandos explícitos de Player Update
+
+El actualizador no sobrescribe un dorsal que ya use otro integrante de la
+plantilla. También verifica el club actual del jugador antes de aplicar un movimiento.
+
+## Seguridad y limitaciones
+
+- Las ejecuciones locales crean copias de seguridad rotativas y usan cifrado atómico verificado.
+- Los archivos guardados se validan antes y después de los cambios en las plantillas.
+- Un bloqueo de proceso evita que dos ejecuciones escriban al mismo tiempo en la misma salida.
+- Las instantáneas incompletas de FotMob interrumpen la ejecución en lugar de producir un archivo guardado parcial.
+- Se omiten las coincidencias ambiguas de jugadores, las discrepancias del club de origen y las plantillas de destino
+  completas.
+- Wikipedia, Sortitoutsi y Transfermarkt son fuentes complementarias. Una interrupción en una
+  de estas fuentes no invalida una instantánea completa de FotMob.
+- `--allow-overflow-release` falla de forma segura porque el catálogo incluido no
+  contiene datos completos de posición y OVR para todos los jugadores.
+
+## Ejecución local
+
+La configuración local es compatible con macOS, Linux y Windows mediante WSL. Se requiere Python 3.10
+o una versión posterior.
+
+```bash
+git clone https://github.com/gvoze32/fldailyedit.git
+cd fldailyedit
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+
+cd vendor/pesXdecrypter
+make
+cd ../..
+```
+
+## Comandos comunes
+
+```bash
+# Previsualizar los cambios sin escribir un archivo guardado
+python run.py run --dry-run --edit-file base/EDIT00000000
+
+# Validar un archivo guardado existente
+python run.py validate --edit-file base/EDIT00000000
+
+# Validar las actualizaciones de un archivo por jugador con la revisión base intacta
+python run.py players validate
+
+# Aplicar explícitamente las Player Updates revisadas a un archivo guardado de salida existente
+python run.py players apply \
+  --base-revision fl26-u2.2-national-squads \
+  --edit-file output/EDIT00000000 \
+  --in-place
+
+# Aplicar todas las transferencias vigentes disponibles hasta hoy
+python run.py run --window auto
+
+# Reconstruir a partir de la base incluida
+python run.py run --from-base --window auto
+
+# Actualizar un archivo guardado específico en el mismo lugar
+python run.py run --edit-file /path/to/EDIT00000000 --in-place
+
+# Mostrar todas las opciones de ejecución
+python run.py run --help
+```
+
+| Comando | Propósito |
+|---|---|
+| `run` | Aplicar únicamente transferencias verificadas |
+| `players validate` | Validar todas las Player Updates con la base intacta |
+| `players apply` | Aplicar explícitamente las Player Updates revisadas a un archivo guardado |
+| `log` | Mostrar las transferencias aplicadas recientemente |
+| `inspect` | Inspeccionar equipos, cantidades de jugadores y desplazamientos del archivo guardado |
+| `validate` | Verificar las inscripciones en las plantillas y las asignaciones de los planes de juego |
+| `repair` | Reparar una base heredada mediante archivos guardados de referencia |
+
+
+`run` solo gestiona transferencias: nunca carga ni aplica Player Updates. Para combinar
+ambos flujos de trabajo, primero se debe ejecutar el comando de transferencias sobre un archivo guardado de salida y luego ejecutar
+`players apply --in-place` sobre ese mismo archivo guardado.
+
+## Actualizaciones de jugadores
+
+Cada Player Update revisada es un archivo JSON completo con la versión 2 del esquema por
+jugador en `players/`. Registra una `operation` (`create` o `update`), un
+ciclo de vida (`active`, `upstreamed` o `retired`), las revisiones base exactas en `applies_to`,
+la identidad estable del jugador y la procedencia del UUID/perfil de Pes Retro Stats,
+evidencia citada y datos de PES revisados. Las actualizaciones de creación contienen una propuesta de
+registro completo del jugador y datos de la plantilla de destino. Las actualizaciones de jugadores existentes
+contienen únicamente valores compatibles que difieren de la base verificada; cada cambio
+registra valores literales `from` y `to`.
+Los grupos de actualización compatibles son habilidades, dominio de posiciones, estilo de juego,
+habilidades del jugador, estilos COM, nacionalidad, configuración física/básica y
+posición registrada.
+
+### Flujo sencillo mediante un issue
+
+1. Abrir el [formulario de issue para actualizar jugadores](.github/ISSUE_TEMPLATE/player-update.yml).
+   Ingresar el `Player name` exactamente como aparece en un `Pes Retro Stats
+   profile` canónico, proporcionar las URL de prueba y esperar a que un responsable del mantenimiento aplique la
+   etiqueta exacta `generate-player-draft`.
+2. El flujo de trabajo configurado del generador obtiene ese perfil y abre un PR en borrador
+   que contiene una propuesta `players/<player-slug>.json` con la versión 2 del esquema. A partir del perfil,
+   deriva la instantánea de origen, la identidad, la configuración física, los datos de posición,
+   las habilidades, el estilo de juego, las habilidades del jugador y los estilos COM.
+3. Para una creación, solo los valores locales del juego que no están disponibles en la fuente permanecen
+   enumerados en `draft.missing`: los ID de PES y los nombres para mostrar de la identidad y el
+   jugador, el ID y el nombre del equipo, el ID de nacionalidad, el color de piel y el color de iris. Un
+   colaborador o responsable del mantenimiento debe proporcionarlos. Para una actualización, el generador
+   encuentra al jugador en la base verificada y emite únicamente diferencias reales `from`/`to`.
+   Una posición de origen no compatible con PES 2021, como `RWB`, se
+   omite en lugar de reasignarse, incluso en el cambio de posición registrada.
+4. Un colaborador y un responsable del mantenimiento revisan cada valor generado como una propuesta
+   no aprobada. La integración continua acepta una Player Update únicamente cuando el PR agrega o modifica
+   exactamente una ruta JSON canónica de jugador y el validador semántico compartido
+   finaliza correctamente.
+5. La fusión del PR sigue siendo el estado de aprobación humana. No existe una marca
+   `approved` separada en el archivo JSON.
+
+Se espera que toda propuesta generada falle la validación de archivos completos. Para
+convertir su evidencia generada al esquema v2 completo, se deben eliminar los campos exclusivos del borrador
+`evidence.current_team`, `evidence.issue_number` y `evidence.issue_url`;
+conservar `evidence.profile_url`, `evidence.proof_urls` revisadas y
+`evidence.effective_date` canónicos; y agregar un valor `evidence.reason` revisado
+y no vacío. Se debe conservar el UUID canónico del perfil como
+`identity.pes_retro_stats_id` y únicamente los valores de jugabilidad revisados en `pes`.
+Para una creación, también se deben completar todos los campos locales del juego indicados por `draft.missing`.
+Luego se deben eliminar los objetos de nivel superior `source` y `draft`, que son metadatos de borrador generado
+exclusivos de la revisión, antes de la validación de archivos completos.
+
+### Flujo directo mediante un PR de un solo archivo
+
+Un colaborador con experiencia puede omitir el borrador generado a partir de un issue y abrir directamente un
+PR que agregue o modifique exactamente un archivo completo
+`players/<player-slug>.json`. Se debe proporcionar la procedencia canónica del UUID/perfil
+en `identity` y `evidence`, pruebas citadas, valores de PES revisados, bases de referencia esperadas para la actualización,
+el ciclo de vida y la revisión base exacta; luego se debe ejecutar
+`python run.py players validate` antes de solicitar una revisión. No se deben incluir los
+metadatos de nivel superior `source` o `draft` del borrador generado. No se deben incluir otros cambios de código o
+documentación en ese PR.
+
+La aplicación siempre se realiza mediante un comando explícito y requiere la revisión exacta de
+`data/base_manifest.json`; una discrepancia de revisión provoca un fallo antes de descifrar el
+archivo guardado de destino.
+
+### Ciclo de vida de las revisiones
+
+Cuando cambia la base oficial, se deben actualizar juntos `base/EDIT00000000` y
+`data/base_manifest.json`. Las Player Updates históricas deben conservarse en
+`players/`; no se deben eliminar solo porque cambió la revisión. Una Player Update activa
+cuya lista `applies_to` no contiene la nueva revisión queda inactiva: la validación informa
+`needs_review` y la aplicación la omite. Después de revisarla, se debe agregar la nueva revisión únicamente cuando la
+Player Update todavía corresponda, marcarla como `upstreamed` cuando la base oficial incluya su cambio
+o marcarla como `retired` cuando ya no corresponda.
+
+Opciones comunes de `run`:
+
+| Opción | Propósito |
+|---|---|
+| `--deep` | Obtener todos los clubes de FotMob indexados localmente |
+| `--club "Chelsea,Arsenal"` | Limitar la ejecución a los clubes seleccionados |
+| `--window auto` | Reproducir todas las transferencias con fecha disponibles hasta hoy |
+| `--window summer` | Usar el intervalo más reciente del 1 de junio al 30 de septiembre |
+| `--window winter` | Usar el intervalo de enero a febrero del año seleccionado |
+| `--since YYYY-MM-DD` | Establecer manualmente la fecha límite inferior |
+| `--dry-run` | Planificar los cambios sin escribir un archivo guardado |
+| `--from-base` | Comenzar desde `base/EDIT00000000` |
+| `--fotmob-only` | Ejecutar sin fuentes de transferencias complementarias |
+
+Sin `--from-base`, una ejecución normal continúa desde la última salida verificada.
+Esto evita que las transferencias desaparezcan cuando una ejecución programada posterior vuelve a leer el
+historial acumulado.
+
+## Fuentes de transferencias
+
+FotMob proporciona el historial principal de transferencias y los metadatos de las plantillas. Las listas de temporada de
+Wikipedia, los envíos de transferencias habilitados de SortitoutSI y los registros verificados con fecha de
+Transfermarkt complementan o confirman las rutas de transferencia. Los perfiles de Pes Retro Stats
+proporcionan propuestas derivadas de la fuente y no aprobadas para los borradores de Player Update.
+
+Los registros de distintas fuentes se concilian sin descartar sus fechas,
+ID, citas ni enlaces de prueba. Los eventos sin fecha, con vigencia futura, contradictorios o
+ambiguos no pueden actualizar el archivo guardado por sí solos.
+
+La búsqueda de coincidencias de jugadores comienza con la plantilla de origen y usa la plantilla de destino
+como alternativa idempotente. La posición, la nacionalidad y la edad se tienen en cuenta únicamente
+cuando esa información está disponible.
+
+## Desarrollo
+
+Ejecutar el conjunto de pruebas con:
+
+```bash
+pytest -v
+```
+
+El conjunto abarca el análisis y la validación de archivos guardados, la conciliación de transferencias, la planificación de
+plantillas, el historial de préstamos, la búsqueda de coincidencias de jugadores, los límites de las plantillas, los informes, las copias de seguridad y
+el bloqueo de procesos.
+
+## Licencia
+
+FL Daily Edit está disponible bajo la [Licencia MIT](LICENSE).
