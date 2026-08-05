@@ -18,22 +18,22 @@ Elle n'est pas compatible avec UML, les versions antérieures de FL26 ou les ins
 
 La [base incluse](base/EDIT00000000) est le [Gondowan's Mid-Summer EDIT](https://www.reddit.com/r/SPFootballLife/comments/1v7z782/release_gondowans_midsummer_edit_file_more_than/), daté du 27 juillet 2026. Elle comprend plus de 500 transferts, des notes, postes et numéros de maillot mis à jour, des retours de prêt, des entraîneurs, des compositions et les changements de promotion ou relégation. Elle ne crée pas de joueurs et n'ajoute pas de clubs promus de troisième division.
 
-## Télécharger la dernière sauvegarde
+## Programme d’installation Windows
 
-GitHub Actions génère quotidiennement une sauvegarde mise à jour et des rapports de transferts.
+Le programme d’installation Windows est l’option recommandée aux débutants. L’interface du programme d’installation est actuellement disponible uniquement en anglais. Les téléchargements validés actuels ciblent **uniquement Football Life 2026 Update 2.2 + SmokePatch's National Squads Update**. La détection d’eFootball PES 2021 vanilla est disponible, mais l’installation reste désactivée jusqu’à la publication d’une base validée correspondante.
 
-> [!NOTE]
-> GitHub requiert une connexion à votre compte avant de pouvoir télécharger les artefacts de workflow.
+1. Téléchargez [FLDailyEditInstaller.exe](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.exe).
+2. Fermez le jeu.
+3. Choisissez **Fast** ou **Deep**. Ce sont deux choix distincts de couverture des mises à jour, chacun affichant son heure de génération.
+4. Confirmez le dossier Football Life 2026 détecté ou utilisez **Browse** si nécessaire.
+5. Sélectionnez **Download and install**. Le programme vérifie le téléchargement, sauvegarde le fichier actuel et le remplace de manière atomique.
 
-1. Ouvrez la dernière exécution réussie de [Deep Sync](https://github.com/gvoze32/fldailyedit/actions/workflows/sync-deep.yml) ou [Fast Sync](https://github.com/gvoze32/fldailyedit/actions/workflows/sync-fast.yml).
-2. Téléchargez `updated-fl-save-and-reports.zip` depuis la section **Artifacts**.
-3. Extrayez `EDIT00000000`.
-4. Sauvegardez votre fichier actuel, puis copiez le fichier extrait dans le répertoire correspondant :
+> [!WARNING]
+> L’exécutable initial n’est pas signé, Windows SmartScreen peut donc afficher un avertissement. Avant de continuer, comparez le fichier téléchargé avec le `FLDailyEditInstaller.exe.sha256` publié dans la [dernière version](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
 
-| Jeu | Répertoire de sauvegarde sous Windows |
-|---|---|
-| SP Football Life 2026 | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\` |
-| eFootball PES 2021 | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\<user_id>\save\` |
+Pour une installation manuelle sans le programme, téléchargez le [ZIP public Fast](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) ou le [ZIP public Deep](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip). Extrayez `EDIT00000000`, sauvegardez votre fichier actuel, puis copiez le fichier extrait vers :
+
+`Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\`
 
 Pour une exécution à la demande ou une liste de clubs personnalisée, forkez le dépôt et utilisez **Run workflow** depuis l'onglet Actions.
 
@@ -51,10 +51,9 @@ L'outil n'écrase pas un numéro de maillot déjà utilisé par un autre membre 
 
 ## Feuille de route / En cours de développement
 
-Ces éléments sont planifiés et ne sont pas encore implémentés :
+Cet élément est planifié et n’est pas encore implémenté :
 
-1. **Installateur / Téléchargeur GUI Windows** — proposer un `.exe` facile d'accès qui guide les utilisateurs dans le téléchargement et l'installation d'un option file, avec des options **Fast** et **Deep**.
-2. **Multiples bases validées** — prendre en charge la création d'option files à partir de bases distinctes et validées pour **SP Football Life 2026**, **eFootball PES 2021 vanilla** et **UML** une fois ces bases fournies et validées.
+1. **Multiples bases validées** — prendre en charge la création d'option files à partir de bases distinctes et validées pour **SP Football Life 2026**, **eFootball PES 2021 vanilla** et **UML** une fois ces bases fournies et validées.
 
 ## Sécurité et limitations
 

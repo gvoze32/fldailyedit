@@ -20,6 +20,109 @@ INSTALLER_SPEC_PATH = Path("FLDailyEditInstaller.spec")
 PYPROJECT_PATH = Path("pyproject.toml")
 README_PATH = Path("README.md")
 
+INSTALLER_URL = (
+    "https://github.com/gvoze32/fldailyedit/releases/download/latest/"
+    "FLDailyEditInstaller.exe"
+)
+FAST_ZIP_URL = (
+    "https://github.com/gvoze32/fldailyedit/releases/download/latest/"
+    "fldailyedit-fl2026-fast.zip"
+)
+DEEP_ZIP_URL = (
+    "https://github.com/gvoze32/fldailyedit/releases/download/latest/"
+    "fldailyedit-fl2026-deep.zip"
+)
+README_INSTALLER_CONTRACTS = (
+    (
+        Path("README.md"),
+        "## Windows installer",
+        "## Roadmap / Work in progress",
+        "The installer interface is currently available in English only.",
+        "The initial executable is unsigned, so Windows SmartScreen may display a warning.",
+        "Detection for vanilla eFootball PES 2021 is present, but installation remains disabled until a matching validated base is published.",
+    ),
+    (
+        Path("README.id.md"),
+        "## Installer Windows",
+        "## Roadmap / Sedang dikerjakan",
+        "Antarmuka installer saat ini hanya tersedia dalam bahasa Inggris.",
+        "Executable awal belum ditandatangani, sehingga Windows SmartScreen mungkin menampilkan peringatan.",
+        "Deteksi untuk vanilla eFootball PES 2021 sudah tersedia, tetapi pemasangan tetap dinonaktifkan hingga base tervalidasi yang sesuai diterbitkan.",
+    ),
+    (
+        Path("README.zh.md"),
+        "## Windows 安装程序",
+        "## 路线图 / 进行中的工作",
+        "安装程序界面目前仅提供英语版本。",
+        "初始可执行文件尚未签名，因此 Windows SmartScreen 可能会显示警告。",
+        "程序可以检测原版 eFootball PES 2021，但在发布匹配且经过验证的基础存档前，安装功能将保持禁用。",
+    ),
+    (
+        Path("README.ar.md"),
+        "## مُثبِّت Windows",
+        "## خارطة الطريق / قيد التطوير",
+        "تتوفر واجهة المُثبِّت حاليًا باللغة الإنجليزية فقط.",
+        "الملف التنفيذي الأولي غير موقّع، لذلك قد يعرض Windows SmartScreen تحذيرًا.",
+        "يتوفر اكتشاف vanilla eFootball PES 2021، لكن يظل التثبيت معطّلًا حتى نشر قاعدة أساسية متحقّق منها ومطابقة.",
+    ),
+    (
+        Path("README.ru.md"),
+        "## Установщик Windows",
+        "## План развития / В работе",
+        "Интерфейс установщика пока доступен только на английском языке.",
+        "Первоначальный исполняемый файл не подписан, поэтому Windows SmartScreen может показать предупреждение.",
+        "Обнаружение vanilla eFootball PES 2021 поддерживается, но установка остаётся отключённой до публикации подходящей проверенной базы.",
+    ),
+    (
+        Path("README.it.md"),
+        "## Programma di installazione per Windows",
+        "## Roadmap / Lavori in corso",
+        "L'interfaccia del programma di installazione è attualmente disponibile solo in inglese.",
+        "L'eseguibile iniziale non è firmato, quindi Windows SmartScreen potrebbe mostrare un avviso.",
+        "Il rilevamento di eFootball PES 2021 vanilla è disponibile, ma l'installazione rimane disabilitata finché non viene pubblicata una base convalidata corrispondente.",
+    ),
+    (
+        Path("README.pt.md"),
+        "## Instalador para Windows",
+        "## Roteiro / Trabalho em andamento",
+        "A interface do instalador está disponível somente em inglês no momento.",
+        "O executável inicial não é assinado, portanto o Windows SmartScreen pode exibir um aviso.",
+        "A detecção do eFootball PES 2021 vanilla está presente, mas a instalação permanece desativada até que uma base validada correspondente seja publicada.",
+    ),
+    (
+        Path("README.es.md"),
+        "## Instalador para Windows",
+        "## Hoja de ruta / Trabajo en curso",
+        "La interfaz del instalador actualmente solo está disponible en inglés.",
+        "El ejecutable inicial no está firmado, por lo que Windows SmartScreen puede mostrar una advertencia.",
+        "La detección de eFootball PES 2021 vanilla está disponible, pero la instalación permanece desactivada hasta que se publique una base validada correspondiente.",
+    ),
+    (
+        Path("README.tr.md"),
+        "## Windows yükleyici",
+        "## Yol Haritası / Devam Eden Çalışmalar",
+        "Yükleyici arayüzü şu anda yalnızca İngilizce olarak sunulmaktadır.",
+        "İlk yürütülebilir dosya imzasızdır; bu nedenle Windows SmartScreen bir uyarı gösterebilir.",
+        "Vanilla eFootball PES 2021 algılanabilir, ancak eşleşen doğrulanmış bir temel yayımlanana kadar kurulum devre dışı kalır.",
+    ),
+    (
+        Path("README.de.md"),
+        "## Windows-Installationsprogramm",
+        "## Roadmap / In Arbeit",
+        "Die Benutzeroberfläche des Installationsprogramms ist derzeit nur auf Englisch verfügbar.",
+        "Die erste ausführbare Datei ist nicht signiert, daher kann Windows SmartScreen eine Warnung anzeigen.",
+        "Vanilla eFootball PES 2021 wird erkannt, die Installation bleibt jedoch deaktiviert, bis eine passende validierte Basis veröffentlicht wird.",
+    ),
+    (
+        Path("README.fr.md"),
+        "## Programme d’installation Windows",
+        "## Feuille de route / En cours de développement",
+        "L’interface du programme d’installation est actuellement disponible uniquement en anglais.",
+        "L’exécutable initial n’est pas signé, Windows SmartScreen peut donc afficher un avertissement.",
+        "La détection d’eFootball PES 2021 vanilla est disponible, mais l’installation reste désactivée jusqu’à la publication d’une base validée correspondante.",
+    ),
+)
+
 
 
 
@@ -190,6 +293,25 @@ def test_readme_uses_player_update_language_for_public_contributions():
     ):
         assert technical_literal in lifecycle
 
+
+def test_localized_readmes_are_installer_first_and_keep_public_manual_fallbacks():
+    for path, installer_heading, roadmap_heading, ui_copy, warning, pes_copy in (
+        README_INSTALLER_CONTRACTS
+    ):
+        text = path.read_text(encoding="utf-8")
+
+        assert text.count(INSTALLER_URL) == 1, path
+        assert text.count(FAST_ZIP_URL) == 1, path
+        assert text.count(DEEP_ZIP_URL) == 1, path
+        assert installer_heading in text, path
+        assert ui_copy in text, path
+        assert warning in text, path
+        assert pes_copy in text, path
+
+        roadmap = text.split(roadmap_heading, 1)[1].split("\n## ", 1)[0]
+        numbered_items = re.findall(r"(?m)^\d+\. \*\*", roadmap)
+        assert numbered_items == ["1. **"], path
+        assert "installer" not in roadmap.casefold(), path
 
 
 def test_workflows_use_player_update_copy_on_public_surfaces():

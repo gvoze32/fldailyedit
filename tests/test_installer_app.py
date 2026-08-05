@@ -1,10 +1,21 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import threading
+import zipfile
+
 from datetime import datetime, timezone
+from functools import partial
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import BytesIO
 from pathlib import Path
 from queue import Empty, SimpleQueue
 from threading import Event, get_ident, main_thread
 from time import monotonic, sleep
+from typing import Iterator
+from urllib.parse import urlsplit
+from urllib.request import urlopen
 
 import pytest
 from installer import app as installer_app
@@ -20,7 +31,15 @@ from installer.app import (
     WorkerFailed,
     error_copy,
 )
-from installer.catalog import Catalog, CatalogError, Channel, DownloadError, ReleaseRecord
+from installer.catalog import (
+    Catalog,
+    CatalogError,
+    Channel,
+    DownloadError,
+    ReleaseRecord,
+    download_archive,
+    fetch_catalog,
+)
 from installer.install import InstallError, InstallResult, InstallStage
 from installer.paths import GameTarget, SaveLocation
 
@@ -974,3 +993,175 @@ def test_close_uses_atomic_worker_answer_when_commit_event_is_not_polled() -> No
     assert application._cancel_requested is False
     assert application._commit_lock_observed is True
     assert rendered == [controller.state]
+
+
+
+class _InstallerReleaseHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.0"
+
+    def do_GET(self) -> None:
+        body = self.server.routes[self.path]  # type: ignore[attr-defined]
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+@pytest.fixture
+def installer_release_server() -> Iterator[ThreadingHTTPServer]:
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _InstallerReleaseHandler)
+    server.routes = {}  # type: ignore[attr-defined]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+class _InstallerReleaseOpener:
+    def __init__(self, server: ThreadingHTTPServer):
+        self._server = server
+        self.requested_urls: list[str] = []
+
+    def open(self, url: str, timeout: float):
+        self.requested_urls.append(url)
+        asset_name = urlsplit(url).path.rsplit("/", 1)[-1]
+        local_url = f"http://127.0.0.1:{self._server.server_port}/{asset_name}"
+        return urlopen(local_url, timeout=timeout)
+
+
+def test_worker_downloads_backs_up_and_installs_end_to_end(
+    installer_release_server: ThreadingHTTPServer,
+    tmp_path: Path,
+) -> None:
+    old_save = b"verified original save"
+    new_save = b"verified replacement save"
+    archive_buffer = BytesIO()
+    archive_member = zipfile.ZipInfo(
+        "EDIT00000000",
+        date_time=(2026, 8, 6, 0, 0, 0),
+    )
+    archive_member.compress_type = zipfile.ZIP_STORED
+    with zipfile.ZipFile(archive_buffer, "w") as archive:
+        archive.writestr(archive_member, new_save)
+    archive_bytes = archive_buffer.getvalue()
+
+    archive_url = (
+        "https://github.com/gvoze32/fldailyedit/releases/download/latest/"
+        "fldailyedit-fl2026-fast.zip"
+    )
+    catalog_bytes = json.dumps(
+        {
+            "schema_version": 1,
+            "records": [
+                {
+                    "target_id": "fl26-u2.2-national-squads",
+                    "target_name": "Football Life 2026 Update 2.2 + National Squads",
+                    "channel": "fast",
+                    "generated_at": "2026-08-06T00:00:00Z",
+                    "asset_name": "fldailyedit-fl2026-fast.zip",
+                    "download_url": archive_url,
+                    "archive_size": len(archive_bytes),
+                    "archive_sha256": hashlib.sha256(archive_bytes).hexdigest(),
+                    "save_size": len(new_save),
+                    "save_sha256": hashlib.sha256(new_save).hexdigest(),
+                }
+            ],
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    installer_release_server.routes.update(  # type: ignore[attr-defined]
+        {
+            "/catalog.json": catalog_bytes,
+            "/fldailyedit-fl2026-fast.zip": archive_bytes,
+        }
+    )
+
+    save_directory = tmp_path / "Football Life 2026" / "save"
+    save_directory.mkdir(parents=True)
+    target = save_directory / "EDIT00000000"
+    target.write_bytes(old_save)
+    location = SaveLocation(
+        GameTarget.FL26,
+        "Football Life 2026",
+        save_directory,
+    )
+    opener = _InstallerReleaseOpener(installer_release_server)
+    worker = InstallerWorker(
+        fetch_catalog=partial(fetch_catalog, opener=opener),
+        download_archive=partial(download_archive, opener=opener),
+        now=lambda: GENERATED_AT,
+    )
+    controller = InstallerController()
+    observed: list[ProgressChanged | InstallCompleted | WorkerFailed] = []
+
+    try:
+        worker.load_catalog()
+        catalog_event = _next_event(worker, CatalogLoaded)
+        assert isinstance(catalog_event, CatalogLoaded)
+        controller.handle_event(catalog_event)
+        record = catalog_event.catalog.records[0]
+
+        controller.set_locations((location,))
+        controller.select_record(record)
+        controller.next()
+        controller.select_location(location)
+        controller.next()
+        controller.next()
+        worker.install(record, location)
+
+        deadline = monotonic() + 5.0
+        while monotonic() < deadline:
+            event = worker.events.get(timeout=deadline - monotonic())
+            observed.append(event)
+            controller.handle_event(event)
+            if isinstance(event, (InstallCompleted, WorkerFailed)):
+                break
+        else:
+            raise AssertionError("worker did not complete the local release install")
+    finally:
+        worker.close()
+
+    assert isinstance(observed[-1], InstallCompleted)
+    assert controller.state.step is WizardStep.RESULT
+    assert controller.state.error_title is None
+    assert controller.state.result is observed[-1].result
+    assert target.read_bytes() == new_save
+    assert controller.state.result.backup_path == (
+        save_directory
+        / "FLDailyEditBackups"
+        / "EDIT00000000.20260806T000000Z.bak"
+    )
+    assert controller.state.result.backup_path.read_bytes() == old_save
+    assert controller.state.result.installed_sha256 == hashlib.sha256(
+        new_save
+    ).hexdigest()
+
+    progress_events = [
+        event for event in observed if isinstance(event, ProgressChanged)
+    ]
+    assert [
+        event.stage for event in progress_events if event.stage != "downloading"
+    ] == [
+        InstallStage.VALIDATING_DESTINATION.value,
+        InstallStage.VERIFYING_ARCHIVE.value,
+        InstallStage.BACKING_UP.value,
+        InstallStage.STAGING.value,
+        InstallStage.REPLACING.value,
+        InstallStage.VERIFYING_INSTALL.value,
+    ]
+    assert [
+        (event.downloaded, event.total)
+        for event in progress_events
+        if event.stage == "downloading"
+    ] == [(0, len(archive_bytes)), (len(archive_bytes), len(archive_bytes))]
+    assert opener.requested_urls == [
+        "https://github.com/gvoze32/fldailyedit/releases/download/latest/catalog.json",
+        archive_url,
+    ]

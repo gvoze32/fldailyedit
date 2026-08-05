@@ -27,30 +27,24 @@
 والمراكز وأرقام القمصان وعودة اللاعبين من الإعارة والمدربين والتشكيلات وتغييرات
 الصعود أو الهبوط. ولا ينشئ لاعبين أو يضيف الأندية الصاعدة من دوريات الدرجة الثالثة.
 
-## تنزيل أحدث ملف حفظ
+## مُثبِّت Windows
 
-تنشئ GitHub Actions يوميًا ملف حفظ محدّثًا وتقارير للانتقالات.
+مُثبِّت Windows هو الخيار الموصى به للمبتدئين. تتوفر واجهة المُثبِّت حاليًا باللغة الإنجليزية فقط. تستهدف التنزيلات المتحقّق منها حاليًا **Football Life 2026 Update 2.2 + SmokePatch's National Squads Update فقط**. يتوفر اكتشاف vanilla eFootball PES 2021، لكن يظل التثبيت معطّلًا حتى نشر قاعدة أساسية متحقّق منها ومطابقة.
 
-<blockquote>
-<strong>ملاحظة</strong><br>
-يتطلب GitHub تسجيل الدخول قبل تنزيل عناصر سير العمل.
-</blockquote>
+1. نزّل [FLDailyEditInstaller.exe](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.exe).
+2. أغلق اللعبة.
+3. اختر **Fast** أو **Deep**. وهما خياران منفصلان لنطاق التحديث، ويعرض كل منهما وقت الإنشاء.
+4. أكّد مجلد Football Life 2026 المكتشف، أو استخدم **Browse** عند الحاجة.
+5. اختر **Download and install**. يتحقق المُثبِّت من التنزيل، وينشئ نسخة احتياطية من ملف الحفظ الحالي، ثم يستبدله ذريًا.
 
-1. افتح أحدث تشغيل ناجح لـ
-   [Deep Sync](https://github.com/gvoze32/fldailyedit/actions/workflows/sync-deep.yml)
-   أو [Fast Sync](https://github.com/gvoze32/fldailyedit/actions/workflows/sync-fast.yml).
-2. نزّل `updated-fl-save-and-reports.zip` من قسم **Artifacts**.
-3. استخرج `EDIT00000000`.
-4. أنشئ نسخة احتياطية من ملف الحفظ الحالي، ثم انسخ الملف المستخرج إلى المجلد
-   المناسب:
+> [!WARNING]
+> الملف التنفيذي الأولي غير موقّع، لذلك قد يعرض Windows SmartScreen تحذيرًا. قبل المتابعة، قارن الملف المنزّل بملف `FLDailyEditInstaller.exe.sha256` المنشور في [أحدث إصدار](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
 
-| اللعبة | مجلد الحفظ على Windows |
-|---|---|
-| SP Football Life 2026 | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\` |
-| eFootball PES 2021 | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\<user_id>\save\` |
+للتثبيت اليدوي من دون المُثبِّت، نزّل [ملف ZIP لإصدار Fast](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) أو [ملف ZIP لإصدار Deep](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip) العام. استخرج `EDIT00000000`، وأنشئ نسخة احتياطية من ملف الحفظ الحالي، ثم انسخ الملف المستخرج إلى:
 
-للتشغيل عند الطلب أو لاستخدام قائمة أندية مخصصة، أنشئ نسخة متفرعة من المستودع
-واستخدم **Run workflow** من علامة التبويب Actions.
+`Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\`
+
+للتشغيل عند الطلب أو لاستخدام قائمة أندية مخصصة، أنشئ نسخة متفرعة من المستودع واستخدم **Run workflow** من علامة التبويب Actions.
 
 ## ما الذي يتم تحديثه
 
@@ -67,10 +61,9 @@
 
 ## خارطة الطريق / قيد التطوير
 
-هذه العناصر مخطط لها ولم تُنفذ بعد:
+هذا العنصر مخطط له ولم يُنفذ بعد:
 
-1. **برنامج تثبيت/تنزيل بواجهة رسومية لنظام Windows** — توفير ملف `.exe` سهل للمبتدئين يرشد المستخدم خلال تنزيل option file وتثبيته، مع خياري **Fast** و**Deep** بوضوح.
-2. **قواعد أساسية متعددة ومتحقق منها** — دعم إنشاء option files متوافقة من قواعد أساسية منفصلة ومتحقق منها لـ **SP Football Life 2026** و**vanilla eFootball PES 2021** و**UML** بعد توفير ملفات القواعد الأساسية والتحقق منها.
+1. **قواعد أساسية متعددة ومتحقق منها** — دعم إنشاء option files متوافقة من قواعد أساسية منفصلة ومتحقق منها لـ **SP Football Life 2026** و**vanilla eFootball PES 2021** و**UML** بعد توفير ملفات القواعد الأساسية والتحقق منها.
 
 ## الأمان والقيود
 

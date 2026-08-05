@@ -26,28 +26,24 @@ posisi, nomor skuad, pemain yang kembali dari peminjaman, manajer, susunan pemai
 serta perubahan promosi atau degradasi. Base ini tidak membuat pemain atau
 menambahkan klub promosi dari divisi ketiga.
 
-## Unduh save terbaru
+## Installer Windows
 
-GitHub Actions menghasilkan save dan laporan transfer yang diperbarui setiap hari.
+Installer Windows adalah pilihan yang disarankan untuk pemula. Antarmuka installer saat ini hanya tersedia dalam bahasa Inggris. Unduhan tervalidasi saat ini hanya mendukung **Football Life 2026 Update 2.2 + SmokePatch's National Squads Update**. Deteksi untuk vanilla eFootball PES 2021 sudah tersedia, tetapi pemasangan tetap dinonaktifkan hingga base tervalidasi yang sesuai diterbitkan.
 
-> [!NOTE]
-> GitHub mewajibkan Anda masuk sebelum mengunduh artefak workflow.
+1. Unduh [FLDailyEditInstaller.exe](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.exe).
+2. Tutup gim.
+3. Pilih **Fast** atau **Deep**. Keduanya adalah pilihan cakupan pembaruan yang terpisah, dan masing-masing menampilkan waktu pembuatannya.
+4. Konfirmasikan folder Football Life 2026 yang terdeteksi, atau gunakan **Browse** bila perlu.
+5. Pilih **Download and install**. Installer memverifikasi unduhan, mencadangkan save saat ini, lalu menggantinya secara atomik.
 
-1. Buka eksekusi terbaru yang berhasil dari
-   [Deep Sync](https://github.com/gvoze32/fldailyedit/actions/workflows/sync-deep.yml)
-   atau [Fast Sync](https://github.com/gvoze32/fldailyedit/actions/workflows/sync-fast.yml).
-2. Unduh `updated-fl-save-and-reports.zip` dari bagian **Artifacts**.
-3. Ekstrak `EDIT00000000`.
-4. Cadangkan save Anda saat ini, lalu salin file yang telah diekstrak ke direktori
-   yang sesuai:
+> [!WARNING]
+> Executable awal belum ditandatangani, sehingga Windows SmartScreen mungkin menampilkan peringatan. Sebelum melanjutkan, bandingkan file unduhan dengan `FLDailyEditInstaller.exe.sha256` yang diterbitkan pada [rilis terbaru](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
 
-| Gim | Direktori save di Windows |
-|---|---|
-| SP Football Life 2026 | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\` |
-| eFootball PES 2021 | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\<user_id>\save\` |
+Untuk pemasangan manual tanpa installer, unduh [ZIP rilis Fast](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) atau [ZIP rilis Deep](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip) yang bersifat publik. Ekstrak `EDIT00000000`, cadangkan save Anda saat ini, lalu salin file tersebut ke:
 
-Untuk menjalankannya sesuai permintaan atau menggunakan daftar klub khusus, fork
-repositori ini dan gunakan **Run workflow** dari tab Actions.
+`Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\`
+
+Untuk menjalankannya sesuai permintaan atau menggunakan daftar klub khusus, fork repositori ini dan gunakan **Run workflow** dari tab Actions.
 
 ## Yang diperbarui
 
@@ -66,8 +62,7 @@ Updater juga memeriksa klub pemain saat ini sebelum menerapkan perpindahan.
 
 Item berikut masih direncanakan dan belum diimplementasikan:
 
-1. **Installer/downloader GUI Windows** — sediakan `.exe` yang mudah digunakan pemula untuk memandu proses pengunduhan dan pemasangan option file, dengan pilihan **Fast** dan **Deep** yang jelas.
-2. **Beberapa base tervalidasi** — dukung pembuatan option file yang sesuai dari base terpisah dan tervalidasi untuk **SP Football Life 2026**, **vanilla eFootball PES 2021**, dan **UML** setelah file base tersebut diberikan dan divalidasi.
+1. **Beberapa base tervalidasi** — dukung pembuatan option file yang sesuai dari base terpisah dan tervalidasi untuk **SP Football Life 2026**, **vanilla eFootball PES 2021**, dan **UML** setelah file base tersebut diberikan dan divalidasi.
 
 ## Keamanan dan keterbatasan
 

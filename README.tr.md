@@ -18,22 +18,22 @@ UML, daha eski FL26 sürümleri veya milli takım güncellemesi olmayan kuruluml
 
 [Dahil edilen temel](base/EDIT00000000), 27 Temmuz 2026 tarihli [Gondowan's Mid-Summer EDIT](https://www.reddit.com/r/SPFootballLife/comments/1v7z782/release_gondowans_midsummer_edit_file_more_than/) dosyasıdır. 500'den fazla transfer, güncellenmiş reytingler, mevkiler, forma numaraları, kiralıktan dönenler, teknik direktörler, dizilişler ve küme düşme/yükselme değişikliklerini içerir. Yeni oyuncu oluşturmaz ve üçüncü ligden yükselen kulüpleri eklemez.
 
-## En güncel kayıt dosyasını indirme
+## Windows yükleyici
 
-GitHub Actions her gün güncel bir kayıt dosyası ve transfer raporları üretir.
+Windows yükleyici, yeni başlayanlar için önerilen seçenektir. Yükleyici arayüzü şu anda yalnızca İngilizce olarak sunulmaktadır. Güncel doğrulanmış indirmeler **yalnızca Football Life 2026 Update 2.2 + SmokePatch's National Squads Update** sürümünü hedefler. Vanilla eFootball PES 2021 algılanabilir, ancak eşleşen doğrulanmış bir temel yayımlanana kadar kurulum devre dışı kalır.
 
-> [!NOTE]
-> İş akışı çıktılarını (artifacts) indirebilmek için GitHub hesabınıza giriş yapmanız gerekmektedir.
+1. [FLDailyEditInstaller.exe](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.exe) dosyasını indirin.
+2. Oyunu kapatın.
+3. **Fast** veya **Deep** seçeneğini belirleyin. Bunlar ayrı güncelleme kapsamı seçenekleridir ve her biri oluşturulma zamanını gösterir.
+4. Algılanan Football Life 2026 klasörünü doğrulayın veya gerekirse **Browse** seçeneğini kullanın.
+5. **Download and install** seçeneğini belirleyin. Yükleyici indirmeyi doğrular, mevcut kayıt dosyasını yedekler ve atomik olarak değiştirir.
 
-1. En son başarılı [Deep Sync](https://github.com/gvoze32/fldailyedit/actions/workflows/sync-deep.yml) veya [Fast Sync](https://github.com/gvoze32/fldailyedit/actions/workflows/sync-fast.yml) çalıştırmasını açın.
-2. **Artifacts** bölümünden `updated-fl-save-and-reports.zip` dosyasını indirin.
-3. `EDIT00000000` dosyasını arşivden çıkarın.
-4. Mevcut kayıt dosyanızı yedekleyin ve çıkarılan dosyayı ilgili dizine kopyalayın:
+> [!WARNING]
+> İlk yürütülebilir dosya imzasızdır; bu nedenle Windows SmartScreen bir uyarı gösterebilir. Devam etmeden önce indirilen dosyayı [en son sürümde](https://github.com/gvoze32/fldailyedit/releases/tag/latest) yayımlanan `FLDailyEditInstaller.exe.sha256` ile karşılaştırın.
 
-| Oyun | Windows Kayıt Dizini |
-|---|---|
-| SP Football Life 2026 | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\` |
-| eFootball PES 2021 | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\<user_id>\save\` |
+Yükleyici olmadan elle kurulum için herkese açık [Fast sürüm ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) veya [Deep sürüm ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip) dosyasını indirin. `EDIT00000000` dosyasını çıkarın, mevcut kayıt dosyanızı yedekleyin ve çıkarılan dosyayı şuraya kopyalayın:
+
+`Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\`
 
 İsteğe bağlı bir çalıştırma veya özel bir kulüp listesi için depoyu fork'layıp Actions sekmesinden **Run workflow** seçeneğini kullanabilirsiniz.
 
@@ -51,10 +51,9 @@ Güncelleyici, başka bir oyuncu tarafından kullanılan forma numarasının üz
 
 ## Yol Haritası / Devam Eden Çalışmalar
 
-Planlanan ancak henüz tamamlanmamış özellikler:
+Planlanan ancak henüz tamamlanmamış özellik:
 
-1. **Windows GUI Yükleyici/İndirici** — Kullanıcıların **Fast** ve **Deep** seçenekleriyle option file indirmesini ve kurmasını sağlayan kullanıcı dostu bir `.exe` aracı.
-2. **Çoklu doğrulanmış temel dosyalar** — **SP Football Life 2026**, **vanilla eFootball PES 2021** ve **UML** için ayrı doğrulanmış temel dosyaları desteklemek.
+1. **Çoklu doğrulanmış temel dosyalar** — **SP Football Life 2026**, **vanilla eFootball PES 2021** ve **UML** için ayrı doğrulanmış temel dosyaları desteklemek.
 
 ## Güvenlik ve Sınırlamalar
 

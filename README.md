@@ -26,29 +26,24 @@ positions, squad numbers, loan returns, managers, lineups, and promotion or
 relegation changes. It does not create players or add promoted clubs from third
 divisions.
 
-## Download the latest save
+## Windows installer
 
-GitHub Actions generates an updated save and transfer reports each day.
+The Windows installer is the recommended option for beginners. The installer interface is currently available in English only. Current validated downloads support **Football Life 2026 Update 2.2 + SmokePatch's National Squads Update only**. Detection for vanilla eFootball PES 2021 is present, but installation remains disabled until a matching validated base is published.
 
-> [!NOTE]
-> GitHub requires you to sign in before downloading workflow artifacts.
+1. Download [FLDailyEditInstaller.exe](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.exe).
+2. Close the game.
+3. Choose **Fast** or **Deep**. They are separate update-coverage choices, and each displays its generation timestamp.
+4. Confirm the detected Football Life 2026 folder, or use **Browse** if needed.
+5. Select **Download and install**. The installer verifies the download, backs up the current save, and replaces it atomically.
 
-1. Open the latest successful
-   [Deep Sync](https://github.com/gvoze32/fldailyedit/actions/workflows/sync-deep.yml)
-   or [Fast Sync](https://github.com/gvoze32/fldailyedit/actions/workflows/sync-fast.yml)
-   run.
-2. Download `updated-fl-save-and-reports.zip` from the **Artifacts** section.
-3. Extract `EDIT00000000`.
-4. Back up your current save, then copy the extracted file to the appropriate
-   directory:
+> [!WARNING]
+> The initial executable is unsigned, so Windows SmartScreen may display a warning. Before continuing, compare the downloaded file against the published `FLDailyEditInstaller.exe.sha256` on the [latest release](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
 
-| Game | Save directory on Windows |
-|---|---|
-| SP Football Life 2026 | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\` |
-| eFootball PES 2021 | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\<user_id>\save\` |
+For a manual installation without the installer, download the public [Fast release ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) or [Deep release ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip). Extract `EDIT00000000`, back up your current save, then copy the extracted file to:
 
-For an on-demand run or a custom club list, fork the repository and use
-**Run workflow** from the Actions tab.
+`Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\`
+
+For an on-demand run or a custom club list, fork the repository and use **Run workflow** from the Actions tab.
 
 ## What it updates
 
@@ -65,10 +60,9 @@ member. It also checks the player's current club before applying a move.
 
 ## Roadmap / Work in progress
 
-These items are planned and are not implemented yet:
+This item is planned and is not implemented yet:
 
-1. **Windows GUI installer/downloader** — provide a beginner-friendly `.exe` that guides users through downloading and installing an option file, with explicit **Fast** and **Deep** choices.
-2. **Multiple validated bases** — support creating matching option files from separate validated bases for **SP Football Life 2026**, **vanilla eFootball PES 2021**, and **UML** after those base files are supplied and validated.
+1. **Multiple validated bases** — support creating matching option files from separate validated bases for **SP Football Life 2026**, **vanilla eFootball PES 2021**, and **UML** after those base files are supplied and validated.
 
 ## Safety and limitations
 

@@ -18,22 +18,22 @@ FL Daily Edit 通过将现实世界中的转会应用到 `EDIT00000000` 存档�
 
 [随附的基础存档](base/EDIT00000000)为 2026 年 7 月 27 日发布的 [Gondowan's Mid-Summer EDIT](https://www.reddit.com/r/SPFootballLife/comments/1v7z782/release_gondowans_midsummer_edit_file_more_than/)。其中包含 500 多笔转会，以及更新后的评分、位置、球衣号码、租借回归、主教练、首发阵容和升降级变动。该存档不会创建球员，也不会添加从第三级别联赛升级的俱乐部。
 
-## 下载最新存档
+## Windows 安装程序
 
-GitHub Actions 每天都会生成更新后的存档和转会报告。
+Windows 安装程序是面向新手的推荐方式。安装程序界面目前仅提供英语版本。当前经过验证的下载内容**仅适用于 Football Life 2026 Update 2.2 + SmokePatch's National Squads Update**。程序可以检测原版 eFootball PES 2021，但在发布匹配且经过验证的基础存档前，安装功能将保持禁用。
 
-> [!NOTE]
-> GitHub 要求先登录才能下载工作流产物。
+1. 下载 [FLDailyEditInstaller.exe](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.exe)。
+2. 关闭游戏。
+3. 选择 **Fast** 或 **Deep**。二者是独立的更新范围选项，并分别显示生成时间。
+4. 确认检测到的 Football Life 2026 文件夹；如有需要，请使用 **Browse**。
+5. 选择 **Download and install**。安装程序会验证下载内容、备份当前存档，并以原子方式替换存档。
 
-1. 打开最近一次成功的 [Deep Sync](https://github.com/gvoze32/fldailyedit/actions/workflows/sync-deep.yml) 或 [Fast Sync](https://github.com/gvoze32/fldailyedit/actions/workflows/sync-fast.yml) 运行记录。
-2. 从 **Artifacts** 部分下载 `updated-fl-save-and-reports.zip`。
-3. 解压出 `EDIT00000000`。
-4. 备份当前存档，然后将解压出的文件复制到对应目录：
+> [!WARNING]
+> 初始可执行文件尚未签名，因此 Windows SmartScreen 可能会显示警告。继续前，请将下载的文件与[最新版本](https://github.com/gvoze32/fldailyedit/releases/tag/latest)中发布的 `FLDailyEditInstaller.exe.sha256` 进行比较。
 
-| 游戏 | Windows 上的存档目录 |
-|---|---|
-| SP Football Life 2026 | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\` |
-| eFootball PES 2021 | `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\<user_id>\save\` |
+如需不使用安装程序手动安装，请下载公开的 [Fast 发布 ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) 或 [Deep 发布 ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip)。解压 `EDIT00000000`，备份当前存档，然后将解压出的文件复制到：
+
+`Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\`
 
 如需按需运行或使用自定义俱乐部列表，请复刻仓库，然后在 Actions 选项卡中使用 **Run workflow**。
 
@@ -53,8 +53,7 @@ GitHub Actions 每天都会生成更新后的存档和转会报告。
 
 以下项目仍在规划中，尚未实现：
 
-1. **Windows 图形界面安装器/下载器** — 提供适合新手的 `.exe`，引导用户下载并安装 option file，并明确提供 **Fast** 和 **Deep** 两种选择。
-2. **多个已验证基础文件** — 在相应基础文件提供并通过验证后，支持从独立且经过验证的基础文件为 **SP Football Life 2026**、**vanilla eFootball PES 2021** 和 **UML** 创建匹配的 option file。
+1. **多个已验证基础文件** — 在相应基础文件提供并通过验证后，支持从独立且经过验证的基础文件为 **SP Football Life 2026**、**vanilla eFootball PES 2021** 和 **UML** 创建匹配的 option file。
 
 ## 安全性与限制
 
