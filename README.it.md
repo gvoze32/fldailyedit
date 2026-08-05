@@ -201,7 +201,7 @@ convalida dei file completi, rimuovi gli oggetti di primo livello `source` e
 
 Un contributore esperto può ignorare la bozza generata dall'issue e aprire
 direttamente una PR che aggiunga o modifichi esattamente un file completo
-`players/<player-slug>.json`. Includi nell'`identity` e nelle `evidence` la
+`players/<player-slug>.json`. Includi nei campi `identity` ed `evidence` la
 provenienza dell'UUID e del profilo canonici, le prove citate, i valori PES
 sottoposti a revisione, i valori di riferimento previsti per l'aggiornamento, il
 ciclo di vita e la revisione esatta della base; quindi esegui
@@ -245,8 +245,8 @@ pianificata legge nuovamente la cronologia cumulativa.
 ## Fonti dei trasferimenti
 
 FotMob fornisce la cronologia principale dei trasferimenti e i metadati delle
-rose. Gli elenchi stagionali di Wikipedia, le segnalazioni abilitate dei
-trasferimenti di SortitoutSI e i record verificati e datati di Transfermarkt
+rose. Gli elenchi stagionali di Wikipedia, le segnalazioni di trasferimenti
+abilitate su SortitoutSI e i record verificati e datati di Transfermarkt
 integrano o confermano i percorsi dei trasferimenti. I profili Pes Retro Stats
 forniscono proposte non approvate, ricavate dalla fonte, per le bozze dei Player
 Update.

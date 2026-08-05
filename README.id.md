@@ -64,7 +64,7 @@ Updater juga memeriksa klub pemain saat ini sebelum menerapkan perpindahan.
 
 ## Keamanan dan keterbatasan
 
-- Eksekusi lokal membuat cadangan berkelanjutan serta menggunakan enkripsi atomik yang terverifikasi.
+- Eksekusi lokal membuat cadangan bergilir serta menggunakan enkripsi atomik yang terverifikasi.
 - Save divalidasi sebelum dan sesudah perubahan roster.
 - Process lock mencegah dua proses menulis output yang sama secara bersamaan.
 - Snapshot FotMob yang tidak lengkap membatalkan proses alih-alih menghasilkan save parsial.
