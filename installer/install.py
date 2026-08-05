@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path, PurePosixPath
+from uuid import uuid4
 from typing import BinaryIO, Callable
 
 from installer.catalog import ReleaseRecord
@@ -18,6 +19,7 @@ from installer.catalog import ReleaseRecord
 SAVE_NAME = "EDIT00000000"
 MAX_SAVE_BYTES = 32 * 1024 * 1024
 _CHUNK_BYTES = 64 * 1024
+_WINDOWS = os.name == "nt"
 
 
 class InstallStage(str, Enum):
@@ -461,6 +463,23 @@ def _stage_archive(
                 pass
 
 
+def _move_no_replace(source: Path, target: Path) -> None:
+    if _WINDOWS:
+        os.rename(source, target)
+        return
+    os.link(source, target)
+    source.unlink()
+
+
+def _quarantine_target(target: Path) -> Path:
+    quarantine = (
+        target.parent
+        / f".fldailyedit-quarantine-{uuid4().hex}.save"
+    )
+    os.rename(target, quarantine)
+    return quarantine
+
+
 def _assert_rollback_ownership(
     target: Path,
     installed_snapshot: _TargetSnapshot,
@@ -494,54 +513,123 @@ def _restore_after_failed_commit(
     progress: Callable[[InstallStage], None],
 ) -> None:
     progress(InstallStage.RESTORING)
-    _assert_rollback_ownership(target, installed_snapshot, backup_path)
     recovery_path: Path | None = None
+    quarantine_path: Path | None = None
+    preserve_recovery = False
     try:
-        if backup_path is None:
-            _assert_rollback_ownership(
-                target, installed_snapshot, backup_path
+        if backup_path is not None:
+            if backup_size is None or backup_sha256 is None:
+                raise OSError("verified backup metadata is unavailable")
+            with tempfile.NamedTemporaryFile(
+                delete=False,
+                dir=destination,
+                prefix=".fldailyedit-",
+                suffix=".tmp",
+            ) as recovery:
+                recovery_path = Path(recovery.name)
+                with backup_path.open("rb") as source:
+                    copied_size, copied_sha256 = _copy_stream(source, recovery)
+                if copied_size != backup_size or copied_sha256 != backup_sha256:
+                    raise OSError("backup changed before recovery")
+                recovery.flush()
+                os.fsync(recovery.fileno())
+            if recovery_path.stat().st_size != backup_size:
+                raise OSError("recovery copy size verification failed")
+            if _file_sha256(recovery_path) != backup_sha256:
+                raise OSError("recovery copy SHA-256 verification failed")
+
+        # These checks provide diagnostics only. Safety comes from atomically
+        # moving whatever is currently named target before examining it.
+        _assert_rollback_ownership(target, installed_snapshot, backup_path)
+        _assert_rollback_ownership(target, installed_snapshot, backup_path)
+        quarantine_path = _quarantine_target(target)
+
+        try:
+            quarantined_snapshot = _capture_target(
+                quarantine_path, InstallStage.RESTORING
             )
-            target.unlink(missing_ok=True)
+        except InstallError:
+            preserve_recovery = recovery_path is not None
+            try:
+                _move_no_replace(quarantine_path, target)
+            except OSError:
+                pass
+            else:
+                quarantine_path = None
+            raise InstallError(
+                "recovery_failed",
+                "The quarantined save could not be verified; manual recovery "
+                f"is required. Preserved quarantine: {quarantine_path}",
+                stage=InstallStage.RESTORING,
+            )
+
+        if quarantined_snapshot != installed_snapshot:
+            preserve_recovery = recovery_path is not None
+            try:
+                _move_no_replace(quarantine_path, target)
+            except OSError:
+                pass
+            else:
+                quarantine_path = None
+            raise InstallError(
+                "recovery_failed",
+                "A concurrent save was quarantined and preserved; manual "
+                f"recovery is required. Target: {target}; "
+                f"quarantine: {quarantine_path}; backup: {backup_path}; "
+                f"recovery copy: {recovery_path}",
+                stage=InstallStage.RESTORING,
+            )
+
+        if backup_path is None:
+            if _optional_lstat(target) is not None:
+                raise InstallError(
+                    "recovery_failed",
+                    "A concurrent save appeared during rollback and was "
+                    f"preserved at {target}; manual recovery is required",
+                    stage=InstallStage.RESTORING,
+                )
             return
 
-        if backup_size is None or backup_sha256 is None:
-            raise OSError("verified backup metadata is unavailable")
-        with tempfile.NamedTemporaryFile(
-            delete=False,
-            dir=destination,
-            prefix=".fldailyedit-",
-            suffix=".tmp",
-        ) as recovery:
-            recovery_path = Path(recovery.name)
-            with backup_path.open("rb") as source:
-                copied_size, copied_sha256 = _copy_stream(source, recovery)
-            if copied_size != backup_size or copied_sha256 != backup_sha256:
-                raise OSError("backup changed before recovery")
-            recovery.flush()
-            os.fsync(recovery.fileno())
-        if recovery_path.stat().st_size != backup_size:
-            raise OSError("recovery copy size verification failed")
-        if _file_sha256(recovery_path) != backup_sha256:
-            raise OSError("recovery copy SHA-256 verification failed")
-        _assert_rollback_ownership(target, installed_snapshot, backup_path)
-        os.replace(recovery_path, target)
+        if recovery_path is None:
+            raise OSError("verified recovery copy is unavailable")
+        try:
+            _move_no_replace(recovery_path, target)
+        except OSError as error:
+            preserve_recovery = True
+            raise InstallError(
+                "recovery_failed",
+                "The original save could not be restored without overwriting "
+                f"a concurrent file; manual recovery is required. Target: "
+                f"{target}; quarantine: {quarantine_path}; backup: "
+                f"{backup_path}; recovery copy: {recovery_path}",
+                stage=InstallStage.RESTORING,
+            ) from error
         recovery_path = None
+
     except InstallError as error:
         if error.code == "recovery_failed":
             raise
+        preserve_recovery = preserve_recovery or quarantine_path is not None
         raise InstallError(
             "recovery_failed",
-            "Installation failed and the original save could not be restored",
+            "Rollback could not safely identify transaction-owned data; "
+            f"manual recovery is required. Target: {target}; quarantine: "
+            f"{quarantine_path}; backup: {backup_path}; recovery copy: "
+            f"{recovery_path}",
             stage=InstallStage.RESTORING,
         ) from error
     except (OSError, ValueError) as error:
+        preserve_recovery = preserve_recovery or quarantine_path is not None
         raise InstallError(
             "recovery_failed",
-            "Installation failed and the original save could not be restored",
+            "Installation failed and safe recovery could not be completed; "
+            f"manual recovery is required. Target: {target}; quarantine: "
+            f"{quarantine_path}; backup: {backup_path}; recovery copy: "
+            f"{recovery_path}",
             stage=InstallStage.RESTORING,
         ) from error
     finally:
-        if recovery_path is not None:
+        if recovery_path is not None and not preserve_recovery:
             try:
                 recovery_path.unlink(missing_ok=True)
             except OSError:

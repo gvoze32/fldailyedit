@@ -615,15 +615,17 @@ def test_final_verification_mismatch_restores_verified_backup_atomically(
     assert caught.value.code == "install_verification_failed"
     assert caught.value.stage is InstallStage.VERIFYING_INSTALL
     assert target.read_bytes() == original
-    assert len(replace_calls) == 2
+    assert len(replace_calls) == 1
     backup = (
         destination
         / "FLDailyEditBackups"
         / "EDIT00000000.20260806T123456Z.bak"
     )
     assert backup.read_bytes() == original
-    assert replace_calls[1][0] != backup
     assert list(destination.glob(".fldailyedit-*.tmp")) == []
+    quarantines = list(destination.glob(".fldailyedit-quarantine-*"))
+    assert len(quarantines) == 1
+    assert quarantines[0].read_bytes() == b"verified new save"
 
 
 def test_final_verification_mismatch_removes_new_invalid_target(
@@ -647,6 +649,9 @@ def test_final_verification_mismatch_removes_new_invalid_target(
     assert caught.value.stage is InstallStage.VERIFYING_INSTALL
     assert not target.exists()
     assert list(destination.glob(".fldailyedit-*.tmp")) == []
+    quarantines = list(destination.glob(".fldailyedit-quarantine-*"))
+    assert len(quarantines) == 1
+    assert quarantines[0].read_bytes() == b"verified new save"
 
 
 def test_restore_failure_retains_backup_and_reports_recovery_failed(
@@ -657,23 +662,16 @@ def test_restore_failure_retains_backup_and_reports_recovery_failed(
     original = b"original"
     target.write_bytes(original)
     real_hash = install_module._file_sha256
-    real_replace = os.replace
-    replace_calls = 0
-
     def wrong_installed_hash(path: Path) -> str:
         if path == target:
             return "0" * 64
         return real_hash(path)
 
     def fail_restore(source: Path, destination_path: Path) -> None:
-        nonlocal replace_calls
-        replace_calls += 1
-        if replace_calls == 2:
-            raise OSError("restore failed")
-        real_replace(source, destination_path)
+        raise OSError("no-replace restore failed")
 
     monkeypatch.setattr(install_module, "_file_sha256", wrong_installed_hash)
-    monkeypatch.setattr(install_module.os, "replace", fail_restore)
+    monkeypatch.setattr(install_module, "_move_no_replace", fail_restore)
 
     with pytest.raises(InstallError) as caught:
         _install(archive_path, destination, record)
@@ -686,8 +684,13 @@ def test_restore_failure_retains_backup_and_reports_recovery_failed(
     assert caught.value.code == "recovery_failed"
     assert caught.value.stage is InstallStage.RESTORING
     assert backup.read_bytes() == original
-    assert target.exists()
-    assert list(destination.glob(".fldailyedit-*.tmp")) == []
+    assert not target.exists()
+    quarantines = list(destination.glob(".fldailyedit-quarantine-*"))
+    recoveries = list(destination.glob(".fldailyedit-*.tmp"))
+    assert len(quarantines) == 1
+    assert quarantines[0].read_bytes() == b"verified new save"
+    assert len(recoveries) == 1
+    assert recoveries[0].read_bytes() == original
 
 def test_target_appearing_before_commit_is_not_overwritten(tmp_path: Path) -> None:
     archive_path, destination, record = _setup(tmp_path)
@@ -859,3 +862,140 @@ def test_rollback_preserves_concurrent_target_when_original_was_absent(
     assert target.read_bytes() == concurrent
     assert not (destination / "FLDailyEditBackups").exists()
     assert list(destination.glob(".fldailyedit-*.tmp")) == []
+
+@pytest.mark.parametrize("windows_semantics", [False, True])
+def test_no_replace_move_restores_only_to_an_absent_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    windows_semantics: bool,
+) -> None:
+    source = tmp_path / "recovery"
+    target = tmp_path / SAVE_NAME
+    source.write_bytes(b"original")
+    real_rename = os.rename
+
+    def windows_rename(source_path: Path, target_path: Path) -> None:
+        if Path(target_path).exists():
+            raise FileExistsError("target exists")
+        real_rename(source_path, target_path)
+
+    monkeypatch.setattr(install_module, "_WINDOWS", windows_semantics)
+    if windows_semantics:
+        monkeypatch.setattr(install_module.os, "rename", windows_rename)
+
+    install_module._move_no_replace(source, target)
+
+    assert not source.exists()
+    assert target.read_bytes() == b"original"
+
+
+@pytest.mark.parametrize("windows_semantics", [False, True])
+def test_no_replace_move_never_clobbers_an_existing_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    windows_semantics: bool,
+) -> None:
+    source = tmp_path / "recovery"
+    target = tmp_path / SAVE_NAME
+    source.write_bytes(b"original")
+    target.write_bytes(b"concurrent")
+    real_rename = os.rename
+
+    def windows_rename(source_path: Path, target_path: Path) -> None:
+        if Path(target_path).exists():
+            raise FileExistsError("target exists")
+        real_rename(source_path, target_path)
+
+    monkeypatch.setattr(install_module, "_WINDOWS", windows_semantics)
+    if windows_semantics:
+        monkeypatch.setattr(install_module.os, "rename", windows_rename)
+
+    with pytest.raises(FileExistsError):
+        install_module._move_no_replace(source, target)
+
+    assert source.read_bytes() == b"original"
+    assert target.read_bytes() == b"concurrent"
+
+
+def test_quarantine_preserves_target_replaced_after_last_absent_rollback_check(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive_path, destination, record = _setup(tmp_path)
+    target = destination / SAVE_NAME
+    concurrent = b"replacement after final ownership check"
+    real_hash = install_module._file_sha256
+    real_assert = install_module._assert_rollback_ownership
+    ownership_checks = 0
+
+    def wrong_installed_hash(path: Path) -> str:
+        if path == target:
+            return "0" * 64
+        return real_hash(path)
+
+    def replace_after_check(*args, **kwargs) -> None:
+        nonlocal ownership_checks
+        real_assert(*args, **kwargs)
+        ownership_checks += 1
+        if ownership_checks == 2:
+            target.write_bytes(concurrent)
+
+    monkeypatch.setattr(install_module, "_file_sha256", wrong_installed_hash)
+    monkeypatch.setattr(
+        install_module, "_assert_rollback_ownership", replace_after_check
+    )
+
+    with pytest.raises(InstallError) as caught:
+        _install(archive_path, destination, record)
+
+    quarantines = list(destination.glob(".fldailyedit-quarantine-*"))
+    assert caught.value.code == "recovery_failed"
+    assert target.exists() or quarantines
+    surviving = target if target.exists() else quarantines[0]
+    assert surviving.read_bytes() == concurrent
+    assert list(destination.glob(".fldailyedit-*.tmp")) == []
+
+
+def test_quarantine_preserves_target_replaced_after_last_backup_rollback_check(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive_path, destination, record = _setup(tmp_path)
+    target = destination / SAVE_NAME
+    target.write_bytes(b"original")
+    concurrent = b"replacement after final ownership check"
+    real_hash = install_module._file_sha256
+    real_assert = install_module._assert_rollback_ownership
+    ownership_checks = 0
+
+    def wrong_installed_hash(path: Path) -> str:
+        if path == target:
+            return "0" * 64
+        return real_hash(path)
+
+    def replace_after_check(*args, **kwargs) -> None:
+        nonlocal ownership_checks
+        real_assert(*args, **kwargs)
+        ownership_checks += 1
+        if ownership_checks == 2:
+            target.write_bytes(concurrent)
+
+    monkeypatch.setattr(install_module, "_file_sha256", wrong_installed_hash)
+    monkeypatch.setattr(
+        install_module, "_assert_rollback_ownership", replace_after_check
+    )
+
+    with pytest.raises(InstallError) as caught:
+        _install(archive_path, destination, record)
+
+    backup = (
+        destination
+        / "FLDailyEditBackups"
+        / "EDIT00000000.20260806T123456Z.bak"
+    )
+    quarantines = list(destination.glob(".fldailyedit-quarantine-*"))
+    assert caught.value.code == "recovery_failed"
+    assert target.exists() or quarantines
+    surviving = target if target.exists() else quarantines[0]
+    assert surviving.read_bytes() == concurrent
+    assert backup.read_bytes() == b"original"
