@@ -1249,3 +1249,40 @@ def test_update_view_keeps_static_choice_copy_when_release_is_unavailable() -> N
         "state": "disabled",
         "text": "Deep — Expanded coverage",
     }
+
+def test_worker_validates_discovered_locations_and_emits_canonical_paths(
+    tmp_path: Path,
+) -> None:
+    discovered_path = tmp_path / "redirected" / "save"
+    discovered_path.mkdir(parents=True)
+    canonical_path = tmp_path / "canonical" / "save"
+    canonical_path.mkdir(parents=True)
+    discovered = SaveLocation(
+        GameTarget.FL26,
+        "Football Life 2026",
+        discovered_path,
+    )
+    validation_calls: list[tuple[Path, GameTarget]] = []
+
+    def fake_validation(path: Path, target: GameTarget) -> Path:
+        validation_calls.append((path, target))
+        return canonical_path
+
+    worker = InstallerWorker(
+        discover_locations=lambda: (discovered,),
+        validate_destination=fake_validation,
+    )
+    try:
+        worker.discover_locations()
+        event = _next_event(worker, installer_app.LocationsDiscovered)
+
+        assert validation_calls == [(discovered_path, GameTarget.FL26)]
+        assert event.locations == (
+            SaveLocation(
+                GameTarget.FL26,
+                "Football Life 2026",
+                canonical_path,
+            ),
+        )
+    finally:
+        worker.close()

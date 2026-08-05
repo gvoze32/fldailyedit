@@ -43,6 +43,142 @@ class InstallError(OSError):
         self.code = code
         self.stage = stage
 
+_REPARSE_POINT_ATTRIBUTE = getattr(
+    stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _TargetSnapshot:
+    exists: bool
+    device: int | None = None
+    inode: int | None = None
+    size: int | None = None
+    sha256: str | None = None
+
+
+def _is_reparse_status(path_status: os.stat_result) -> bool:
+    return stat.S_ISLNK(path_status.st_mode) or bool(
+        getattr(path_status, "st_file_attributes", 0)
+        & _REPARSE_POINT_ATTRIBUTE
+    )
+
+
+def _optional_lstat(path: Path) -> os.stat_result | None:
+    try:
+        return path.lstat()
+    except FileNotFoundError:
+        return None
+
+
+def _assert_safe_destination(
+    destination: Path,
+    target: Path,
+    stage: InstallStage,
+) -> None:
+    try:
+        destination_status = destination.lstat()
+        if (
+            _is_reparse_status(destination_status)
+            or not stat.S_ISDIR(destination_status.st_mode)
+            or destination.name.casefold() != "save"
+        ):
+            raise OSError("unsafe save destination")
+        target_status = _optional_lstat(target)
+        if target_status is not None and (
+            _is_reparse_status(target_status)
+            or not stat.S_ISREG(target_status.st_mode)
+        ):
+            raise OSError("unsafe save target")
+        backup_directory = destination / "FLDailyEditBackups"
+        backup_status = _optional_lstat(backup_directory)
+        if backup_status is not None and (
+            _is_reparse_status(backup_status)
+            or not stat.S_ISDIR(backup_status.st_mode)
+        ):
+            raise OSError("unsafe backup directory")
+    except InstallError:
+        raise
+    except OSError as error:
+        raise InstallError(
+            "invalid_destination",
+            "The save destination contains an unsafe link or reparse point",
+            stage=stage,
+        ) from error
+
+
+def _capture_target(target: Path, stage: InstallStage) -> _TargetSnapshot:
+    try:
+        path_status = target.lstat()
+    except FileNotFoundError:
+        return _TargetSnapshot(False)
+    except OSError as error:
+        raise InstallError(
+            "target_changed",
+            "The save file could not be inspected safely",
+            stage=stage,
+        ) from error
+    if _is_reparse_status(path_status) or not stat.S_ISREG(path_status.st_mode):
+        raise InstallError(
+            "invalid_destination",
+            "The save target is a link, reparse point, or non-file",
+            stage=stage,
+        )
+
+    digest = hashlib.sha256()
+    try:
+        with target.open("rb") as source:
+            before = os.fstat(source.fileno())
+            while chunk := source.read(_CHUNK_BYTES):
+                digest.update(chunk)
+            after = os.fstat(source.fileno())
+        final_path_status = target.lstat()
+    except OSError as error:
+        raise InstallError(
+            "target_changed",
+            "The save file changed while it was inspected",
+            stage=stage,
+        ) from error
+
+    identities = {
+        (path_status.st_dev, path_status.st_ino),
+        (before.st_dev, before.st_ino),
+        (after.st_dev, after.st_ino),
+        (final_path_status.st_dev, final_path_status.st_ino),
+    }
+    if (
+        len(identities) != 1
+        or _is_reparse_status(final_path_status)
+        or before.st_size != after.st_size
+        or after.st_size != final_path_status.st_size
+    ):
+        raise InstallError(
+            "target_changed",
+            "The save file changed while it was inspected",
+            stage=stage,
+        )
+    return _TargetSnapshot(
+        True,
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        digest.hexdigest(),
+    )
+
+
+def _assert_target_matches(
+    target: Path,
+    expected: _TargetSnapshot,
+    stage: InstallStage,
+) -> None:
+    actual = _capture_target(target, stage)
+    if actual != expected:
+        raise InstallError(
+            "target_changed",
+            "The save file appeared, disappeared, or changed during installation",
+            stage=stage,
+        )
+
 
 def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -204,6 +340,7 @@ def _backup_target(
     target: Path,
     destination: Path,
     timestamp: datetime,
+    expected: _TargetSnapshot,
 ) -> tuple[Path, int, str]:
     backup_path: Path | None = None
     created = False
@@ -216,13 +353,44 @@ def _backup_target(
         backup_path = backup_directory / f"{SAVE_NAME}.{utc_timestamp}.bak"
         with target.open("rb") as source, backup_path.open("xb") as backup:
             created = True
+            source_before = os.fstat(source.fileno())
+            if (
+                not expected.exists
+                or (source_before.st_dev, source_before.st_ino)
+                != (expected.device, expected.inode)
+            ):
+                raise InstallError(
+                    "target_changed",
+                    "The save file changed before backup",
+                    stage=InstallStage.BACKING_UP,
+                )
             copied_size, copied_sha256 = _copy_stream(source, backup)
+            source_after = os.fstat(source.fileno())
+            if (
+                (source_after.st_dev, source_after.st_ino)
+                != (expected.device, expected.inode)
+                or source_after.st_size != expected.size
+                or copied_size != expected.size
+                or copied_sha256 != expected.sha256
+            ):
+                raise InstallError(
+                    "target_changed",
+                    "The save file changed during backup",
+                    stage=InstallStage.BACKING_UP,
+                )
             backup.flush()
             os.fsync(backup.fileno())
-        if backup_path.stat().st_size != copied_size:
+        if backup_path.stat().st_size != expected.size:
             raise OSError("backup size verification failed")
-        if _file_sha256(backup_path) != copied_sha256:
+        if _file_sha256(backup_path) != expected.sha256:
             raise OSError("backup SHA-256 verification failed")
+    except InstallError:
+        if created and backup_path is not None:
+            try:
+                backup_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
     except (OSError, ValueError) as error:
         if created and backup_path is not None:
             try:
@@ -362,9 +530,13 @@ def install_archive(
     progress(InstallStage.VALIDATING_DESTINATION)
     _raise_if_cancelled(cancelled, InstallStage.VALIDATING_DESTINATION)
     try:
-        if not destination.is_dir() or (target.exists() and not target.is_file()):
-            raise OSError("destination is not a writable save directory")
-        existing_target_size = target.stat().st_size if target.exists() else 0
+        _assert_safe_destination(
+            destination, target, InstallStage.VALIDATING_DESTINATION
+        )
+        target_snapshot = _capture_target(
+            target, InstallStage.VALIDATING_DESTINATION
+        )
+        existing_target_size = target_snapshot.size or 0
         required_space = record.archive_size + record.save_size + existing_target_size
         if shutil.disk_usage(destination).free < required_space:
             raise InstallError(
@@ -386,18 +558,26 @@ def install_archive(
     _raise_if_cancelled(cancelled, InstallStage.VERIFYING_ARCHIVE)
 
     try:
-        if target.exists():
+        if target_snapshot.exists:
             progress(InstallStage.BACKING_UP)
+            _assert_safe_destination(destination, target, InstallStage.BACKING_UP)
+            _assert_target_matches(
+                target, target_snapshot, InstallStage.BACKING_UP
+            )
             backup_path, backup_size, backup_sha256 = _backup_target(
-                target, destination, now()
+                target, destination, now(), target_snapshot
             )
             _raise_if_cancelled(cancelled, InstallStage.BACKING_UP)
 
         progress(InstallStage.STAGING)
+        _assert_safe_destination(destination, target, InstallStage.STAGING)
+        _assert_target_matches(target, target_snapshot, InstallStage.STAGING)
         staged_path = _stage_archive(archive_path, destination, record)
         _raise_if_cancelled(cancelled, InstallStage.STAGING)
 
         progress(InstallStage.REPLACING)
+        _assert_safe_destination(destination, target, InstallStage.REPLACING)
+        _assert_target_matches(target, target_snapshot, InstallStage.REPLACING)
         commit_started = True
         try:
             os.replace(staged_path, target)

@@ -284,3 +284,57 @@ def test_validate_destination_maps_probe_time_non_directory_race(
 
     assert caught.value.code == "not_directory"
     assert list(save_directory.iterdir()) == []
+
+def test_validate_destination_rejects_symlinked_save_leaf(tmp_path: Path) -> None:
+    real_save = _make_directory(tmp_path / "real" / "save")
+    linked_save = tmp_path / "linked" / "save"
+    linked_save.parent.mkdir()
+    linked_save.symlink_to(real_save, target_is_directory=True)
+
+    with pytest.raises(DestinationError) as caught:
+        validate_destination(linked_save, GameTarget.FL26)
+
+    assert caught.value.code == "reparse_point"
+    assert list(real_save.iterdir()) == []
+
+
+def test_validate_destination_allows_redirected_ancestor_with_normal_leaf(
+    tmp_path: Path,
+) -> None:
+    real_parent = _make_directory(tmp_path / "OneDrive" / "game")
+    real_save = _make_directory(real_parent / "save")
+    redirected_parent = tmp_path / "Documents"
+    redirected_parent.symlink_to(real_parent, target_is_directory=True)
+
+    assert validate_destination(
+        redirected_parent / "save", GameTarget.FL26
+    ) == real_save.resolve()
+
+
+def test_validate_destination_rejects_symlinked_backup_directory(
+    tmp_path: Path,
+) -> None:
+    save_directory = _make_directory(tmp_path / "save")
+    escaped = _make_directory(tmp_path / "escaped")
+    (save_directory / "FLDailyEditBackups").symlink_to(
+        escaped, target_is_directory=True
+    )
+
+    with pytest.raises(DestinationError) as caught:
+        validate_destination(save_directory, GameTarget.FL26)
+
+    assert caught.value.code == "reparse_point"
+    assert list(escaped.iterdir()) == []
+
+
+def test_validate_destination_rejects_symlinked_edit_file(tmp_path: Path) -> None:
+    save_directory = _make_directory(tmp_path / "save")
+    escaped = tmp_path / "outside-edit"
+    escaped.write_bytes(b"outside")
+    (save_directory / "EDIT00000000").symlink_to(escaped)
+
+    with pytest.raises(DestinationError) as caught:
+        validate_destination(save_directory, GameTarget.FL26)
+
+    assert caught.value.code == "reparse_point"
+    assert escaped.read_bytes() == b"outside"

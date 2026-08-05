@@ -45,6 +45,37 @@ class DestinationError(OSError):
         self.code = code
 
 
+_REPARSE_POINT_ATTRIBUTE = getattr(
+    stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400
+)
+
+
+def _is_reparse_status(path_status: os.stat_result) -> bool:
+    return stat.S_ISLNK(path_status.st_mode) or bool(
+        getattr(path_status, "st_file_attributes", 0)
+        & _REPARSE_POINT_ATTRIBUTE
+    )
+
+
+def _reject_reparse_point(path: Path, description: str) -> None:
+    try:
+        path_status = path.lstat()
+    except FileNotFoundError:
+        return
+    except PermissionError as error:
+        raise DestinationError(
+            "permission_denied", f"{description} cannot be accessed: {path}"
+        ) from error
+    except OSError as error:
+        raise DestinationError(
+            "not_writable", f"{description} cannot be inspected: {path}"
+        ) from error
+    if _is_reparse_status(path_status):
+        raise DestinationError(
+            "reparse_point",
+            f"{description} must not be a symbolic link, junction, or reparse point: {path}",
+        )
+
 def _is_directory(path: Path) -> bool:
     try:
         return path.is_dir()
@@ -108,8 +139,9 @@ def discover_save_locations(
 
 
 def validate_destination(path: Path, target: GameTarget) -> Path:
+    _reject_reparse_point(path, "destination")
     try:
-        path_status = path.stat()
+        path_status = path.lstat()
     except (FileNotFoundError, NotADirectoryError) as error:
         raise DestinationError(
             "missing", f"destination does not exist: {path}"
@@ -146,6 +178,16 @@ def validate_destination(path: Path, target: GameTarget) -> Path:
         raise DestinationError(
             "not_writable", f"destination cannot be normalized: {path}"
         ) from error
+
+    _reject_reparse_point(normalized, "destination")
+    _reject_reparse_point(normalized / "EDIT00000000", "save file")
+    backup_directory = normalized / "FLDailyEditBackups"
+    _reject_reparse_point(backup_directory, "backup directory")
+    if backup_directory.exists() and not backup_directory.is_dir():
+        raise DestinationError(
+            "not_directory",
+            f"backup path is not a directory: {backup_directory}",
+        )
 
     probe_descriptor: int | None = None
     probe_path: Path | None = None

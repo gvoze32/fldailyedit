@@ -688,3 +688,115 @@ def test_restore_failure_retains_backup_and_reports_recovery_failed(
     assert backup.read_bytes() == original
     assert target.exists()
     assert list(destination.glob(".fldailyedit-*.tmp")) == []
+
+def test_target_appearing_before_commit_is_not_overwritten(tmp_path: Path) -> None:
+    archive_path, destination, record = _setup(tmp_path)
+    target = destination / SAVE_NAME
+
+    def create_target_at_commit(stage: InstallStage) -> None:
+        if stage is InstallStage.REPLACING:
+            target.write_bytes(b"created by another process")
+
+    with pytest.raises(InstallError) as caught:
+        _install(
+            archive_path,
+            destination,
+            record,
+            progress=create_target_at_commit,
+        )
+
+    assert caught.value.code == "target_changed"
+    assert caught.value.stage is InstallStage.REPLACING
+    assert target.read_bytes() == b"created by another process"
+    assert list(destination.glob(".fldailyedit-*.tmp")) == []
+
+
+def test_target_changed_after_backup_is_not_overwritten(tmp_path: Path) -> None:
+    archive_path, destination, record = _setup(tmp_path)
+    target = destination / SAVE_NAME
+    target.write_bytes(b"original")
+
+    def change_target_at_commit(stage: InstallStage) -> None:
+        if stage is InstallStage.REPLACING:
+            target.write_bytes(b"changed by another process")
+
+    with pytest.raises(InstallError) as caught:
+        _install(
+            archive_path,
+            destination,
+            record,
+            progress=change_target_at_commit,
+        )
+
+    assert caught.value.code == "target_changed"
+    assert caught.value.stage is InstallStage.REPLACING
+    assert target.read_bytes() == b"changed by another process"
+    assert (
+        destination
+        / "FLDailyEditBackups"
+        / "EDIT00000000.20260806T123456Z.bak"
+    ).read_bytes() == b"original"
+    assert list(destination.glob(".fldailyedit-*.tmp")) == []
+
+
+def test_target_disappearing_after_backup_is_not_recreated(tmp_path: Path) -> None:
+    archive_path, destination, record = _setup(tmp_path)
+    target = destination / SAVE_NAME
+    target.write_bytes(b"original")
+
+    def remove_target_at_commit(stage: InstallStage) -> None:
+        if stage is InstallStage.REPLACING:
+            target.unlink()
+
+    with pytest.raises(InstallError) as caught:
+        _install(
+            archive_path,
+            destination,
+            record,
+            progress=remove_target_at_commit,
+        )
+
+    assert caught.value.code == "target_changed"
+    assert caught.value.stage is InstallStage.REPLACING
+    assert not target.exists()
+    assert (
+        destination
+        / "FLDailyEditBackups"
+        / "EDIT00000000.20260806T123456Z.bak"
+    ).read_bytes() == b"original"
+    assert list(destination.glob(".fldailyedit-*.tmp")) == []
+
+
+def test_install_rejects_symlinked_destination_leaf(tmp_path: Path) -> None:
+    archive_path, _unused, record = _setup(tmp_path)
+    real_destination = tmp_path / "real" / "save"
+    real_destination.mkdir(parents=True)
+    linked_destination = tmp_path / "linked" / "save"
+    linked_destination.parent.mkdir()
+    linked_destination.symlink_to(real_destination, target_is_directory=True)
+
+    with pytest.raises(InstallError) as caught:
+        _install(archive_path, linked_destination, record)
+
+    assert caught.value.code == "invalid_destination"
+    assert caught.value.stage is InstallStage.VALIDATING_DESTINATION
+    assert list(real_destination.iterdir()) == []
+
+
+def test_install_rejects_symlinked_backup_directory(tmp_path: Path) -> None:
+    archive_path, destination, record = _setup(tmp_path)
+    target = destination / SAVE_NAME
+    target.write_bytes(b"original")
+    escaped = tmp_path / "escaped"
+    escaped.mkdir()
+    (destination / "FLDailyEditBackups").symlink_to(
+        escaped, target_is_directory=True
+    )
+
+    with pytest.raises(InstallError) as caught:
+        _install(archive_path, destination, record)
+
+    assert caught.value.code == "invalid_destination"
+    assert caught.value.stage is InstallStage.VALIDATING_DESTINATION
+    assert target.read_bytes() == b"original"
+    assert list(escaped.iterdir()) == []

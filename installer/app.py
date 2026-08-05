@@ -183,10 +183,12 @@ _ERROR_TITLES = {
     "not_save": "The selected folder is not a save folder",
     "not_writable": "The save folder is not writable",
     "permission_denied": "The save folder is not writable",
+    "reparse_point": "The save folder is not available",
     "recovery_failed": "The original save could not be restored",
     "replace_failed": "The save could not be replaced",
     "staging_failed": "The downloaded save could not be prepared",
     "target_locked": "Close the game and try again",
+    "target_changed": "The save file changed during installation",
 }
 
 
@@ -578,9 +580,13 @@ class InstallerWorker:
             )
             if self._cancelled():
                 raise DownloadError("cancelled", "download cancelled by user")
+            canonical_destination = self._validate_destination(
+                location.save_directory,
+                location.target,
+            )
             result = self._install_archive(
                 archive_path,
-                location.save_directory,
+                canonical_destination,
                 record,
                 now=self._now,
                 progress=self._emit_install_progress,
@@ -604,10 +610,29 @@ class InstallerWorker:
             if isinstance(command, _DiscoverLocations):
                 try:
                     locations = self._discover_locations()
+                    validated_locations: list[SaveLocation] = []
+                    seen_paths: set[str] = set()
+                    for location in locations:
+                        try:
+                            canonical_path = self._validate_destination(
+                                location.save_directory,
+                                location.target,
+                            )
+                        except DestinationError:
+                            continue
+                        key = str(canonical_path).casefold()
+                        if key in seen_paths:
+                            continue
+                        seen_paths.add(key)
+                        validated_locations.append(
+                            replace(location, save_directory=canonical_path)
+                        )
                 except Exception as error:
                     self.events.put(LocationDiscoveryFailed(error))
                 else:
-                    self.events.put(LocationsDiscovered(tuple(locations)))
+                    self.events.put(
+                        LocationsDiscovered(tuple(validated_locations))
+                    )
                 continue
             if isinstance(command, _ValidateDestination):
                 try:
