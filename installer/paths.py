@@ -158,6 +158,15 @@ def validate_destination(path: Path, target: GameTarget) -> Path:
         probe_path = Path(probe_name)
         os.close(probe_descriptor)
         probe_descriptor = None
+    except FileNotFoundError as error:
+        raise DestinationError(
+            "missing", f"destination disappeared during write probe: {normalized}"
+        ) from error
+    except NotADirectoryError as error:
+        raise DestinationError(
+            "not_directory",
+            f"destination stopped being a directory during write probe: {normalized}",
+        ) from error
     except PermissionError as error:
         raise DestinationError(
             "permission_denied",

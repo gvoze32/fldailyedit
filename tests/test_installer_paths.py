@@ -250,3 +250,37 @@ def test_validate_destination_removes_probe_when_close_fails(
     assert len(created_probes) == 1
     assert not created_probes[0].exists()
     assert list(save_directory.iterdir()) == []
+
+
+def test_validate_destination_maps_probe_time_disappearance_to_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    save_directory = _make_directory(tmp_path / "save")
+
+    def missing_during_probe(*args: object, **kwargs: object) -> tuple[int, str]:
+        raise FileNotFoundError("destination disappeared")
+
+    monkeypatch.setattr(paths_module.tempfile, "mkstemp", missing_during_probe)
+
+    with pytest.raises(DestinationError) as caught:
+        validate_destination(save_directory, GameTarget.FL26)
+
+    assert caught.value.code == "missing"
+    assert list(save_directory.iterdir()) == []
+
+
+def test_validate_destination_maps_probe_time_non_directory_race(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    save_directory = _make_directory(tmp_path / "save")
+
+    def file_during_probe(*args: object, **kwargs: object) -> tuple[int, str]:
+        raise NotADirectoryError("destination became a file")
+
+    monkeypatch.setattr(paths_module.tempfile, "mkstemp", file_during_probe)
+
+    with pytest.raises(DestinationError) as caught:
+        validate_destination(save_directory, GameTarget.FL26)
+
+    assert caught.value.code == "not_directory"
+    assert list(save_directory.iterdir()) == []
