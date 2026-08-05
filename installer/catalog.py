@@ -191,7 +191,10 @@ def _validate_release_url(
             "untrusted_asset", "target, channel, and asset are not allowlisted"
         )
 
-    parsed = urlsplit(download_url)
+    try:
+        parsed = urlsplit(download_url)
+    except ValueError as error:
+        raise CatalogError("untrusted_asset", "release URL is malformed") from error
     expected_path = (
         f"/{REPOSITORY}/releases/download/{RELEASE_TAG}/{asset_name}"
     )
@@ -435,5 +438,7 @@ def download_archive(
         if not complete:
             try:
                 destination.unlink(missing_ok=True)
-            except OSError:
-                pass
+            except OSError as error:
+                raise DownloadError(
+                    "cleanup_failed", "partial archive could not be removed"
+                ) from error

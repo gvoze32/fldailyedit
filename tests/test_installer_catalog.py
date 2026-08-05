@@ -216,6 +216,19 @@ def test_rejects_untrusted_release_urls(url: str) -> None:
         parse_catalog(_payload(document))
 
 
+def test_malformed_release_authority_raises_coded_catalog_error() -> None:
+    document = _catalog_copy()
+    document["records"][0]["download_url"] = (  # type: ignore[index]
+        "https://[invalid/gvoze32/fldailyedit/releases/download/latest/"
+        "fldailyedit-fl2026-fast.zip"
+    )
+
+    with pytest.raises(CatalogError) as caught:
+        parse_catalog(_payload(document))
+
+    assert caught.value.code == "untrusted_asset"
+
+
 def test_rejects_url_basename_that_differs_from_asset_name() -> None:
     document = _catalog_copy()
     document["records"][0]["asset_name"] = "fldailyedit-fl2026-deep.zip"  # type: ignore[index]
@@ -559,6 +572,33 @@ def test_download_removes_partial_file_on_checksum_mismatch(
     assert not destination.exists()
 
 
+def test_download_surfaces_partial_cleanup_failure(
+    local_server: ThreadingHTTPServer,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = b"archive"
+    _serve(local_server, "/cleanup-failure", body)
+    destination = tmp_path / "archive.zip"
+
+    def fail_unlink(path: Path, missing_ok: bool = False) -> None:
+        raise PermissionError("cleanup denied")
+
+    monkeypatch.setattr(Path, "unlink", fail_unlink)
+
+    with pytest.raises(DownloadError) as caught:
+        download_archive(
+            _record_for(body, digest="0" * 64),
+            destination,
+            progress=lambda downloaded, expected: None,
+            cancelled=lambda: False,
+            opener=_LocalServerOpener(local_server, "/cleanup-failure"),
+        )
+
+    assert caught.value.code == "cleanup_failed"
+    assert destination.exists()
+
+
 def test_download_maps_http_errors_to_stable_code(
     local_server: ThreadingHTTPServer, tmp_path: Path
 ) -> None:
@@ -587,3 +627,28 @@ def test_download_maps_url_errors_to_stable_code(tmp_path: Path) -> None:
         )
 
     assert caught.value.code == "network_error"
+
+
+def test_download_malformed_authority_raises_coded_untrusted_asset(
+    local_server: ThreadingHTTPServer, tmp_path: Path
+) -> None:
+    opener = _LocalServerOpener(local_server, "/unused")
+    malformed = replace(
+        _record_for(b"x"),
+        download_url=(
+            "https://[invalid/gvoze32/fldailyedit/releases/download/latest/"
+            "fldailyedit-fl2026-fast.zip"
+        ),
+    )
+
+    with pytest.raises(DownloadError) as caught:
+        download_archive(
+            malformed,
+            tmp_path / "archive.zip",
+            progress=lambda downloaded, expected: None,
+            cancelled=lambda: False,
+            opener=opener,
+        )
+
+    assert caught.value.code == "untrusted_asset"
+    assert opener.requested_urls == []
