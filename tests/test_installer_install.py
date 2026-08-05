@@ -800,3 +800,62 @@ def test_install_rejects_symlinked_backup_directory(tmp_path: Path) -> None:
     assert caught.value.stage is InstallStage.VALIDATING_DESTINATION
     assert target.read_bytes() == b"original"
     assert list(escaped.iterdir()) == []
+
+def test_rollback_preserves_concurrent_target_when_original_existed(
+    tmp_path: Path,
+) -> None:
+    archive_path, destination, record = _setup(tmp_path)
+    target = destination / SAVE_NAME
+    target.write_bytes(b"original")
+    concurrent = b"changed after installer commit"
+
+    def mutate_during_final_verification(stage: InstallStage) -> None:
+        if stage is InstallStage.VERIFYING_INSTALL:
+            target.write_bytes(concurrent)
+
+    with pytest.raises(InstallError) as caught:
+        _install(
+            archive_path,
+            destination,
+            record,
+            progress=mutate_during_final_verification,
+        )
+
+    backup = (
+        destination
+        / "FLDailyEditBackups"
+        / "EDIT00000000.20260806T123456Z.bak"
+    )
+    assert caught.value.code == "recovery_failed"
+    assert caught.value.stage is InstallStage.RESTORING
+    assert "manual recovery" in str(caught.value).casefold()
+    assert target.read_bytes() == concurrent
+    assert backup.read_bytes() == b"original"
+    assert list(destination.glob(".fldailyedit-*.tmp")) == []
+
+
+def test_rollback_preserves_concurrent_target_when_original_was_absent(
+    tmp_path: Path,
+) -> None:
+    archive_path, destination, record = _setup(tmp_path)
+    target = destination / SAVE_NAME
+    concurrent = b"created after installer commit"
+
+    def mutate_during_final_verification(stage: InstallStage) -> None:
+        if stage is InstallStage.VERIFYING_INSTALL:
+            target.write_bytes(concurrent)
+
+    with pytest.raises(InstallError) as caught:
+        _install(
+            archive_path,
+            destination,
+            record,
+            progress=mutate_during_final_verification,
+        )
+
+    assert caught.value.code == "recovery_failed"
+    assert caught.value.stage is InstallStage.RESTORING
+    assert "manual recovery" in str(caught.value).casefold()
+    assert target.read_bytes() == concurrent
+    assert not (destination / "FLDailyEditBackups").exists()
+    assert list(destination.glob(".fldailyedit-*.tmp")) == []

@@ -461,18 +461,46 @@ def _stage_archive(
                 pass
 
 
+def _assert_rollback_ownership(
+    target: Path,
+    installed_snapshot: _TargetSnapshot,
+    backup_path: Path | None,
+) -> None:
+    try:
+        _assert_target_matches(
+            target, installed_snapshot, InstallStage.RESTORING
+        )
+    except InstallError as error:
+        backup_detail = (
+            f" The verified backup remains at {backup_path}."
+            if backup_path is not None
+            else ""
+        )
+        raise InstallError(
+            "recovery_failed",
+            "The save file changed after installation; manual recovery is "
+            f"required and the concurrent file was preserved.{backup_detail}",
+            stage=InstallStage.RESTORING,
+        ) from error
+
+
 def _restore_after_failed_commit(
     target: Path,
     destination: Path,
     backup_path: Path | None,
     backup_size: int | None,
     backup_sha256: str | None,
+    installed_snapshot: _TargetSnapshot,
     progress: Callable[[InstallStage], None],
 ) -> None:
     progress(InstallStage.RESTORING)
+    _assert_rollback_ownership(target, installed_snapshot, backup_path)
     recovery_path: Path | None = None
     try:
         if backup_path is None:
+            _assert_rollback_ownership(
+                target, installed_snapshot, backup_path
+            )
             target.unlink(missing_ok=True)
             return
 
@@ -495,8 +523,17 @@ def _restore_after_failed_commit(
             raise OSError("recovery copy size verification failed")
         if _file_sha256(recovery_path) != backup_sha256:
             raise OSError("recovery copy SHA-256 verification failed")
+        _assert_rollback_ownership(target, installed_snapshot, backup_path)
         os.replace(recovery_path, target)
         recovery_path = None
+    except InstallError as error:
+        if error.code == "recovery_failed":
+            raise
+        raise InstallError(
+            "recovery_failed",
+            "Installation failed and the original save could not be restored",
+            stage=InstallStage.RESTORING,
+        ) from error
     except (OSError, ValueError) as error:
         raise InstallError(
             "recovery_failed",
@@ -573,15 +610,20 @@ def install_archive(
         _assert_safe_destination(destination, target, InstallStage.STAGING)
         _assert_target_matches(target, target_snapshot, InstallStage.STAGING)
         staged_path = _stage_archive(archive_path, destination, record)
+        staged_snapshot = _capture_target(staged_path, InstallStage.STAGING)
         _raise_if_cancelled(cancelled, InstallStage.STAGING)
 
         progress(InstallStage.REPLACING)
         _assert_safe_destination(destination, target, InstallStage.REPLACING)
         _assert_target_matches(target, target_snapshot, InstallStage.REPLACING)
+        _assert_target_matches(
+            staged_path, staged_snapshot, InstallStage.REPLACING
+        )
         commit_started = True
         try:
             os.replace(staged_path, target)
             staged_path = None
+            installed_snapshot = staged_snapshot
         except PermissionError as error:
             raise InstallError(
                 "target_locked",
@@ -599,6 +641,9 @@ def install_archive(
         try:
             installed_size = target.stat().st_size
             installed_sha256 = _file_sha256(target)
+            _assert_target_matches(
+                target, installed_snapshot, InstallStage.VERIFYING_INSTALL
+            )
         except OSError as error:
             verification_error: BaseException = error
         else:
@@ -616,6 +661,7 @@ def install_archive(
                 backup_path,
                 backup_size,
                 backup_sha256,
+                installed_snapshot,
                 progress,
             )
         except InstallError:
