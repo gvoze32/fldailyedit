@@ -148,6 +148,51 @@ def test_package_record_rolls_back_pair_when_second_publish_fails(
     assert set(output_dir.iterdir()) == {archive_path, record_path}
 
 
+def test_package_record_cleans_first_temp_when_second_allocation_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    save_path = tmp_path / "EDIT00000000"
+    output_dir = tmp_path / "release"
+    save_path.write_bytes(b"old consistent save")
+    archive_path, record_path = package_record(
+        save_path,
+        output_dir,
+        target_id=TARGET_ID,
+        target_name=TARGET_NAME,
+        channel=Channel.FAST,
+        generated_at=GENERATED_AT,
+    )
+    old_archive = archive_path.read_bytes()
+    old_record = record_path.read_bytes()
+    real_mkstemp = build_release_asset.tempfile.mkstemp
+    allocation_calls = 0
+
+    def fail_second_allocation(*args: object, **kwargs: object) -> tuple[int, str]:
+        nonlocal allocation_calls
+        allocation_calls += 1
+        if allocation_calls == 2:
+            raise OSError("simulated record temp allocation failure")
+        return real_mkstemp(*args, **kwargs)
+
+    monkeypatch.setattr(
+        build_release_asset.tempfile, "mkstemp", fail_second_allocation
+    )
+
+    with pytest.raises(OSError, match="record temp allocation failure"):
+        package_record(
+            save_path,
+            output_dir,
+            target_id=TARGET_ID,
+            target_name=TARGET_NAME,
+            channel=Channel.FAST,
+            generated_at=datetime(2026, 8, 6, 4, 5, 6, tzinfo=timezone.utc),
+        )
+
+    assert archive_path.read_bytes() == old_archive
+    assert record_path.read_bytes() == old_record
+    assert set(output_dir.iterdir()) == {archive_path, record_path}
+
+
 def test_package_record_clamps_pre_1980_zip_timestamp(tmp_path: Path) -> None:
     save_path = tmp_path / "EDIT00000000"
     save_path.write_bytes(b"old save")

@@ -8,7 +8,8 @@ import shutil
 import sys
 import tempfile
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError
@@ -54,6 +55,15 @@ def _new_sibling_temp(destination: Path) -> Path:
     )
     os.close(descriptor)
     return Path(raw_path)
+
+
+@contextmanager
+def _owned_sibling_temp(destination: Path) -> Iterator[Path]:
+    path = _new_sibling_temp(destination)
+    try:
+        yield path
+    finally:
+        path.unlink(missing_ok=True)
 
 
 def _fsync_file(path: Path) -> None:
@@ -142,10 +152,10 @@ def package_record(
     output_dir.mkdir(parents=True, exist_ok=True)
     archive_path = output_dir / asset_name
     record_path = output_dir / "record.json"
-    staged_archive = _new_sibling_temp(archive_path)
-    staged_record = _new_sibling_temp(record_path)
-
-    try:
+    with (
+        _owned_sibling_temp(archive_path) as staged_archive,
+        _owned_sibling_temp(record_path) as staged_record,
+    ):
         member_time = max(generated_utc, _ZIP_MINIMUM)
         member = zipfile.ZipInfo(
             _SAVE_MEMBER_NAME,
@@ -198,9 +208,6 @@ def package_record(
                 (staged_record, record_path),
             )
         )
-    finally:
-        staged_archive.unlink(missing_ok=True)
-        staged_record.unlink(missing_ok=True)
     return archive_path, record_path
 
 
