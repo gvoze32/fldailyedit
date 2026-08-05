@@ -136,9 +136,14 @@ def test_cmd_run_dry_run_resolves_stale_loan_chain(monkeypatch, tmp_path, capsys
 
         def get_all_rosters(self):
             return {
-                psg: TeamData(psg),
-                tottenham: TeamData(tottenham, [player_id] + [0] * 39),
-                juventus: TeamData(juventus),
+                psg: TeamData(psg, list(range(200001, 200017)) + [0] * 24),
+                tottenham: TeamData(
+                    tottenham,
+                    [player_id] + list(range(300001, 300017)) + [0] * 23,
+                ),
+                juventus: TeamData(
+                    juventus, list(range(400001, 400017)) + [0] * 24
+                ),
             }
 
         def find_overflow_release_candidate(self, *_, **__):

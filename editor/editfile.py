@@ -95,6 +95,7 @@ TP_TEAM_ID = 0x00          # 4 bytes uint32 LE
 TP_PLAYER_IDS = 0x04       # 40 × 4 bytes (160 bytes total)
 TP_SHIRT_NUMBERS = 0xA4    # 40 × 2 bytes (80 bytes total)
 TP_MAX_PLAYERS = 40
+MIN_CLUB_ROSTER_SIZE = 16
 
 # Game plan entry
 GP_TEAM_ID = 0x000         # 4 bytes uint32 LE
@@ -1369,7 +1370,21 @@ class EditFile:
             if any(pid == 0 and shirt != 0 for pid, shirt in zip(roster.player_ids, roster.shirt_numbers)):
                 errors.append(f"Team {tid} has a shirt number assigned to an empty roster slot")
 
-        club_ids = self.get_club_team_ids()
+        league_divisions = self.get_league_divisions()
+        club_ids = {team_id for division in league_divisions for team_id in division}
+        if not club_ids:
+            errors.append("Competition membership does not identify any clubs")
+        undersized_clubs = {
+            tid: rosters[tid].roster_size if tid in rosters else 0
+            for tid in club_ids
+            if tid not in rosters
+            or rosters[tid].roster_size < MIN_CLUB_ROSTER_SIZE
+        }
+        for tid, roster_size in sorted(undersized_clubs.items()):
+            errors.append(
+                f"Club {tid} roster has {roster_size} players; "
+                f"minimum is {MIN_CLUB_ROSTER_SIZE}"
+            )
         club_registrations: dict[int, list[int]] = {}
         for tid, roster in rosters.items():
             if tid not in club_ids:
@@ -1433,6 +1448,7 @@ class EditFile:
             "rosters": len(rosters),
             "clubs": len(club_ids),
             "duplicate_club_players": len(duplicate_club_players),
+            "undersized_clubs": len(undersized_clubs),
             "checked_game_plans": checked_game_plans,
         }
         return {

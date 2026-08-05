@@ -5,9 +5,6 @@
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> [!WARNING]
-> **Masalah yang Diketahui / Sedang Diperbaiki**: File save `EDIT00000000` yang dihasilkan saat ini masih mengalami bug/corrupt saat dibuka di dalam game (fallback ke default). Masalah integritas save file ini sedang dalam proses perbaikan.
-
 FL Daily Edit memperbarui skuad SP Football Life 2026 dan eFootball PES 2021
 dengan menerapkan transfer dunia nyata ke file save `EDIT00000000`.
 
@@ -69,9 +66,8 @@ Updater juga memeriksa klub pemain saat ini sebelum menerapkan perpindahan.
 
 Item berikut masih direncanakan dan belum diimplementasikan:
 
-1. **Pulihkan integritas output** — selidiki dan perbaiki kerusakan pada `EDIT00000000` yang saat ini dihasilkan, lalu perkuat validasi dan pemeriksaan round-trip sebelum output dianggap telah diperbaiki.
-2. **Installer/downloader GUI Windows** — sediakan `.exe` yang mudah digunakan pemula untuk memandu proses pengunduhan dan pemasangan option file, dengan pilihan **Fast** dan **Deep** yang jelas.
-3. **Beberapa base tervalidasi** — dukung pembuatan option file yang sesuai dari base terpisah dan tervalidasi untuk **SP Football Life 2026**, **vanilla eFootball PES 2021**, dan **UML** setelah file base tersebut diberikan dan divalidasi.
+1. **Installer/downloader GUI Windows** — sediakan `.exe` yang mudah digunakan pemula untuk memandu proses pengunduhan dan pemasangan option file, dengan pilihan **Fast** dan **Deep** yang jelas.
+2. **Beberapa base tervalidasi** — dukung pembuatan option file yang sesuai dari base terpisah dan tervalidasi untuk **SP Football Life 2026**, **vanilla eFootball PES 2021**, dan **UML** setelah file base tersebut diberikan dan divalidasi.
 
 ## Keamanan dan keterbatasan
 

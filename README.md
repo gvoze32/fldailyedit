@@ -5,9 +5,6 @@
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> [!WARNING]
-> **Known Issue / Work in Progress**: The generated `EDIT00000000` save file is currently encountering a bug/corruption issue when loaded in-game (falling back to default). We are actively investigating and fixing the save file integrity.
-
 FL Daily Edit updates SP Football Life 2026 and eFootball PES 2021 squads by
 applying real-world transfers to an `EDIT00000000` save file.
 
@@ -70,9 +67,8 @@ member. It also checks the player's current club before applying a move.
 
 These items are planned and are not implemented yet:
 
-1. **Restore output integrity** — investigate and repair corruption in the currently generated `EDIT00000000`, then strengthen validation and round-trip checks before considering the output fixed.
-2. **Windows GUI installer/downloader** — provide a beginner-friendly `.exe` that guides users through downloading and installing an option file, with explicit **Fast** and **Deep** choices.
-3. **Multiple validated bases** — support creating matching option files from separate validated bases for **SP Football Life 2026**, **vanilla eFootball PES 2021**, and **UML** after those base files are supplied and validated.
+1. **Windows GUI installer/downloader** — provide a beginner-friendly `.exe` that guides users through downloading and installing an option file, with explicit **Fast** and **Deep** choices.
+2. **Multiple validated bases** — support creating matching option files from separate validated bases for **SP Football Life 2026**, **vanilla eFootball PES 2021**, and **UML** after those base files are supplied and validated.
 
 ## Safety and limitations
 

@@ -5,9 +5,6 @@
 [![Version Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Licence : MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> [!WARNING]
-> **Problème connu / En cours de résolution** : Le fichier de sauvegarde `EDIT00000000` actuellement généré rencontre un bogue / une corruption lors du chargement dans le jeu (retour aux paramètres par défaut). Nous étudions et corrigeons activement l'intégrité du fichier.
-
 FL Daily Edit met à jour les effectifs de SP Football Life 2026 et eFootball PES 2021 en appliquant les transferts du monde réel à un fichier de sauvegarde `EDIT00000000`.
 
 ## Compatibilité
@@ -56,9 +53,8 @@ L'outil n'écrase pas un numéro de maillot déjà utilisé par un autre membre 
 
 Ces éléments sont planifiés et ne sont pas encore implémentés :
 
-1. **Restaurer l'intégrité de la sortie** — examiner et réparer la corruption du fichier `EDIT00000000` actuellement généré, puis renforcer la validation et les vérifications aller-retour avant de considérer la sortie réparée.
-2. **Installateur / Téléchargeur GUI Windows** — proposer un `.exe` facile d'accès qui guide les utilisateurs dans le téléchargement et l'installation d'un option file, avec des options **Fast** et **Deep**.
-3. **Multiples bases validées** — prendre en charge la création d'option files à partir de bases distinctes et validées pour **SP Football Life 2026**, **eFootball PES 2021 vanilla** et **UML** une fois ces bases fournies et validées.
+1. **Installateur / Téléchargeur GUI Windows** — proposer un `.exe` facile d'accès qui guide les utilisateurs dans le téléchargement et l'installation d'un option file, avec des options **Fast** et **Deep**.
+2. **Multiples bases validées** — prendre en charge la création d'option files à partir de bases distinctes et validées pour **SP Football Life 2026**, **eFootball PES 2021 vanilla** et **UML** une fois ces bases fournies et validées.
 
 ## Sécurité et limitations
 

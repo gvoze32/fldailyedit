@@ -36,6 +36,7 @@ def _build_mock_data(
     team_player_entries=None,
     player_entries=None,
     team_entries=None,
+    league_team_ids=None,
 ):
     """
     Build a mock data.dat with blocks sized at MAX capacity (like real PES21).
@@ -46,6 +47,7 @@ def _build_mock_data(
     team_player_entries: list of (team_id, [player_ids...], [shirt_nums...])
     player_entries: list of (player_id, name)
     team_entries: list of (team_id, name)
+    league_team_ids: team IDs encoded into one competition-membership division
     """
     header = bytearray(HEADER_SIZE)
 
@@ -99,6 +101,9 @@ def _build_mock_data(
 
     # Competition entry section (flat 4656 bytes) + Game plan block
     comp_entry_section = bytearray(COMPETITION_SECTION_SIZE)
+    if league_team_ids:
+        for index, team_id in enumerate(league_team_ids):
+            struct.pack_into("<I", comp_entry_section, index * 4, team_id)
     gp_block = bytearray(MAX_GAME_PLANS * GAME_PLAN_ENTRY_SIZE)
     if team_player_entries:
         for i, (tid, _pids, _shirts) in enumerate(team_player_entries[:num_game_plans]):
@@ -165,15 +170,16 @@ class TestEditFileHeader:
 
     def test_valid_mock_passes_integrity_validation(self):
         data = _build_mock_data(
-            num_players=5,
+            num_players=32,
             num_teams=2,
             num_team_player=2,
             num_game_plans=2,
             team_entries=[(101, "Alpha FC"), (102, "Beta FC")],
             team_player_entries=[
-                (101, [1001, 1002, 1003], [7, 10, 11]),
-                (102, [2001, 2002], [1, 9]),
+                (101, list(range(1001, 1017)), list(range(1, 17))),
+                (102, list(range(2001, 2017)), list(range(17, 33))),
             ],
+            league_team_ids=[101, 102],
         )
         ef = EditFile()
         ef.load_bytes(data)
@@ -183,6 +189,65 @@ class TestEditFileHeader:
         assert report["valid"] is True
         assert report["errors"] == []
 
+    def test_integrity_rejects_club_with_fewer_than_sixteen_players(self):
+        data = _build_mock_data(
+            num_players=15,
+            num_teams=1,
+            num_team_player=1,
+            num_game_plans=1,
+            team_entries=[(101, "Undersized FC")],
+            team_player_entries=[
+                (101, list(range(1001, 1016)), list(range(1, 16))),
+            ],
+            league_team_ids=[101],
+        )
+        ef = EditFile()
+        ef.load_bytes(data)
+
+        report = ef.validate_integrity()
+
+        assert report["valid"] is False
+        assert any(
+            "Club 101 roster has 15 players; minimum is 16" in error
+            for error in report["errors"]
+        )
+
+    def test_integrity_rejects_missing_club_membership_classification(self):
+        data = _build_mock_data(
+            num_players=16,
+            num_teams=1,
+            num_team_player=1,
+            num_game_plans=1,
+            team_entries=[(100, "Low ID FC")],
+            team_player_entries=[
+                (100, list(range(1001, 1017)), list(range(1, 17))),
+            ],
+        )
+        ef = EditFile()
+        ef.load_bytes(data)
+
+        report = ef.validate_integrity()
+
+        assert report["valid"] is False
+        assert "Competition membership does not identify any clubs" in report["errors"]
+
+    def test_integrity_rejects_club_without_a_roster_entry(self):
+        data = _build_mock_data(
+            num_players=0,
+            num_teams=1,
+            num_team_player=0,
+            num_game_plans=0,
+            team_entries=[(101, "Rosterless FC")],
+            league_team_ids=[101],
+        )
+        ef = EditFile()
+        ef.load_bytes(data)
+
+        report = ef.validate_integrity()
+
+        assert report["valid"] is False
+        assert "Club 101 roster has 0 players; minimum is 16" in report["errors"]
+
     def test_integrity_rejects_role_pointing_to_empty_roster_slot(self):
         data = bytearray(_build_mock_data(
             num_players=1,
@@ -191,6 +256,7 @@ class TestEditFileHeader:
             num_game_plans=1,
             team_entries=[(101, "Alpha FC")],
             team_player_entries=[(101, [1001], [7])],
+            league_team_ids=[101],
         ))
         ef = EditFile()
         ef.load_bytes(data)
@@ -205,12 +271,15 @@ class TestEditFileHeader:
 
     def test_repair_game_plan_preserves_valid_order_and_fills_missing_slots(self):
         data = bytearray(_build_mock_data(
-            num_players=4,
+            num_players=16,
             num_teams=1,
             num_team_player=1,
             num_game_plans=1,
             team_entries=[(101, "Alpha FC")],
-            team_player_entries=[(101, [1001, 1002, 1003, 1004], [7, 8, 9, 10])],
+            team_player_entries=[
+                (101, list(range(1001, 1017)), list(range(1, 17))),
+            ],
+            league_team_ids=[101],
         ))
         ef = EditFile()
         ef.load_bytes(data)
@@ -222,7 +291,9 @@ class TestEditFileHeader:
         metrics = ef.repair_game_plans()
         report = ef.validate_integrity()
 
-        assert list(ef._data[lineup:lineup + 4]) == [2, 0, 1, 3]
+        assert list(ef._data[lineup:lineup + 16]) == [
+            2, 0, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 1, 3
+        ]
         assert ef._data[game_plan_base + GP_CAPTAIN] == 0xFF
         assert metrics["repaired_lineups"] == 1
         assert metrics["reset_roles"] == 1
@@ -318,7 +389,14 @@ class TestMovePlayer:
 
     def test_basic_transfer(self):
         """Move player 1002 from team 101 to team 102."""
-        data = self._build_transfer_data()
+        data = _build_mock_data(
+            num_team_player=2,
+            team_player_entries=[
+                (101, list(range(1001, 1018)), list(range(1, 18))),
+                (102, list(range(2001, 2017)), list(range(18, 34))),
+            ],
+            league_team_ids=[101, 102],
+        )
         ef = EditFile()
         ef.load_bytes(data)
 
@@ -326,17 +404,17 @@ class TestMovePlayer:
         assert result is True
         assert ef.validate_integrity()["valid"] is True
 
-        # Verify source: 1002 removed, 1003 compacted into slot 1
+        # Verify source: 1002 removed, 1017 compacted into slot 1
         src = ef.get_team_roster(101)
         assert 1002 not in src.roster
-        assert src.roster_size == 2
+        assert src.roster_size == 16
         assert src.player_ids[0] == 1001
-        assert src.player_ids[1] == 1003  # compacted from slot 2
+        assert src.player_ids[1] == 1017
 
         # Verify dest: 1002 added
         dst = ef.get_team_roster(102)
         assert 1002 in dst.roster
-        assert dst.roster_size == 3
+        assert dst.roster_size == 17
 
     def test_transfer_last_player(self):
         """Move the last player in a team's roster (no compaction needed)."""

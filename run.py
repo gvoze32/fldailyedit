@@ -32,7 +32,11 @@ from pathlib import Path
 import config
 from editor import backup as backup_mod
 from editor import crypto
-from editor.editfile import COMPETITION_SECTION_SIZE, EditFile
+from editor.editfile import (
+    COMPETITION_SECTION_SIZE,
+    MIN_CLUB_ROSTER_SIZE,
+    EditFile,
+)
 from editor import logger as transfer_logger
 from editor.player_spec import (
     PlayerSpec,
@@ -630,8 +634,16 @@ def _plan_roster_actions(
             superseded_loan_sources.get(id(match), frozenset()),
         )
         item = PlannedRosterAction(match, action, current_team_id)
+        if (
+            action in {"move", "release"}
+            and current_team_id in rosters
+            and sum(player_id != 0 for player_id in rosters[current_team_id])
+            <= MIN_CLUB_ROSTER_SIZE
+        ):
+            item.action = "skip"
+            item.reason = "source_roster_minimum"
 
-        if action in {"move", "add"}:
+        if item.action in {"move", "add"}:
             destination = match.to_team_id
             if destination is None or destination not in rosters:
                 item.action = "skip"

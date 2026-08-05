@@ -5,9 +5,6 @@
 [![Python Sürümü](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Lisans: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> [!WARNING]
-> **Bilinen Sorun / Geliştirme Aşamasında**: Oluşturulan `EDIT00000000` kayıt dosyası oyun içinde yüklenirken bir hata/bozulma ile karşılaşmaktadır (varsayılan ayarlara dönmektedir). Dosya bütünlüğünü düzeltmek için aktif olarak çalışıyoruz.
-
 FL Daily Edit, gerçek dünyadaki transferleri bir `EDIT00000000` kayıt dosyasına uygulayarak SP Football Life 2026 ve eFootball PES 2021 kadrolarını günceller.
 
 ## Uyumluluk
@@ -56,9 +53,8 @@ Güncelleyici, başka bir oyuncu tarafından kullanılan forma numarasının üz
 
 Planlanan ancak henüz tamamlanmamış özellikler:
 
-1. **Çıktı bütünlüğünü geri yükleme** — Oluşturulan `EDIT00000000` dosyasındaki bozulmayı araştırıp onarmak ve doğrulama kontrollerini güçlendirmek.
-2. **Windows GUI Yükleyici/İndirici** — Kullanıcıların **Fast** ve **Deep** seçenekleriyle option file indirmesini ve kurmasını sağlayan kullanıcı dostu bir `.exe` aracı.
-3. **Çoklu doğrulanmış temel dosyalar** — **SP Football Life 2026**, **vanilla eFootball PES 2021** ve **UML** için ayrı doğrulanmış temel dosyaları desteklemek.
+1. **Windows GUI Yükleyici/İndirici** — Kullanıcıların **Fast** ve **Deep** seçenekleriyle option file indirmesini ve kurmasını sağlayan kullanıcı dostu bir `.exe` aracı.
+2. **Çoklu doğrulanmış temel dosyalar** — **SP Football Life 2026**, **vanilla eFootball PES 2021** ve **UML** için ayrı doğrulanmış temel dosyaları desteklemek.
 
 ## Güvenlik ve Sınırlamalar
 

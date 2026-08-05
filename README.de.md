@@ -5,9 +5,6 @@
 [![Python-Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Lizenz: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> [!WARNING]
-> **Bekanntes Problem / In Bearbeitung**: Die aktuell generierte `EDIT00000000`-Speicherdatei weist beim Laden im Spiel einen Fehler/eine Beschädigung auf (fällt auf Standardwerte zurück). Wir arbeiten aktiv an der Behebung der Dateiintegrität.
-
 FL Daily Edit aktualisiert die Kader von SP Football Life 2026 und eFootball PES 2021, indem reale Transfers auf eine `EDIT00000000`-Speicherdatei angewendet werden.
 
 ## Kompatibilität
@@ -56,9 +53,8 @@ Der Updater überschreibt keine Trikotnummer, die bereits von einem anderen Kade
 
 Folgende Punkte sind geplant und noch nicht implementiert:
 
-1. **Wiederherstellung der Ausgabe-Integrität** — Untersuchung und Behebung von Beschädigungen in der generierten `EDIT00000000`-Datei, gefolgt von verschärften Validierungs- und Roundtrip-Prüfungen.
-2. **Windows-GUI-Installer/Downloader** — Bereitstellung einer benutzerfreundlichen `.exe`, die durch den Download und die Installation einer Option File mit den Optionen **Fast** und **Deep** führt.
-3. **Mehrere validierte Basisdateien** — Unterstützung für separate, validierte Basisdateien für **SP Football Life 2026**, **vanilla eFootball PES 2021** und **UML**.
+1. **Windows-GUI-Installer/Downloader** — Bereitstellung einer benutzerfreundlichen `.exe`, die durch den Download und die Installation einer Option File mit den Optionen **Fast** und **Deep** führt.
+2. **Mehrere validierte Basisdateien** — Unterstützung für separate, validierte Basisdateien für **SP Football Life 2026**, **vanilla eFootball PES 2021** und **UML**.
 
 ## Sicherheit und Einschränkungen
 

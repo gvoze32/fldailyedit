@@ -5,9 +5,6 @@
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> [!WARNING]
-> **已知问题 / 正在修复中**：生成的 `EDIT00000000` 存档文件目前在游戏中加载时存在 bug/损坏（导致回退到默认设置）。我们正在全力修复存档完整性问题。
-
 FL Daily Edit 通过将现实世界中的转会应用到 `EDIT00000000` 存档文件，更新 SP Football Life 2026 和 eFootball PES 2021 的阵容。
 
 ## 兼容性
@@ -56,9 +53,8 @@ GitHub Actions 每天都会生成更新后的存档和转会报告。
 
 以下项目仍在规划中，尚未实现：
 
-1. **恢复输出完整性** — 调查并修复当前生成的 `EDIT00000000` 损坏问题，然后加强验证和往返检查，确认无误后再将输出视为已修复。
-2. **Windows 图形界面安装器/下载器** — 提供适合新手的 `.exe`，引导用户下载并安装 option file，并明确提供 **Fast** 和 **Deep** 两种选择。
-3. **多个已验证基础文件** — 在相应基础文件提供并通过验证后，支持从独立且经过验证的基础文件为 **SP Football Life 2026**、**vanilla eFootball PES 2021** 和 **UML** 创建匹配的 option file。
+1. **Windows 图形界面安装器/下载器** — 提供适合新手的 `.exe`，引导用户下载并安装 option file，并明确提供 **Fast** 和 **Deep** 两种选择。
+2. **多个已验证基础文件** — 在相应基础文件提供并通过验证后，支持从独立且经过验证的基础文件为 **SP Football Life 2026**、**vanilla eFootball PES 2021** 和 **UML** 创建匹配的 option file。
 
 ## 安全性与限制
 

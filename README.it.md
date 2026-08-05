@@ -5,9 +5,6 @@
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> [!WARNING]
-> **Problema noto / In fase di risoluzione**: Il file di salvataggio `EDIT00000000` generato presenta attualmente un bug/corruzione al caricamento nel gioco (ritorno ai dati predefiniti). Stiamo lavorando attivamente per ripristinare la piena integrità del salvataggio.
-
 FL Daily Edit aggiorna le rose di SP Football Life 2026 ed eFootball PES 2021
 applicando i trasferimenti reali a un file di salvataggio `EDIT00000000`.
 
@@ -71,9 +68,8 @@ prima di applicare un trasferimento.
 
 Questi elementi sono pianificati e non sono ancora stati implementati:
 
-1. **Ripristinare l'integrità dell'output** — esaminare e correggere il danneggiamento del file `EDIT00000000` attualmente generato, quindi rafforzare la convalida e i controlli di andata e ritorno prima di considerare l'output corretto.
-2. **Programma di installazione/download con GUI per Windows** — fornire un `.exe` adatto ai principianti che guidi il download e l'installazione di un option file, con scelte esplicite **Fast** e **Deep**.
-3. **Più basi convalidate** — supportare la creazione di option file corrispondenti da basi separate e convalidate per **SP Football Life 2026**, **vanilla eFootball PES 2021** e **UML**, dopo che i relativi file di base saranno stati forniti e convalidati.
+1. **Programma di installazione/download con GUI per Windows** — fornire un `.exe` adatto ai principianti che guidi il download e l'installazione di un option file, con scelte esplicite **Fast** e **Deep**.
+2. **Più basi convalidate** — supportare la creazione di option file corrispondenti da basi separate e convalidate per **SP Football Life 2026**, **vanilla eFootball PES 2021** e **UML**, dopo che i relativi file di base saranno stati forniti e convalidati.
 
 ## Sicurezza e limitazioni
 

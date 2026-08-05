@@ -162,9 +162,11 @@ def test_roster_plan_simulates_chained_moves_chronologically():
         date="2026-08-02T18:40:10Z",
     )
     rosters = {
-        psg: TeamData(psg, [115254] + [0] * 39),
-        tottenham: TeamData(tottenham),
-        juventus: TeamData(juventus),
+        psg: TeamData(psg, [115254] + list(range(200001, 200017)) + [0] * 23),
+        tottenham: TeamData(
+            tottenham, list(range(300001, 300017)) + [0] * 24
+        ),
+        juventus: TeamData(juventus, list(range(400001, 400017)) + [0] * 24),
     }
     superseded = _build_superseded_loan_sources([loan, permanent])
 
@@ -178,6 +180,32 @@ def test_roster_plan_simulates_chained_moves_chronologically():
     ]
 
 
+def test_roster_plan_refuses_to_reduce_a_club_below_sixteen_players():
+    source, destination = 10, 20
+    transfer = _club_match(
+        source=source,
+        destination=destination,
+        date="2026-08-02",
+    )
+    rosters = {
+        source: TeamData(
+            source, [115254] + list(range(200001, 200016)) + [0] * 24
+        ),
+        destination: TeamData(
+            destination, list(range(300001, 300017)) + [0] * 24
+        ),
+    }
+
+    plan = _plan_roster_actions(
+        [transfer], rosters, set(rosters), object(), {}
+    )
+
+    assert (plan[0].action, plan[0].reason) == (
+        "skip",
+        "source_roster_minimum",
+    )
+
+
 def test_roster_plan_requires_explicit_overflow_permission():
     source, destination = 10, 20
     transfer = _club_match(
@@ -186,7 +214,9 @@ def test_roster_plan_requires_explicit_overflow_permission():
         date="2026-08-02",
     )
     rosters = {
-        source: TeamData(source, [115254] + [0] * 39),
+        source: TeamData(
+            source, [115254] + list(range(200001, 200017)) + [0] * 23
+        ),
         destination: TeamData(destination, list(range(1000, 1040))),
     }
 
