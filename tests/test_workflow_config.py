@@ -870,22 +870,27 @@ def test_sync_workflows_publish_only_validated_payloads_under_one_catalog_lock()
             "--record release-payload/record.json "
             "--output release-payload/catalog.json"
         ) in publish[merge_position:release_position]
-        assert "GH_TOKEN: ${{ github.token }}" in publish[release_position:]
+        release = publish[release_position:]
+        assert "GH_TOKEN: ${{ github.token }}" in release
+        assert "GH_REPO: ${{ github.repository }}" in release
         assert (
-            'gh release view latest >/dev/null 2>&1 || gh release create latest '
+            'gh release view latest --repo "$GH_REPO" >/dev/null 2>&1 || '
+            'gh release create latest --repo "$GH_REPO" '
             '--title "Latest FL Daily Edit" '
             '--notes "Validated Fast and Deep option files for FL Daily Edit."'
-        ) in publish[release_position:]
-
-        upload_commands = re.findall(
-            r"(?m)^          gh release upload latest .+$", publish
-        )
-        assert upload_commands == [
-            "          gh release upload latest "
-            f"release-payload/fldailyedit-fl2026-{channel}.zip "
-            "release-payload/catalog.json --clobber"
-        ]
+        ) in release
+        assert (
+            "python tools/publish_release_assets.py \\\n"
+            '            --repo "$GH_REPO" \\\n'
+            "            --tag latest \\\n"
+            f"            release-payload/fldailyedit-fl2026-{channel}.zip \\\n"
+            "            release-payload/catalog.json"
+        ) in release
+        assert "gh release upload" not in release
         assert f"fldailyedit-fl2026-{other_channel}.zip" not in publish
+        for line in release.splitlines():
+            if "gh release " in line:
+                assert '--repo "$GH_REPO"' in line
 
 
 def test_fast_and_deep_sync_workflows_differ_only_by_channel_and_deep_mode():
@@ -975,6 +980,8 @@ def test_installer_workflow_builds_tests_and_smoke_tests_on_windows():
         "FLDailyEditInstaller.spec",
         "pyproject.toml",
         ".github/workflows/build-installer.yml",
+        "tools/publish_release_assets.py",
+        "tests/test_release_publisher.py",
     ):
         assert path_filter in text
 
@@ -1015,12 +1022,25 @@ def test_installer_publish_job_is_serialized_and_uploads_exact_release_assets():
     assert "contents: write" in publish
     assert "group: fldailyedit-latest-release" in publish
     assert "cancel-in-progress: false" in publish
-    assert "uses: actions/download-artifact@v8" in publish
+    assert "uses: actions/checkout@v7" in publish
+    assert "GH_REPO: ${{ github.repository }}" in publish
     assert (
-        "gh release upload latest "
-        "release-payload/FLDailyEditInstaller.exe "
-        "release-payload/FLDailyEditInstaller.exe.sha256 --clobber"
+        'gh release view latest --repo "$GH_REPO" >/dev/null 2>&1 || '
+        'gh release create latest --repo "$GH_REPO" '
+        '--title "Latest FL Daily Edit" '
+        '--notes "Validated FL Daily Edit release assets."'
     ) in publish
+    assert (
+        "python tools/publish_release_assets.py \\\n"
+        '            --repo "$GH_REPO" \\\n'
+        "            --tag latest \\\n"
+        "            release-payload/FLDailyEditInstaller.exe \\\n"
+        "            release-payload/FLDailyEditInstaller.exe.sha256"
+    ) in publish
+    assert "gh release upload" not in publish
+    for line in publish.splitlines():
+        if "gh release " in line:
+            assert '--repo "$GH_REPO"' in line
 
     actions = re.findall(r"(?m)^\s*uses:\s+([^@\s]+)@", text)
     assert actions

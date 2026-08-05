@@ -8,6 +8,8 @@ on:
       - "installer/**"
       - "tests/test_installer_*.py"
       - "tests/test_release_asset.py"
+      - "tests/test_release_publisher.py"
+      - "tools/publish_release_assets.py"
       - "FLDailyEditInstaller.spec"
       - "pyproject.toml"
       - ".github/workflows/build-installer.yml"
@@ -73,6 +75,7 @@ jobs:
       group: fldailyedit-latest-release
       cancel-in-progress: false
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           name: installer-${{ github.run_id }}
@@ -80,6 +83,11 @@ jobs:
       - name: Publish rolling release assets
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          gh release view latest >/dev/null 2>&1 || gh release create latest --title "Latest FL Daily Edit" --notes "Validated FL Daily Edit release assets."
-          gh release upload latest release-payload/FLDailyEditInstaller.exe release-payload/FLDailyEditInstaller.exe.sha256 --clobber
+          gh release view latest --repo "$GH_REPO" >/dev/null 2>&1 || gh release create latest --repo "$GH_REPO" --title "Latest FL Daily Edit" --notes "Validated FL Daily Edit release assets."
+          python tools/publish_release_assets.py \
+            --repo "$GH_REPO" \
+            --tag latest \
+            release-payload/FLDailyEditInstaller.exe \
+            release-payload/FLDailyEditInstaller.exe.sha256
