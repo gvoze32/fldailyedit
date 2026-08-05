@@ -6,6 +6,9 @@ from queue import Empty, SimpleQueue
 from threading import Event, get_ident, main_thread
 from time import monotonic, sleep
 
+import pytest
+from installer import app as installer_app
+
 from installer.app import (
     CatalogLoaded,
     InstallCompleted,
@@ -670,3 +673,150 @@ def test_terminal_event_is_published_after_pending_state_is_cleared(
     finally:
         gate.release_publisher.set()
         worker.close()
+
+
+def test_exact_english_ui_copy_is_available_without_rendering() -> None:
+    assert {
+        "Fast — Recommended",
+        "Standard daily update from the live transfer feed.",
+        "Deep — Expanded coverage",
+        "Checks every locally indexed FotMob club for maximum coverage.",
+        "Fast and Deep describe update coverage, not download speed.",
+        "Download and install",
+        "Close the game before continuing.",
+        "Open save folder",
+        "Copy diagnostic details",
+    } <= set(installer_app.UI_COPY.values())
+
+
+def test_entry_point_supports_launch_version_self_test_and_rejects_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from installer import __main__ as entry_point
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        entry_point, "run_gui", lambda: calls.append("launch") or 0
+    )
+    monkeypatch.setattr(
+        entry_point, "self_test", lambda: calls.append("self-test") or 0
+    )
+
+    assert entry_point.main([]) == 0
+    assert calls == ["launch"]
+    assert entry_point.main(["--self-test"]) == 0
+    assert calls == ["launch", "self-test"]
+    assert entry_point.main(["--version"]) == 0
+    assert capsys.readouterr().out == "0.1.0\n"
+    with pytest.raises(SystemExit) as error:
+        entry_point.main(["--unknown"])
+    assert error.value.code != 0
+
+
+def test_progress_presentation_switches_mode_and_locks_at_commit() -> None:
+    downloading = InstallerState(
+        step=WizardStep.PROGRESS,
+        progress_stage="downloading",
+        progress_downloaded=25,
+        progress_total=100,
+    )
+    download_view = installer_app.progress_presentation(downloading)
+    assert download_view.mode == "determinate"
+    assert download_view.maximum == 100
+    assert download_view.value == 25
+    assert download_view.controls_locked is False
+    assert download_view.status == "Downloading update… 25%"
+
+    replacing = InstallerState(
+        step=WizardStep.PROGRESS,
+        progress_stage=InstallStage.REPLACING.value,
+        commit_started=True,
+    )
+    commit_view = installer_app.progress_presentation(replacing)
+    assert commit_view.mode == "indeterminate"
+    assert commit_view.controls_locked is True
+    assert commit_view.status == "Finishing installation safely…"
+
+
+def test_close_disposition_cancels_before_commit_and_blocks_during_commit() -> None:
+    before_commit = InstallerState(step=WizardStep.PROGRESS)
+    at_commit = InstallerState(step=WizardStep.PROGRESS, commit_started=True)
+
+    assert (
+        installer_app.close_disposition(before_commit)
+        is installer_app.CloseDisposition.CANCEL_AND_WAIT
+    )
+    assert (
+        installer_app.close_disposition(at_commit)
+        is installer_app.CloseDisposition.BLOCK
+    )
+    assert (
+        installer_app.close_disposition(InstallerState())
+        is installer_app.CloseDisposition.CLOSE
+    )
+
+
+def test_diagnostics_include_only_version_stage_code_and_selected_path() -> None:
+    location = _location(GameTarget.FL26, "Football Life 2026")
+    state = InstallerState(
+        step=WizardStep.RESULT,
+        selected_location=location,
+        progress_stage=InstallStage.VERIFYING_ARCHIVE.value,
+        error_title="Downloaded file failed verification",
+        error_detail="payload secret must not be copied",
+    )
+
+    assert installer_app.diagnostic_details(
+        state, error_code="checksum_mismatch"
+    ) == (
+        "FLDailyEdit Installer 0.1.0\n"
+        "Stage: verifying_archive\n"
+        "Code: checksum_mismatch\n"
+        f"Selected path: {location.save_directory}"
+    )
+
+
+def test_open_save_folder_is_platform_guarded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened: list[Path] = []
+    monkeypatch.setattr(installer_app.sys, "platform", "darwin")
+    monkeypatch.setattr(
+        installer_app.os,
+        "startfile",
+        lambda path: opened.append(Path(path)),
+        raising=False,
+    )
+
+    assert installer_app.open_save_folder(Path("/tmp/save")) is False
+    assert opened == []
+
+    monkeypatch.setattr(installer_app.sys, "platform", "win32")
+    assert installer_app.open_save_folder(Path("C:/save")) is True
+    assert opened == [Path("C:/save")]
+
+
+def test_orderly_application_shutdown_closes_worker_before_destroying_root() -> None:
+    actions: list[str] = []
+
+    class Root:
+        def after_cancel(self, _identifier: str) -> None:
+            actions.append("cancel-poll")
+
+        def destroy(self) -> None:
+            actions.append("destroy-root")
+
+    class Worker:
+        def close(self, timeout: float | None = 2.0) -> None:
+            actions.append(f"close-worker:{timeout}")
+
+    application = object.__new__(installer_app.InstallerApplication)
+    application.root = Root()
+    application.worker = Worker()
+    application._poll_after_id = "poll"
+    application._closed = False
+
+    application.close()
+
+    assert actions == ["cancel-poll", "close-worker:0.0", "destroy-root"]
