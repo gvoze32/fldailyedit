@@ -31,8 +31,10 @@
 
 تنشئ GitHub Actions يوميًا ملف حفظ محدّثًا وتقارير للانتقالات.
 
-> [!NOTE]
-> يتطلب GitHub تسجيل الدخول قبل تنزيل عناصر سير العمل.
+<blockquote>
+<strong>ملاحظة</strong><br>
+يتطلب GitHub تسجيل الدخول قبل تنزيل عناصر سير العمل.
+</blockquote>
 
 1. افتح أحدث تشغيل ناجح لـ
    [Deep Sync](https://github.com/gvoze32/fldailyedit/actions/workflows/sync-deep.yml)
