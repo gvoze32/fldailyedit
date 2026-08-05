@@ -58,6 +58,20 @@ class _TargetSnapshot:
     size: int | None = None
     sha256: str | None = None
 
+@dataclass(frozen=True, slots=True)
+class _RollbackOutcome:
+    quarantine_path: Path
+    backup_path: Path | None
+    recovery_path: Path | None
+
+    def artifact_detail(self) -> str:
+        artifacts = [f"quarantine: {self.quarantine_path}"]
+        if self.backup_path is not None:
+            artifacts.append(f"backup: {self.backup_path}")
+        if self.recovery_path is not None:
+            artifacts.append(f"recovery copy: {self.recovery_path}")
+        return "; ".join(artifacts)
+
 
 def _is_reparse_status(path_status: os.stat_result) -> bool:
     return stat.S_ISLNK(path_status.st_mode) or bool(
@@ -463,12 +477,18 @@ def _stage_archive(
                 pass
 
 
-def _move_no_replace(source: Path, target: Path) -> None:
+def _move_no_replace(source: Path, target: Path) -> bool:
+    source_status = source.lstat()
+    if (
+        _is_reparse_status(source_status)
+        or not stat.S_ISREG(source_status.st_mode)
+    ):
+        raise OSError("no-replace source is not a regular file")
     if _WINDOWS:
         os.rename(source, target)
-        return
-    os.link(source, target)
-    source.unlink()
+        return False
+    os.link(source, target, follow_symlinks=False)
+    return True
 
 
 def _quarantine_target(target: Path) -> Path:
@@ -511,7 +531,7 @@ def _restore_after_failed_commit(
     backup_sha256: str | None,
     installed_snapshot: _TargetSnapshot,
     progress: Callable[[InstallStage], None],
-) -> None:
+) -> _RollbackOutcome:
     progress(InstallStage.RESTORING)
     recovery_path: Path | None = None
     quarantine_path: Path | None = None
@@ -538,8 +558,7 @@ def _restore_after_failed_commit(
             if _file_sha256(recovery_path) != backup_sha256:
                 raise OSError("recovery copy SHA-256 verification failed")
 
-        # These checks provide diagnostics only. Safety comes from atomically
-        # moving whatever is currently named target before examining it.
+        # Diagnostics only: the quarantine move below is the safety boundary.
         _assert_rollback_ownership(target, installed_snapshot, backup_path)
         _assert_rollback_ownership(target, installed_snapshot, backup_path)
         quarantine_path = _quarantine_target(target)
@@ -548,28 +567,24 @@ def _restore_after_failed_commit(
             quarantined_snapshot = _capture_target(
                 quarantine_path, InstallStage.RESTORING
             )
-        except InstallError:
+        except InstallError as error:
             preserve_recovery = recovery_path is not None
-            try:
-                _move_no_replace(quarantine_path, target)
-            except OSError:
-                pass
-            else:
-                quarantine_path = None
             raise InstallError(
                 "recovery_failed",
-                "The quarantined save could not be verified; manual recovery "
-                f"is required. Preserved quarantine: {quarantine_path}",
+                "The quarantined save could not be verified and was not "
+                "republished; manual recovery is required. "
+                f"quarantine: {quarantine_path}; backup: {backup_path}; "
+                f"recovery copy: {recovery_path}",
                 stage=InstallStage.RESTORING,
-            )
+            ) from error
 
         if quarantined_snapshot != installed_snapshot:
             preserve_recovery = recovery_path is not None
             try:
-                _move_no_replace(quarantine_path, target)
+                source_retained = _move_no_replace(quarantine_path, target)
             except OSError:
-                pass
-            else:
+                source_retained = True
+            if not source_retained:
                 quarantine_path = None
             raise InstallError(
                 "recovery_failed",
@@ -585,15 +600,19 @@ def _restore_after_failed_commit(
                 raise InstallError(
                     "recovery_failed",
                     "A concurrent save appeared during rollback and was "
-                    f"preserved at {target}; manual recovery is required",
+                    f"preserved at {target}; manual recovery is required. "
+                    f"quarantine: {quarantine_path}",
                     stage=InstallStage.RESTORING,
                 )
-            return
+            return _RollbackOutcome(quarantine_path, None, None)
 
         if recovery_path is None:
             raise OSError("verified recovery copy is unavailable")
+        recovery_snapshot = _capture_target(
+            recovery_path, InstallStage.RESTORING
+        )
         try:
-            _move_no_replace(recovery_path, target)
+            source_retained = _move_no_replace(recovery_path, target)
         except OSError as error:
             preserve_recovery = True
             raise InstallError(
@@ -604,16 +623,36 @@ def _restore_after_failed_commit(
                 f"{backup_path}; recovery copy: {recovery_path}",
                 stage=InstallStage.RESTORING,
             ) from error
-        recovery_path = None
-
+        if source_retained:
+            preserve_recovery = True
+        else:
+            recovery_path = None
+        try:
+            _assert_target_matches(
+                target, recovery_snapshot, InstallStage.RESTORING
+            )
+        except InstallError as error:
+            preserve_recovery = recovery_path is not None
+            raise InstallError(
+                "recovery_failed",
+                "The restored target changed after no-clobber publication; "
+                f"manual recovery is required. Target: {target}; quarantine: "
+                f"{quarantine_path}; backup: {backup_path}; recovery copy: "
+                f"{recovery_path}",
+                stage=InstallStage.RESTORING,
+            ) from error
+        return _RollbackOutcome(
+            quarantine_path, backup_path, recovery_path
+        )
     except InstallError as error:
-        if error.code == "recovery_failed":
-            raise
-        preserve_recovery = preserve_recovery or quarantine_path is not None
+        preserve_recovery = (
+            preserve_recovery
+            or quarantine_path is not None
+            or error.code == "recovery_failed"
+        )
         raise InstallError(
             "recovery_failed",
-            "Rollback could not safely identify transaction-owned data; "
-            f"manual recovery is required. Target: {target}; quarantine: "
+            f"{error} Retained artifacts — target: {target}; quarantine: "
             f"{quarantine_path}; backup: {backup_path}; recovery copy: "
             f"{recovery_path}",
             stage=InstallStage.RESTORING,
@@ -743,7 +782,7 @@ def install_archive(
             verification_error = OSError("installed save verification failed")
 
         try:
-            _restore_after_failed_commit(
+            rollback = _restore_after_failed_commit(
                 target,
                 destination,
                 backup_path,
@@ -756,7 +795,8 @@ def install_archive(
             raise
         raise InstallError(
             "install_verification_failed",
-            "The installed save failed final verification",
+            "The installed save failed final verification. Retained artifacts "
+            f"— {rollback.artifact_detail()}",
             stage=InstallStage.VERIFYING_INSTALL,
         ) from verification_error
     finally:

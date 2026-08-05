@@ -622,10 +622,19 @@ def test_final_verification_mismatch_restores_verified_backup_atomically(
         / "EDIT00000000.20260806T123456Z.bak"
     )
     assert backup.read_bytes() == original
-    assert list(destination.glob(".fldailyedit-*.tmp")) == []
+    recoveries = list(destination.glob(".fldailyedit-*.tmp"))
     quarantines = list(destination.glob(".fldailyedit-quarantine-*"))
     assert len(quarantines) == 1
     assert quarantines[0].read_bytes() == b"verified new save"
+    detail = str(caught.value)
+    assert str(backup) in detail
+    assert str(quarantines[0]) in detail
+    if install_module._WINDOWS:
+        assert recoveries == []
+    else:
+        assert len(recoveries) == 1
+        assert recoveries[0].read_bytes() == original
+        assert str(recoveries[0]) in detail
 
 
 def test_final_verification_mismatch_removes_new_invalid_target(
@@ -652,6 +661,7 @@ def test_final_verification_mismatch_removes_new_invalid_target(
     quarantines = list(destination.glob(".fldailyedit-quarantine-*"))
     assert len(quarantines) == 1
     assert quarantines[0].read_bytes() == b"verified new save"
+    assert str(quarantines[0]) in str(caught.value)
 
 
 def test_restore_failure_retains_backup_and_reports_recovery_failed(
@@ -834,7 +844,11 @@ def test_rollback_preserves_concurrent_target_when_original_existed(
     assert "manual recovery" in str(caught.value).casefold()
     assert target.read_bytes() == concurrent
     assert backup.read_bytes() == b"original"
-    assert list(destination.glob(".fldailyedit-*.tmp")) == []
+    recoveries = list(destination.glob(".fldailyedit-*.tmp"))
+    assert len(recoveries) == 1
+    assert recoveries[0].read_bytes() == b"original"
+    assert str(backup) in str(caught.value)
+    assert str(recoveries[0]) in str(caught.value)
 
 
 def test_rollback_preserves_concurrent_target_when_original_was_absent(
@@ -885,7 +899,7 @@ def test_no_replace_move_restores_only_to_an_absent_target(
 
     install_module._move_no_replace(source, target)
 
-    assert not source.exists()
+    assert source.exists() is (not windows_semantics)
     assert target.read_bytes() == b"original"
 
 
@@ -999,3 +1013,164 @@ def test_quarantine_preserves_target_replaced_after_last_backup_rollback_check(
     surviving = target if target.exists() else quarantines[0]
     assert surviving.read_bytes() == concurrent
     assert backup.read_bytes() == b"original"
+
+def test_posix_no_replace_retains_source_across_destination_race(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "recovery"
+    target = tmp_path / SAVE_NAME
+    source.write_bytes(b"original")
+    real_link = os.link
+    observed_follow_symlinks: list[bool | None] = []
+
+    def race_after_link(
+        source_path: Path,
+        target_path: Path,
+        *,
+        follow_symlinks: bool | None = None,
+    ) -> None:
+        observed_follow_symlinks.append(follow_symlinks)
+        real_link(
+            source_path,
+            target_path,
+            follow_symlinks=bool(follow_symlinks),
+        )
+        Path(target_path).unlink()
+        Path(target_path).write_bytes(b"concurrent")
+
+    monkeypatch.setattr(install_module, "_WINDOWS", False)
+    monkeypatch.setattr(install_module.os, "link", race_after_link)
+
+    install_module._move_no_replace(source, target)
+
+    assert observed_follow_symlinks == [False]
+    assert source.read_bytes() == b"original"
+    assert target.read_bytes() == b"concurrent"
+
+
+def test_no_replace_rejects_symlink_source_without_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    escaped = tmp_path / "escaped"
+    escaped.write_bytes(b"external")
+    source = tmp_path / "recovery"
+    source.symlink_to(escaped)
+    target = tmp_path / SAVE_NAME
+    monkeypatch.setattr(install_module, "_WINDOWS", False)
+
+    with pytest.raises(OSError):
+        install_module._move_no_replace(source, target)
+
+    assert source.is_symlink()
+    assert escaped.read_bytes() == b"external"
+    assert not target.exists()
+
+
+def test_unverified_symlink_quarantine_is_never_republished(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive_path, destination, record = _setup(tmp_path)
+    target = destination / SAVE_NAME
+    escaped = tmp_path / "escaped"
+    escaped.write_bytes(b"external")
+    real_hash = install_module._file_sha256
+    real_capture = install_module._capture_target
+
+    def wrong_installed_hash(path: Path) -> str:
+        if path == target:
+            return "0" * 64
+        return real_hash(path)
+
+    def inject_symlink(path: Path, stage: InstallStage):
+        if path.name.startswith(".fldailyedit-quarantine-"):
+            path.unlink()
+            path.symlink_to(escaped)
+            raise InstallError(
+                "target_changed",
+                "quarantine changed",
+                stage=InstallStage.RESTORING,
+            )
+        return real_capture(path, stage)
+
+    monkeypatch.setattr(install_module, "_file_sha256", wrong_installed_hash)
+    monkeypatch.setattr(install_module, "_capture_target", inject_symlink)
+
+    with pytest.raises(InstallError) as caught:
+        _install(archive_path, destination, record)
+
+    quarantines = list(destination.glob(".fldailyedit-quarantine-*"))
+    assert caught.value.code == "recovery_failed"
+    assert not target.exists()
+    assert len(quarantines) == 1
+    assert quarantines[0].is_symlink()
+    assert str(quarantines[0]) in str(caught.value)
+    assert escaped.read_bytes() == b"external"
+
+
+def test_no_backup_concurrent_appearance_error_lists_retained_quarantine(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive_path, destination, record = _setup(tmp_path)
+    target = destination / SAVE_NAME
+    concurrent = b"appeared after quarantine"
+    real_hash = install_module._file_sha256
+    real_quarantine = install_module._quarantine_target
+
+    def wrong_installed_hash(path: Path) -> str:
+        if path == target:
+            return "0" * 64
+        return real_hash(path)
+
+    def quarantine_then_appear(path: Path) -> Path:
+        quarantine = real_quarantine(path)
+        target.write_bytes(concurrent)
+        return quarantine
+
+    monkeypatch.setattr(install_module, "_file_sha256", wrong_installed_hash)
+    monkeypatch.setattr(
+        install_module, "_quarantine_target", quarantine_then_appear
+    )
+
+    with pytest.raises(InstallError) as caught:
+        _install(archive_path, destination, record)
+
+    quarantines = list(destination.glob(".fldailyedit-quarantine-*"))
+    assert caught.value.code == "recovery_failed"
+    assert target.read_bytes() == concurrent
+    assert len(quarantines) == 1
+    assert str(target) in str(caught.value)
+    assert str(quarantines[0]) in str(caught.value)
+
+
+def test_repeated_failed_installs_leave_discoverable_quarantines(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive_path, destination, record = _setup(tmp_path)
+    target = destination / SAVE_NAME
+    real_hash = install_module._file_sha256
+
+    def wrong_installed_hash(path: Path) -> str:
+        if path == target:
+            return "0" * 64
+        return real_hash(path)
+
+    monkeypatch.setattr(install_module, "_file_sha256", wrong_installed_hash)
+    observed_errors: list[str] = []
+
+    for _ in range(2):
+        with pytest.raises(InstallError) as caught:
+            _install(archive_path, destination, record)
+        observed_errors.append(str(caught.value))
+
+    quarantines = sorted(destination.glob(".fldailyedit-quarantine-*"))
+    assert len(quarantines) == 2
+    assert quarantines[0] != quarantines[1]
+    assert all(
+        any(str(quarantine) in detail for detail in observed_errors)
+        for quarantine in quarantines
+    )
