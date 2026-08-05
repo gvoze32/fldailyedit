@@ -42,6 +42,38 @@ def _encrypted_zip_bytes(content: bytes) -> bytes:
     struct.pack_into("<H", data, central + 8, central_flags | 1)
     return bytes(data)
 
+def _nul_suffixed_member_zip_bytes(content: bytes) -> bytes:
+    raw_name = f"{SAVE_NAME}Xevil".encode()
+    nul_name = f"{SAVE_NAME}\x00evil".encode()
+    data = _zip_bytes([(raw_name.decode(), content)])
+    assert data.count(raw_name) == 2
+    return data.replace(raw_name, nul_name)
+
+
+def _unsupported_zip_bytes(content: bytes, *, strong_encryption: bool) -> bytes:
+    data = bytearray(_zip_bytes([(SAVE_NAME, content)]))
+    local = data.index(b"PK\x03\x04")
+    central = data.index(b"PK\x01\x02")
+    if strong_encryption:
+        local_flags = struct.unpack_from("<H", data, local + 6)[0]
+        central_flags = struct.unpack_from("<H", data, central + 8)[0]
+        struct.pack_into("<H", data, local + 6, local_flags | 0x40)
+        struct.pack_into("<H", data, central + 8, central_flags | 0x40)
+    else:
+        struct.pack_into("<H", data, local + 8, 99)
+        struct.pack_into("<H", data, central + 10, 99)
+    return bytes(data)
+
+def _zip_bytes_with_changed_metadata(data: bytes) -> bytes:
+    changed = bytearray(data)
+    local = changed.index(b"PK\x03\x04")
+    central = changed.index(b"PK\x01\x02")
+    local_time = struct.unpack_from("<H", changed, local + 10)[0]
+    central_time = struct.unpack_from("<H", changed, central + 12)[0]
+    struct.pack_into("<H", changed, local + 10, local_time ^ 1)
+    struct.pack_into("<H", changed, central + 12, central_time ^ 1)
+    return bytes(changed)
+
 
 def _record(archive_bytes: bytes, save_bytes: bytes) -> ReleaseRecord:
     return ReleaseRecord(
@@ -151,6 +183,22 @@ def test_rejects_posix_symlink_member(tmp_path: Path) -> None:
 def test_rejects_encrypted_member(tmp_path: Path) -> None:
     content = b"save"
     _assert_invalid_archive(tmp_path, _encrypted_zip_bytes(content), content)
+
+def test_rejects_raw_member_name_with_nul_suffix(tmp_path: Path) -> None:
+    content = b"save"
+    _assert_invalid_archive(tmp_path, _nul_suffixed_member_zip_bytes(content), content)
+
+
+@pytest.mark.parametrize("strong_encryption", [False, True])
+def test_maps_unsupported_zip_features_to_invalid_archive(
+    tmp_path: Path, strong_encryption: bool
+) -> None:
+    content = b"save"
+    _assert_invalid_archive(
+        tmp_path,
+        _unsupported_zip_bytes(content, strong_encryption=strong_encryption),
+        content,
+    )
 
 
 def test_rejects_member_exceeding_maximum_extracted_size(tmp_path: Path) -> None:
@@ -416,6 +464,70 @@ def test_staging_fsync_failure_preserves_original_and_verified_backup(
         / "FLDailyEditBackups"
         / "EDIT00000000.20260806T123456Z.bak"
     ).read_bytes() == b"original"
+    assert list(destination.glob(".fldailyedit-*.tmp")) == []
+
+
+def test_reauthenticates_archive_replaced_before_staging(
+    tmp_path: Path,
+) -> None:
+    save_bytes = b"verified new save"
+    archive_path, destination, record = _setup(tmp_path, save_bytes)
+    target = destination / SAVE_NAME
+    target.write_bytes(b"original")
+    original_archive = archive_path.read_bytes()
+    replacement = _zip_bytes_with_changed_metadata(original_archive)
+    assert len(replacement) == record.archive_size
+    assert hashlib.sha256(replacement).hexdigest() != record.archive_sha256
+
+    def replace_archive_at_staging(stage: InstallStage) -> None:
+        if stage is InstallStage.STAGING:
+            archive_path.write_bytes(replacement)
+
+    with pytest.raises(InstallError) as caught:
+        _install(
+            archive_path,
+            destination,
+            record,
+            progress=replace_archive_at_staging,
+        )
+
+    assert caught.value.code == "archive_sha256_mismatch"
+    assert caught.value.stage is InstallStage.VERIFYING_ARCHIVE
+    assert target.read_bytes() == b"original"
+    assert list(destination.glob(".fldailyedit-*.tmp")) == []
+
+
+def test_invalid_archive_during_staging_never_leaks_temporary_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive_path, destination, record = _setup(tmp_path)
+    target = destination / SAVE_NAME
+    target.write_bytes(b"original")
+    real_validated_member = install_module._validated_member
+    validation_calls = 0
+
+    def fail_staging_validation(archive: zipfile.ZipFile) -> zipfile.ZipInfo:
+        nonlocal validation_calls
+        validation_calls += 1
+        if validation_calls == 3:
+            raise InstallError(
+                "invalid_archive",
+                "staging validation failed",
+                stage=InstallStage.VERIFYING_ARCHIVE,
+            )
+        return real_validated_member(archive)
+
+    monkeypatch.setattr(
+        install_module, "_validated_member", fail_staging_validation
+    )
+
+    with pytest.raises(InstallError) as caught:
+        _install(archive_path, destination, record)
+
+    assert caught.value.code == "invalid_archive"
+    assert caught.value.stage is InstallStage.VERIFYING_ARCHIVE
+    assert target.read_bytes() == b"original"
     assert list(destination.glob(".fldailyedit-*.tmp")) == []
 
 

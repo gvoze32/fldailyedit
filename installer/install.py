@@ -95,9 +95,10 @@ def _validated_member(archive: zipfile.ZipFile) -> zipfile.ZipInfo:
         or normalized.is_absolute()
         or normalized.parts != (SAVE_NAME,)
         or member.filename != SAVE_NAME
+        or member.orig_filename != SAVE_NAME
         or stat.S_ISLNK(mode)
         or file_type not in (0, stat.S_IFREG)
-        or member.flag_bits & 0x1
+        or member.flag_bits & (0x1 | 0x40)
         or member.file_size > MAX_SAVE_BYTES
     ):
         raise InstallError(
@@ -108,9 +109,10 @@ def _validated_member(archive: zipfile.ZipFile) -> zipfile.ZipInfo:
     return member
 
 
-def _verify_archive(archive_path: Path, record: ReleaseRecord) -> None:
+def _verify_open_archive(source: BinaryIO, record: ReleaseRecord) -> None:
     try:
-        archive_size = archive_path.stat().st_size
+        source.seek(0)
+        archive_size = os.fstat(source.fileno()).st_size
     except OSError as error:
         raise InstallError(
             "invalid_archive",
@@ -123,15 +125,19 @@ def _verify_archive(archive_path: Path, record: ReleaseRecord) -> None:
             "Archive size does not match the release catalog",
             stage=InstallStage.VERIFYING_ARCHIVE,
         )
+
+    digest = hashlib.sha256()
     try:
-        archive_sha256 = _file_sha256(archive_path)
+        while chunk := source.read(_CHUNK_BYTES):
+            digest.update(chunk)
+        source.seek(0)
     except OSError as error:
         raise InstallError(
             "invalid_archive",
             "Archive cannot be read",
             stage=InstallStage.VERIFYING_ARCHIVE,
         ) from error
-    if archive_sha256 != record.archive_sha256:
+    if digest.hexdigest() != record.archive_sha256:
         raise InstallError(
             "archive_sha256_mismatch",
             "Archive SHA-256 does not match the release catalog",
@@ -139,12 +145,21 @@ def _verify_archive(archive_path: Path, record: ReleaseRecord) -> None:
         )
 
     try:
-        with zipfile.ZipFile(archive_path) as archive:
+        with zipfile.ZipFile(source) as archive:
             member = _validated_member(archive)
-            with archive.open(member, "r") as source:
-                save_size, save_sha256 = _hash_stream(source, limit=MAX_SAVE_BYTES)
+            with archive.open(member, "r") as member_source:
+                save_size, save_sha256 = _hash_stream(
+                    member_source, limit=MAX_SAVE_BYTES
+                )
+        source.seek(0)
     except InstallError:
         raise
+    except NotImplementedError as error:
+        raise InstallError(
+            "invalid_archive",
+            "Archive uses an unsupported ZIP feature",
+            stage=InstallStage.VERIFYING_ARCHIVE,
+        ) from error
     except (OSError, EOFError, RuntimeError, zipfile.BadZipFile) as error:
         raise InstallError(
             "invalid_archive",
@@ -164,6 +179,20 @@ def _verify_archive(archive_path: Path, record: ReleaseRecord) -> None:
             "Save SHA-256 does not match the release catalog",
             stage=InstallStage.VERIFYING_ARCHIVE,
         )
+
+
+def _verify_archive(archive_path: Path, record: ReleaseRecord) -> None:
+    try:
+        with archive_path.open("rb") as source:
+            _verify_open_archive(source, record)
+    except InstallError:
+        raise
+    except OSError as error:
+        raise InstallError(
+            "invalid_archive",
+            "Archive cannot be read",
+            stage=InstallStage.VERIFYING_ARCHIVE,
+        ) from error
 
 
 def _raise_if_cancelled(cancelled: Callable[[], bool], stage: InstallStage) -> None:
@@ -214,40 +243,54 @@ def _stage_archive(
     record: ReleaseRecord,
 ) -> Path:
     temporary_path: Path | None = None
+    completed = False
     try:
-        with tempfile.NamedTemporaryFile(
-            delete=False,
-            dir=destination,
-            prefix=".fldailyedit-",
-            suffix=".tmp",
-        ) as staged:
-            temporary_path = Path(staged.name)
-            with zipfile.ZipFile(archive_path) as archive:
-                member = _validated_member(archive)
-                with archive.open(member, "r") as source:
-                    save_size, save_sha256 = _copy_stream(source, staged)
-            if save_size != record.save_size or save_size > MAX_SAVE_BYTES:
-                raise OSError("staged save size verification failed")
-            if save_sha256 != record.save_sha256:
-                raise OSError("staged save SHA-256 verification failed")
-            staged.flush()
-            os.fsync(staged.fileno())
+        with archive_path.open("rb") as archive_source:
+            _verify_open_archive(archive_source, record)
+            archive_source.seek(0)
+            with tempfile.NamedTemporaryFile(
+                delete=False,
+                dir=destination,
+                prefix=".fldailyedit-",
+                suffix=".tmp",
+            ) as staged:
+                temporary_path = Path(staged.name)
+                with zipfile.ZipFile(archive_source) as archive:
+                    member = _validated_member(archive)
+                    with archive.open(member, "r") as source:
+                        save_size, save_sha256 = _copy_stream(source, staged)
+                if save_size != record.save_size or save_size > MAX_SAVE_BYTES:
+                    raise OSError("staged save size verification failed")
+                if save_sha256 != record.save_sha256:
+                    raise OSError("staged save SHA-256 verification failed")
+                staged.flush()
+                os.fsync(staged.fileno())
         if temporary_path.stat().st_size != record.save_size:
             raise OSError("staged save size verification failed")
         if _file_sha256(temporary_path) != record.save_sha256:
             raise OSError("staged save SHA-256 verification failed")
+        completed = True
         return temporary_path
-    except (OSError, EOFError, RuntimeError, ValueError, zipfile.BadZipFile) as error:
-        if temporary_path is not None:
-            try:
-                temporary_path.unlink(missing_ok=True)
-            except OSError:
-                pass
+    except InstallError:
+        raise
+    except NotImplementedError as error:
         raise InstallError(
             "staging_failed",
             "Could not stage and verify the new save",
             stage=InstallStage.STAGING,
         ) from error
+    except (OSError, EOFError, RuntimeError, ValueError, zipfile.BadZipFile) as error:
+        raise InstallError(
+            "staging_failed",
+            "Could not stage and verify the new save",
+            stage=InstallStage.STAGING,
+        ) from error
+    finally:
+        if not completed and temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _restore_after_failed_commit(
