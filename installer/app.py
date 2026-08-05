@@ -69,6 +69,26 @@ class CatalogLoaded:
     catalog: Catalog
 
 
+
+@dataclass(frozen=True, slots=True)
+class LocationsDiscovered:
+    locations: tuple[SaveLocation, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class LocationDiscoveryFailed:
+    error: Exception
+
+
+@dataclass(frozen=True, slots=True)
+class DestinationValidated:
+    location: SaveLocation
+
+
+@dataclass(frozen=True, slots=True)
+class DestinationValidationFailed:
+    error: Exception
+
 @dataclass(frozen=True, slots=True)
 class ProgressChanged:
     stage: str
@@ -87,12 +107,33 @@ class WorkerFailed:
     error: Exception
 
 
-WorkerEvent = CatalogLoaded | ProgressChanged | InstallCompleted | WorkerFailed
+WorkerEvent = (
+    CatalogLoaded
+    | LocationsDiscovered
+    | LocationDiscoveryFailed
+    | DestinationValidated
+    | DestinationValidationFailed
+    | ProgressChanged
+    | InstallCompleted
+    | WorkerFailed
+)
 
 
 @dataclass(frozen=True, slots=True)
 class _LoadCatalog:
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class _DiscoverLocations:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class _ValidateDestination:
+    path: Path
+    target: GameTarget
+    game_name: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,7 +147,13 @@ class _Stop:
     pass
 
 
-_WorkerCommand = _LoadCatalog | _Install | _Stop
+_WorkerCommand = (
+    _LoadCatalog
+    | _DiscoverLocations
+    | _ValidateDestination
+    | _Install
+    | _Stop
+)
 
 
 _NETWORK_ERROR_CODES = frozenset({"network_error", "http_error", "timeout"})
@@ -180,6 +227,8 @@ class InstallerController:
     def handle_event(self, event: WorkerEvent) -> bool:
         if isinstance(event, CatalogLoaded):
             return self.set_catalog(event.catalog)
+        if isinstance(event, LocationsDiscovered):
+            return self.set_locations(event.locations)
         if isinstance(event, ProgressChanged):
             if self.state.step is not WizardStep.PROGRESS:
                 return False
@@ -330,6 +379,27 @@ class InstallerController:
             )
         )
 
+    def retry_catalog(self) -> bool:
+        if (
+            self.state.step is not WizardStep.RESULT
+            or self.state.error_title is None
+            or self.state.catalog is not None
+        ):
+            return False
+        return self._publish(
+            replace(
+                self.state,
+                step=WizardStep.UPDATE,
+                progress_stage=None,
+                progress_downloaded=0,
+                progress_total=0,
+                result=None,
+                error_title=None,
+                error_detail=None,
+                commit_started=False,
+            )
+        )
+
     def retry(self) -> bool:
         if (
             self.state.step is not WizardStep.RESULT
@@ -359,6 +429,12 @@ class InstallerWorker:
         self,
         *,
         fetch_catalog: Callable[[], Catalog] = default_fetch_catalog,
+        discover_locations: Callable[
+            [], tuple[SaveLocation, ...]
+        ] = discover_save_locations,
+        validate_destination: Callable[
+            [Path, GameTarget], Path
+        ] = validate_destination,
         download_archive: Callable[..., None] = default_download_archive,
         install_archive: Callable[..., InstallResult] = default_install_archive,
         now: Callable[[], datetime] | None = None,
@@ -366,6 +442,8 @@ class InstallerWorker:
         self.events: SimpleQueue[WorkerEvent] = SimpleQueue()
         self._commands: SimpleQueue[_WorkerCommand] = SimpleQueue()
         self._fetch_catalog = fetch_catalog
+        self._discover_locations = discover_locations
+        self._validate_destination = validate_destination
         self._download_archive = download_archive
         self._install_archive = install_archive
         self._now = (
@@ -401,6 +479,19 @@ class InstallerWorker:
         self.start()
         self._commands.put(_LoadCatalog())
 
+    def discover_locations(self) -> None:
+        self.start()
+        self._commands.put(_DiscoverLocations())
+
+    def validate_destination(
+        self,
+        path: Path,
+        target: GameTarget,
+        game_name: str,
+    ) -> None:
+        self.start()
+        self._commands.put(_ValidateDestination(path, target, game_name))
+
     def install(self, record: ReleaseRecord, location: SaveLocation) -> None:
         if location.target.value != record.target_id:
             raise ValueError("record and save location are incompatible")
@@ -413,9 +504,12 @@ class InstallerWorker:
             self._cancel_requested.clear()
         self._commands.put(_Install(record, location))
 
-    def cancel(self) -> None:
+    def cancel(self) -> bool:
         with self._state_lock:
+            if not self._install_pending or self._commit_started:
+                return False
             self._cancel_requested.set()
+            return True
 
     def close(self, timeout: float | None = 2.0) -> None:
         with self._state_lock:
@@ -507,6 +601,33 @@ class InstallerWorker:
                 else:
                     self.events.put(CatalogLoaded(catalog))
                 continue
+            if isinstance(command, _DiscoverLocations):
+                try:
+                    locations = self._discover_locations()
+                except Exception as error:
+                    self.events.put(LocationDiscoveryFailed(error))
+                else:
+                    self.events.put(LocationsDiscovered(tuple(locations)))
+                continue
+            if isinstance(command, _ValidateDestination):
+                try:
+                    path = self._validate_destination(
+                        command.path,
+                        command.target,
+                    )
+                except Exception as error:
+                    self.events.put(DestinationValidationFailed(error))
+                else:
+                    self.events.put(
+                        DestinationValidated(
+                            SaveLocation(
+                                command.target,
+                                command.game_name,
+                                path,
+                            )
+                        )
+                    )
+                continue
 
             try:
                 result = self._perform_install(command.record, command.location)
@@ -545,6 +666,7 @@ _RADIO_DESCRIPTION_INDENT = 28
 _POLL_INTERVAL_MS = 50
 _PROGRESS_PULSE_MS = 12
 _MINIMUM_WRAP_WIDTH = 320
+_LOCATION_VIEWPORT_HEIGHT = 200
 
 
 class CloseDisposition(str, Enum):
@@ -577,10 +699,10 @@ def progress_presentation(
     state: InstallerState,
     *,
     cancellation_requested: bool = False,
+    commit_locked: bool = False,
 ) -> ProgressPresentation:
     """Translate controller progress into widget-neutral display state."""
-
-    if state.commit_started:
+    if state.commit_started or commit_locked:
         return ProgressPresentation(
             mode="indeterminate",
             status="Finishing installation safely…",
@@ -629,6 +751,30 @@ def close_disposition(state: InstallerState) -> CloseDisposition:
     return CloseDisposition.CANCEL_AND_WAIT
 
 
+def scroll_fraction_for_item(
+    *,
+    view_top: int,
+    view_height: int,
+    content_height: int,
+    item_top: int,
+    item_height: int,
+) -> float | None:
+    """Return a canvas yview fraction only when an item is clipped."""
+
+    if content_height <= view_height:
+        return None
+    item_bottom = item_top + item_height
+    if item_top < view_top:
+        target_top = item_top
+    elif item_bottom > view_top + view_height:
+        target_top = item_bottom - view_height
+    else:
+        return None
+    maximum_top = content_height - view_height
+    target_top = min(max(target_top, 0), maximum_top)
+    return target_top / content_height
+
+
 def diagnostic_details(
     state: InstallerState,
     *,
@@ -658,7 +804,10 @@ def open_save_folder(path: Path) -> bool:
     startfile = getattr(os, "startfile", None)
     if startfile is None:
         return False
-    startfile(path)
+    try:
+        startfile(path)
+    except OSError:
+        return False
     return True
 
 
@@ -708,6 +857,10 @@ class InstallerApplication:
         self._close_pending = False
         self._cancel_requested = False
         self._error_code: str | None = None
+        self._failure_operation: str | None = None
+        self._location_discovery_error: str | None = None
+        self._browse_pending = False
+        self._commit_lock_observed = False
         self._poll_after_id: str | None = None
         self._rendered_step: WizardStep | None = None
         self._progress_running = False
@@ -720,16 +873,12 @@ class InstallerApplication:
         self._build_view()
         self._render(self.controller.state)
 
-        try:
-            locations = discover_save_locations()
-        except OSError:
-            locations = ()
-        self.controller.set_locations(locations)
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
         self.root.bind("<Escape>", self._on_escape)
         self.root.bind("<Configure>", self._on_resize, add="+")
         self._schedule_poll()
+        self.worker.discover_locations()
         self.worker.load_catalog()
 
     def _configure_root(self) -> None:
@@ -937,9 +1086,49 @@ class InstallerApplication:
             textvariable=self._location_status_var,
         ).grid(row=1, column=0, sticky="ew", pady=(_SPACE_S, _SPACE_M))
 
-        self._location_holder = ttk.Frame(frame)
-        self._location_holder.grid(row=2, column=0, sticky="nsew")
+        location_viewport = ttk.Frame(frame)
+        location_viewport.grid(row=2, column=0, sticky="nsew")
+        location_viewport.columnconfigure(0, weight=1)
+        location_viewport.rowconfigure(0, weight=1)
+        frame_background = ttk.Style(self.root).lookup("TFrame", "background")
+        self._location_canvas = tkinter.Canvas(
+            location_viewport,
+            background=frame_background,
+            borderwidth=0,
+            highlightthickness=0,
+            height=_LOCATION_VIEWPORT_HEIGHT,
+            takefocus=True,
+        )
+        self._location_canvas.grid(row=0, column=0, sticky="nsew")
+        self._location_scrollbar = ttk.Scrollbar(
+            location_viewport,
+            orient="vertical",
+            command=self._location_canvas.yview,
+            takefocus=True,
+        )
+        self._location_scrollbar.grid(row=0, column=1, sticky="ns")
+        self._location_canvas.configure(
+            yscrollcommand=self._location_scrollbar.set
+        )
+        self._location_holder = ttk.Frame(self._location_canvas)
         self._location_holder.columnconfigure(0, weight=1)
+        self._location_window = self._location_canvas.create_window(
+            (0, 0),
+            window=self._location_holder,
+            anchor="nw",
+        )
+        self._location_holder.bind(
+            "<Configure>",
+            self._on_location_holder_configure,
+            add="+",
+        )
+        self._location_canvas.bind(
+            "<Configure>",
+            self._on_location_canvas_configure,
+            add="+",
+        )
+        self._bind_location_scrolling(self._location_canvas)
+        self._bind_location_scrolling(self._location_holder)
         self._location_var = tkinter.StringVar(self.root)
         self._location_path_labels: list[ttk.Label] = []
 
@@ -965,6 +1154,67 @@ class InstallerApplication:
             pady=(_SPACE_S, 0),
         )
         return frame
+
+    def _bind_location_scrolling(self, widget: tkinter.Misc) -> None:
+        widget.bind("<MouseWheel>", self._on_location_mousewheel, add="+")
+        widget.bind("<Button-4>", self._on_location_mousewheel, add="+")
+        widget.bind("<Button-5>", self._on_location_mousewheel, add="+")
+
+    def _on_location_holder_configure(
+        self,
+        _event: tkinter.Event[tkinter.Misc],
+    ) -> None:
+        self._location_canvas.configure(
+            scrollregion=self._location_canvas.bbox("all")
+        )
+
+    def _on_location_canvas_configure(
+        self,
+        event: tkinter.Event[tkinter.Misc],
+    ) -> None:
+        self._location_canvas.itemconfigure(
+            self._location_window,
+            width=event.width,
+        )
+
+    def _on_location_mousewheel(
+        self,
+        event: tkinter.Event[tkinter.Misc],
+    ) -> str:
+        button = getattr(event, "num", None)
+        delta = getattr(event, "delta", 0)
+        if button == 4 or delta > 0:
+            units = -1
+        elif button == 5 or delta < 0:
+            units = 1
+        else:
+            return "break"
+        self._location_canvas.yview_scroll(units, "units")
+        return "break"
+
+    def _ensure_location_visible(self, widget: tkinter.Misc) -> None:
+        if not widget.winfo_exists():
+            return
+        content_height = self._location_holder.winfo_reqheight()
+        view_height = self._location_canvas.winfo_height()
+        view_top = round(
+            self._location_canvas.yview()[0] * content_height
+        )
+        fraction = scroll_fraction_for_item(
+            view_top=view_top,
+            view_height=view_height,
+            content_height=content_height,
+            item_top=widget.winfo_y(),
+            item_height=widget.winfo_height(),
+        )
+        if fraction is not None:
+            self._location_canvas.yview_moveto(fraction)
+
+    def _focus_location_button(self, widget: ttk.Radiobutton) -> None:
+        if not widget.winfo_exists():
+            return
+        widget.focus_set()
+        self._ensure_location_visible(widget)
 
     def _build_review_frame(self) -> ttk.Frame:
         frame = ttk.Frame(self._body)
@@ -1089,17 +1339,54 @@ class InstallerApplication:
             except Empty:
                 break
             terminal = isinstance(event, (InstallCompleted, WorkerFailed))
+            state_before_event = self.controller.state
             if isinstance(event, WorkerFailed):
-                self._error_code = getattr(event.error, "code", None)
-            elif isinstance(event, InstallCompleted):
-                self._error_code = None
-            self.controller.handle_event(event)
-            if isinstance(event, CatalogLoaded):
-                self.root.after_idle(
-                    lambda: self._focus_for_step(WizardStep.UPDATE)
+                self._failure_operation = (
+                    "catalog"
+                    if state_before_event.step is WizardStep.UPDATE
+                    else "install"
                 )
+                self._error_code = getattr(event.error, "code", None)
+                self.controller.handle_event(event)
+            elif isinstance(event, InstallCompleted):
+                self._failure_operation = None
+                self._error_code = None
+                self._commit_lock_observed = False
+                self.controller.handle_event(event)
+            elif isinstance(event, LocationDiscoveryFailed):
+                self._location_discovery_error = str(event.error)
+                self._render(self.controller.state)
+            elif isinstance(event, DestinationValidated):
+                self._browse_pending = False
+                location = event.location
+                locations = tuple(
+                    existing
+                    for existing in self.controller.state.locations
+                    if existing.save_directory != location.save_directory
+                ) + (location,)
+                self._browse_error_var.set("")
+                self.controller.set_locations(locations)
+                self.controller.select_location(location)
+            elif isinstance(event, DestinationValidationFailed):
+                self._browse_pending = False
+                self._browse_error_var.set(
+                    "That folder cannot be used. Choose the folder named "
+                    f"“save”.\n{event.error}"
+                )
+                self._render(self.controller.state)
+                self.root.after_idle(self._browse_button.focus_set)
+            else:
+                if isinstance(event, LocationsDiscovered):
+                    self._location_discovery_error = None
+                self.controller.handle_event(event)
+                if isinstance(event, CatalogLoaded):
+                    self._failure_operation = None
+                    self.root.after_idle(
+                        lambda: self._focus_for_step(WizardStep.UPDATE)
+                    )
             if terminal:
                 self._cancel_requested = False
+                self._commit_lock_observed = False
                 if self._close_pending:
                     self.close()
                     return
@@ -1194,6 +1481,7 @@ class InstallerApplication:
         self._locations_by_key = {}
         record = state.selected_record
         compatible_count = 0
+        selected_button: ttk.Radiobutton | None = None
         for row, location in enumerate(state.locations):
             key = f"{location.target.value}|{location.save_directory}"
             self._locations_by_key[key] = location
@@ -1214,6 +1502,16 @@ class InstallerApplication:
                 state="normal" if compatible else "disabled",
             )
             button.grid(row=row * 2, column=0, sticky="w")
+            self._bind_location_scrolling(button)
+            button.bind(
+                "<FocusIn>",
+                lambda _event, widget=button: self.root.after_idle(
+                    lambda: self._ensure_location_visible(widget)
+                ),
+                add="+",
+            )
+            if location == state.selected_location:
+                selected_button = button
             path_label = self._wrapped_label(
                 self._location_holder,
                 text=str(location.save_directory),
@@ -1226,10 +1524,16 @@ class InstallerApplication:
                 padx=(_RADIO_DESCRIPTION_INDENT, 0),
                 pady=(_SPACE_XS, _SPACE_M),
             )
+            self._bind_location_scrolling(path_label)
         if state.locations:
             self._location_status_var.set(
                 f"{compatible_count} compatible save "
                 f"{'location' if compatible_count == 1 else 'locations'} found."
+            )
+        elif self._location_discovery_error is not None:
+            self._location_status_var.set(
+                "Save locations could not be detected automatically. "
+                "Choose Browse to select one."
             )
         else:
             self._location_status_var.set(
@@ -1243,6 +1547,13 @@ class InstallerApplication:
             if state.selected_location is not None
             else ""
         )
+        self._browse_button.configure(
+            state="disabled" if self._browse_pending else "normal"
+        )
+        if selected_button is not None:
+            self.root.after_idle(
+                lambda: self._focus_location_button(selected_button)
+            )
 
     def _render_review(self, state: InstallerState) -> None:
         record = state.selected_record
@@ -1268,6 +1579,7 @@ class InstallerApplication:
         presentation = progress_presentation(
             state,
             cancellation_requested=self._cancel_requested,
+            commit_locked=self._commit_lock_observed,
         )
         self._progress_status_var.set(presentation.status)
         self._progress_detail_var.set(
@@ -1321,7 +1633,10 @@ class InstallerApplication:
             self._copy_button.grid()
 
     def _render_footer(self, state: InstallerState) -> None:
-        back_enabled = state.step in {WizardStep.SAVE, WizardStep.REVIEW}
+        back_enabled = (
+            state.step in {WizardStep.SAVE, WizardStep.REVIEW}
+            and not self._browse_pending
+        )
         self._back_button.configure(
             state="normal" if back_enabled else "disabled"
         )
@@ -1336,6 +1651,7 @@ class InstallerApplication:
                 and state.selected_location is not None
                 and state.selected_location.target.value
                 == state.selected_record.target_id
+                and not self._browse_pending
             )
         elif state.step is WizardStep.REVIEW:
             next_enabled = True
@@ -1347,7 +1663,10 @@ class InstallerApplication:
 
         if state.step is WizardStep.RESULT:
             self._cancel_button.configure(text="Close", state="normal")
-        elif state.step is WizardStep.PROGRESS and state.commit_started:
+        elif (
+            state.step is WizardStep.PROGRESS
+            and (state.commit_started or self._commit_lock_observed)
+        ):
             self._cancel_button.configure(text="Cancel", state="disabled")
         elif state.step is WizardStep.PROGRESS and self._cancel_requested:
             self._cancel_button.configure(text="Cancelling…", state="disabled")
@@ -1365,8 +1684,11 @@ class InstallerApplication:
                     return
         elif step is WizardStep.SAVE:
             for child in self._location_holder.winfo_children():
-                if isinstance(child, ttk.Radiobutton) and "disabled" not in child.state():
-                    child.focus_set()
+                if (
+                    isinstance(child, ttk.Radiobutton)
+                    and "disabled" not in child.state()
+                ):
+                    self._focus_location_button(child)
                     return
             self._browse_button.focus_set()
         elif step is WizardStep.REVIEW:
@@ -1380,7 +1702,6 @@ class InstallerApplication:
         record = self._records_by_channel.get(self._record_var.get())
         if record is not None:
             self.controller.select_record(record)
-
     def _select_location(self) -> None:
         location = self._locations_by_key.get(self._location_var.get())
         if location is not None:
@@ -1388,7 +1709,7 @@ class InstallerApplication:
 
     def _browse(self) -> None:
         record = self.controller.state.selected_record
-        if record is None:
+        if record is None or self._browse_pending:
             return
         selected = filedialog.askdirectory(
             parent=self.root,
@@ -1399,24 +1720,20 @@ class InstallerApplication:
             return
         try:
             target = GameTarget(record.target_id)
-            path = validate_destination(Path(selected), target)
-        except (DestinationError, ValueError) as error:
+        except ValueError as error:
             self._browse_error_var.set(
-                "That folder cannot be used. Choose the folder named "
-                f"“save”.\n{error}"
+                f"The selected update target is not supported.\n{error}"
             )
             self._browse_button.focus_set()
             return
-
-        location = SaveLocation(target, record.target_name, path)
-        locations = tuple(
-            existing
-            for existing in self.controller.state.locations
-            if existing.save_directory != path
-        ) + (location,)
-        self._browse_error_var.set("")
-        self.controller.set_locations(locations)
-        self.controller.select_location(location)
+        self._browse_pending = True
+        self._browse_error_var.set("Checking selected folder…")
+        self._render(self.controller.state)
+        self.worker.validate_destination(
+            Path(selected),
+            target,
+            record.target_name,
+        )
 
     def _back(self) -> None:
         self._browse_error_var.set("")
@@ -1432,13 +1749,25 @@ class InstallerApplication:
             location = state.selected_location
             if record is None or location is None:
                 return
+            self._failure_operation = None
+            self._cancel_requested = False
+            self._commit_lock_observed = False
             try:
                 self.worker.install(record, location)
             except Exception as error:
+                self._failure_operation = "install"
                 self._error_code = getattr(error, "code", None)
                 self.controller.fail(error)
 
     def _retry(self) -> None:
+        if self._failure_operation == "catalog":
+            if not self.controller.retry_catalog():
+                return
+            self._failure_operation = None
+            self._error_code = None
+            self.worker.load_catalog()
+            self.worker.discover_locations()
+            return
         if not self.controller.retry():
             return
         state = self.controller.state
@@ -1446,26 +1775,29 @@ class InstallerApplication:
         location = state.selected_location
         if record is None or location is None:
             return
+        self._failure_operation = None
         self._error_code = None
         self._cancel_requested = False
+        self._commit_lock_observed = False
         try:
             self.worker.install(record, location)
         except Exception as error:
+            self._failure_operation = "install"
             self._error_code = getattr(error, "code", None)
             self.controller.fail(error)
 
     def _request_cancel(self, *, close_after: bool) -> None:
         state = self.controller.state
-        disposition = close_disposition(state)
-        if disposition is CloseDisposition.BLOCK:
-            self._render(state)
-            return
-        if disposition is CloseDisposition.CLOSE:
+        if state.step is not WizardStep.PROGRESS:
             self.close()
             return
-        self._close_pending = self._close_pending or close_after
-        self._cancel_requested = True
-        self.worker.cancel()
+        if self.worker.cancel():
+            self._close_pending = self._close_pending or close_after
+            self._cancel_requested = True
+            self._commit_lock_observed = False
+        else:
+            self._cancel_requested = False
+            self._commit_lock_observed = True
         self._render(state)
 
     def _cancel_or_close(self) -> None:

@@ -462,7 +462,7 @@ def test_worker_honors_cancellation_before_commit_and_removes_temp_directory(
     try:
         worker.install(record, location)
         assert started.wait(2.0)
-        worker.cancel()
+        assert worker.cancel() is True
         failure = _next_event(worker, WorkerFailed)
 
         assert cancellation_observed.wait(2.0)
@@ -520,7 +520,7 @@ def test_commit_boundary_is_propagated_and_cancellation_is_ignored_after_it(
     try:
         worker.install(record, location)
         assert at_commit.wait(2.0)
-        worker.cancel()
+        assert worker.cancel() is False
         continue_after_cancel.set()
         completed = _next_event(worker, InstallCompleted)
 
@@ -820,3 +820,157 @@ def test_orderly_application_shutdown_closes_worker_before_destroying_root() -> 
     application.close()
 
     assert actions == ["cancel-poll", "close-worker:0.0", "destroy-root"]
+
+
+def test_catalog_failure_retry_reloads_catalog_and_locations() -> None:
+    controller = InstallerController()
+    assert controller.fail(CatalogError("network_error", "offline"))
+    calls: list[str] = []
+
+    class Worker:
+        def load_catalog(self) -> None:
+            calls.append("catalog")
+
+        def discover_locations(self) -> None:
+            calls.append("locations")
+
+    application = object.__new__(installer_app.InstallerApplication)
+    application.controller = controller
+    application.worker = Worker()
+    application._failure_operation = "catalog"
+    application._error_code = "network_error"
+    application._cancel_requested = False
+
+    application._retry()
+
+    assert controller.state.step is WizardStep.UPDATE
+    assert controller.state.error_title is None
+    assert calls == ["catalog", "locations"]
+
+
+def test_worker_runs_location_discovery_and_browse_validation_off_main_thread(
+    tmp_path: Path,
+) -> None:
+    save_directory = tmp_path / "save"
+    save_directory.mkdir()
+    location = SaveLocation(
+        GameTarget.FL26,
+        "Football Life 2026",
+        save_directory,
+    )
+    operation_thread_ids: list[int] = []
+
+    def fake_discovery() -> tuple[SaveLocation, ...]:
+        operation_thread_ids.append(get_ident())
+        return (location,)
+
+    def fake_validation(path: Path, target: GameTarget) -> Path:
+        operation_thread_ids.append(get_ident())
+        assert path == save_directory
+        assert target is GameTarget.FL26
+        return save_directory
+
+    worker = InstallerWorker(
+        discover_locations=fake_discovery,
+        validate_destination=fake_validation,
+    )
+    try:
+        worker.discover_locations()
+        discovered = _next_event(worker, installer_app.LocationsDiscovered)
+        worker.validate_destination(
+            save_directory,
+            GameTarget.FL26,
+            "Football Life 2026",
+        )
+        validated = _next_event(worker, installer_app.DestinationValidated)
+
+        assert discovered.locations == (location,)
+        assert validated.location == location
+        assert operation_thread_ids
+        assert all(identifier != get_ident() for identifier in operation_thread_ids)
+    finally:
+        worker.close()
+
+
+def test_worker_reports_browse_validation_failure_as_a_typed_event(
+    tmp_path: Path,
+) -> None:
+    expected = installer_app.DestinationError(
+        "not_save",
+        "destination directory must be named save",
+    )
+
+    def reject(_path: Path, _target: GameTarget) -> Path:
+        raise expected
+
+    worker = InstallerWorker(validate_destination=reject)
+    try:
+        worker.validate_destination(
+            tmp_path,
+            GameTarget.FL26,
+            "Football Life 2026",
+        )
+        event = _next_event(
+            worker,
+            installer_app.DestinationValidationFailed,
+        )
+
+        assert event.error is expected
+    finally:
+        worker.close()
+
+
+def test_scroll_fraction_reveals_clipped_location_without_moving_visible_item() -> None:
+    assert installer_app.scroll_fraction_for_item(
+        view_top=0,
+        view_height=200,
+        content_height=600,
+        item_top=300,
+        item_height=40,
+    ) == pytest.approx(140 / 600)
+    assert (
+        installer_app.scroll_fraction_for_item(
+            view_top=200,
+            view_height=200,
+            content_height=600,
+            item_top=250,
+            item_height=40,
+        )
+        is None
+    )
+
+
+def test_open_save_folder_returns_false_when_startfile_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(_path: Path) -> None:
+        raise OSError("Explorer is unavailable")
+
+    monkeypatch.setattr(installer_app.sys, "platform", "win32")
+    monkeypatch.setattr(installer_app.os, "startfile", fail, raising=False)
+
+    assert installer_app.open_save_folder(Path("C:/save")) is False
+
+
+def test_close_uses_atomic_worker_answer_when_commit_event_is_not_polled() -> None:
+    controller, _, _ = _progress_controller()
+    rendered: list[InstallerState] = []
+
+    class Worker:
+        def cancel(self) -> bool:
+            return False
+
+    application = object.__new__(installer_app.InstallerApplication)
+    application.controller = controller
+    application.worker = Worker()
+    application._close_pending = False
+    application._cancel_requested = False
+    application._commit_lock_observed = False
+    application._render = rendered.append
+
+    application._request_cancel(close_after=True)
+
+    assert application._close_pending is False
+    assert application._cancel_requested is False
+    assert application._commit_lock_observed is True
+    assert rendered == [controller.state]
