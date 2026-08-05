@@ -323,6 +323,7 @@ def test_workflows_use_latest_official_action_majors():
 
     assert versions == {
         "checkout": {"v7"},
+        "download-artifact": {"v8"},
         "setup-python": {"v7"},
         "upload-artifact": {"v7"},
     }
@@ -646,8 +647,139 @@ def test_sync_workflows_read_revision_from_checked_out_manifest_without_literal_
         assert 'json.load(open("data/base_manifest.json", encoding="utf-8"))["revision"]' in text
         assert 'BASE_REVISION="$(' in text
         assert '--base-revision "$BASE_REVISION"' in text
-        assert "fl26-u2.2-national-squads" not in text
+        assert '--base-revision fl26-u2.2-national-squads' not in text
 
+
+
+def test_sync_workflows_validate_package_and_transfer_complete_channel_payloads():
+    workflows = (
+        (Path(".github/workflows/sync-fast.yml"), "Fast", "fast"),
+        (Path(".github/workflows/sync-deep.yml"), "Deep", "deep"),
+    )
+
+    for path, display_channel, channel in workflows:
+        text = path.read_text(encoding="utf-8")
+        apply_position = text.index("          python run.py players apply")
+        validation_position = text.index("      - name: Validate final save")
+        package_position = text.index(
+            f"      - name: Package public {display_channel} save"
+        )
+        payload_position = text.index("      - name: Upload release payload")
+        report_position = text.index(
+            "      - name: Upload Updated Save File & Visual Reports"
+        )
+
+        assert (
+            apply_position
+            < validation_position
+            < package_position
+            < payload_position
+            < report_position
+        )
+        assert (
+            text[validation_position:package_position]
+            == "      - name: Validate final save\n"
+            "        run: python run.py validate --edit-file output/EDIT00000000\n\n"
+        )
+
+        package = text[package_position:payload_position]
+        assert "if: always()" not in package
+        assert (
+            "python tools/build_release_asset.py package \\\n"
+            "            --save output/EDIT00000000 \\\n"
+            "            --output-dir release-payload \\\n"
+            "            --target-id fl26-u2.2-national-squads \\\n"
+            '            --target-name "Football Life 2026 Update 2.2 + National Squads" \\\n'
+            f"            --channel {channel} \\\n"
+            '            --generated-at "$GENERATED_AT"'
+        ) in package
+
+        payload = text[payload_position:report_position]
+        assert "if: always()" not in payload
+        assert "uses: actions/upload-artifact@v7" in payload
+        assert f"name: release-${{{{ github.run_id }}}}-{channel}" in payload
+        assert "path: release-payload/" in payload
+        assert "retention-days: 1" in payload
+        assert (
+            "        if: always()\n"
+            "        uses: actions/upload-artifact@v7"
+            in text[report_position:]
+        )
+
+
+def test_sync_workflows_publish_only_validated_payloads_under_one_catalog_lock():
+    workflows = (
+        (Path(".github/workflows/sync-fast.yml"), "Fast", "fast", "deep"),
+        (Path(".github/workflows/sync-deep.yml"), "Deep", "deep", "fast"),
+    )
+
+    for path, display_channel, channel, other_channel in workflows:
+        text = path.read_text(encoding="utf-8")
+        sync, publish = text.split("\n  publish:\n", 1)
+
+        assert "build_release_asset.py merge" not in sync
+        assert "gh release" not in sync
+        assert publish.startswith(
+            f"    name: Publish {display_channel} save\n"
+            "    needs: sync\n"
+            "    runs-on: ubuntu-latest\n"
+            "    permissions:\n"
+            "      contents: write\n"
+            "    concurrency:\n"
+            "      group: fldailyedit-latest-release\n"
+            "      cancel-in-progress: false\n"
+        )
+        assert "if: always()" not in publish
+
+        download_position = publish.index("      - uses: actions/download-artifact@v8")
+        merge_position = publish.index("      - name: Merge release catalog")
+        release_position = publish.index("      - name: Publish rolling release")
+        assert download_position < merge_position < release_position
+
+        download = publish[download_position:merge_position]
+        assert f"name: release-${{{{ github.run_id }}}}-{channel}" in download
+        assert "path: release-payload" in download
+        assert (
+            'python tools/build_release_asset.py merge --existing-url '
+            '"https://github.com/gvoze32/fldailyedit/releases/download/latest/catalog.json" '
+            "--record release-payload/record.json "
+            "--output release-payload/catalog.json"
+        ) in publish[merge_position:release_position]
+        assert "GH_TOKEN: ${{ github.token }}" in publish[release_position:]
+        assert (
+            'gh release view latest >/dev/null 2>&1 || gh release create latest '
+            '--title "Latest FL Daily Edit" '
+            '--notes "Validated Fast and Deep option files for FL Daily Edit."'
+        ) in publish[release_position:]
+
+        upload_commands = re.findall(
+            r"(?m)^          gh release upload latest .+$", publish
+        )
+        assert upload_commands == [
+            "          gh release upload latest "
+            f"release-payload/fldailyedit-fl2026-{channel}.zip "
+            "release-payload/catalog.json --clobber"
+        ]
+        assert f"fldailyedit-fl2026-{other_channel}.zip" not in publish
+
+
+def test_fast_and_deep_sync_workflows_differ_only_by_channel_and_deep_mode():
+    fast = Path(".github/workflows/sync-fast.yml").read_text(encoding="utf-8")
+    deep = Path(".github/workflows/sync-deep.yml").read_text(encoding="utf-8")
+    release_notes = "Validated Fast and Deep option files for FL Daily Edit."
+    normalized_fast = (
+        fast.replace(release_notes, "{RELEASE_NOTES}")
+        .replace("Fast", "{DISPLAY}")
+        .replace("fast", "{channel}")
+    )
+    normalized_deep = (
+        deep.replace(release_notes, "{RELEASE_NOTES}")
+        .replace("            --deep \\\n", "")
+        .replace("Deep", "{DISPLAY}")
+        .replace("deep", "{channel}")
+    )
+
+    assert normalized_fast == normalized_deep
 
 def test_readme_lists_every_whitelisted_update_patch_group_and_pair_contract():
     text = README_PATH.read_text(encoding="utf-8")

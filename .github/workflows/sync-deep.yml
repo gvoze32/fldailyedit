@@ -50,6 +50,27 @@ jobs:
             --edit-file output/EDIT00000000 \
             --in-place
 
+      - name: Validate final save
+        run: python run.py validate --edit-file output/EDIT00000000
+
+      - name: Package public Deep save
+        run: |
+          GENERATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          python tools/build_release_asset.py package \
+            --save output/EDIT00000000 \
+            --output-dir release-payload \
+            --target-id fl26-u2.2-national-squads \
+            --target-name "Football Life 2026 Update 2.2 + National Squads" \
+            --channel deep \
+            --generated-at "$GENERATED_AT"
+
+      - name: Upload release payload
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ github.run_id }}-deep
+          path: release-payload/
+          retention-days: 1
+
       - name: Upload Updated Save File & Visual Reports
         if: always()
         uses: actions/upload-artifact@v7
@@ -62,3 +83,30 @@ jobs:
             data/transfer_log.jsonl
           if-no-files-found: ignore
           retention-days: 14
+
+  publish:
+    name: Publish Deep save
+    needs: sync
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: fldailyedit-latest-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-${{ github.run_id }}-deep
+          path: release-payload
+      - name: Merge release catalog
+        run: python tools/build_release_asset.py merge --existing-url "https://github.com/gvoze32/fldailyedit/releases/download/latest/catalog.json" --record release-payload/record.json --output release-payload/catalog.json
+      - name: Publish rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view latest >/dev/null 2>&1 || gh release create latest --title "Latest FL Daily Edit" --notes "Validated Fast and Deep option files for FL Daily Edit."
+          gh release upload latest release-payload/fldailyedit-fl2026-deep.zip release-payload/catalog.json --clobber
