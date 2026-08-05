@@ -66,7 +66,7 @@ prima di applicare un trasferimento.
 
 ## Sicurezza e limitazioni
 
-- Le esecuzioni locali creano backup a rotazione e usano una crittografia atomica e verificata.
+- Le esecuzioni locali creano backup a rotazione, eseguono la cifratura in modo atomico e ne verificano il risultato.
 - I salvataggi vengono convalidati prima e dopo le modifiche alle rose.
 - Un blocco di processo impedisce a due esecuzioni di scrivere contemporaneamente lo stesso output.
 - Le istantanee FotMob incomplete interrompono l'esecuzione anziché produrre un salvataggio parziale.
@@ -74,8 +74,8 @@ prima di applicare un trasferimento.
   e le rose di destinazione complete vengono ignorate.
 - Wikipedia, Sortitoutsi e Transfermarkt sono fonti supplementari. Un'interruzione
   di una di queste fonti non invalida un'istantanea FotMob completa.
-- `--allow-overflow-release` non procede in caso di errore perché il catalogo
-  incluso non contiene dati completi sul ruolo e sull'OVR di ogni giocatore.
+- `--allow-overflow-release` interrompe l'operazione in sicurezza perché il
+  catalogo incluso non contiene dati completi sul ruolo e sull'OVR di ogni giocatore.
 
 ## Esecuzione locale
 
@@ -98,31 +98,31 @@ cd ../..
 ## Comandi comuni
 
 ```bash
-# Visualizza in anteprima le modifiche senza scrivere un salvataggio
+# Preview changes without writing a save
 python run.py run --dry-run --edit-file base/EDIT00000000
 
-# Convalida un salvataggio esistente
+# Validate an existing save
 python run.py validate --edit-file base/EDIT00000000
 
-# Convalida gli aggiornamenti con un file per giocatore rispetto alla revisione originale della base
+# Validate one-file-per-player updates against the pristine base revision
 python run.py players validate
 
-# Applica esplicitamente i Player Update sottoposti a revisione a un salvataggio di output esistente
+# Apply reviewed Player Updates explicitly to an existing output save
 python run.py players apply \
   --base-revision fl26-u2.2-national-squads \
   --edit-file output/EDIT00000000 \
   --in-place
 
-# Applica tutti i trasferimenti effettivi disponibili fino a oggi
+# Apply all effective transfers available through today
 python run.py run --window auto
 
-# Ricostruisce a partire dalla base inclusa
+# Rebuild from the bundled base
 python run.py run --from-base --window auto
 
-# Aggiorna sul posto un salvataggio specifico
+# Update a specific save in place
 python run.py run --edit-file /path/to/EDIT00000000 --in-place
 
-# Mostra tutte le opzioni di esecuzione
+# Show every run option
 python run.py run --help
 ```
 
