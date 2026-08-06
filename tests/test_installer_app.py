@@ -1739,7 +1739,9 @@ def _layout_application(monkeypatch) -> InstallerApplication:
     return application
 
 
-def test_update_frame_keeps_local_description_with_local_mode(monkeypatch) -> None:
+def test_update_frame_places_prebuilt_first_and_keeps_local_copy_together(
+    monkeypatch,
+) -> None:
     application = _layout_application(monkeypatch)
 
     frame = application._build_update_frame()
@@ -1759,28 +1761,30 @@ def test_update_frame_keeps_local_description_with_local_mode(monkeypatch) -> No
         for child in frame.children
         if child.options.get("variable") is application._local_deep_var
     )
+    assert application._mode_var.value == InstallerMode.RELEASE.value
     assert mode_rows == {
-        installer_app.UI_COPY["local_mode"]: 2,
-        installer_app.UI_COPY["local_description"]: 3,
-        installer_app.UI_COPY["release_mode"]: 5,
+        installer_app.UI_COPY["release_mode"]: 2,
+        installer_app.UI_COPY["local_mode"]: 8,
+        installer_app.UI_COPY["local_description"]: 9,
     }
-    assert local_deep_row == 4
+    assert local_deep_row == 10
 
 
-def test_save_frame_places_browse_before_location_viewport(monkeypatch) -> None:
+def test_save_frame_places_browse_right_of_location_viewport(monkeypatch) -> None:
     application = _layout_application(monkeypatch)
     application._bind_location_scrolling = lambda _widget: None
 
     frame = application._build_save_frame()
 
-    browse_row = next(
+    browse_button = next(
         child
         for child in frame.children
-        if any(
-            grandchild.options.get("text") == "Browse…"
-            for grandchild in child.children
-        )
+        if child.options.get("text") == "Browse…"
     )
-    assert browse_row.grid_options["row"] == 2
-    assert application._location_canvas.parent.grid_options["row"] == 3
-    assert (3, {"weight": 1}) in frame.rowconfigure_calls
+    location_viewport = application._location_canvas.parent
+    assert browse_button.grid_options["row"] == 2
+    assert browse_button.grid_options["column"] == 1
+    assert browse_button.grid_options["sticky"] == "ne"
+    assert location_viewport.grid_options["row"] == 2
+    assert location_viewport.grid_options["column"] == 0
+    assert (2, {"weight": 1}) in frame.rowconfigure_calls

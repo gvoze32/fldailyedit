@@ -37,13 +37,18 @@ jobs:
         run: |
           python run.py validate --edit-file base/EDIT00000000
           python run.py players validate
+          BASE_REVISION="$(python -c 'import json; print(json.load(open("data/base_manifest.json", encoding="utf-8"))["revision"])')"
           mkdir -p output
           cp base/EDIT00000000 output/EDIT00000000
           python run.py run \
             --window auto \
             --edit-file output/EDIT00000000 \
             --in-place
-
+          python run.py players apply \
+            --base-revision "$BASE_REVISION" \
+            --edit-file output/EDIT00000000 \
+            --in-place \
+            --allow-overflow-release
 
       - name: Validate final save
         run: python run.py validate --edit-file output/EDIT00000000

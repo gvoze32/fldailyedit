@@ -898,6 +898,7 @@ def test_players_parser_dispatches_nested_apply(monkeypatch):
             "revision-1",
             "--edit-file",
             "source",
+            "--allow-overflow-release",
             "--output",
             "destination",
         ],
@@ -910,7 +911,7 @@ def test_players_parser_dispatches_nested_apply(monkeypatch):
     assert dispatched[0].edit_file == "source"
     assert dispatched[0].output == "destination"
     assert dispatched[0].in_place is False
-
+    assert dispatched[0].allow_overflow_release is True
 
 def test_players_parser_dispatches_approve_with_spec(monkeypatch):
     import run
@@ -1096,7 +1097,13 @@ def test_players_apply_no_change_writes_nothing(monkeypatch, tmp_path, capsys):
     assert "needs_review" in capsys.readouterr().out
 
 
-def _prepare_players_apply_results(monkeypatch, tmp_path, results):
+def _prepare_players_apply_results(
+    monkeypatch,
+    tmp_path,
+    results,
+    *,
+    allow_overflow_release=False,
+):
     import run
     from editor.player_spec import BaseManifest, load_player_specs
 
@@ -1138,7 +1145,11 @@ def _prepare_players_apply_results(monkeypatch, tmp_path, results):
     )
     monkeypatch.setattr(run, "load_player_specs", lambda: specs)
     monkeypatch.setattr(run, "validate_spec_set", lambda _specs: None)
-    monkeypatch.setattr(run, "apply_player_specs", lambda *_args: results)
+    monkeypatch.setattr(
+        run,
+        "apply_player_specs",
+        lambda *_args, **_kwargs: results,
+    )
     monkeypatch.setattr(run.crypto, "decrypt", lambda _path: decrypted)
     monkeypatch.setattr(run.crypto, "encrypt", encrypt)
     monkeypatch.setattr(run.crypto, "cleanup_temp", lambda _path: None)
@@ -1171,6 +1182,7 @@ def _prepare_players_apply_results(monkeypatch, tmp_path, results):
                 output=str(output),
                 in_place=False,
                 base_revision="expected-revision",
+                allow_overflow_release=allow_overflow_release,
             )
         )
 
@@ -1244,6 +1256,35 @@ def test_players_apply_mixed_success_and_mutation_failure_persists_verified_succ
     assert "player specs" not in rendered.lower()
 
 
+def test_players_apply_overflow_mode_fails_when_no_safe_candidate(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    from editor.player_spec import SpecResult
+
+    invoke, calls, source, output = _prepare_players_apply_results(
+        monkeypatch,
+        tmp_path,
+        (
+            SpecResult(
+                200000,
+                "Dastan Satpaev",
+                "waiting",
+                "no_safe_overflow_candidate",
+            ),
+        ),
+        allow_overflow_release=True,
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        invoke()
+
+    assert exc_info.value.code == 2
+    assert calls == ["validate"]
+    assert source.read_bytes() == b"encrypted"
+    assert output.exists() is False
+    assert "no_safe_overflow_candidate" in capsys.readouterr().out
 def test_players_apply_audits_and_rebuilds_same_save_reports_after_roundtrip(
     monkeypatch, tmp_path
 ):

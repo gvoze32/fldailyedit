@@ -1872,6 +1872,32 @@ def test_waiting_create_does_not_block_valid_update(tmp_path):
         ("Marco Palestra", "updated"),
     ]
     assert edit_file.get_player_ability_profile(162196).abilities["speed"] == 80
+def test_explicit_overflow_release_allows_essential_create(tmp_path):
+    from editor.player_spec import apply_player_specs
+
+    edit_file = make_combined_fixture(chelsea_roster_size=40)
+    players = current_players(edit_file)
+
+    results = apply_player_specs(
+        edit_file,
+        (dastan_spec(tmp_path), marco_spec(tmp_path)),
+        REVISION,
+        players,
+        allow_overflow_release=True,
+    )
+
+    assert [(result.name, result.status) for result in results] == [
+        ("Dastan Satpaev", "created"),
+        ("Marco Palestra", "updated"),
+    ]
+    roster = edit_file.get_team_roster(102)
+    assert roster is not None
+    assert roster.roster_size == 40
+    assert roster.has_player(200000)
+    assert not roster.has_player(100040)
+    assert edit_file.get_all_players(include_base_db=False)[200000].name == (
+        "Dastan Satpaev"
+    )
 
 def test_update_before_eligible_create_keeps_cache_mapping_safe(tmp_path):
     from dataclasses import replace

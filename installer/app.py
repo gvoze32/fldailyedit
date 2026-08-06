@@ -1326,38 +1326,6 @@ class InstallerApplication:
         )
         self._mode_buttons: dict[InstallerMode, ttk.Radiobutton] = {}
 
-        local_button = ttk.Radiobutton(
-            frame,
-            text=UI_COPY["local_mode"],
-            value=InstallerMode.LOCAL.value,
-            variable=self._mode_var,
-            command=self._select_mode,
-        )
-        local_button.grid(row=2, column=0, sticky="w", pady=(_SPACE_S, 0))
-        self._mode_buttons[InstallerMode.LOCAL] = local_button
-
-        self._wrapped_label(frame, text=UI_COPY["local_description"]).grid(
-            row=3,
-            column=0,
-            sticky="ew",
-            padx=(_RADIO_DESCRIPTION_INDENT, 0),
-            pady=(_SPACE_XS, _SPACE_S),
-        )
-        self._local_deep_var = tkinter.BooleanVar(self.root, value=False)
-        self._local_deep_button = ttk.Checkbutton(
-            frame,
-            text="Deep — Expanded coverage",
-            variable=self._local_deep_var,
-            command=self._select_local_deep,
-        )
-        self._local_deep_button.grid(
-            row=4,
-            column=0,
-            sticky="w",
-            padx=(_RADIO_DESCRIPTION_INDENT, 0),
-            pady=(0, _SPACE_M),
-        )
-
         release_button = ttk.Radiobutton(
             frame,
             text=UI_COPY["release_mode"],
@@ -1365,7 +1333,7 @@ class InstallerApplication:
             variable=self._mode_var,
             command=self._select_mode,
         )
-        release_button.grid(row=5, column=0, sticky="w", pady=(_SPACE_S, 0))
+        release_button.grid(row=2, column=0, sticky="w", pady=(_SPACE_S, 0))
         self._mode_buttons[InstallerMode.RELEASE] = release_button
 
         self._catalog_status_var = tkinter.StringVar(
@@ -1375,7 +1343,7 @@ class InstallerApplication:
         self._wrapped_label(
             frame,
             textvariable=self._catalog_status_var,
-        ).grid(row=6, column=0, sticky="ew", pady=(0, _SPACE_M))
+        ).grid(row=3, column=0, sticky="ew", pady=(0, _SPACE_M))
 
         self._record_var = tkinter.StringVar(self.root)
         self._record_buttons: dict[Channel, ttk.Radiobutton] = {}
@@ -1391,7 +1359,7 @@ class InstallerApplication:
                 UI_COPY["deep_description"],
             ),
         )
-        row = 7
+        row = 4
         for channel, title, description in choices:
             button = ttk.Radiobutton(
                 frame,
@@ -1411,12 +1379,45 @@ class InstallerApplication:
                 pady=(_SPACE_XS, _SPACE_S),
             )
             row += 2
+
+        local_button = ttk.Radiobutton(
+            frame,
+            text=UI_COPY["local_mode"],
+            value=InstallerMode.LOCAL.value,
+            variable=self._mode_var,
+            command=self._select_mode,
+        )
+        local_button.grid(row=8, column=0, sticky="w", pady=(_SPACE_M, 0))
+        self._mode_buttons[InstallerMode.LOCAL] = local_button
+
+        self._wrapped_label(frame, text=UI_COPY["local_description"]).grid(
+            row=9,
+            column=0,
+            sticky="ew",
+            padx=(_RADIO_DESCRIPTION_INDENT, 0),
+            pady=(_SPACE_XS, _SPACE_S),
+        )
+        self._local_deep_var = tkinter.BooleanVar(self.root, value=False)
+        self._local_deep_button = ttk.Checkbutton(
+            frame,
+            text="Deep — Expanded coverage",
+            variable=self._local_deep_var,
+            command=self._select_local_deep,
+        )
+        self._local_deep_button.grid(
+            row=10,
+            column=0,
+            sticky="w",
+            padx=(_RADIO_DESCRIPTION_INDENT, 0),
+            pady=(0, _SPACE_M),
+        )
         return frame
 
     def _build_save_frame(self) -> ttk.Frame:
         frame = ttk.Frame(self._body)
         frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(3, weight=1)
+        frame.columnconfigure(1, weight=0)
+        frame.rowconfigure(2, weight=1)
 
         self._wrapped_label(
             frame,
@@ -1424,26 +1425,22 @@ class InstallerApplication:
                 "Select the save folder to update. Detected locations appear "
                 "below; use Browse if yours is elsewhere."
             ),
-        ).grid(row=0, column=0, sticky="ew")
+        ).grid(row=0, column=0, columnspan=2, sticky="ew")
 
         self._location_status_var = tkinter.StringVar(self.root)
         self._wrapped_label(
             frame,
             textvariable=self._location_status_var,
-        ).grid(row=1, column=0, sticky="ew", pady=(_SPACE_S, _SPACE_M))
-
-        browse_row = ttk.Frame(frame)
-        browse_row.grid(row=2, column=0, sticky="ew", pady=(0, _SPACE_S))
-        self._browse_button = ttk.Button(
-            browse_row,
-            text="Browse…",
-            command=self._browse,
-            underline=0,
+        ).grid(
+            row=1,
+            column=0,
+            columnspan=2,
+            sticky="ew",
+            pady=(_SPACE_S, _SPACE_M),
         )
-        self._browse_button.grid(row=0, column=0, sticky="w")
 
         location_viewport = ttk.Frame(frame)
-        location_viewport.grid(row=3, column=0, sticky="nsew")
+        location_viewport.grid(row=2, column=0, sticky="nsew")
         location_viewport.columnconfigure(0, weight=1)
         location_viewport.rowconfigure(0, weight=1)
         frame_background = ttk.Style(self.root).lookup("TFrame", "background")
@@ -1488,6 +1485,18 @@ class InstallerApplication:
         self._location_var = tkinter.StringVar(self.root)
         self._location_path_labels: list[ttk.Label] = []
 
+        self._browse_button = ttk.Button(
+            frame,
+            text="Browse…",
+            command=self._browse,
+            underline=0,
+        )
+        self._browse_button.grid(
+            row=2,
+            column=1,
+            sticky="ne",
+            padx=(_SPACE_M, 0),
+        )
 
         self._browse_error_var = tkinter.StringVar(self.root)
         self._browse_error_label = self._wrapped_label(
@@ -1495,12 +1504,14 @@ class InstallerApplication:
             textvariable=self._browse_error_var,
         )
         self._browse_error_label.grid(
-            row=4,
+            row=3,
             column=0,
+            columnspan=2,
             sticky="ew",
             pady=(_SPACE_S, 0),
         )
         return frame
+
 
     def _bind_location_scrolling(self, widget: tkinter.Misc) -> None:
         widget.bind("<MouseWheel>", self._on_location_mousewheel, add="+")

@@ -1235,13 +1235,19 @@ def test_installer_publish_job_is_serialized_and_uploads_exact_release_assets():
     actions = re.findall(r"(?m)^\s*uses:\s+([^@\s]+)@", text)
     assert actions
     assert all(action.startswith("actions/") for action in actions)
-def test_sync_workflows_do_not_publish_unverified_player_spec_mutations() -> None:
+def test_sync_workflows_apply_reviewed_player_specs_after_transfers() -> None:
     for path in SYNC_WORKFLOW_PATHS:
         sync, _publish = path.read_text(encoding="utf-8").split(
             "\n  publish:\n", 1
         )
         assert "python run.py players validate" in sync
-        assert "python run.py players apply" not in sync
+        assert 'BASE_REVISION="$(' in sync
+        assert '--base-revision "$BASE_REVISION"' in sync
+        run_index = sync.index("python run.py run")
+        apply_index = sync.index("python run.py players apply")
+        assert run_index < apply_index
+        apply_block = sync[apply_index:]
+        assert "--allow-overflow-release" in apply_block
 def test_sync_workflows_do_not_upload_partial_save_artifacts() -> None:
     workflows = (
         (Path(".github/workflows/sync-fast.yml"), "fast"),
