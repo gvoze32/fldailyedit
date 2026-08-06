@@ -13,6 +13,62 @@ from editor.player_spec import (
 )
 
 
+def _assert_decoded_profile_matches_proposal(
+    profile, proposal, *, compare_registered_position: bool
+):
+    assert profile is not None
+    assert profile.age == proposal.age
+    assert profile.height == proposal.height
+    assert profile.weight == proposal.weight
+    assert profile.playing_style == proposal.playing_style
+    assert profile.strong_foot == proposal.strong_foot
+    assert profile.weak_foot_usage == proposal.weak_foot_usage
+    assert profile.weak_foot_accuracy == proposal.weak_foot_accuracy
+    assert profile.form == proposal.form
+    assert profile.injury_resistance == proposal.injury_resistance
+    assert dict(profile.position_proficiency) == dict(proposal.position_proficiency)
+    assert dict(profile.abilities) == dict(proposal.abilities)
+    assert profile.player_skills == proposal.player_skills
+    assert profile.com_styles == proposal.com_styles
+    if compare_registered_position:
+        assert profile.registered_position == proposal.registered_position
+
+
+def _assert_complete_generated_payload(payload):
+    from tests.test_generate_player_draft import (
+        assert_no_missing_keys,
+        assert_no_nulls,
+    )
+
+    assert set(payload) == {
+        "schema_version",
+        "operation",
+        "lifecycle",
+        "applies_to",
+        "identity",
+        "source",
+        "evidence",
+        "pes",
+        "draft",
+    }
+    assert_no_missing_keys(payload)
+    for key, value in payload.items():
+        if key != "source":
+            assert_no_nulls(value)
+
+
+def _assert_completed_payload_has_no_proposal_metadata(payload):
+    assert "source" not in payload
+    assert "draft" not in payload
+    assert "ovr_review" not in payload
+    assert set(payload["evidence"]) == {
+        "profile_url",
+        "proof_urls",
+        "effective_date",
+        "reason",
+    }
+
+
 def test_approved_update_proposal_applies_and_survives_encryption_roundtrip(
     tmp_path, monkeypatch
 ):
@@ -50,10 +106,48 @@ def test_approved_update_proposal_applies_and_survives_encryption_roundtrip(
         proposal_path = proposal_dir / "marco-palestra.json"
         proposal_path.write_text(json.dumps(payload), encoding="utf-8")
         unapproved_bytes = proposal_path.read_bytes()
-        from editor.player_spec import approve_player_proposal
+        from editor.player_spec import (
+            approve_player_proposal,
+            assess_update,
+        )
+        from scraper.pes_retro_snapshot import profile_from_snapshot
+        from tools.generate_player_draft import validate_generated_proposal
+
+        assert profile_from_snapshot(payload["source"]) == source_profile
+        _assert_complete_generated_payload(payload)
+        assert validate_generated_proposal(proposal_path, edit_file) == payload
+
+        unapproved = load_player_specs(
+            proposal_dir,
+            allow_proposals=True,
+        )[0]
+        before_unapproved = bytes(edit_file._data)
+        blocked = apply_player_spec(
+            edit_file,
+            unapproved,
+            load_base_manifest().revision,
+            edit_file.get_all_players(),
+        )
+        assert (blocked.status, blocked.reason) == (
+            "rejected",
+            "human_review_required",
+        )
+        assert bytes(edit_file._data) == before_unapproved
+        assert proposal_path.read_bytes() == unapproved_bytes
 
         assert approve_player_proposal(proposal_path, edit_file) == proposal_path
-        completed = load_player_specs(proposal_dir)[0]
+        completed_payload = json.loads(proposal_path.read_text(encoding="utf-8"))
+        _assert_completed_payload_has_no_proposal_metadata(completed_payload)
+        completed_specs = load_player_specs(proposal_dir)
+        assert len(completed_specs) == 1
+        completed = completed_specs[0]
+        assert completed.proposal is None
+        assessment = assess_update(
+            edit_file,
+            completed,
+            edit_file.get_all_players(),
+        )
+        assert (assessment.status, assessment.reason) == ("ready", "all_current")
         result = apply_player_spec(
             edit_file,
             completed,
@@ -70,8 +164,13 @@ def test_approved_update_proposal_applies_and_survives_encryption_roundtrip(
         verified = EditFile()
         verified.load(reopened / "data.dat")
         assert verified.validate_integrity()["valid"] is True
-        assert verified.get_player_ability_profile(162196).abilities["speed"] == 80
-
+        assert proposal.registered_position is None
+        assert "registered_position" not in payload["pes"]
+        _assert_decoded_profile_matches_proposal(
+            verified.get_player_ability_profile(162196),
+            proposal,
+            compare_registered_position=False,
+        )
         unapproved_dir = tmp_path / "unapproved"
         unapproved_dir.mkdir()
         unapproved_path = unapproved_dir / proposal_path.name
@@ -92,6 +191,7 @@ def test_approved_update_proposal_applies_and_survives_encryption_roundtrip(
             "human_review_required",
         )
         assert bytes(verified._data) == before_unapproved
+
     finally:
         crypto.cleanup_temp(decrypted)
         if reopened is not None:
@@ -111,6 +211,7 @@ def test_approved_create_proposal_frees_slot_applies_and_survives_roundtrip(
     from tools.generate_player_draft import (
         build_player_draft,
         parse_player_issue_event,
+        validate_generated_proposal,
     )
 
     proposal_dir = tmp_path / "proposals"
@@ -130,6 +231,7 @@ def test_approved_create_proposal_frees_slot_applies_and_survives_roundtrip(
             if any(character.isalnum() for character in team.name)
         }
         assert edit_file.release_player(126925, 102) is True
+        assert edit_file.get_team_roster(102).player_index(126925) == -1
         source_profile = make_source()
         proposal = proposal_for(source_profile)
         request = replace(
@@ -149,10 +251,47 @@ def test_approved_create_proposal_frees_slot_applies_and_survives_roundtrip(
         proposal_path = proposal_dir / "dastan-satpaev.json"
         proposal_path.write_text(json.dumps(payload), encoding="utf-8")
         unapproved_bytes = proposal_path.read_bytes()
-        from editor.player_spec import approve_player_proposal
+        from editor.player_spec import (
+            approve_player_proposal,
+            assess_create,
+        )
+        from scraper.pes_retro_snapshot import profile_from_snapshot
+
+        assert profile_from_snapshot(payload["source"]) == source_profile
+        _assert_complete_generated_payload(payload)
+        assert validate_generated_proposal(proposal_path, edit_file) == payload
+
+        unapproved = load_player_specs(
+            proposal_dir,
+            allow_proposals=True,
+        )[0]
+        before_unapproved = bytes(edit_file._data)
+        blocked = apply_player_spec(
+            edit_file,
+            unapproved,
+            load_base_manifest().revision,
+            edit_file.get_all_players(),
+        )
+        assert (blocked.status, blocked.reason) == (
+            "rejected",
+            "human_review_required",
+        )
+        assert bytes(edit_file._data) == before_unapproved
+        assert proposal_path.read_bytes() == unapproved_bytes
 
         assert approve_player_proposal(proposal_path, edit_file) == proposal_path
-        completed = load_player_specs(proposal_dir)[0]
+        completed_payload = json.loads(proposal_path.read_text(encoding="utf-8"))
+        _assert_completed_payload_has_no_proposal_metadata(completed_payload)
+        completed_specs = load_player_specs(proposal_dir)
+        assert len(completed_specs) == 1
+        completed = completed_specs[0]
+        assert completed.proposal is None
+        assessment = assess_create(
+            edit_file,
+            completed,
+            edit_file.get_all_players(),
+        )
+        assert (assessment.status, assessment.reason) == ("ready", "eligible")
         result = apply_player_spec(
             edit_file,
             completed,
@@ -172,10 +311,14 @@ def test_approved_create_proposal_frees_slot_applies_and_survives_roundtrip(
         verified = EditFile()
         verified.load(reopened / "data.dat")
         assert verified.validate_integrity()["valid"] is True
+        _assert_decoded_profile_matches_proposal(
+            verified.get_player_ability_profile(completed.identity.pes_id),
+            proposal,
+            compare_registered_position=True,
+        )
         assert verified.get_team_roster(102).player_index(
             completed.identity.pes_id
         ) != -1
-
         unapproved_dir = tmp_path / "unapproved"
         unapproved_dir.mkdir()
         unapproved_path = unapproved_dir / proposal_path.name
