@@ -256,6 +256,35 @@ def test_apply_player_spec_rejects_human_review_proposal_before_edit_access(
 
 
 @pytest.mark.parametrize("operation", ["update", "create"])
+def test_direct_apply_helpers_reject_human_review_proposals(
+    tmp_path, monkeypatch, operation
+):
+    from editor.player_spec import (
+        apply_create,
+        apply_update,
+        load_player_specs,
+    )
+
+    write_approval_proposal(tmp_path, monkeypatch, operation)
+    spec = load_player_specs(tmp_path, allow_proposals=True)[0]
+    if operation == "create":
+        edit_file = make_player_spec_edit_file(roster_size=39)
+        apply = apply_create
+    else:
+        edit_file = make_player_spec_edit_file_with_palestra()
+        apply = apply_update
+
+    before = bytes(edit_file._data)
+    result = apply(edit_file, spec, current_players(edit_file))
+
+    assert (result.status, result.reason) == (
+        "rejected",
+        "human_review_required",
+    )
+    assert bytes(edit_file._data) == before
+
+
+@pytest.mark.parametrize("operation", ["update", "create"])
 def test_approve_player_proposal_transforms_exact_completed_shape(
     tmp_path,
     monkeypatch,

@@ -1479,6 +1479,9 @@ def apply_create(
     all_players: Mapping[int, "PlayerInfo"],
 ) -> SpecResult:
     """Atomically serialize and register one reviewed created player."""
+    if spec.proposal is not None:
+        return _result(spec, "rejected", "human_review_required")
+
     assessment = assess_create(edit_file, spec, all_players)
     if assessment.status != "ready":
         return assessment
@@ -1637,6 +1640,8 @@ def apply_update(
     all_players: Mapping[int, "PlayerInfo"],
 ) -> SpecResult:
     """Apply a whole-spec patch only when every current value matches."""
+    if spec.proposal is not None:
+        return _result(spec, "rejected", "human_review_required")
     assessment, entry = _assess_update_state(edit_file, spec, all_players)
     if assessment.status != "ready":
         return assessment
