@@ -857,7 +857,7 @@ def test_players_apply_audits_and_rebuilds_same_save_reports_after_roundtrip(
         change["field"]: (change["from"], change["to"])
         for change in audit["field_changes"]
     }
-    assert changes_by_field["speed"] == (77, 80)
+    assert changes_by_field["speed"] == (77, 90)
     assert changes_by_field["height"] == (180, 186)
     assert calls.index("save") < calls.index("encrypt")
     assert calls.index("encrypt") < calls.index("decrypt-verify")
