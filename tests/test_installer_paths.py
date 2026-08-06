@@ -127,6 +127,10 @@ def test_save_location_exposes_the_edit_file_path(tmp_path: Path) -> None:
     assert location.target.value == "fl26-u2.2-national-squads"
     assert GameTarget.PES2021.value == "pes2021-vanilla"
 
+def test_local_policy_marker_is_not_a_remote_target() -> None:
+    assert GameTarget.LOCAL.value == "local"
+    assert GameTarget.LOCAL not in (GameTarget.FL26, GameTarget.PES2021)
+
 
 def test_validate_destination_probes_real_writability_and_cleans_up(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

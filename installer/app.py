@@ -41,7 +41,6 @@ from local_update import (
 )
 from installer.paths import (
     DestinationError,
-    FL_RELATIVE,
     GameTarget,
     SaveLocation,
     discover_save_locations,
@@ -247,13 +246,6 @@ _ERROR_TITLES = {
     "target_locked": "Close the game and try again",
 }
 
-def _is_canonical_fl26_save(path: Path) -> bool:
-    path_parts = tuple(part.casefold() for part in Path(path).parts)
-    fl_parts = tuple(part.casefold() for part in FL_RELATIVE.parts)
-    return (
-        len(path_parts) >= len(fl_parts)
-        and path_parts[-len(fl_parts) :] == fl_parts
-    )
 
 
 
@@ -428,11 +420,6 @@ class InstallerController:
     def select_location(self, location: SaveLocation) -> bool:
         if self.state.step is not WizardStep.SAVE:
             return False
-        if (
-            self.state.mode is InstallerMode.LOCAL
-            and location.target is not GameTarget.FL26
-        ):
-            return False
         selected = next(
             (
                 available
@@ -472,7 +459,6 @@ class InstallerController:
             return (
                 location is not None
                 and any(candidate == location for candidate in self.state.locations)
-                and location.target is GameTarget.FL26
                 and location.edit_file.is_file()
             )
         record = self.state.selected_record
@@ -679,8 +665,6 @@ class InstallerWorker:
         self._commands.put(_Install(record, location))
 
     def select_local(self, location: SaveLocation) -> None:
-        if location.target is not GameTarget.FL26:
-            raise ValueError("local updates require a Football Life 2026 save")
         if not location.edit_file.is_file():
             raise ValueError(f"Edit file not found: {location.edit_file}")
         self.start()
@@ -693,8 +677,6 @@ class InstallerWorker:
         *,
         deep: bool = False,
     ) -> None:
-        if location.target is not GameTarget.FL26:
-            raise ValueError("local updates require a Football Life 2026 save")
         self.start()
         with self._state_lock:
             if self._install_pending:
@@ -935,7 +917,7 @@ UI_COPY = {
     "local_mode": "Update my local save",
     "release_mode": "Install a prebuilt release",
     "local_description": (
-        "Update the Football Life 2026 EDIT00000000 already on this PC."
+        "Update the existing local save on this PC."
     ),
     "local_safety": (
         "The original save is backed up before an in-place replacement."
@@ -1835,7 +1817,7 @@ class InstallerApplication:
             )
         if local_mode and mode_var is not None:
             self._catalog_status_var.set(
-                "Choose Fast or Deep coverage for your existing FL26 save."
+                "Choose Fast or Deep coverage for your existing local save."
             )
         elif state.catalog is None:
             self._catalog_status_var.set("Checking for available updates…")
@@ -1889,10 +1871,7 @@ class InstallerApplication:
             key = f"{location.target.value}|{location.save_directory}"
             self._locations_by_key[key] = location
             compatible = (
-                (
-                    location.target is GameTarget.FL26
-                    and location.edit_file.is_file()
-                )
+                location.edit_file.is_file()
                 if local_mode
                 else record is not None and location.target.value == record.target_id
             )
@@ -1940,7 +1919,7 @@ class InstallerApplication:
         if state.locations:
             if local_mode:
                 self._location_status_var.set(
-                    f"{compatible_count} existing FL26 "
+                    f"{compatible_count} existing save "
                     f"{'save' if compatible_count == 1 else 'saves'} found."
                 )
             else:
@@ -2109,7 +2088,6 @@ class InstallerApplication:
             if state.mode is InstallerMode.LOCAL:
                 next_enabled = (
                     state.selected_location is not None
-                    and state.selected_location.target is GameTarget.FL26
                     and state.selected_location.edit_file.is_file()
                     and not self._browse_pending
                 )
@@ -2199,8 +2177,8 @@ class InstallerApplication:
         if self._browse_pending:
             return
         if state.mode is InstallerMode.LOCAL:
-            target = GameTarget.FL26
-            game_name = "Football Life 2026"
+            target = GameTarget.LOCAL
+            game_name = "Selected local save"
         else:
             record = state.selected_record
             if record is None:
@@ -2220,16 +2198,6 @@ class InstallerApplication:
             mustexist=True,
         )
         if not selected:
-            return
-        if (
-            state.mode is InstallerMode.LOCAL
-            and not _is_canonical_fl26_save(Path(selected))
-        ):
-            self._browse_error_var.set(
-                "Choose the Football Life 2026 save folder under "
-                "Documents/KONAMI/eFootball PES 2021 SEASON UPDATE/2026/save."
-            )
-            self._browse_button.focus_set()
             return
         self._browse_pending = True
         self._browse_error_var.set("Checking selected folder…")

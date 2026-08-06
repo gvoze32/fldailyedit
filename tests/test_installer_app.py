@@ -47,11 +47,12 @@ from installer.catalog import (
 from local_update import (
     CancellationToken,
     LocalUpdateProgress,
+    LocalUpdateRequest,
     LocalUpdateResult,
     LocalUpdateStage,
 )
 from installer.install import InstallError, InstallResult, InstallStage
-from installer.paths import FL_RELATIVE, GameTarget, SaveLocation
+from installer.paths import GameTarget, SaveLocation
 
 
 GENERATED_AT = datetime(2026, 8, 6, tzinfo=timezone.utc)
@@ -1303,18 +1304,18 @@ def _local_location(tmp_path: Path) -> SaveLocation:
     save_directory.mkdir()
     (save_directory / "EDIT00000000").write_bytes(b"local-save")
     return SaveLocation(GameTarget.FL26, "Football Life 2026", save_directory)
-
-def test_local_browse_rejects_known_pes2021_save_layout(tmp_path: Path) -> None:
-    canonical_fl26 = tmp_path / FL_RELATIVE
-    vanilla_pes = tmp_path / FL_RELATIVE.parent / "2025" / "save"
-
-    assert installer_app._is_canonical_fl26_save(canonical_fl26)
-    assert not installer_app._is_canonical_fl26_save(vanilla_pes)
-
-def test_local_browse_rejects_known_pes2021_path_before_worker_validation(
+def test_local_browse_accepts_non_2026_save_layout(
     monkeypatch, tmp_path: Path
 ) -> None:
-    vanilla_pes = tmp_path / FL_RELATIVE.parent / "2025" / "save"
+    vanilla_pes = (
+        tmp_path
+        / "Documents"
+        / "KONAMI"
+        / "eFootball PES 2021 SEASON UPDATE"
+        / "2025"
+        / "save"
+    )
+    vanilla_pes.mkdir(parents=True)
 
     class BrowseVar:
         def __init__(self) -> None:
@@ -1323,26 +1324,28 @@ def test_local_browse_rejects_known_pes2021_path_before_worker_validation(
         def set(self, value: str) -> None:
             self.value = value
 
-    class BrowseButton:
-        def focus_set(self) -> None:
-            pass
-
     class BrowseWorker:
         def __init__(self) -> None:
-            self.calls = []
+            self.calls: list[tuple[Path, GameTarget, str]] = []
 
-        def validate_destination(self, *args) -> None:
-            self.calls.append(args)
+        def validate_destination(
+            self, path: Path, target: GameTarget, game_name: str
+        ) -> None:
+            self.calls.append((path, target, game_name))
 
     controller = InstallerController()
     controller.select_mode(InstallerMode.LOCAL)
+    worker = BrowseWorker()
     application = object.__new__(installer_app.InstallerApplication)
     application.controller = controller
     application.root = None
-    application.worker = BrowseWorker()
+    application.worker = worker
     application._browse_pending = False
     application._browse_error_var = BrowseVar()
-    application._browse_button = BrowseButton()
+    application._browse_button = type(
+        "BrowseButton", (), {"focus_set": lambda _self: None}
+    )()
+    application._render = lambda _state: None
     monkeypatch.setattr(
         installer_app,
         "filedialog",
@@ -1351,10 +1354,68 @@ def test_local_browse_rejects_known_pes2021_path_before_worker_validation(
 
     application._browse()
 
-    assert application.worker.calls == []
-    assert application._browse_pending is False
-    assert "Football Life 2026" in application._browse_error_var.value
+    assert worker.calls == [
+        (vanilla_pes, GameTarget.LOCAL, "Selected local save")
+    ]
+    assert application._browse_pending is True
+    assert application._browse_error_var.value == "Checking selected folder…"
 
+def test_local_mode_accepts_a_non_fl26_save_location(tmp_path: Path) -> None:
+    save = tmp_path / "2025" / "save"
+    save.mkdir(parents=True)
+    (save / "EDIT00000000").write_bytes(b"standard-edit")
+    location = SaveLocation(GameTarget.PES2021, "PES 2021", save)
+
+    controller = InstallerController()
+    assert controller.select_mode(InstallerMode.LOCAL)
+    controller.set_locations((location,))
+    assert controller.next()
+    assert controller.select_location(location)
+    assert controller.next()
+    assert controller.state.step is WizardStep.REVIEW
+
+
+def test_local_worker_accepts_non_fl26_location_and_reaches_service(
+    tmp_path: Path,
+) -> None:
+    save = tmp_path / "2025" / "save"
+    save.mkdir(parents=True)
+    (save / "EDIT00000000").write_bytes(b"standard-edit")
+    location = SaveLocation(GameTarget.PES2021, "PES 2021", save)
+    calls: list[tuple[LocalUpdateRequest, CancellationToken]] = []
+
+    class FakeService:
+        def execute(
+            self,
+            request: LocalUpdateRequest,
+            *,
+            progress,
+            token: CancellationToken,
+        ) -> LocalUpdateResult:
+            calls.append((request, token))
+            return LocalUpdateResult(
+                target_path=location.edit_file,
+                backup_path=tmp_path / "backup",
+                installed_sha256="a" * 64,
+                transfer_applied=1,
+                shirt_numbers_changed=0,
+                unchanged=0,
+                safety_skipped=0,
+            )
+
+    worker = InstallerWorker(local_update_factory=lambda: FakeService())
+    try:
+        worker.start_local_update(location, deep=True)
+        event = _next_event(worker, LocalUpdateCompleted)
+        assert isinstance(event, LocalUpdateCompleted)
+        assert len(calls) == 1
+        assert calls[0][0] == LocalUpdateRequest(
+            edit_path=location.edit_file,
+            deep=True,
+        )
+        assert isinstance(calls[0][1], CancellationToken)
+    finally:
+        worker.close()
 
 def test_local_mode_rejects_missing_edit_file_before_review(
     tmp_path: Path,

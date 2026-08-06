@@ -26,6 +26,7 @@ _GAME_NAMES = {
 class GameTarget(str, Enum):
     FL26 = "fl26-u2.2-national-squads"
     PES2021 = "pes2021-vanilla"
+    LOCAL = "local"
 
 
 @dataclass(frozen=True, slots=True)
