@@ -31,13 +31,27 @@ from installer.install import (
     InstallStage,
     install_archive as default_install_archive,
 )
+from local_update import (
+    CancellationToken,
+    LocalUpdateProgress,
+    LocalUpdateRequest,
+    LocalUpdateResult,
+    LocalUpdateService,
+    LocalUpdateStage,
+)
 from installer.paths import (
     DestinationError,
+    FL_RELATIVE,
     GameTarget,
     SaveLocation,
     discover_save_locations,
     validate_destination,
 )
+
+
+class InstallerMode(str, Enum):
+    RELEASE = "release"
+    LOCAL = "local"
 
 
 class WizardStep(str, Enum):
@@ -50,15 +64,18 @@ class WizardStep(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class InstallerState:
+    mode: InstallerMode = InstallerMode.RELEASE
     step: WizardStep = WizardStep.UPDATE
     catalog: Catalog | None = None
     selected_record: ReleaseRecord | None = None
     locations: tuple[SaveLocation, ...] = ()
     selected_location: SaveLocation | None = None
+    local_edit_file: Path | None = None
+    local_deep: bool = False
     progress_stage: str | None = None
     progress_downloaded: int = 0
     progress_total: int = 0
-    result: InstallResult | None = None
+    result: InstallResult | LocalUpdateResult | None = None
     error_title: str | None = None
     error_detail: str | None = None
     commit_started: bool = False
@@ -90,12 +107,26 @@ class DestinationValidationFailed:
     error: Exception
 
 @dataclass(frozen=True, slots=True)
+class LocalSaveSelected:
+    location: SaveLocation
+
+@dataclass(frozen=True, slots=True)
 class ProgressChanged:
     stage: str
     downloaded: int = 0
     total: int = 0
     commit_started: bool = False
 
+
+
+@dataclass(frozen=True, slots=True)
+class LocalProgressChanged:
+    progress: LocalUpdateProgress
+
+
+@dataclass(frozen=True, slots=True)
+class LocalUpdateCompleted:
+    result: LocalUpdateResult
 
 @dataclass(frozen=True, slots=True)
 class InstallCompleted:
@@ -114,7 +145,10 @@ WorkerEvent = (
     | DestinationValidated
     | DestinationValidationFailed
     | ProgressChanged
+    | LocalProgressChanged
+    | LocalSaveSelected
     | InstallCompleted
+    | LocalUpdateCompleted
     | WorkerFailed
 )
 
@@ -143,6 +177,18 @@ class _Install:
 
 
 @dataclass(frozen=True, slots=True)
+class _SelectLocal:
+    location: SaveLocation
+
+
+@dataclass(frozen=True, slots=True)
+class _StartLocalUpdate:
+    location: SaveLocation
+    deep: bool
+
+
+
+@dataclass(frozen=True, slots=True)
 class _Stop:
     pass
 
@@ -152,6 +198,8 @@ _WorkerCommand = (
     | _DiscoverLocations
     | _ValidateDestination
     | _Install
+    | _SelectLocal
+    | _StartLocalUpdate
     | _Stop
 )
 
@@ -177,19 +225,36 @@ _ERROR_TITLES = {
     "backup_failed": "The backup could not be created",
     "cancelled": "Installation cancelled",
     "cleanup_failed": "Temporary files could not be removed",
+    "decrypt_failed": "The local save could not be opened",
+    "input_changed": "The local save changed during the update",
     "insufficient_space": "Not enough free space",
     "invalid_destination": "The save folder is not available",
+    "invalid_save": "The local save failed validation",
+    "missing_input": "The local save could not be found",
     "not_directory": "The save folder is not available",
     "not_save": "The selected folder is not a save folder",
     "not_writable": "The save folder is not writable",
+    "output_changed": "The output save changed during the update",
     "permission_denied": "The save folder is not writable",
+    "post_validation_failed": "The updated save failed validation",
+    "publish_failed": "The updated save could not be published",
     "reparse_point": "The save folder is not available",
     "recovery_failed": "The original save could not be restored",
     "replace_failed": "The save could not be replaced",
+    "runtime_error": "The local update could not be completed",
     "staging_failed": "The downloaded save could not be prepared",
-    "target_locked": "Close the game and try again",
     "target_changed": "The save file changed during installation",
+    "target_locked": "Close the game and try again",
 }
+
+def _is_canonical_fl26_save(path: Path) -> bool:
+    path_parts = tuple(part.casefold() for part in Path(path).parts)
+    fl_parts = tuple(part.casefold() for part in FL_RELATIVE.parts)
+    return (
+        len(path_parts) >= len(fl_parts)
+        and path_parts[-len(fl_parts) :] == fl_parts
+    )
+
 
 
 def error_copy(error: Exception) -> tuple[str, str]:
@@ -231,6 +296,31 @@ class InstallerController:
             return self.set_catalog(event.catalog)
         if isinstance(event, LocationsDiscovered):
             return self.set_locations(event.locations)
+        if isinstance(event, LocalSaveSelected):
+            if self.state.mode is not InstallerMode.LOCAL:
+                return False
+            return self._publish(
+                replace(
+                    self.state,
+                    selected_location=event.location,
+                    local_edit_file=event.location.edit_file,
+                )
+            )
+        if isinstance(event, LocalProgressChanged):
+            if self.state.step is not WizardStep.PROGRESS:
+                return False
+            progress = event.progress
+            return self._publish(
+                replace(
+                    self.state,
+                    progress_stage=progress.stage.value,
+                    progress_downloaded=progress.current,
+                    progress_total=progress.total,
+                    commit_started=(
+                        self.state.commit_started or progress.commit_started
+                    ),
+                )
+            )
         if isinstance(event, ProgressChanged):
             if self.state.step is not WizardStep.PROGRESS:
                 return False
@@ -245,11 +335,31 @@ class InstallerController:
                     ),
                 )
             )
-        if isinstance(event, InstallCompleted):
+        if isinstance(event, InstallCompleted | LocalUpdateCompleted):
             return self.succeed(event.result)
         if isinstance(event, WorkerFailed):
             return self.fail(event.error)
         return False
+
+    def select_mode(self, mode: InstallerMode) -> bool:
+        if self.state.step is not WizardStep.UPDATE:
+            return False
+        return self._publish(
+            replace(
+                self.state,
+                mode=mode,
+                selected_record=(
+                    None
+                    if mode is InstallerMode.LOCAL
+                    else self.state.selected_record
+                ),
+                local_edit_file=(
+                    self.state.local_edit_file
+                    if mode is InstallerMode.LOCAL
+                    else None
+                ),
+            )
+        )
 
     def set_catalog(self, catalog: Catalog) -> bool:
         selected = self.state.selected_record
@@ -261,6 +371,14 @@ class InstallerController:
             replace(self.state, catalog=catalog, selected_record=selected)
         )
 
+    def set_local_deep(self, deep: bool) -> bool:
+        if (
+            self.state.step is not WizardStep.UPDATE
+            or self.state.mode is not InstallerMode.LOCAL
+        ):
+            return False
+        return self._publish(replace(self.state, local_deep=bool(deep)))
+
     def set_locations(self, locations: tuple[SaveLocation, ...]) -> bool:
         selected = self.state.selected_location
         if selected is not None:
@@ -268,11 +386,24 @@ class InstallerController:
                 (location for location in locations if location == selected), None
             )
         return self._publish(
-            replace(self.state, locations=tuple(locations), selected_location=selected)
+            replace(
+                self.state,
+                locations=tuple(locations),
+                selected_location=selected,
+                local_edit_file=(
+                    selected.edit_file
+                    if self.state.mode is InstallerMode.LOCAL and selected is not None
+                    else None
+                ),
+            )
         )
 
     def select_record(self, record: ReleaseRecord) -> bool:
-        if self.state.step is not WizardStep.UPDATE or self.state.catalog is None:
+        if (
+            self.state.step is not WizardStep.UPDATE
+            or self.state.mode is not InstallerMode.RELEASE
+            or self.state.catalog is None
+        ):
             return False
         selected = next(
             (
@@ -284,10 +415,23 @@ class InstallerController:
         )
         if selected is None:
             return False
-        return self._publish(replace(self.state, selected_record=selected))
+        return self._publish(
+            replace(
+                self.state,
+                mode=InstallerMode.RELEASE,
+                selected_record=selected,
+                local_edit_file=None,
+            )
+        )
+
 
     def select_location(self, location: SaveLocation) -> bool:
         if self.state.step is not WizardStep.SAVE:
+            return False
+        if (
+            self.state.mode is InstallerMode.LOCAL
+            and location.target is not GameTarget.FL26
+        ):
             return False
         selected = next(
             (
@@ -299,9 +443,21 @@ class InstallerController:
         )
         if selected is None:
             return False
-        return self._publish(replace(self.state, selected_location=selected))
+        return self._publish(
+            replace(
+                self.state,
+                selected_location=selected,
+                local_edit_file=(
+                    selected.edit_file
+                    if self.state.mode is InstallerMode.LOCAL
+                    else None
+                ),
+            )
+        )
 
     def _has_valid_record(self) -> bool:
+        if self.state.mode is InstallerMode.LOCAL:
+            return True
         catalog = self.state.catalog
         record = self.state.selected_record
         return (
@@ -311,17 +467,28 @@ class InstallerController:
         )
 
     def _has_compatible_location(self) -> bool:
-        record = self.state.selected_record
         location = self.state.selected_location
+        if self.state.mode is InstallerMode.LOCAL:
+            return (
+                location is not None
+                and any(candidate == location for candidate in self.state.locations)
+                and location.target is GameTarget.FL26
+                and location.edit_file.is_file()
+            )
+        record = self.state.selected_record
         return (
             self._has_valid_record()
             and location is not None
             and any(candidate == location for candidate in self.state.locations)
+            and record is not None
             and location.target.value == record.target_id
         )
 
+
     def next(self) -> bool:
         if self.state.step is WizardStep.UPDATE:
+            if self.state.mode is InstallerMode.LOCAL:
+                return self._publish(replace(self.state, step=WizardStep.SAVE))
             if not self._has_valid_record():
                 return False
             return self._publish(replace(self.state, step=WizardStep.SAVE))
@@ -354,7 +521,7 @@ class InstallerController:
             return self._publish(replace(self.state, step=WizardStep.SAVE))
         return False
 
-    def succeed(self, result: InstallResult) -> bool:
+    def succeed(self, result: InstallResult | LocalUpdateResult) -> bool:
         if self.state.step is not WizardStep.PROGRESS:
             return False
         return self._publish(
@@ -439,6 +606,8 @@ class InstallerWorker:
         ] = validate_destination,
         download_archive: Callable[..., None] = default_download_archive,
         install_archive: Callable[..., InstallResult] = default_install_archive,
+        local_update_service: LocalUpdateService | None = None,
+        local_update_factory: Callable[[], LocalUpdateService] | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self.events: SimpleQueue[WorkerEvent] = SimpleQueue()
@@ -447,6 +616,8 @@ class InstallerWorker:
         self._discover_locations = discover_locations
         self._validate_destination = validate_destination
         self._download_archive = download_archive
+        self._local_update_factory = local_update_factory
+        self._local_update_service = local_update_service
         self._install_archive = install_archive
         self._now = (
             now
@@ -458,6 +629,7 @@ class InstallerWorker:
         self._thread: threading.Thread | None = None
         self._install_pending = False
         self._closed = False
+        self._local_token: CancellationToken | None = None
         self._commit_started = False
 
     @property
@@ -506,10 +678,39 @@ class InstallerWorker:
             self._cancel_requested.clear()
         self._commands.put(_Install(record, location))
 
+    def select_local(self, location: SaveLocation) -> None:
+        if location.target is not GameTarget.FL26:
+            raise ValueError("local updates require a Football Life 2026 save")
+        if not location.edit_file.is_file():
+            raise ValueError(f"Edit file not found: {location.edit_file}")
+        self.start()
+        self._commands.put(_SelectLocal(location))
+
+
+    def start_local_update(
+        self,
+        location: SaveLocation,
+        *,
+        deep: bool = False,
+    ) -> None:
+        if location.target is not GameTarget.FL26:
+            raise ValueError("local updates require a Football Life 2026 save")
+        self.start()
+        with self._state_lock:
+            if self._install_pending:
+                raise RuntimeError("an installation is already pending")
+            self._install_pending = True
+            self._commit_started = False
+            self._cancel_requested.clear()
+            self._local_token = CancellationToken()
+        self._commands.put(_StartLocalUpdate(location, bool(deep)))
+
     def cancel(self) -> bool:
         with self._state_lock:
             if not self._install_pending or self._commit_started:
                 return False
+            if self._local_token is not None:
+                return self._local_token.request()
             self._cancel_requested.set()
             return True
 
@@ -594,6 +795,38 @@ class InstallerWorker:
             )
         return result
 
+    def _emit_local_progress(self, progress: LocalUpdateProgress) -> None:
+        with self._state_lock:
+            if progress.commit_started:
+                self._commit_started = True
+        self.events.put(LocalProgressChanged(progress))
+
+    def _local_service(self) -> LocalUpdateService:
+        if self._local_update_service is None:
+            if self._local_update_factory is not None:
+                self._local_update_service = self._local_update_factory()
+            else:
+                from run import build_local_update_service
+
+                self._local_update_service = build_local_update_service()
+        return self._local_update_service
+
+    def _perform_local_update(
+        self,
+        location: SaveLocation,
+        deep: bool,
+    ) -> LocalUpdateResult:
+        with self._state_lock:
+            token = self._local_token
+        if token is None:
+            raise RuntimeError("local update cancellation token is unavailable")
+        request = LocalUpdateRequest(edit_path=location.edit_file, deep=deep)
+        return self._local_service().execute(
+            request,
+            progress=self._emit_local_progress,
+            token=token,
+        )
+
     def _run(self) -> None:
         while True:
             command = self._commands.get()
@@ -654,6 +887,28 @@ class InstallerWorker:
                     )
                 continue
 
+            if isinstance(command, _SelectLocal):
+                self.events.put(LocalSaveSelected(command.location))
+                continue
+
+            if isinstance(command, _StartLocalUpdate):
+                try:
+                    result = self._perform_local_update(
+                        command.location,
+                        command.deep,
+                    )
+                except Exception as error:
+                    terminal_event: LocalUpdateCompleted | WorkerFailed = WorkerFailed(
+                        error
+                    )
+                else:
+                    terminal_event = LocalUpdateCompleted(result)
+                with self._state_lock:
+                    self._install_pending = False
+                    self._local_token = None
+                self.events.put(terminal_event)
+                continue
+
             try:
                 result = self._perform_install(command.record, command.location)
             except Exception as error:
@@ -677,6 +932,15 @@ UI_COPY = {
         "Fast and Deep describe update coverage, not download speed."
     ),
     "install": "Download and install",
+    "local_mode": "Update my local save",
+    "release_mode": "Install a prebuilt release",
+    "local_description": (
+        "Update the Football Life 2026 EDIT00000000 already on this PC."
+    ),
+    "local_safety": (
+        "The original save is backed up before an in-place replacement."
+    ),
+    "apply_local": "Apply update",
     "close_game": "Close the game before continuing.",
     "open_folder": "Open save folder",
     "copy_diagnostics": "Copy diagnostic details",
@@ -699,6 +963,16 @@ class CloseDisposition(str, Enum):
     CANCEL_AND_WAIT = "cancel_and_wait"
     BLOCK = "block"
 
+
+_LOCAL_STAGE_COPY = {
+    LocalUpdateStage.SCRAPING.value: "Checking the latest transfers…",
+    LocalUpdateStage.VALIDATING.value: "Validating the local save…",
+    LocalUpdateStage.MATCHING.value: "Matching players safely…",
+    LocalUpdateStage.APPLYING.value: "Preparing the updated save…",
+    LocalUpdateStage.VERIFYING.value: "Verifying the updated save…",
+    LocalUpdateStage.ENCRYPTING.value: "Finishing the in-place update safely…",
+    LocalUpdateStage.COMPLETE.value: "Local update complete.",
+}
 
 @dataclass(frozen=True, slots=True)
 class ProgressPresentation:
@@ -727,10 +1001,15 @@ def progress_presentation(
     commit_locked: bool = False,
 ) -> ProgressPresentation:
     """Translate controller progress into widget-neutral display state."""
+    local = state.mode is InstallerMode.LOCAL
     if state.commit_started or commit_locked:
         return ProgressPresentation(
             mode="indeterminate",
-            status="Finishing installation safely…",
+            status=(
+                "Finishing the local update safely…"
+                if local
+                else "Finishing installation safely…"
+            ),
             maximum=100,
             value=0,
             controls_locked=True,
@@ -738,7 +1017,11 @@ def progress_presentation(
     if cancellation_requested:
         return ProgressPresentation(
             mode="indeterminate",
-            status="Cancelling installation…",
+            status=(
+                "Cancelling local update…"
+                if local
+                else "Cancelling installation…"
+            ),
             maximum=100,
             value=0,
             controls_locked=False,
@@ -754,11 +1037,12 @@ def progress_presentation(
             value=downloaded,
             controls_locked=False,
         )
+    stage_copy = _LOCAL_STAGE_COPY if local else _STAGE_COPY
     return ProgressPresentation(
         mode="indeterminate",
-        status=_STAGE_COPY.get(
+        status=stage_copy.get(
             state.progress_stage,
-            "Preparing installation…",
+            "Preparing the local update…" if local else "Preparing installation…",
         ),
         maximum=100,
         value=0,
@@ -1038,13 +1322,57 @@ class InstallerApplication:
 
         self._wrapped_label(
             frame,
-            text="Choose how broadly FLDailyEdit should update your save.",
+            text="Choose how FLDailyEdit should update your save.",
         ).grid(row=0, column=0, sticky="ew")
         self._wrapped_label(frame, text=UI_COPY["coverage_note"]).grid(
             row=1,
             column=0,
             sticky="ew",
             pady=(_SPACE_XS, _SPACE_M),
+        )
+
+        self._mode_var = tkinter.StringVar(
+            self.root,
+            value=InstallerMode.RELEASE.value,
+        )
+        self._mode_buttons: dict[InstallerMode, ttk.Radiobutton] = {}
+        for row, (mode, label) in enumerate(
+            (
+                (InstallerMode.LOCAL, UI_COPY["local_mode"]),
+                (InstallerMode.RELEASE, UI_COPY["release_mode"]),
+            ),
+            start=2,
+        ):
+            button = ttk.Radiobutton(
+                frame,
+                text=label,
+                value=mode.value,
+                variable=self._mode_var,
+                command=self._select_mode,
+            )
+            button.grid(row=row, column=0, sticky="w", pady=(_SPACE_S, 0))
+            self._mode_buttons[mode] = button
+
+        self._wrapped_label(frame, text=UI_COPY["local_description"]).grid(
+            row=4,
+            column=0,
+            sticky="ew",
+            padx=(_RADIO_DESCRIPTION_INDENT, 0),
+            pady=(_SPACE_XS, _SPACE_S),
+        )
+        self._local_deep_var = tkinter.BooleanVar(self.root, value=False)
+        self._local_deep_button = ttk.Checkbutton(
+            frame,
+            text="Deep — Expanded coverage",
+            variable=self._local_deep_var,
+            command=self._select_local_deep,
+        )
+        self._local_deep_button.grid(
+            row=5,
+            column=0,
+            sticky="w",
+            padx=(_RADIO_DESCRIPTION_INDENT, 0),
+            pady=(0, _SPACE_M),
         )
 
         self._catalog_status_var = tkinter.StringVar(
@@ -1054,7 +1382,7 @@ class InstallerApplication:
         self._wrapped_label(
             frame,
             textvariable=self._catalog_status_var,
-        ).grid(row=2, column=0, sticky="ew", pady=(0, _SPACE_M))
+        ).grid(row=6, column=0, sticky="ew", pady=(0, _SPACE_M))
 
         self._record_var = tkinter.StringVar(self.root)
         self._record_buttons: dict[Channel, ttk.Radiobutton] = {}
@@ -1070,7 +1398,7 @@ class InstallerApplication:
                 UI_COPY["deep_description"],
             ),
         )
-        row = 3
+        row = 7
         for channel, title, description in choices:
             button = ttk.Radiobutton(
                 frame,
@@ -1253,6 +1581,7 @@ class InstallerApplication:
 
         self._review_coverage_var = tkinter.StringVar(self.root)
         self._review_location_var = tkinter.StringVar(self.root)
+        self._review_safety_var = tkinter.StringVar(self.root)
         ttk.Label(frame, text="Update coverage").grid(
             row=1,
             column=0,
@@ -1273,6 +1602,10 @@ class InstallerApplication:
             textvariable=self._review_location_var,
             style="Wizard.Section.TLabel",
         ).grid(row=4, column=0, sticky="ew", pady=(_SPACE_XS, _SPACE_S))
+        self._wrapped_label(
+            frame,
+            textvariable=self._review_safety_var,
+        ).grid(row=5, column=0, sticky="ew", pady=(0, _SPACE_S))
         return frame
 
     def _build_progress_frame(self) -> ttk.Frame:
@@ -1363,17 +1696,21 @@ class InstallerApplication:
                 event = self.worker.events.get_nowait()
             except Empty:
                 break
-            terminal = isinstance(event, (InstallCompleted, WorkerFailed))
+            terminal = isinstance(
+                event,
+                (InstallCompleted, LocalUpdateCompleted, WorkerFailed),
+            )
             state_before_event = self.controller.state
             if isinstance(event, WorkerFailed):
-                self._failure_operation = (
-                    "catalog"
-                    if state_before_event.step is WizardStep.UPDATE
-                    else "install"
-                )
+                if state_before_event.step is WizardStep.UPDATE:
+                    self._failure_operation = "catalog"
+                elif state_before_event.mode is InstallerMode.LOCAL:
+                    self._failure_operation = "local"
+                else:
+                    self._failure_operation = "install"
                 self._error_code = getattr(event.error, "code", None)
                 self.controller.handle_event(event)
-            elif isinstance(event, InstallCompleted):
+            elif isinstance(event, (InstallCompleted, LocalUpdateCompleted)):
                 self._failure_operation = None
                 self._error_code = None
                 self._commit_lock_observed = False
@@ -1437,19 +1774,38 @@ class InstallerApplication:
             WizardStep.RESULT: 4,
         }[state.step]
         self._step_var.set(f"Step {step_number} of 4")
-        self._title_var.set(
-            {
-                WizardStep.UPDATE: "Choose update coverage",
-                WizardStep.SAVE: "Choose save location",
-                WizardStep.REVIEW: "Review installation",
-                WizardStep.PROGRESS: "Installing update",
-                WizardStep.RESULT: (
-                    "Installation complete"
-                    if state.result is not None
+        titles = {
+            WizardStep.UPDATE: (
+                "Choose local update"
+                if state.mode is InstallerMode.LOCAL
+                else "Choose update coverage"
+            ),
+            WizardStep.SAVE: "Choose save location",
+            WizardStep.REVIEW: (
+                "Review local update"
+                if state.mode is InstallerMode.LOCAL
+                else "Review installation"
+            ),
+            WizardStep.PROGRESS: (
+                "Updating local save"
+                if state.mode is InstallerMode.LOCAL
+                else "Installing update"
+            ),
+            WizardStep.RESULT: (
+                (
+                    "Local update complete"
+                    if state.mode is InstallerMode.LOCAL
+                    else "Installation complete"
+                )
+                if state.result is not None
+                else (
+                    "Local update stopped"
+                    if state.mode is InstallerMode.LOCAL
                     else "Installation stopped"
-                ),
-            }[state.step]
-        )
+                )
+            ),
+        }
+        self._title_var.set(titles[state.step])
 
         if state.step is WizardStep.UPDATE:
             self._render_update(state)
@@ -1469,7 +1825,19 @@ class InstallerApplication:
 
     def _render_update(self, state: InstallerState) -> None:
         self._records_by_channel = {}
-        if state.catalog is None:
+        mode_var = getattr(self, "_mode_var", None)
+        local_mode = state.mode is InstallerMode.LOCAL
+        if mode_var is not None:
+            mode_var.set(state.mode.value)
+            self._local_deep_var.set(state.local_deep)
+            self._local_deep_button.configure(
+                state="normal" if local_mode else "disabled"
+            )
+        if local_mode and mode_var is not None:
+            self._catalog_status_var.set(
+                "Choose Fast or Deep coverage for your existing FL26 save."
+            )
+        elif state.catalog is None:
             self._catalog_status_var.set("Checking for available updates…")
         else:
             self._records_by_channel = {
@@ -1493,7 +1861,11 @@ class InstallerApplication:
                     f"{generated_at:%Y-%m-%d %H:%M} UTC"
                 )
             button.configure(
-                state="normal" if record is not None else "disabled",
+                state=(
+                    "normal"
+                    if record is not None and not local_mode
+                    else "disabled"
+                ),
                 text=title,
             )
         self._record_var.set(
@@ -1510,19 +1882,29 @@ class InstallerApplication:
             child.destroy()
         self._locations_by_key = {}
         record = state.selected_record
+        local_mode = state.mode is InstallerMode.LOCAL
         compatible_count = 0
         selected_button: ttk.Radiobutton | None = None
         for row, location in enumerate(state.locations):
             key = f"{location.target.value}|{location.save_directory}"
             self._locations_by_key[key] = location
             compatible = (
-                record is not None and location.target.value == record.target_id
+                (
+                    location.target is GameTarget.FL26
+                    and location.edit_file.is_file()
+                )
+                if local_mode
+                else record is not None and location.target.value == record.target_id
             )
             if compatible:
                 compatible_count += 1
             title = location.game_name
             if not compatible:
-                title = f"{title} — Not compatible with this update"
+                title = (
+                    f"{title} — Needs an existing EDIT00000000"
+                    if local_mode
+                    else f"{title} — Not compatible with this update"
+                )
             button = ttk.Radiobutton(
                 self._location_holder,
                 text=title,
@@ -1544,7 +1926,7 @@ class InstallerApplication:
                 selected_button = button
             path_label = self._wrapped_label(
                 self._location_holder,
-                text=str(location.save_directory),
+                text=str(location.edit_file if local_mode else location.save_directory),
             )
             self._location_path_labels.append(path_label)
             path_label.grid(
@@ -1556,10 +1938,16 @@ class InstallerApplication:
             )
             self._bind_location_scrolling(path_label)
         if state.locations:
-            self._location_status_var.set(
-                f"{compatible_count} compatible save "
-                f"{'location' if compatible_count == 1 else 'locations'} found."
-            )
+            if local_mode:
+                self._location_status_var.set(
+                    f"{compatible_count} existing FL26 "
+                    f"{'save' if compatible_count == 1 else 'saves'} found."
+                )
+            else:
+                self._location_status_var.set(
+                    f"{compatible_count} compatible save "
+                    f"{'location' if compatible_count == 1 else 'locations'} found."
+                )
         elif self._location_discovery_error is not None:
             self._location_status_var.set(
                 "Save locations could not be detected automatically. "
@@ -1588,20 +1976,42 @@ class InstallerApplication:
     def _render_review(self, state: InstallerState) -> None:
         record = state.selected_record
         location = state.selected_location
-        self._review_coverage_var.set(
-            (
-                UI_COPY["fast_title"]
-                if record is not None and record.channel is Channel.FAST
-                else UI_COPY["deep_title"]
+        if state.mode is InstallerMode.LOCAL:
+            coverage = (
+                UI_COPY["deep_title"]
+                if state.local_deep
+                else UI_COPY["fast_title"]
             )
-            if record is not None
-            else "Not selected"
-        )
-        self._review_location_var.set(
-            str(location.save_directory)
-            if location is not None
-            else "Not selected"
-        )
+            location_text = (
+                str(location.edit_file)
+                if location is not None
+                else "Not selected"
+            )
+            safety = (
+                f"{UI_COPY['local_safety']} "
+                "Only the verified encrypted result is published."
+            )
+        else:
+            coverage = (
+                (
+                    UI_COPY["fast_title"]
+                    if record is not None and record.channel is Channel.FAST
+                    else UI_COPY["deep_title"]
+                )
+                if record is not None
+                else "Not selected"
+            )
+            location_text = (
+                str(location.save_directory)
+                if location is not None
+                else "Not selected"
+            )
+            safety = ""
+        self._review_coverage_var.set(coverage)
+        self._review_location_var.set(location_text)
+        safety_var = getattr(self, "_review_safety_var", None)
+        if safety_var is not None:
+            safety_var.set(safety)
 
     def _render_progress(self, state: InstallerState) -> None:
         self._result_actions.grid_remove()
@@ -1639,8 +2049,20 @@ class InstallerApplication:
         self._progress_bar.grid_remove()
         self._result_actions.grid()
         if state.result is not None:
-            self._progress_status_var.set("Your save is ready.")
-            detail = f"Installed to:\n{state.result.target_path}"
+            if isinstance(state.result, LocalUpdateResult):
+                self._progress_status_var.set("Your local save is ready.")
+                detail = f"Updated in place:\n{state.result.target_path}"
+                detail += (
+                    f"\n\nTransfers applied: {state.result.transfer_applied}"
+                    f"\nShirt numbers changed: {state.result.shirt_numbers_changed}"
+                    f"\nUnchanged: {state.result.unchanged}"
+                    f"\nSafety skipped: {state.result.safety_skipped}"
+                )
+                if state.result.diagnostic:
+                    detail += f"\n\nWarning:\n{state.result.diagnostic}"
+            else:
+                self._progress_status_var.set("Your save is ready.")
+                detail = f"Installed to:\n{state.result.target_path}"
             if state.result.backup_path is not None:
                 detail += f"\n\nBackup created at:\n{state.result.backup_path}"
             self._progress_detail_var.set(detail)
@@ -1652,7 +2074,12 @@ class InstallerApplication:
             self._copy_button.grid_remove()
         else:
             self._progress_status_var.set(
-                state.error_title or "Installation could not be completed"
+                state.error_title
+                or (
+                    "Local update could not be completed"
+                    if state.mode is InstallerMode.LOCAL
+                    else "Installation could not be completed"
+                )
             )
             self._progress_detail_var.set(
                 state.error_detail
@@ -1670,22 +2097,37 @@ class InstallerApplication:
         self._back_button.configure(
             state="normal" if back_enabled else "disabled"
         )
-
         next_enabled = False
         next_text = "Next"
         if state.step is WizardStep.UPDATE:
-            next_enabled = state.selected_record is not None
-        elif state.step is WizardStep.SAVE:
             next_enabled = (
-                state.selected_record is not None
-                and state.selected_location is not None
-                and state.selected_location.target.value
-                == state.selected_record.target_id
-                and not self._browse_pending
+                True
+                if state.mode is InstallerMode.LOCAL
+                else state.selected_record is not None
             )
+        elif state.step is WizardStep.SAVE:
+            if state.mode is InstallerMode.LOCAL:
+                next_enabled = (
+                    state.selected_location is not None
+                    and state.selected_location.target is GameTarget.FL26
+                    and state.selected_location.edit_file.is_file()
+                    and not self._browse_pending
+                )
+            else:
+                next_enabled = (
+                    state.selected_record is not None
+                    and state.selected_location is not None
+                    and state.selected_location.target.value
+                    == state.selected_record.target_id
+                    and not self._browse_pending
+                )
         elif state.step is WizardStep.REVIEW:
-            next_enabled = True
-            next_text = UI_COPY["install"]
+            next_enabled = self.controller._has_compatible_location()
+            next_text = (
+                UI_COPY["apply_local"]
+                if state.mode is InstallerMode.LOCAL
+                else UI_COPY["install"]
+            )
         self._next_button.configure(
             text=next_text,
             state="normal" if next_enabled else "disabled",
@@ -1707,6 +2149,11 @@ class InstallerApplication:
         if self._closed:
             return
         if step is WizardStep.UPDATE:
+            if self.controller.state.mode is InstallerMode.LOCAL:
+                local_button = self._mode_buttons.get(InstallerMode.LOCAL)
+                if local_button is not None:
+                    local_button.focus_set()
+                    return
             for channel in (Channel.FAST, Channel.DEEP):
                 button = self._record_buttons[channel]
                 if "disabled" not in button.state():
@@ -1728,6 +2175,16 @@ class InstallerApplication:
         else:
             self._cancel_button.focus_set()
 
+    def _select_mode(self) -> None:
+        try:
+            mode = InstallerMode(self._mode_var.get())
+        except ValueError:
+            return
+        self.controller.select_mode(mode)
+
+    def _select_local_deep(self) -> None:
+        self.controller.set_local_deep(bool(self._local_deep_var.get()))
+
     def _select_record(self) -> None:
         record = self._records_by_channel.get(self._record_var.get())
         if record is not None:
@@ -1738,9 +2195,25 @@ class InstallerApplication:
             self.controller.select_location(location)
 
     def _browse(self) -> None:
-        record = self.controller.state.selected_record
-        if record is None or self._browse_pending:
+        state = self.controller.state
+        if self._browse_pending:
             return
+        if state.mode is InstallerMode.LOCAL:
+            target = GameTarget.FL26
+            game_name = "Football Life 2026"
+        else:
+            record = state.selected_record
+            if record is None:
+                return
+            try:
+                target = GameTarget(record.target_id)
+            except ValueError as error:
+                self._browse_error_var.set(
+                    f"The selected update target is not supported.\n{error}"
+                )
+                self._browse_button.focus_set()
+                return
+            game_name = record.target_name
         selected = filedialog.askdirectory(
             parent=self.root,
             title="Choose save folder",
@@ -1748,11 +2221,13 @@ class InstallerApplication:
         )
         if not selected:
             return
-        try:
-            target = GameTarget(record.target_id)
-        except ValueError as error:
+        if (
+            state.mode is InstallerMode.LOCAL
+            and not _is_canonical_fl26_save(Path(selected))
+        ):
             self._browse_error_var.set(
-                f"The selected update target is not supported.\n{error}"
+                "Choose the Football Life 2026 save folder under "
+                "Documents/KONAMI/eFootball PES 2021 SEASON UPDATE/2026/save."
             )
             self._browse_button.focus_set()
             return
@@ -1762,7 +2237,7 @@ class InstallerApplication:
         self.worker.validate_destination(
             Path(selected),
             target,
-            record.target_name,
+            game_name,
         )
 
     def _back(self) -> None:
@@ -1775,17 +2250,27 @@ class InstallerApplication:
             return
         if previous is WizardStep.REVIEW:
             state = self.controller.state
-            record = state.selected_record
             location = state.selected_location
-            if record is None or location is None:
+            if location is None:
                 return
             self._failure_operation = None
             self._cancel_requested = False
             self._commit_lock_observed = False
             try:
-                self.worker.install(record, location)
+                if state.mode is InstallerMode.LOCAL:
+                    self.worker.start_local_update(
+                        location,
+                        deep=state.local_deep,
+                    )
+                else:
+                    record = state.selected_record
+                    if record is None:
+                        return
+                    self.worker.install(record, location)
             except Exception as error:
-                self._failure_operation = "install"
+                self._failure_operation = (
+                    "local" if state.mode is InstallerMode.LOCAL else "install"
+                )
                 self._error_code = getattr(error, "code", None)
                 self.controller.fail(error)
 
@@ -1801,18 +2286,28 @@ class InstallerApplication:
         if not self.controller.retry():
             return
         state = self.controller.state
-        record = state.selected_record
         location = state.selected_location
-        if record is None or location is None:
+        if location is None:
             return
         self._failure_operation = None
         self._error_code = None
         self._cancel_requested = False
         self._commit_lock_observed = False
         try:
-            self.worker.install(record, location)
+            if state.mode is InstallerMode.LOCAL:
+                self.worker.start_local_update(
+                    location,
+                    deep=state.local_deep,
+                )
+            else:
+                record = state.selected_record
+                if record is None:
+                    return
+                self.worker.install(record, location)
         except Exception as error:
-            self._failure_operation = "install"
+            self._failure_operation = (
+                "local" if state.mode is InstallerMode.LOCAL else "install"
+            )
             self._error_code = getattr(error, "code", None)
             self.controller.fail(error)
 

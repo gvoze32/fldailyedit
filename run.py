@@ -75,6 +75,15 @@ from scraper.sortitoutsi import fetch_sortitoutsi_transfers
 from scraper.sources import reconcile_transfer_sources
 from scraper.wikipedia import fetch_wikipedia_transfers
 from scraper.transfermarkt import fetch_transfermarkt_transfers
+from local_update import (
+    CancellationToken,
+    LocalUpdateError,
+    LocalUpdateProgress,
+    LocalUpdateRequest,
+    LocalUpdateResult,
+    LocalUpdateService,
+    LocalUpdateStage,
+)
 
 logger = logging.getLogger(__name__)
 if not hasattr(config, "BASE_EDIT_PATH"):
@@ -1325,128 +1334,290 @@ def _find_shirt_number_conflict(
     return None
 
 
-def cmd_run(args):
-    """Main pipeline for verified transfers."""
-    dry_run = args.dry_run
-    edit_path, output_path = _resolve_run_paths(args)
-    threshold = args.threshold or config.MATCH_THRESHOLD_PLAYER
-
-    if not dry_run and not edit_path.exists():
-        print(f"Edit file not found: {edit_path}")
-        print("Use --edit-file to specify the path, or set EDIT_FILE_PATH in config.py")
-        sys.exit(1)
-
-    allow_overflow_release = getattr(args, "allow_overflow_release", False)
-    transfers = _scrape_run_transfers(args)
-
-    if not transfers:
-        print("No verified transfers found. Nothing to apply.")
-        return
-
-    if dry_run and not edit_path.exists():
-        print("\n⚠ Dry-run mode without edit file — showing scraped data only.")
-        print(f"\nAll {len(transfers)} transfers:")
-        for t in transfers:
-            print(f"  {t}")
-        return
-
-    output_lock = EditFileLock(output_path)
-    output_lock.acquire()
-    try:
-        input_digest = _sha256_file(edit_path)
-        same_input_output = output_path.resolve() == edit_path.resolve()
-        output_existed = output_path.exists()
-        output_digest = (
-            input_digest
-            if same_input_output
-            else _sha256_file(output_path) if output_existed else None
+class _RunPrepared:
+    def __init__(
+        self,
+        *,
+        temp_dir: Path,
+        data_dat: Path,
+        edit_file: EditFile,
+        edit_path: Path,
+        output_path: Path,
+        input_digest: str,
+        same_input_output: bool,
+        output_existed: bool,
+        output_digest: str | None,
+    ) -> None:
+        self.temp_dir = temp_dir
+        self.data_dat = data_dat
+        self.edit_file = edit_file
+        self.edit_path = edit_path
+        self.output_path = output_path
+        self.input_digest = input_digest
+        self.same_input_output = same_input_output
+        self.output_existed = output_existed
+        self.output_digest = output_digest
+        self.output_lock: EditFileLock | None = None
+        self.roster_plan = ()
+        self.save_scope = str(output_path.resolve())
+        self.backup_path: Path | None = None
+        self.original_data = bytes(
+            getattr(edit_file, "_data", data_dat.read_bytes())
         )
-    except Exception:
-        output_lock.release()
-        raise
+        self.pending_logs = []
+        self.run_records = []
 
-    print(f"\n🔓 Decrypting {edit_path}...")
-    try:
-        temp_dir = crypto.decrypt(edit_path)
-    except Exception as e:
-        output_lock.release()
-        print(f"Decryption failed: {e}")
-        sys.exit(1)
 
-    try:
-        data_dat = temp_dir / "data.dat"
-        if not data_dat.exists():
-            dat_files = list(temp_dir.glob("*.dat"))
-            data_dat = max(dat_files, key=lambda f: f.stat().st_size)
+class _RunMutation:
+    def __init__(
+        self,
+        *,
+        transfer_applied: int,
+        shirt_numbers_changed: int,
+        unchanged: int,
+        safety_skipped: int,
+    ) -> None:
+        self.transfer_applied = transfer_applied
+        self.shirt_numbers_changed = shirt_numbers_changed
+        self.unchanged = unchanged
+        self.safety_skipped = safety_skipped
 
-        ef = EditFile()
-        ef.load(data_dat)
 
-        integrity = ef.validate_integrity()
-        if not integrity["valid"]:
-            print("\n❌ Input save failed FL26 integrity validation; no changes will be written.")
-            for error in integrity["errors"][:20]:
-                print(f"  - {error}")
-            remaining = len(integrity["errors"]) - 20
-            if remaining > 0:
-                print(f"  ... and {remaining} more errors")
-            print("Use a known-good Football Life 2026 EDIT00000000 as --edit-file.")
-            sys.exit(2)
+class _RunLocalUpdateRuntime:
+    """Adapter from the shared service lifecycle to the existing FL26 pipeline."""
 
-        matcher, all_rosters, team_player_map, club_ids = _load_match_database(ef)
-        roster_plan, fully_matched, save_scope = _match_and_plan_transfers(
-            transfers,
-            matcher,
-            threshold,
-            team_player_map,
-            all_rosters,
-            club_ids,
-            ef,
-            output_path,
-            allow_overflow_release=allow_overflow_release,
+    @staticmethod
+    def _args(request: LocalUpdateRequest) -> argparse.Namespace:
+        return argparse.Namespace(
+            popular=request.popular,
+            window=request.window,
+            since=request.since,
+            club=request.club,
+            deep=request.deep,
+            fotmob_only=request.fotmob_only,
+            allow_overflow_release=request.allow_overflow_release,
         )
 
-        run_records = []
-        if dry_run:
-            _print_dry_run(ef, roster_plan)
-            return
+    @staticmethod
+    def _release_lock(prepared: _RunPrepared) -> None:
+        if prepared.output_lock is not None:
+            prepared.output_lock.release()
+            prepared.output_lock = None
 
+    def scrape(
+        self,
+        request: LocalUpdateRequest,
+        _token: CancellationToken,
+    ):
+        if not request.dry_run and not request.edit_path.exists():
+            raise LocalUpdateError(
+                "missing_input",
+                f"Edit file not found: {request.edit_path}",
+                stage=LocalUpdateStage.SCRAPING,
+            )
+        return _scrape_run_transfers(self._args(request))
+
+    def validate_and_prepare(
+        self,
+        request: LocalUpdateRequest,
+        _transfers,
+        _token: CancellationToken,
+    ) -> _RunPrepared:
+        output_path = request.target_path
+        prepared: _RunPrepared | None = None
+        lock = EditFileLock(output_path)
+        try:
+            lock.acquire()
+        except Exception as error:
+            raise LocalUpdateError(
+                "target_locked",
+                str(error),
+                stage=LocalUpdateStage.VALIDATING,
+            ) from error
+
+        try:
+            input_digest = _sha256_file(request.edit_path)
+            same_input_output = output_path.resolve() == request.edit_path.resolve()
+            output_existed = output_path.exists()
+            output_digest = (
+                input_digest
+                if same_input_output
+                else _sha256_file(output_path) if output_existed else None
+            )
+
+            print(f"\n🔓 Decrypting {request.edit_path}...")
+            try:
+                temp_dir = crypto.decrypt(request.edit_path)
+            except Exception as error:
+                raise LocalUpdateError(
+                    "decrypt_failed",
+                    f"Decryption failed: {error}",
+                    stage=LocalUpdateStage.VALIDATING,
+                ) from error
+
+            data_dat = temp_dir / "data.dat"
+            if not data_dat.exists():
+                dat_files = list(temp_dir.glob("*.dat"))
+                if not dat_files:
+                    raise LocalUpdateError(
+                        "invalid_save",
+                        f"Decryption produced no data block in {temp_dir}",
+                        stage=LocalUpdateStage.VALIDATING,
+                    )
+                data_dat = max(dat_files, key=lambda path: path.stat().st_size)
+
+            edit_file = EditFile()
+            edit_file.load(data_dat)
+            integrity = edit_file.validate_integrity()
+            if not integrity["valid"]:
+                details = [
+                    "Input save failed FL26 integrity validation; no changes were written."
+                ]
+                details.extend(f"  - {error}" for error in integrity["errors"][:20])
+                remaining = len(integrity["errors"]) - 20
+                if remaining > 0:
+                    details.append(f"  ... and {remaining} more errors")
+                details.append(
+                    "Use a known-good Football Life 2026 EDIT00000000 as the local save."
+                )
+                raise LocalUpdateError(
+                    "invalid_save",
+                    "\n".join(details),
+                    stage=LocalUpdateStage.VALIDATING,
+                )
+
+            prepared = _RunPrepared(
+                temp_dir=temp_dir,
+                data_dat=data_dat,
+                edit_file=edit_file,
+                edit_path=request.edit_path,
+                output_path=output_path,
+                input_digest=input_digest,
+                same_input_output=same_input_output,
+                output_existed=output_existed,
+                output_digest=output_digest,
+            )
+            prepared.output_lock = lock
+            return prepared
+        except LocalUpdateError:
+            if prepared is not None:
+                crypto.cleanup_temp(prepared.temp_dir)
+            else:
+                temp_dir = locals().get("temp_dir")
+                if temp_dir is not None:
+                    crypto.cleanup_temp(temp_dir)
+            lock.release()
+            raise
+        except Exception as error:
+            temp_dir = locals().get("temp_dir")
+            if temp_dir is not None:
+                crypto.cleanup_temp(temp_dir)
+            lock.release()
+            raise LocalUpdateError(
+                "invalid_save",
+                f"Could not load the selected FL26 save: {error}",
+                stage=LocalUpdateStage.VALIDATING,
+            ) from error
+
+    def match_and_plan(
+        self,
+        request: LocalUpdateRequest,
+        prepared: _RunPrepared,
+        transfers,
+        _token: CancellationToken,
+    ):
+        try:
+            matcher, all_rosters, team_player_map, club_ids = _load_match_database(
+                prepared.edit_file
+            )
+            roster_plan, fully_matched, save_scope = _match_and_plan_transfers(
+                transfers,
+                matcher,
+                request.threshold or config.MATCH_THRESHOLD_PLAYER,
+                team_player_map,
+                all_rosters,
+                club_ids,
+                prepared.edit_file,
+                prepared.output_path,
+                allow_overflow_release=request.allow_overflow_release,
+            )
+            prepared.roster_plan = roster_plan
+            prepared.save_scope = save_scope
+            return roster_plan, fully_matched
+        except LocalUpdateError:
+            raise
+        except Exception as error:
+            raise LocalUpdateError(
+                "matching_failed",
+                f"Transfer matching failed: {error}",
+                stage=LocalUpdateStage.MATCHING,
+            ) from error
+
+    def apply(
+        self,
+        request: LocalUpdateRequest,
+        prepared: _RunPrepared,
+        _plan,
+        token: CancellationToken,
+    ):
         actionable_roster = any(
             item.action in {"move", "add", "release", "shirt_update"}
-            for item in roster_plan
+            for item in prepared.roster_plan
         )
         if not actionable_roster:
+            unchanged = sum(
+                item.action == "noop" for item in prepared.roster_plan
+            )
+            safety_skipped = sum(
+                item.action == "skip" for item in prepared.roster_plan
+            )
             print("\nNo effective transfer or shirt-number changes to apply. Exiting.")
-            return
+            return LocalUpdateResult(
+                target_path=prepared.output_path,
+                backup_path=None,
+                installed_sha256=None,
+                transfer_applied=0,
+                shirt_numbers_changed=0,
+                unchanged=unchanged,
+                safety_skipped=safety_skipped,
+                no_changes=True,
+            )
 
-        # Create backup before modifying
-        print(f"\n💾 Creating backup...")
-        backup_path = backup_mod.create_backup(edit_path)
-        print(f"  Backup: {backup_path}")
+        token.raise_if_cancelled()
+        print("\n💾 Creating backup...")
+        try:
+            prepared.backup_path = backup_mod.create_backup(prepared.edit_path)
+        except Exception as error:
+            raise LocalUpdateError(
+                "backup_failed",
+                f"Backup failed: {error}",
+                stage=LocalUpdateStage.APPLYING,
+            ) from error
+        print(f"  Backup: {prepared.backup_path}")
 
-        print(f"\n⚡ Applying verified transfers and shirt-number changes...")
+        print("\n⚡ Applying verified transfers and shirt-number changes...")
         transfer_applied = 0
         shirt_numbers_applied = 0
         unchanged = 0
         safety_skipped = 0
-        original_data = bytes(ef._data)
-        pending_logs = []
+        original_data = prepared.original_data
 
-        for planned_action in roster_plan:
-            m = planned_action.match
-            pid = m.player_id
-            to_tid = m.to_team_id
-            t = m.transfer
-            
-            if pid is None:
+        for planned_action in prepared.roster_plan:
+            token.raise_if_cancelled()
+            match = planned_action.match
+            player_id = match.player_id
+            to_team_id = match.to_team_id
+            transfer = match.transfer
+
+            if player_id is None:
                 continue
-                
+
             action = planned_action.action
-            current_tid = planned_action.current_team_id
+            current_team_id = planned_action.current_team_id
             if action == "skip":
                 safety_skipped += 1
                 print(
-                    f"  ⚠ Safety skip {m.matched_player_name or t.player_name}: "
+                    f"  ⚠ Safety skip {match.matched_player_name or transfer.player_name}: "
                     f"{planned_action.reason or 'state mismatch'}"
                 )
                 continue
@@ -1455,179 +1626,335 @@ def cmd_run(args):
                 continue
 
             ok = False
-            pref_shirt = t.shirt_number
+            preferred_shirt = transfer.shirt_number
             previous_shirt = None
             if action == "shirt_update":
-                if pref_shirt is None:
+                if preferred_shirt is None:
                     unchanged += 1
                     continue
-                previous_shirt = ef.get_player_shirt_number(to_tid, pid)
-                if previous_shirt == pref_shirt:
+                previous_shirt = prepared.edit_file.get_player_shirt_number(
+                    to_team_id,
+                    player_id,
+                )
+                if previous_shirt == preferred_shirt:
                     unchanged += 1
                     continue
                 conflicting_player = _find_shirt_number_conflict(
-                    ef, to_tid, pid, pref_shirt
+                    prepared.edit_file,
+                    to_team_id,
+                    player_id,
+                    preferred_shirt,
                 )
                 if conflicting_player is not None:
                     safety_skipped += 1
                     print(
-                        f"  ⚠ Safety skip {m.matched_player_name or t.player_name}: "
-                        f"shirt #{pref_shirt} is already assigned to player "
-                        f"{conflicting_player} on team {to_tid}"
+                        f"  ⚠ Safety skip {match.matched_player_name or transfer.player_name}: "
+                        f"shirt #{preferred_shirt} is already assigned to player "
+                        f"{conflicting_player} on team {to_team_id}"
                     )
                     continue
-                ok = ef.update_player_shirt_number(to_tid, pid, pref_shirt)
+                ok = prepared.edit_file.update_player_shirt_number(
+                    to_team_id,
+                    player_id,
+                    preferred_shirt,
+                )
             elif action == "move":
-                ok = ef.move_player(
-                    pid,
-                    current_tid,
-                    to_tid,
-                    shirt_number=pref_shirt,
-                    position=t.position,
-                    allow_overflow_release=allow_overflow_release,
+                ok = prepared.edit_file.move_player(
+                    player_id,
+                    current_team_id,
+                    to_team_id,
+                    shirt_number=preferred_shirt,
+                    position=transfer.position,
+                    allow_overflow_release=request.allow_overflow_release,
                 )
             elif action == "add":
-                ok = ef.add_player(
-                    pid,
-                    to_tid,
-                    shirt_number=pref_shirt,
-                    position=t.position,
-                    allow_overflow_release=allow_overflow_release,
+                ok = prepared.edit_file.add_player(
+                    player_id,
+                    to_team_id,
+                    shirt_number=preferred_shirt,
+                    position=transfer.position,
+                    allow_overflow_release=request.allow_overflow_release,
                 )
             elif action == "release":
-                ok = ef.release_player(pid, m.from_team_id)
+                ok = prepared.edit_file.release_player(
+                    player_id,
+                    match.from_team_id,
+                )
 
-            if ok:
-                if action == "shirt_update":
-                    shirt_numbers_applied += 1
-                else:
-                    transfer_applied += 1
-                pending_logs.append((m, previous_shirt, action))
-                run_records.append({
-                    "player_name": m.matched_player_name or m.transfer.player_name,
-                    "from_team": m.matched_from_team or m.transfer.from_club,
-                    "to_team": m.matched_to_team or m.transfer.to_club,
-                    "position": m.transfer.position,
-                    "fee": m.transfer.fee,
-                    "transfer_type": m.transfer.transfer_type,
-                    "confidence": m.min_confidence,
+            if not ok:
+                prepared.edit_file._data = bytearray(original_data)
+                raise LocalUpdateError(
+                    "apply_failed",
+                    f"Failed: {match.matched_player_name or transfer.player_name} "
+                    f"({match.action_type}); entire batch rolled back",
+                    stage=LocalUpdateStage.APPLYING,
+                )
+
+            if action == "shirt_update":
+                shirt_numbers_applied += 1
+            else:
+                transfer_applied += 1
+            prepared.pending_logs.append((match, previous_shirt, action))
+            prepared.run_records.append(
+                {
+                    "player_name": match.matched_player_name or transfer.player_name,
+                    "from_team": match.matched_from_team or transfer.from_club,
+                    "to_team": match.matched_to_team or transfer.to_club,
+                    "position": transfer.position,
+                    "fee": transfer.fee,
+                    "transfer_type": transfer.transfer_type,
+                    "confidence": match.min_confidence,
                     "dry_run": False,
                     "previous_shirt_number": previous_shirt,
-                    "shirt_number": pref_shirt if action == "shirt_update" else None,
+                    "shirt_number": (
+                        preferred_shirt if action == "shirt_update" else None
+                    ),
                     "roster_action": action,
-                    "sources": list(m.transfer.sources),
-                    "source_urls": list(m.transfer.source_urls),
-                    "proof_urls": list(m.transfer.proof_urls),
-                })
-            else:
-                ef._data = bytearray(original_data)
-                print(
-                    f"  ✗ Failed: {m.matched_player_name or m.transfer.player_name} "
-                    f"({m.action_type}); entire batch rolled back"
-                )
-                sys.exit(2)
-
+                    "sources": list(transfer.sources),
+                    "source_urls": list(transfer.source_urls),
+                    "proof_urls": list(transfer.proof_urls),
+                }
+            )
 
         print(
             f"\n  Transfers applied: {transfer_applied}, "
             f"shirt numbers changed: {shirt_numbers_applied}, "
             f"already current: {unchanged}, safety-skipped: {safety_skipped}"
         )
-
-        post_integrity = ef.validate_integrity()
-        if not post_integrity["valid"]:
-            ef._data = bytearray(original_data)
-            print("\n❌ Modified save failed integrity validation; changes were rolled back.")
-            for error in post_integrity["errors"][:20]:
-                print(f"  - {error}")
-            remaining = len(post_integrity["errors"]) - 20
-            if remaining > 0:
-                print(f"  ... and {remaining} more errors")
-            sys.exit(2)
-
-        if _sha256_file(edit_path) != input_digest:
-            ef._data = bytearray(original_data)
-            print(
-                "\n❌ Input EDIT file changed while this run was processing; "
-                "stale output was not written."
-            )
-            sys.exit(2)
-        if not same_input_output:
-            output_changed = output_path.exists() != output_existed
-            if output_existed and output_path.exists():
-                output_changed = _sha256_file(output_path) != output_digest
-            if output_changed:
-                ef._data = bytearray(original_data)
-                print(
-                    "\n❌ Output EDIT file changed while this run was processing; "
-                    "concurrent output was preserved."
-                )
-                sys.exit(2)
-
-        # Save modified data.dat
-        ef.save(data_dat)
-
-        # Re-encrypt
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        print(f"\n🔒 Re-encrypting → {output_path}...")
-        crypto.encrypt(temp_dir, output_path)
-
-        # Persist audit entries only after the binary passed validation and
-        # verified encryption round-trip.
-        for m, previous_shirt, action in pending_logs:
-            transfer_logger.log_transfer(
-                player_name=m.matched_player_name or m.transfer.player_name,
-                player_id=m.player_id,
-                from_team=m.matched_from_team or m.transfer.from_club,
-                from_team_id=m.from_team_id or 0,
-                to_team=m.matched_to_team or m.transfer.to_club,
-                to_team_id=m.to_team_id or 0,
-                confidence=m.min_confidence,
-                transfer_type=m.transfer.transfer_type,
-                dry_run=False,
-                position=m.transfer.position,
-                fee=m.transfer.fee,
-                market_value=m.transfer.market_value,
-                transfer_date=m.transfer.date,
-                previous_shirt_number=previous_shirt,
-                shirt_number=(
-                    m.transfer.shirt_number
-                    if m.transfer.transfer_type == "shirt_number_update"
-                    else None
-                ),
-                roster_action=action,
-                save_scope=save_scope,
-                fotmob_player_id=m.transfer.player_id_fotmob,
-                sortitoutsi_player_id=m.transfer.player_id_sortitoutsi,
-                transfermarkt_player_id=m.transfer.player_id_transfermarkt,
-                transfermarkt_from_club_id=m.transfer.from_club_id_transfermarkt,
-                transfermarkt_to_club_id=m.transfer.to_club_id_transfermarkt,
-                transfermarkt_transfer_id=m.transfer.transfer_id_transfermarkt,
-                sources=m.transfer.sources,
-                source_urls=m.transfer.source_urls,
-                proof_urls=m.transfer.proof_urls,
-            )
-
-
-        # Save visual reports
-        transfer_logger.save_reports(run_records)
-
-        print(
-            f"\n✅ Done! {transfer_applied} transfers applied; "
-            f"{shirt_numbers_applied} shirt numbers changed."
+        return _RunMutation(
+            transfer_applied=transfer_applied,
+            shirt_numbers_changed=shirt_numbers_applied,
+            unchanged=unchanged,
+            safety_skipped=safety_skipped,
         )
-        if output_path.resolve() != edit_path.resolve():
-            print(f"   Input (base/pristine):   {edit_path}")
-            print(f"   Output (updated save):   {output_path}")
-        else:
-            print(f"   Updated file:            {output_path}")
-        print(f"   Backup at:               {backup_path}")
-        print(f"   Log at:                  {config.TRANSFER_LOG_FILE}")
-        print(f"   Visual Summary Report:   {config.OUTPUT_DIR / 'transfer_summary.md'}")
 
-    finally:
-        crypto.cleanup_temp(temp_dir)
-        output_lock.release()
+    def verify(
+        self,
+        _request: LocalUpdateRequest,
+        prepared: _RunPrepared,
+        _mutation: _RunMutation,
+        _token: CancellationToken,
+    ) -> None:
+        post_integrity = prepared.edit_file.validate_integrity()
+        if not post_integrity["valid"]:
+            prepared.edit_file._data = bytearray(prepared.original_data)
+            details = [
+                "Modified save failed integrity validation; changes were rolled back."
+            ]
+            details.extend(f"  - {error}" for error in post_integrity["errors"][:20])
+            raise LocalUpdateError(
+                "post_validation_failed",
+                "\n".join(details),
+                stage=LocalUpdateStage.VERIFYING,
+            )
+
+        if _sha256_file(prepared.edit_path) != prepared.input_digest:
+            prepared.edit_file._data = bytearray(prepared.original_data)
+            raise LocalUpdateError(
+                "input_changed",
+                "Input EDIT file changed while this run was processing; "
+                "stale output was not written.",
+                stage=LocalUpdateStage.VERIFYING,
+            )
+
+        if not prepared.same_input_output:
+            output_changed = prepared.output_path.exists() != prepared.output_existed
+            if prepared.output_existed and prepared.output_path.exists():
+                output_changed = (
+                    _sha256_file(prepared.output_path) != prepared.output_digest
+                )
+            if output_changed:
+                prepared.edit_file._data = bytearray(prepared.original_data)
+                raise LocalUpdateError(
+                    "output_changed",
+                    "Output EDIT file changed while this run was processing; "
+                    "concurrent output was preserved.",
+                    stage=LocalUpdateStage.VERIFYING,
+                )
+
+    def publish(
+        self,
+        _request: LocalUpdateRequest,
+        prepared: _RunPrepared,
+        mutation: _RunMutation,
+        _token: CancellationToken,
+    ) -> LocalUpdateResult:
+        try:
+            prepared.edit_file.save(prepared.data_dat)
+            prepared.output_path.parent.mkdir(parents=True, exist_ok=True)
+            print(f"\n🔒 Re-encrypting → {prepared.output_path}...")
+            crypto.encrypt(prepared.temp_dir, prepared.output_path)
+        except Exception as error:
+            prepared.edit_file._data = bytearray(prepared.original_data)
+            raise LocalUpdateError(
+                "publish_failed",
+                f"Could not publish verified save: {error}",
+                stage=LocalUpdateStage.ENCRYPTING,
+            ) from error
+
+        diagnostic: str | None = None
+        try:
+            for match, previous_shirt, action in prepared.pending_logs:
+                transfer = match.transfer
+                transfer_logger.log_transfer(
+                    player_name=match.matched_player_name or transfer.player_name,
+                    player_id=match.player_id,
+                    from_team=match.matched_from_team or transfer.from_club,
+                    from_team_id=match.from_team_id or 0,
+                    to_team=match.matched_to_team or transfer.to_club,
+                    to_team_id=match.to_team_id or 0,
+                    confidence=match.min_confidence,
+                    transfer_type=transfer.transfer_type,
+                    dry_run=False,
+                    position=transfer.position,
+                    fee=transfer.fee,
+                    market_value=transfer.market_value,
+                    transfer_date=transfer.date,
+                    previous_shirt_number=previous_shirt,
+                    shirt_number=(
+                        transfer.shirt_number
+                        if transfer.transfer_type == "shirt_number_update"
+                        else None
+                    ),
+                    roster_action=action,
+                    save_scope=prepared.save_scope,
+                    fotmob_player_id=transfer.player_id_fotmob,
+                    sortitoutsi_player_id=transfer.player_id_sortitoutsi,
+                    transfermarkt_player_id=transfer.player_id_transfermarkt,
+                    transfermarkt_from_club_id=transfer.from_club_id_transfermarkt,
+                    transfermarkt_to_club_id=transfer.to_club_id_transfermarkt,
+                    transfermarkt_transfer_id=transfer.transfer_id_transfermarkt,
+                    sources=transfer.sources,
+                    source_urls=transfer.source_urls,
+                    proof_urls=transfer.proof_urls,
+                )
+            transfer_logger.save_reports(prepared.run_records)
+        except Exception as error:
+            diagnostic = (
+                "Save published, but transfer logging/report generation failed: "
+                f"{error}"
+            )
+            print(f"\n⚠ {diagnostic}")
+        installed_sha256 = (
+            _sha256_file(prepared.output_path)
+            if prepared.output_path.exists()
+            else None
+        )
+        return LocalUpdateResult(
+            target_path=prepared.output_path,
+            backup_path=prepared.backup_path,
+            installed_sha256=installed_sha256,
+            transfer_applied=mutation.transfer_applied,
+            shirt_numbers_changed=mutation.shirt_numbers_changed,
+            unchanged=mutation.unchanged,
+            safety_skipped=mutation.safety_skipped,
+            diagnostic=diagnostic,
+        )
+
+    def preview(
+        self,
+        _request: LocalUpdateRequest,
+        prepared: _RunPrepared,
+        plan,
+        _token: CancellationToken,
+    ) -> LocalUpdateResult:
+        _print_dry_run(prepared.edit_file, plan[0] if isinstance(plan, tuple) else plan)
+        return LocalUpdateResult(
+            target_path=prepared.output_path,
+            backup_path=None,
+            installed_sha256=None,
+            transfer_applied=0,
+            shirt_numbers_changed=0,
+            unchanged=0,
+            safety_skipped=0,
+            no_changes=True,
+        )
+
+    @staticmethod
+    def cleanup(prepared: _RunPrepared) -> None:
+        crypto.cleanup_temp(prepared.temp_dir)
+        if prepared.output_lock is not None:
+            prepared.output_lock.release()
+            prepared.output_lock = None
+
+
+def build_local_update_service() -> LocalUpdateService:
+    """Return the shared FL26 service used by CLI and installer GUI."""
+
+    return LocalUpdateService(_RunLocalUpdateRuntime())
+
+
+def cmd_run(args):
+    """CLI adapter for the shared verified-transfer service."""
+    dry_run = bool(getattr(args, "dry_run", False))
+    edit_path, output_path = _resolve_run_paths(args)
+
+    if not dry_run and not edit_path.exists():
+        print(f"Edit file not found: {edit_path}")
+        print("Use --edit-file to specify the path, or set EDIT_FILE_PATH in config.py")
+        sys.exit(1)
+
+    if dry_run and not edit_path.exists():
+        transfers = _scrape_run_transfers(args)
+        if not transfers:
+            print("No verified transfers found. Nothing to apply.")
+            return
+        print("\n⚠ Dry-run mode without edit file — showing scraped data only.")
+        print(f"\nAll {len(transfers)} transfers:")
+        for transfer in transfers:
+            print(f"  {transfer}")
+        return
+
+    request = LocalUpdateRequest(
+        edit_path=edit_path,
+        output_path=output_path,
+        deep=bool(getattr(args, "deep", False)),
+        window=getattr(args, "window", "auto") or "auto",
+        since=getattr(args, "since", None),
+        club=getattr(args, "club", None),
+        threshold=getattr(args, "threshold", None) or config.MATCH_THRESHOLD_PLAYER,
+        popular=bool(getattr(args, "popular", False)),
+        fotmob_only=bool(getattr(args, "fotmob_only", False)),
+        allow_overflow_release=bool(
+            getattr(args, "allow_overflow_release", False)
+        ),
+        dry_run=dry_run,
+    )
+
+    try:
+        result = build_local_update_service().execute(request)
+    except LocalUpdateError as error:
+        print(f"\n❌ {error}")
+        sys.exit(1 if error.code in {"missing_input", "decrypt_failed"} else 2)
+
+    if dry_run:
+        return
+    if result.no_changes:
+        if (
+            result.transfer_applied == 0
+            and result.shirt_numbers_changed == 0
+            and result.unchanged == 0
+            and result.safety_skipped == 0
+        ):
+            print("No verified transfers found. Nothing to apply.")
+        return
+
+    print(
+        f"\n✅ Done! {result.transfer_applied} transfers applied; "
+        f"{result.shirt_numbers_changed} shirt numbers changed."
+    )
+    if result.diagnostic:
+        print(f"   Warning: {result.diagnostic}")
+    if result.target_path.resolve() != edit_path.resolve():
+        print(f"   Input (base/pristine):   {edit_path}")
+        print(f"   Output (updated save):   {result.target_path}")
+    else:
+        print(f"   Updated file:            {result.target_path}")
+    print(f"   Backup at:               {result.backup_path}")
+    print(f"   Log at:                  {config.TRANSFER_LOG_FILE}")
+    print(f"   Visual Summary Report:   {config.OUTPUT_DIR / 'transfer_summary.md'}")
+
+
 
 
 def _decrypted_data_file(decrypted_path: Path) -> Path:

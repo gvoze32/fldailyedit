@@ -63,6 +63,64 @@ def test_transfer_run_never_loads_or_applies_player_specs(
     assert "players apply" not in help_output
 
 
+def test_cmd_run_routes_through_shared_local_update_service(
+    monkeypatch, tmp_path, capsys
+):
+    import run
+    from local_update import LocalUpdateResult
+
+    edit_path = tmp_path / "EDIT00000000"
+    edit_path.write_bytes(b"encrypted-edit")
+    requests = []
+
+    class FakeService:
+        def execute(self, request):
+            requests.append(request)
+            return LocalUpdateResult(
+                target_path=edit_path,
+                backup_path=tmp_path / "backup",
+                installed_sha256="a" * 64,
+                transfer_applied=2,
+                shirt_numbers_changed=1,
+                unchanged=3,
+                safety_skipped=4,
+                diagnostic="report warning",
+            )
+
+    monkeypatch.setattr(
+        run,
+        "build_local_update_service",
+        lambda: FakeService(),
+        raising=False,
+    )
+    monkeypatch.setattr(run, "_scrape_run_transfers", lambda _args: [])
+
+    run.cmd_run(
+        Namespace(
+            dry_run=False,
+            edit_file=str(edit_path),
+            output=None,
+            threshold=80,
+            in_place=True,
+            from_base=False,
+            deep=True,
+            window="auto",
+            since=None,
+            popular=False,
+            fotmob_only=False,
+            allow_overflow_release=False,
+        )
+    )
+
+    assert len(requests) == 1
+    assert requests[0].edit_path == edit_path
+    assert requests[0].output_path == edit_path
+    assert requests[0].deep is True
+    output = capsys.readouterr().out
+    assert "Done!" in output
+    assert "Warning: report warning" in output
+
+
 def test_players_help_uses_player_update_language(monkeypatch, capsys):
     import run
 

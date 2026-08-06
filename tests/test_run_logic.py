@@ -2,10 +2,13 @@
 
 import argparse
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from run import (
+    PlannedRosterAction,
+    _RunLocalUpdateRuntime,
     _build_superseded_loan_sources,
     _competition_section_bounds,
     _decide_roster_action,
@@ -242,6 +245,55 @@ def test_roster_plan_requires_explicit_overflow_permission():
     )
     assert allowed[0].action == "move"
     assert allowed[0].overflow_player_id == 1030
+
+def test_local_runtime_apply_forwards_overflow_release_permission(
+    monkeypatch, tmp_path
+):
+    from local_update import CancellationToken, LocalUpdateRequest
+    import run
+
+    class FakeEditFile:
+        _data = bytearray(b"updated")
+
+        def move_player(self, *args, **kwargs):
+            self.move_kwargs = kwargs
+            return True
+
+    edit_path = tmp_path / "EDIT00000000"
+    edit_path.write_bytes(b"encrypted")
+    edit_file = FakeEditFile()
+    prepared = SimpleNamespace(
+        edit_file=edit_file,
+        edit_path=edit_path,
+        output_path=edit_path,
+        original_data=b"original",
+        roster_plan=(
+            PlannedRosterAction(
+                match=_club_match(source=10, destination=20, date="2026-08-02"),
+                action="move",
+                current_team_id=10,
+            ),
+        ),
+        run_records=[],
+        backup_path=None,
+        pending_logs=[],
+        save_scope=str(edit_path),
+    )
+    monkeypatch.setattr(
+        run.backup_mod,
+        "create_backup",
+        lambda _path: tmp_path / "backup",
+    )
+
+    result = _RunLocalUpdateRuntime().apply(
+        LocalUpdateRequest(edit_path, allow_overflow_release=True),
+        prepared,
+        None,
+        CancellationToken(),
+    )
+
+    assert edit_file.move_kwargs["allow_overflow_release"] is True
+    assert result.transfer_applied == 1
 
 
 def test_same_day_transfers_sort_by_timestamp():

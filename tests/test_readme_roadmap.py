@@ -312,7 +312,19 @@ def test_readmes_preserve_immutable_structure_and_clean_roadmap(path: Path) -> N
 
     roadmap = _roadmap_section(text, roadmap_heading)
     planned_items = _PLANNED_ITEM_RE.findall(roadmap)
-    assert len(planned_items) == 1
-    assert local_update in planned_items[0]
-    assert multi_base in planned_items[0]
+    if path == Path("README.md"):
+        assert len(planned_items) == 2
+        delivered, future = planned_items
+        assert local_update in delivered
+        assert "Fast" in roadmap
+        assert "Deep" in roadmap
+        assert "in-place backup" in roadmap
+        assert "atomically" in roadmap
+        assert "future" in future.casefold()
+        assert "PES 2021" in roadmap
+        assert "UML" in roadmap
+    else:
+        assert len(planned_items) == 1
+        assert local_update in planned_items[0]
+        assert multi_base in planned_items[0]
     assert not ("ovr" in roadmap.casefold() and "pes retro" in roadmap.casefold())

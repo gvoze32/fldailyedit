@@ -5,6 +5,7 @@ import json
 import threading
 import zipfile
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -24,8 +25,11 @@ from installer.app import (
     CatalogLoaded,
     InstallCompleted,
     InstallerController,
+    InstallerMode,
     InstallerState,
     InstallerWorker,
+    LocalProgressChanged,
+    LocalUpdateCompleted,
     ProgressChanged,
     WizardStep,
     WorkerFailed,
@@ -40,8 +44,14 @@ from installer.catalog import (
     download_archive,
     fetch_catalog,
 )
+from local_update import (
+    CancellationToken,
+    LocalUpdateProgress,
+    LocalUpdateResult,
+    LocalUpdateStage,
+)
 from installer.install import InstallError, InstallResult, InstallStage
-from installer.paths import GameTarget, SaveLocation
+from installer.paths import FL_RELATIVE, GameTarget, SaveLocation
 
 
 GENERATED_AT = datetime(2026, 8, 6, tzinfo=timezone.utc)
@@ -1286,3 +1296,211 @@ def test_worker_validates_discovered_locations_and_emits_canonical_paths(
         )
     finally:
         worker.close()
+
+
+def _local_location(tmp_path: Path) -> SaveLocation:
+    save_directory = tmp_path / "save"
+    save_directory.mkdir()
+    (save_directory / "EDIT00000000").write_bytes(b"local-save")
+    return SaveLocation(GameTarget.FL26, "Football Life 2026", save_directory)
+
+def test_local_browse_rejects_known_pes2021_save_layout(tmp_path: Path) -> None:
+    canonical_fl26 = tmp_path / FL_RELATIVE
+    vanilla_pes = tmp_path / FL_RELATIVE.parent / "2025" / "save"
+
+    assert installer_app._is_canonical_fl26_save(canonical_fl26)
+    assert not installer_app._is_canonical_fl26_save(vanilla_pes)
+
+def test_local_browse_rejects_known_pes2021_path_before_worker_validation(
+    monkeypatch, tmp_path: Path
+) -> None:
+    vanilla_pes = tmp_path / FL_RELATIVE.parent / "2025" / "save"
+
+    class BrowseVar:
+        def __init__(self) -> None:
+            self.value = ""
+
+        def set(self, value: str) -> None:
+            self.value = value
+
+    class BrowseButton:
+        def focus_set(self) -> None:
+            pass
+
+    class BrowseWorker:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def validate_destination(self, *args) -> None:
+            self.calls.append(args)
+
+    controller = InstallerController()
+    controller.select_mode(InstallerMode.LOCAL)
+    application = object.__new__(installer_app.InstallerApplication)
+    application.controller = controller
+    application.root = None
+    application.worker = BrowseWorker()
+    application._browse_pending = False
+    application._browse_error_var = BrowseVar()
+    application._browse_button = BrowseButton()
+    monkeypatch.setattr(
+        installer_app,
+        "filedialog",
+        type("Dialog", (), {"askdirectory": staticmethod(lambda **_: str(vanilla_pes))}),
+    )
+
+    application._browse()
+
+    assert application.worker.calls == []
+    assert application._browse_pending is False
+    assert "Football Life 2026" in application._browse_error_var.value
+
+
+def test_local_mode_rejects_missing_edit_file_before_review(
+    tmp_path: Path,
+) -> None:
+    missing = SaveLocation(
+        GameTarget.FL26,
+        "Football Life 2026",
+        tmp_path / "missing" / "save",
+    )
+    controller = InstallerController()
+    assert controller.select_mode(InstallerMode.LOCAL) is True
+    controller.set_locations((missing,))
+    assert controller.next() is True
+    assert controller.select_location(missing) is True
+    assert controller.next() is False
+    assert controller.state.step is WizardStep.SAVE
+
+
+def test_local_mode_can_reach_browse_without_discovered_fl26_location() -> None:
+    controller = InstallerController()
+    assert controller.select_mode(InstallerMode.LOCAL) is True
+    controller.set_locations(())
+
+    assert controller.next() is True
+    assert controller.state.step is WizardStep.SAVE
+
+
+def test_local_fast_is_default_and_deep_can_be_selected(
+    tmp_path: Path,
+) -> None:
+    location = _local_location(tmp_path)
+    controller = InstallerController()
+    controller.select_mode(InstallerMode.LOCAL)
+    controller.set_locations((location,))
+    assert controller.state.local_deep is False
+    assert controller.set_local_deep(True) is True
+    assert controller.state.local_deep is True
+
+
+def test_local_progress_marks_commit_and_completion(
+    tmp_path: Path,
+) -> None:
+    location = _local_location(tmp_path)
+    controller = InstallerController()
+    controller.select_mode(InstallerMode.LOCAL)
+    controller.set_locations((location,))
+    controller.next()
+    controller.select_location(location)
+    assert controller.next() is True
+    assert controller.next() is True
+
+    assert controller.handle_event(
+        LocalProgressChanged(
+            LocalUpdateProgress(
+                LocalUpdateStage.ENCRYPTING,
+                commit_started=True,
+            )
+        )
+    )
+    assert controller.state.commit_started is True
+
+    result = LocalUpdateResult(
+        target_path=location.edit_file,
+        backup_path=tmp_path / "backup",
+        installed_sha256="a" * 64,
+        transfer_applied=1,
+        shirt_numbers_changed=0,
+        unchanged=0,
+        safety_skipped=0,
+    )
+    assert controller.handle_event(LocalUpdateCompleted(result)) is True
+    assert controller.state.step is WizardStep.RESULT
+    assert controller.state.result is result
+
+
+def test_local_worker_cannot_cancel_after_commit(
+    tmp_path: Path,
+) -> None:
+    location = _local_location(tmp_path)
+    entered_commit = Event()
+    release_commit = Event()
+
+    class FakeService:
+        def execute(
+            self,
+            request,
+            *,
+            progress,
+            token: CancellationToken,
+        ):
+            assert request.edit_path == location.edit_file
+            progress(
+                LocalUpdateProgress(
+                    LocalUpdateStage.ENCRYPTING,
+                    commit_started=True,
+                )
+            )
+            entered_commit.set()
+            assert release_commit.wait(timeout=2)
+            return LocalUpdateResult(
+                target_path=location.edit_file,
+                backup_path=tmp_path / "backup",
+                installed_sha256="a" * 64,
+                transfer_applied=1,
+                shirt_numbers_changed=0,
+                unchanged=0,
+                safety_skipped=0,
+            )
+
+    worker = InstallerWorker(local_update_factory=lambda: FakeService())
+    try:
+        worker.start_local_update(location, deep=False)
+        assert entered_commit.wait(timeout=2)
+        assert worker.cancel() is False
+        release_commit.set()
+        event = _next_event(worker, LocalUpdateCompleted)
+        assert isinstance(event, LocalUpdateCompleted)
+    finally:
+        release_commit.set()
+        worker.close()
+
+
+def test_local_progress_presentation_covers_stages_and_commit_lock() -> None:
+    progress = InstallerState(
+        mode=InstallerMode.LOCAL,
+        step=WizardStep.PROGRESS,
+        progress_stage=LocalUpdateStage.MATCHING.value,
+    )
+    matching = installer_app.progress_presentation(progress)
+    assert matching.mode == "indeterminate"
+    assert "Matching players" in matching.status
+    assert matching.controls_locked is False
+
+    cancelling = installer_app.progress_presentation(
+        progress,
+        cancellation_requested=True,
+    )
+    assert cancelling.status == "Cancelling local update…"
+    assert cancelling.controls_locked is False
+
+    committing = installer_app.progress_presentation(
+        replace(
+            progress,
+            progress_stage=LocalUpdateStage.ENCRYPTING.value,
+            commit_started=True,
+        )
+    )
+    assert committing.controls_locked is True
+    assert "Finishing the local update" in committing.status

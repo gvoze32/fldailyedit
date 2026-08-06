@@ -60,9 +60,17 @@ member. It also checks the player's current club before applying a move.
 
 ## Roadmap / Work in progress
 
-This item is planned and in progress:
+The FL26 local-save slice is delivered:
 
-1. **Local Update in GUI (replaces separate multi-base distribution)** — instead of distributing separate pre-built bases for every patch, add a local update mode directly to the app GUI so users can run the transfer pipeline on their own save file across supported targets (**SP Football Life 2026**, **vanilla eFootball PES 2021**, and **UML**).
+1. **Local Update in GUI (FL26)** — the Guided four-step wizard lets users
+   update their own Football Life 2026 `EDIT00000000` save with **Fast** or
+   **Deep** coverage. It creates an automatic in-place backup, validates the
+   save before and after roster changes, and publishes only an atomically
+   verified result.
+- **Future: Multi-target local updates** — continue the remaining
+   multi-base distribution scope by extending local mutation to vanilla
+   eFootball PES 2021 and UML after matching validated targets and safety
+   rules are available.
 
 ## Safety and limitations
 
