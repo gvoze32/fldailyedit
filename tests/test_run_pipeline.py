@@ -737,6 +737,90 @@ def test_players_parser_dispatches_nested_apply(monkeypatch):
     assert dispatched[0].in_place is False
 
 
+def test_players_parser_dispatches_approve_with_spec(monkeypatch):
+    import run
+
+    dispatched = []
+    monkeypatch.setattr(
+        run,
+        "cmd_players_approve",
+        lambda args: dispatched.append(args),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        run.sys,
+        "argv",
+        [
+            "run.py",
+            "players",
+            "approve",
+            "--spec",
+            "players/marco-palestra.json",
+        ],
+    )
+
+    run.main()
+
+    assert len(dispatched) == 1
+    assert dispatched[0].spec == "players/marco-palestra.json"
+
+
+def test_players_apply_cannot_bypass_proposal_human_review_gate(
+    monkeypatch, tmp_path, capsys
+):
+    import run
+    from editor.player_spec import BaseManifest, load_player_specs
+    from tests.test_player_specs import write_approval_proposal
+
+    spec_path, _, _ = write_approval_proposal(
+        tmp_path, monkeypatch, "update"
+    )
+    proposal_spec = load_player_specs(tmp_path, allow_proposals=True)[0]
+    source = tmp_path / "EDIT00000000"
+    source.write_bytes(b"encrypted proposal input")
+    before = source.read_bytes()
+    output = tmp_path / "updated-EDIT00000000"
+    lock_calls = []
+    revision = "fl26-u2.2-national-squads"
+
+    class ForbiddenOutputLock:
+        def __init__(self, path):
+            lock_calls.append(("init", Path(path)))
+
+        def acquire(self):
+            lock_calls.append(("acquire",))
+            raise AssertionError("proposal gate must precede output lock")
+
+        def release(self):
+            lock_calls.append(("release",))
+
+    monkeypatch.setattr(
+        run,
+        "load_base_manifest",
+        lambda: BaseManifest(revision, "0" * 64),
+    )
+    monkeypatch.setattr(run, "load_player_specs", lambda: (proposal_spec,))
+    monkeypatch.setattr(run, "validate_spec_set", lambda _specs: None)
+    monkeypatch.setattr(run, "EditFileLock", ForbiddenOutputLock)
+
+    with pytest.raises(SystemExit) as exc_info:
+        run.cmd_players_apply(
+            Namespace(
+                edit_file=str(source),
+                output=str(output),
+                in_place=False,
+                base_revision=revision,
+            )
+        )
+
+    assert exc_info.value.code == 2
+    assert lock_calls == []
+    assert source.read_bytes() == before
+    assert output.exists() is False
+    assert "human_review_required" in capsys.readouterr().out
+    assert spec_path.read_bytes()
+
+
 def test_players_apply_rejects_wrong_revision_before_decrypt(monkeypatch, tmp_path):
     import run
     from editor.player_spec import BaseManifest

@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from datetime import date
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import tempfile
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Mapping
 import unicodedata
@@ -1251,6 +1253,149 @@ def load_player_specs(
     return specs
 
 
+def _canonical_approval_path(path: str | Path) -> Path:
+    """Validate and canonicalize one proposal path before reading its bytes."""
+    try:
+        candidate = Path(path)
+    except TypeError as exc:
+        raise PlayerSpecError(f"invalid player proposal path {path!r}") from exc
+
+    if candidate.suffix != ".json":
+        raise PlayerSpecError(
+            f"player proposal path {candidate} must use the .json extension"
+        )
+    try:
+        if candidate.is_symlink():
+            raise PlayerSpecError(
+                f"player proposal path {candidate} must not be a symlink"
+            )
+        if not candidate.exists():
+            raise PlayerSpecError(f"player proposal path does not exist: {candidate}")
+        if not candidate.is_file():
+            raise PlayerSpecError(
+                f"player proposal path is not a regular file: {candidate}"
+            )
+        specs_dir = Path(config.PLAYER_SPECS_DIR).resolve(strict=True)
+        canonical = candidate.resolve(strict=True)
+    except PlayerSpecError:
+        raise
+    except (OSError, RuntimeError) as exc:
+        raise PlayerSpecError(
+            f"could not validate player proposal path {candidate}: {exc}"
+        ) from exc
+
+    if canonical.parent != specs_dir:
+        raise PlayerSpecError(
+            f"player proposal path {candidate} must be a direct child of "
+            f"{specs_dir}"
+        )
+    if canonical.suffix != ".json":
+        raise PlayerSpecError(
+            f"player proposal path {candidate} must use the .json extension"
+        )
+    return canonical
+
+
+def approve_player_proposal(path: str | Path, edit_file: "EditFile") -> Path:
+    """Validate and atomically convert one generated proposal to a spec."""
+    proposal_path = _canonical_approval_path(path)
+    raw = _object(
+        _read_json(proposal_path, "player proposal"),
+        f"player proposal {proposal_path}",
+    )
+    if "draft" not in raw:
+        raise PlayerSpecError(
+            f"player proposal {proposal_path} is already completed"
+        )
+
+    identity = _object(
+        raw.get("identity"), f"player proposal {proposal_path} identity"
+    )
+    name = identity.get("name")
+    if not isinstance(name, str):
+        raise PlayerSpecError(
+            f"player proposal {proposal_path} identity name must be text"
+        )
+    try:
+        expected_slug = player_slug(name)
+    except (TypeError, ValueError) as exc:
+        raise PlayerSpecError(
+            f"player proposal {proposal_path} identity name is invalid"
+        ) from exc
+    if proposal_path.stem != expected_slug:
+        raise PlayerSpecError(
+            f"player proposal filename {proposal_path.name!r} does not match "
+            f"identity name {name!r}"
+        )
+
+    verify_base_file(
+        getattr(config, "BASE_EDIT_PATH", config.EDIT_FILE_PATH)
+    )
+    from tools.generate_player_draft import validate_generated_proposal
+
+    validated = validate_generated_proposal(proposal_path, edit_file)
+    completed = dict(
+        _object(validated, f"player proposal {proposal_path}")
+    )
+    try:
+        evidence = _object(
+            completed["evidence"], f"player proposal {proposal_path} evidence"
+        )
+        issue_number = evidence["issue_number"]
+        completed.pop("source")
+        completed.pop("draft")
+    except (KeyError, TypeError) as exc:
+        raise PlayerSpecError(
+            f"player proposal {proposal_path} is not a complete generated proposal"
+        ) from exc
+    if (
+        isinstance(issue_number, bool)
+        or not isinstance(issue_number, int)
+        or issue_number <= 0
+    ):
+        raise PlayerSpecError(
+            f"player proposal {proposal_path} issue number is invalid"
+        )
+    completed["evidence"] = {
+        "profile_url": evidence["profile_url"],
+        "proof_urls": evidence["proof_urls"],
+        "effective_date": evidence["effective_date"],
+        "reason": (
+            "Reviewed automated Pes Retro Stats proposal from issue "
+            f"#{issue_number}"
+        ),
+    }
+    content = json.dumps(completed, indent=2, sort_keys=True) + "\n"
+
+    temporary_path: Path | None = None
+    try:
+        temporary_file = tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=proposal_path.parent,
+            prefix=f".{proposal_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        )
+        temporary_path = Path(temporary_file.name)
+        with temporary_file as temporary:
+            temporary.write(content)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_path, proposal_path)
+        return proposal_path
+    except OSError as exc:
+        raise PlayerSpecError(
+            f"could not atomically approve player proposal {proposal_path}: {exc}"
+        ) from exc
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 def _result(
     spec: PlayerSpec,
     status: str,
@@ -1531,6 +1676,8 @@ def apply_player_spec(
     all_players: Mapping[int, "PlayerInfo"],
 ) -> SpecResult:
     """Apply one lifecycle-compatible spec with mutation isolation."""
+    if spec.proposal is not None:
+        return _result(spec, "rejected", "human_review_required")
     if spec.lifecycle_status != "active":
         return _result(
             spec,

@@ -32,6 +32,7 @@ from pathlib import Path
 import config
 from editor import backup as backup_mod
 from editor import crypto
+from editor.crypto import CryptoError
 from editor.editfile import (
     COMPETITION_SECTION_SIZE,
     MIN_CLUB_ROSTER_SIZE,
@@ -43,6 +44,7 @@ from editor.player_spec import (
     PlayerSpecError,
     SpecResult,
     apply_player_specs,
+    approve_player_proposal,
     assess_create,
     assess_update,
     load_base_manifest,
@@ -1822,6 +1824,41 @@ def cmd_players_validate(args) -> None:
             crypto.cleanup_temp(decrypted)
 
 
+def cmd_players_approve(args) -> None:
+    """Approve one generated proposal against the pristine base offline."""
+    base_path = Path(config.BASE_EDIT_PATH)
+    if not base_path.exists():
+        print(f"Pristine base not found: {base_path}")
+        raise SystemExit(2)
+    try:
+        verify_base_file(base_path)
+    except PlayerSpecError as exc:
+        print(f"Pristine base verification failed: {exc}")
+        raise SystemExit(2) from exc
+
+    decrypted = None
+    try:
+        decrypted = crypto.decrypt(base_path)
+        edit_file = EditFile()
+        edit_file.load(_decrypted_data_file(decrypted))
+        _require_valid_edit(edit_file, "Pristine base")
+        approved_path = approve_player_proposal(Path(args.spec), edit_file)
+        print(approved_path)
+    except (
+        OSError,
+        PlayerDraftError,
+        PlayerSpecError,
+        ValueError,
+        struct.error,
+        CryptoError,
+    ) as exc:
+        print(f"Player approval failed: {exc}")
+        raise SystemExit(2) from exc
+    finally:
+        if decrypted is not None:
+            crypto.cleanup_temp(decrypted)
+
+
 def _machine_json_string(value: str) -> str:
     """Encode untrusted text as one inert JSON string value."""
     return (
@@ -1945,7 +1982,16 @@ def cmd_players_apply(args) -> None:
         print(f"Edit file not found: {edit_path}")
         raise SystemExit(2)
 
-    specs = load_player_specs()
+    try:
+        specs = load_player_specs()
+    except PlayerSpecError as exc:
+        if "requires human approval" in str(exc):
+            print("human_review_required")
+            raise SystemExit(2) from exc
+        raise
+    if any(getattr(spec, "proposal", None) is not None for spec in specs):
+        print("human_review_required")
+        raise SystemExit(2)
     validate_spec_set(specs)
     output_lock = EditFileLock(output_path)
     output_lock.acquire()
@@ -2141,6 +2187,13 @@ def main():
         "validate", help="Validate Player Updates against the pristine base"
     )
     p_players_validate.set_defaults(func=cmd_players_validate)
+    p_players_approve = players_sub.add_parser(
+        "approve", help="Approve one generated Player Update proposal"
+    )
+    p_players_approve.add_argument(
+        "--spec", required=True, help="Path to the generated player proposal JSON"
+    )
+    p_players_approve.set_defaults(func=cmd_players_approve)
     p_players_generate = players_sub.add_parser(
         "generate-draft",
         help="Generate a reviewable Pes Retro Stats proposal from an issue event",

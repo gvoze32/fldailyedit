@@ -176,6 +176,338 @@ def write_generated_proposal(directory, operation: str = "create"):
     return payload
 
 
+def write_approval_proposal(directory, monkeypatch, operation):
+    import config
+    from tests.test_generate_player_draft import (
+        FakeEditFile,
+        make_source,
+        marco_source,
+        proposal_for,
+    )
+
+    monkeypatch.setattr(config, "PLAYER_SPECS_DIR", directory)
+    payload = complete_generated_proposal(operation)
+    payload["evidence"]["issue_number"] = 123
+    payload["evidence"][
+        "issue_url"
+    ] = "https://github.com/gvoze32/fldailyedit/issues/123"
+    filename = (
+        "dastan-satpaev.json"
+        if operation == "create"
+        else "marco-palestra.json"
+    )
+    path = directory / filename
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    source = make_source() if operation == "create" else marco_source()
+    return path, payload, FakeEditFile(proposal_for(source))
+
+
+@pytest.mark.parametrize("operation", ["update", "create"])
+def test_apply_player_spec_rejects_human_review_proposal_before_edit_access(
+    tmp_path,
+    monkeypatch,
+    operation,
+):
+    from editor.player_spec import apply_player_spec, load_player_specs
+
+    path, _, _ = write_approval_proposal(tmp_path, monkeypatch, operation)
+    spec = load_player_specs(tmp_path, allow_proposals=True)[0]
+
+    class GuardedEditFile:
+        guarded = {
+            "_data",
+            "_player_cache",
+            "get_all_players",
+            "get_player_ability_profile",
+            "player_catalog_report",
+            "transferred_player_ids",
+        }
+
+        def __init__(self):
+            object.__setattr__(self, "accesses", [])
+            object.__setattr__(self, "_data", bytearray(b"untouched proposal gate"))
+            object.__setattr__(self, "_player_cache", object())
+            object.__setattr__(self, "player_catalog_report", {"untouched": True})
+            object.__setattr__(self, "transferred_player_ids", {999})
+
+        def __getattribute__(self, name):
+            if name in object.__getattribute__(self, "guarded"):
+                object.__getattribute__(self, "accesses").append(name)
+            return object.__getattribute__(self, name)
+
+        def get_all_players(self, include_base_db=True):
+            return {}
+
+        def get_player_ability_profile(self, _player_id):
+            return None
+
+    edit_file = GuardedEditFile()
+    before = bytes(object.__getattribute__(edit_file, "_data"))
+
+    result = apply_player_spec(edit_file, spec, REVISION, {})
+
+    assert (result.status, result.reason) == (
+        "rejected",
+        "human_review_required",
+    )
+    assert edit_file.accesses == []
+    assert bytes(object.__getattribute__(edit_file, "_data")) == before
+    assert path.read_bytes()
+
+
+@pytest.mark.parametrize("operation", ["update", "create"])
+def test_approve_player_proposal_transforms_exact_completed_shape(
+    tmp_path,
+    monkeypatch,
+    operation,
+):
+    path, proposal, edit_file = write_approval_proposal(
+        tmp_path, monkeypatch, operation
+    )
+    from editor.player_spec import approve_player_proposal, load_player_specs
+
+    returned = approve_player_proposal(path, edit_file)
+
+    expected = deepcopy(proposal)
+    del expected["source"]
+    del expected["draft"]
+    expected["evidence"] = {
+        "profile_url": proposal["evidence"]["profile_url"],
+        "proof_urls": proposal["evidence"]["proof_urls"],
+        "effective_date": proposal["evidence"]["effective_date"],
+        "reason": (
+            "Reviewed automated Pes Retro Stats proposal from issue #123"
+        ),
+    }
+    completed = json.loads(path.read_text(encoding="utf-8"))
+    assert returned == path
+    assert completed == expected
+    assert path.read_text(encoding="utf-8") == (
+        json.dumps(expected, indent=2, sort_keys=True) + "\n"
+    )
+    assert set(completed["evidence"]) == {
+        "profile_url",
+        "proof_urls",
+        "effective_date",
+        "reason",
+    }
+    assert completed["identity"] == proposal["identity"]
+    assert completed["pes"] == proposal["pes"]
+    assert completed["applies_to"] == proposal["applies_to"]
+    loaded = load_player_specs(tmp_path)
+    assert len(loaded) == 1
+    assert loaded[0].path == path
+    assert loaded[0].proposal is None
+
+
+@pytest.mark.parametrize("operation", ["update", "create"])
+def test_approve_player_proposal_rejects_second_approval_without_mutation(
+    tmp_path,
+    monkeypatch,
+    operation,
+):
+    from editor.player_spec import PlayerSpecError, approve_player_proposal
+    from tools.generate_player_draft import PlayerDraftError
+
+    path, _, edit_file = write_approval_proposal(
+        tmp_path, monkeypatch, operation
+    )
+    approve_player_proposal(path, edit_file)
+    approved_bytes = path.read_bytes()
+
+    with pytest.raises((PlayerSpecError, PlayerDraftError)):
+        approve_player_proposal(path, edit_file)
+
+    assert path.read_bytes() == approved_bytes
+    assert {item.name for item in tmp_path.iterdir()} == {path.name}
+
+
+@pytest.mark.parametrize(
+    "failure",
+    ["stale-update", "tampered-update", "conflicting-create"],
+)
+def test_approve_player_proposal_rejects_untrusted_state_without_mutation(
+    tmp_path,
+    monkeypatch,
+    failure,
+):
+    from editor.models import PlayerInfo
+    from editor.player_spec import PlayerSpecError, approve_player_proposal
+    from tests.test_generate_player_draft import (
+        FakeEditFile,
+        marco_source,
+        proposal_for,
+    )
+    from tools.generate_player_draft import PlayerDraftError
+
+    operation = "create" if failure == "conflicting-create" else "update"
+    path, payload, edit_file = write_approval_proposal(
+        tmp_path, monkeypatch, operation
+    )
+    if failure == "stale-update":
+        edit_file = FakeEditFile(proposal_for(marco_source()), changed=False)
+    elif failure == "tampered-update":
+        payload["pes"]["abilities"]["speed"]["from"] -= 1
+        path.write_text(json.dumps(payload), encoding="utf-8")
+    else:
+        edit_file.players[payload["identity"]["pes_id"]] = PlayerInfo(
+            payload["identity"]["pes_id"],
+            "Other Existing Player",
+            "O. Existing",
+        )
+    original = path.read_bytes()
+
+    with pytest.raises((PlayerSpecError, PlayerDraftError)):
+        approve_player_proposal(path, edit_file)
+
+    assert path.read_bytes() == original
+    assert {item.name for item in tmp_path.iterdir()} == {path.name}
+
+
+@pytest.mark.parametrize("failure", ["open", "write", "fsync", "replace"])
+def test_approve_player_proposal_atomic_failures_preserve_original_and_clean_temp(
+    tmp_path,
+    monkeypatch,
+    failure,
+):
+    import editor.player_spec as player_spec
+    from editor.player_spec import PlayerSpecError, approve_player_proposal
+
+    path, _, edit_file = write_approval_proposal(
+        tmp_path, monkeypatch, "update"
+    )
+    original = path.read_bytes()
+    real_named_temporary_file = player_spec.tempfile.NamedTemporaryFile
+
+    if failure == "open":
+        monkeypatch.setattr(
+            player_spec.tempfile,
+            "NamedTemporaryFile",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                OSError("temporary open failed")
+            ),
+        )
+    elif failure == "write":
+        class WriteFailure:
+            def __init__(self, temporary):
+                self.temporary = temporary
+                self.name = temporary.name
+
+            def __enter__(self):
+                self.temporary.__enter__()
+                return self
+
+            def __exit__(self, *args):
+                return self.temporary.__exit__(*args)
+
+            def write(self, content):
+                self.temporary.write(content[:17])
+                raise OSError("temporary write failed")
+
+            def __getattr__(self, name):
+                return getattr(self.temporary, name)
+
+        monkeypatch.setattr(
+            player_spec.tempfile,
+            "NamedTemporaryFile",
+            lambda *args, **kwargs: WriteFailure(
+                real_named_temporary_file(*args, **kwargs)
+            ),
+        )
+    elif failure == "fsync":
+        monkeypatch.setattr(
+            player_spec.os,
+            "fsync",
+            lambda _descriptor: (_ for _ in ()).throw(
+                OSError("temporary fsync failed")
+            ),
+        )
+    else:
+        monkeypatch.setattr(
+            player_spec.os,
+            "replace",
+            lambda *_args: (_ for _ in ()).throw(
+                OSError("atomic replace failed")
+            ),
+        )
+
+    with pytest.raises((PlayerSpecError, OSError)):
+        approve_player_proposal(path, edit_file)
+
+    assert path.read_bytes() == original
+    assert {item.name for item in tmp_path.iterdir()} == {path.name}
+
+
+def test_approve_player_proposal_flushes_fsyncs_and_atomically_replaces(
+    tmp_path,
+    monkeypatch,
+):
+    import editor.player_spec as player_spec
+    from editor.player_spec import approve_player_proposal
+
+    path, _, edit_file = write_approval_proposal(
+        tmp_path, monkeypatch, "update"
+    )
+    events = []
+    allocations = []
+    real_named_temporary_file = player_spec.tempfile.NamedTemporaryFile
+    real_fsync = player_spec.os.fsync
+    real_replace = player_spec.os.replace
+
+    class TrackedTemporary:
+        def __init__(self, temporary):
+            self.temporary = temporary
+            self.name = temporary.name
+
+        def __enter__(self):
+            self.temporary.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.temporary.__exit__(*args)
+
+        def flush(self):
+            events.append("flush")
+            return self.temporary.flush()
+
+        def __getattr__(self, name):
+            return getattr(self.temporary, name)
+
+    def tracked_named_temporary_file(*args, **kwargs):
+        allocations.append(kwargs)
+        return TrackedTemporary(real_named_temporary_file(*args, **kwargs))
+
+    def tracked_fsync(descriptor):
+        events.append("fsync")
+        return real_fsync(descriptor)
+
+    def tracked_replace(source, destination):
+        events.append("replace")
+        assert Path(source).parent == path.parent
+        assert Path(destination) == path
+        return real_replace(source, destination)
+
+    from pathlib import Path
+
+    monkeypatch.setattr(
+        player_spec.tempfile,
+        "NamedTemporaryFile",
+        tracked_named_temporary_file,
+    )
+    monkeypatch.setattr(player_spec.os, "fsync", tracked_fsync)
+    monkeypatch.setattr(player_spec.os, "replace", tracked_replace)
+
+    assert approve_player_proposal(path, edit_file) == path
+
+    assert len(allocations) == 1
+    assert allocations[0]["mode"] == "w"
+    assert allocations[0]["encoding"] == "utf-8"
+    assert Path(allocations[0]["dir"]) == tmp_path
+    assert allocations[0]["delete"] is False
+    assert events.index("flush") < events.index("fsync") < events.index("replace")
+    assert {item.name for item in tmp_path.iterdir()} == {path.name}
+
+
 @pytest.mark.parametrize("operation", ["create", "update"])
 def test_mature_proposals_require_human_approval_by_default(tmp_path, operation):
     from editor.player_spec import PlayerSpecError, load_player_specs
