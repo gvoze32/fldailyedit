@@ -49,18 +49,9 @@ Für einen manuellen Durchlauf oder eine benutzerdefinierte Vereinsliste forken 
 
 Der Updater überschreibt keine Trikotnummer, die bereits von einem anderen Kadermitglied verwendet wird. Zudem wird der aktuelle Verein des Spielers geprüft, bevor ein Wechsel vorgenommen wird.
 
-## Roadmap / In Arbeit
+## Roadmap / Vorerst abgeschlossen
 
-Das GUI-Update für lokale Speicherstände ist verfügbar:
-
-1. **Lokales Update im GUI** — der vierstufige Assistent aktualisiert jetzt
-   einen vom Benutzer ausgewählten `EDIT00000000`-Speicherstand mit validiertem
-   Standardlayout und **Fast**- oder **Deep**-Abdeckung. Die lokale Eignung ist
-   unabhängig von der SPFL/PES/UML-Kennzeichnung des Speicherstands; der
-   Speicherstand wird vor der Änderung geprüft und an Ort und Stelle gesichert
-   und anschließend nur durch ein atomar verifiziertes Ergebnis ersetzt. Dies
-   veröffentlicht keine neuen Remote-Assets: herunterladbare Releases bleiben
-   auf validierte FL26/SPFL-Ziele beschränkt.
+Alle aktuellen Roadmap-Aufgaben sind abgeschlossen. Wir warten auf die nächste sinnvolle Idee.
 
 ## Sicherheit und Einschränkungen
 

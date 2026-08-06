@@ -59,18 +59,9 @@ Il programma di aggiornamento non sovrascrive un numero di maglia già usato da
 un altro componente della rosa. Verifica inoltre il club corrente del giocatore
 prima di applicare un trasferimento.
 
-## Roadmap / Lavori in corso
+## Roadmap / Completa per ora
 
-È stato rilasciato l'aggiornamento della GUI per i salvataggi locali:
-
-1. **Aggiornamento locale nella GUI** — la procedura guidata in quattro passaggi
-   ora aggiorna un salvataggio `EDIT00000000` selezionato dall'utente e con layout
-   comune convalidato, con copertura **Fast** o **Deep**. L'idoneità locale è
-   indipendente dall'etichetta SPFL/PES/UML del salvataggio; il salvataggio viene
-   controllato prima della mutazione e riceve un backup sul posto, quindi viene
-   sostituito solo da un risultato verificato atomicamente. Questo non pubblica
-   nuovi asset remoti: le versioni scaricabili restano limitate a target
-   FL26/SPFL convalidati.
+Tutte le attività attuali della roadmap sono completate. Attendiamo la prossima idea utile.
 
 ## Sicurezza e limitazioni
 

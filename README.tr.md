@@ -49,17 +49,9 @@ Yükleyici olmadan elle kurulum için herkese açık [Fast sürüm ZIP](https://
 
 Güncelleyici, başka bir oyuncu tarafından kullanılan forma numarasının üzerine yazmaz. Ayrıca transfer uygulamadan önce oyuncunun mevcut kulübünü doğrular.
 
-## Yol Haritası / Devam Eden Çalışmalar
+## Yol Haritası / Şimdilik tamamlandı
 
-Yerel kayıtlar için GUI güncellemesi kullanıma sunuldu:
-
-1. **Arayüzde Yerel Güncelleme** — dört adımlı sihirbaz artık kullanıcı tarafından
-   seçilen, doğrulanmış ortak düzene sahip `EDIT00000000` kaydını **Fast** veya
-   **Deep** kapsamıyla günceller. Yerel uygunluk, kaydın SPFL/PES/UML etiketinden
-   bağımsızdır; kayıt değişiklikten önce kontrol edilir ve yerinde yedeklenir,
-   ardından yalnızca atomik olarak doğrulanmış bir sonuçla değiştirilir. Bu işlem
-   yeni uzak varlıkları yayımlamaz: indirilebilir sürümler yalnızca doğrulanmış
-   FL26/SPFL hedefleriyle sınırlı kalır.
+Mevcut yol haritasındaki tüm maddeler tamamlandı. Sıradaki faydalı fikri bekliyoruz.
 
 ## Güvenlik ve Sınırlamalar
 

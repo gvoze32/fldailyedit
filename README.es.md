@@ -58,18 +58,9 @@ Para ejecutar el proceso cuando se necesite o usar una lista personalizada de cl
 El actualizador no sobrescribe un dorsal que ya use otro integrante de la
 plantilla. También verifica el club actual del jugador antes de aplicar un movimiento.
 
-## Hoja de ruta / Trabajo en curso
+## Hoja de ruta / Completada por ahora
 
-La actualización de la GUI para partidas locales ya está entregada:
-
-1. **Actualización local en la GUI** — el asistente de cuatro pasos ya actualiza
-   una partida `EDIT00000000` seleccionada por el usuario y con diseño común
-   validado, con cobertura **Fast** o **Deep**. La elegibilidad local es
-   independiente de la etiqueta SPFL/PES/UML de la partida; la partida se
-   comprueba antes de la mutación y recibe una copia de seguridad en el propio
-   lugar, y solo se reemplaza por un resultado verificado atómicamente. Esto no
-   publica nuevos activos remotos: las versiones descargables siguen limitadas
-   a objetivos FL26/SPFL validados.
+Todos los elementos actuales de la hoja de ruta están terminados. Esperamos la próxima idea útil.
 
 ## Seguridad y limitaciones
 

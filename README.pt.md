@@ -49,17 +49,9 @@ Para executar sob demanda ou usar uma lista personalizada de clubes, faça um fo
 
 O atualizador não substitui um número de camisa que já esteja sendo usado por outro jogador do elenco. Ele também verifica o clube atual do jogador antes de aplicar uma transferência.
 
-## Roteiro / Trabalho em andamento
+## Roteiro / Concluído por enquanto
 
-O modo de atualização da GUI para arquivos locais foi entregue:
-
-1. **Atualização Local na GUI** — o assistente de quatro etapas agora atualiza
-   um arquivo de salvamento `EDIT00000000` escolhido pelo usuário e com layout
-   comum validado, com cobertura **Fast** ou **Deep**. A elegibilidade local
-   independe do rótulo SPFL/PES/UML do arquivo; o arquivo é verificado antes da
-   mutação e recebe um backup no local, sendo substituído apenas por um resultado
-   verificado atomicamente. Isso não publica novos ativos remotos: as versões
-   para download continuam restritas a alvos FL26/SPFL validados.
+Todos os itens atuais do roteiro foram concluídos. Estamos aguardando a próxima ideia útil.
 
 ## Segurança e limitações
 

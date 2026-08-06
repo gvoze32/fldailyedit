@@ -49,18 +49,9 @@ Pour une exécution à la demande ou une liste de clubs personnalisée, forkez l
 
 L'outil n'écrase pas un numéro de maillot déjà utilisé par un autre membre de l'équipe. Il vérifie également le club actuel du joueur avant d'appliquer un transfert.
 
-## Feuille de route / En cours de développement
+## Feuille de route / Terminée pour l’instant
 
-La mise à jour de l'interface graphique pour les sauvegardes locales est livrée :
-
-1. **Mise à jour locale dans l'interface graphique** — l'assistant en quatre
-   étapes met désormais à jour une sauvegarde `EDIT00000000` sélectionnée par
-   l'utilisateur et dotée d'une structure commune validée, avec une couverture
-   **Fast** ou **Deep**. L'éligibilité locale est indépendante de l'étiquette
-   SPFL/PES/UML de la sauvegarde ; la sauvegarde est contrôlée avant la mutation
-   et reçoit une copie de sauvegarde sur place, puis n'est remplacée que par un
-   résultat vérifié atomiquement. Cela ne publie pas de nouveaux actifs distants :
-   les versions téléchargeables restent limitées aux cibles FL26/SPFL validées.
+Tous les éléments actuels de la feuille de route sont terminés. Nous attendons la prochaine idée utile.
 
 ## Sécurité et limitations
 

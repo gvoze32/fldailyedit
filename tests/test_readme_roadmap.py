@@ -189,143 +189,51 @@ README_STRUCTURE_FIXTURES = {
 
 ROADMAP_FIXTURES = {
     Path("README.md"): (
-        "## Roadmap / Work in progress",
-        "Local Update",
-        "the four-step wizard updates",
-        "validated common-layout",
-        "Local eligibility is independent of the save’s SPFL/PES/UML label",
-        "downloadable releases remain validated FL26/SPFL targets",
+        "## Roadmap / Complete for now",
+        "All current roadmap items are complete. We are waiting for the next useful idea.",
     ),
     Path("README.id.md"): (
-        "## Roadmap / Sedang dikerjakan",
-        "Pembaruan Lokal",
-        "wizard empat langkah kini memperbarui",
-        "ber-layout umum tervalidasi",
-        "Kelayakan lokal tidak bergantung pada label SPFL/PES/UML",
-        "rilis yang dapat diunduh tetap hanya menargetkan FL26/SPFL tervalidasi",
+        "## Roadmap / Selesai untuk saat ini",
+        "Semua item roadmap saat ini telah selesai. Kami menunggu ide berguna berikutnya.",
     ),
     Path("README.es.md"): (
-        "## Hoja de ruta / Trabajo en curso",
-        "Actualización local",
-        "el asistente de cuatro pasos ya actualiza",
-        "diseño común validado",
-        "La elegibilidad local es independiente de la etiqueta SPFL/PES/UML",
-        "las versiones descargables siguen limitadas a objetivos FL26/SPFL validados",
+        "## Hoja de ruta / Completada por ahora",
+        "Todos los elementos actuales de la hoja de ruta están terminados. Esperamos la próxima idea útil.",
     ),
     Path("README.pt.md"): (
-        "## Roteiro / Trabalho em andamento",
-        "Atualização Local",
-        "o assistente de quatro etapas agora atualiza",
-        "layout comum validado",
-        "A elegibilidade local independe do rótulo SPFL/PES/UML",
-        "as versões para download continuam restritas a alvos FL26/SPFL validados",
+        "## Roteiro / Concluído por enquanto",
+        "Todos os itens atuais do roteiro foram concluídos. Estamos aguardando a próxima ideia útil.",
     ),
     Path("README.ar.md"): (
-        "## خارطة الطريق / قيد التطوير",
-        "التحديث المحلي",
-        "يحدّث المعالج المكوّن من أربع خطوات الآن",
-        "ذي التخطيط المشترك المتحقق منه",
-        "لا تعتمد أهلية التحديث المحلي على تسمية SPFL/PES/UML",
-        "تظل الإصدارات القابلة للتنزيل مقتصرة على أهداف FL26/SPFL المتحقق منها",
+        "## خارطة الطريق / مكتملة حاليًا",
+        "اكتملت جميع عناصر خارطة الطريق الحالية. ننتظر الفكرة المفيدة التالية.",
     ),
     Path("README.zh.md"): (
-        "## 路线图 / 进行中的工作",
-        "本地更新模式",
-        "四步向导现已可",
-        "采用已验证通用布局",
-        "本地更新资格不受存档的 SPFL/PES/UML 标签影响",
-        "可下载版本仍仅面向已验证的 FL26/SPFL 目标",
+        "## 路线图 / 当前已完成",
+        "当前路线图中的所有项目都已完成。我们正在等待下一个有价值的想法。",
     ),
     Path("README.it.md"): (
-        "## Roadmap / Lavori in corso",
-        "Aggiornamento locale",
-        "la procedura guidata in quattro passaggi ora aggiorna",
-        "layout comune convalidato",
-        "L'idoneità locale è indipendente dall'etichetta SPFL/PES/UML",
-        "le versioni scaricabili restano limitate a target FL26/SPFL convalidati",
+        "## Roadmap / Completa per ora",
+        "Tutte le attività attuali della roadmap sono completate. Attendiamo la prossima idea utile.",
     ),
     Path("README.ru.md"): (
-        "## План развития / В работе",
-        "Локальное обновление",
-        "четырёхшаговый мастер теперь обновляет",
-        "проверенной общей структурой",
-        "Допуск к локальному обновлению не зависит от метки SPFL/PES/UML",
-        "загружаемые выпуски по-прежнему предназначены только для проверенных целей FL26/SPFL",
+        "## План развития / Пока завершён",
+        "Все текущие задачи плана развития завершены. Ждём следующую полезную идею.",
     ),
     Path("README.de.md"): (
-        "## Roadmap / In Arbeit",
-        "Lokales Update",
-        "der vierstufige Assistent aktualisiert jetzt",
-        "validiertem Standardlayout",
-        "Die lokale Eignung ist unabhängig von der SPFL/PES/UML-Kennzeichnung",
-        "herunterladbare Releases bleiben auf validierte FL26/SPFL-Ziele beschränkt",
+        "## Roadmap / Vorerst abgeschlossen",
+        "Alle aktuellen Roadmap-Aufgaben sind abgeschlossen. Wir warten auf die nächste sinnvolle Idee.",
     ),
     Path("README.fr.md"): (
-        "## Feuille de route / En cours de développement",
-        "Mise à jour locale",
-        "l'assistant en quatre étapes met désormais à jour",
-        "structure commune validée",
-        "L'éligibilité locale est indépendante de l'étiquette SPFL/PES/UML",
-        "les versions téléchargeables restent limitées aux cibles FL26/SPFL validées",
+        "## Feuille de route / Terminée pour l’instant",
+        "Tous les éléments actuels de la feuille de route sont terminés. Nous attendons la prochaine idée utile.",
     ),
     Path("README.tr.md"): (
-        "## Yol Haritası / Devam Eden Çalışmalar",
-        "Yerel Güncelleme",
-        "dört adımlı sihirbaz artık",
-        "doğrulanmış ortak düzene",
-        "Yerel uygunluk, kaydın SPFL/PES/UML etiketinden bağımsızdır",
-        "indirilebilir sürümler yalnızca doğrulanmış FL26/SPFL hedefleriyle sınırlı kalır",
+        "## Yol Haritası / Şimdilik tamamlandı",
+        "Mevcut yol haritasındaki tüm maddeler tamamlandı. Sıradaki faydalı fikri bekliyoruz.",
     ),
 }
 
-_LOCAL_MUTATION_FUTURE_MARKERS = {
-    Path("README.md"): ("future", "will be added"),
-    Path("README.id.md"): (
-        "direncanakan",
-        "akan ditambahkan",
-        "sedang dalam proses",
-    ),
-    Path("README.es.md"): (
-        "planificado",
-        "se añadirá",
-        "se añadira",
-    ),
-    Path("README.pt.md"): (
-        "planejado",
-        "será adicionado",
-        "sera adicionado",
-    ),
-    Path("README.ar.md"): (
-        "مخطط له",
-        "ستتم إضافة",
-        "سيتم إضافة",
-    ),
-    Path("README.zh.md"): ("已规划", "正在开发", "将"),
-    Path("README.it.md"): (
-        "pianificato",
-        "verrà aggiunta",
-        "verra aggiunta",
-    ),
-    Path("README.ru.md"): (
-        "запланирована",
-        "в разработке",
-        "будет добавлен",
-    ),
-    Path("README.de.md"): (
-        "geplant",
-        "wird ein lokaler update-modus",
-    ),
-    Path("README.fr.md"): (
-        "planifié",
-        "sera ajouté",
-        "sera ajoute",
-    ),
-    Path("README.tr.md"): (
-        "planlanan",
-        "geliştirilmekte",
-        "eklenecektir",
-    ),
-}
 
 
 
@@ -387,14 +295,7 @@ def _roadmap_section(text: str, heading: str) -> str:
 def test_readmes_preserve_immutable_structure_and_clean_roadmap(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     structure = README_STRUCTURE_FIXTURES[path]
-    (
-        roadmap_heading,
-        local_update,
-        delivered_update,
-        validated_layout,
-        label_independence,
-        remote_fl26_only,
-    ) = ROADMAP_FIXTURES[path]
+    roadmap_heading, completion_marker = ROADMAP_FIXTURES[path]
 
     assert _heading_counts(text) == structure["heading_counts"]
     assert _badge_targets(text) == structure["badge_targets"]
@@ -403,35 +304,12 @@ def test_readmes_preserve_immutable_structure_and_clean_roadmap(path: Path) -> N
 
     roadmap = _roadmap_section(text, roadmap_heading)
     normalized_roadmap = " ".join(roadmap.split())
-    compact_roadmap = re.sub(r"\s+", "", roadmap)
     planned_items = _PLANNED_ITEM_RE.findall(roadmap)
-    assert len(planned_items) == 1
-    assert local_update in planned_items[0]
-    for required in (
-        delivered_update,
-        validated_layout,
-        label_independence,
-        remote_fl26_only,
-        "`EDIT00000000`",
-        "SPFL/PES/UML",
-    ):
-        assert re.sub(r"\s+", "", required) in compact_roadmap
 
-    assert "Future: Multi-target local updates" not in normalized_roadmap
-    assert not re.search(
-        r"(?is)(?:future|will be added).{0,200}local|"
-        r"local.{0,200}(?:future|will be added)",
-        normalized_roadmap,
-    )
-    for forbidden_marker in _LOCAL_MUTATION_FUTURE_MARKERS[path]:
-        assert forbidden_marker.casefold() not in normalized_roadmap.casefold()
-    if path == Path("README.md"):
-        assert "common-layout" in normalized_roadmap or "standard" in normalized_roadmap.casefold()
-        assert "Fast" in normalized_roadmap
-        assert "Deep" in normalized_roadmap
-        assert "in-place backup" in normalized_roadmap
-        assert "atomically" in normalized_roadmap
-        assert "remote" in normalized_roadmap.casefold()
-        assert "FL26" in normalized_roadmap
+    assert planned_items == []
+    assert completion_marker in normalized_roadmap
+    assert "`EDIT00000000`" not in roadmap
+    assert "SPFL/PES/UML" not in roadmap
+    assert "Local Update" not in normalized_roadmap
 
     assert not ("ovr" in normalized_roadmap.casefold() and "pes retro" in normalized_roadmap.casefold())

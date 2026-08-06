@@ -58,17 +58,9 @@ For an on-demand run or a custom club list, fork the repository and use **Run wo
 The updater does not overwrite a shirt number already used by another squad
 member. It also checks the player's current club before applying a move.
 
-## Roadmap / Work in progress
+## Roadmap / Complete for now
 
-The local-save GUI update is delivered:
-
-1. **Local Update in GUI** — the four-step wizard updates a user-selected,
-   validated common-layout `EDIT00000000` save with **Fast** or **Deep**
-   coverage. Local eligibility is independent of the save’s SPFL/PES/UML
-   label; the save is checked before mutation and given an in-place backup,
-   then replaced only with an atomically verified result. This does not
-   publish new remote assets: downloadable releases remain validated
-   FL26/SPFL targets.
+All current roadmap items are complete. We are waiting for the next useful idea.
 
 ## Safety and limitations
 

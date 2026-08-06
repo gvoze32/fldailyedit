@@ -58,17 +58,10 @@ Untuk menjalankannya sesuai permintaan atau menggunakan daftar klub khusus, fork
 Updater tidak menimpa nomor seragam yang sudah digunakan oleh anggota skuad lain.
 Updater juga memeriksa klub pemain saat ini sebelum menerapkan perpindahan.
 
-## Roadmap / Sedang dikerjakan
+## Roadmap / Selesai untuk saat ini
 
-Pembaruan GUI untuk save lokal telah tersedia:
+Semua item roadmap saat ini telah selesai. Kami menunggu ide berguna berikutnya.
 
-1. **Pembaruan Lokal di GUI** — wizard empat langkah kini memperbarui save
-   `EDIT00000000` yang dipilih pengguna dan ber-layout umum tervalidasi, dengan
-   cakupan **Fast** atau **Deep**. Kelayakan lokal tidak bergantung pada label
-   SPFL/PES/UML save; save diperiksa sebelum mutasi dan diberi cadangan di
-   tempat, lalu hanya diganti dengan hasil yang diverifikasi secara atomik. Ini
-   tidak menerbitkan aset remote baru: rilis yang dapat diunduh tetap hanya
-   menargetkan FL26/SPFL tervalidasi.
 ## Keamanan dan keterbatasan
 
 - Eksekusi lokal membuat cadangan bergilir serta menggunakan enkripsi atomik yang terverifikasi.
