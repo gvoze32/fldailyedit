@@ -211,11 +211,10 @@ def test_validate_destination_maps_probe_permission_failure_and_leaves_no_probe(
 ) -> None:
     save_directory = _make_directory(tmp_path / "save")
 
-    def deny_probe(path: Path, flags: int, mode: int = 0o777) -> int:
+    def deny_probe(*_args: object, **_kwargs: object) -> object:
         raise PermissionError("read-only directory")
 
-    monkeypatch.setattr(paths_module.os, "open", deny_probe)
-
+    monkeypatch.setattr(paths_module.tempfile, "mkstemp", deny_probe)
     with pytest.raises(DestinationError) as caught:
         validate_destination(save_directory, GameTarget.FL26)
 
