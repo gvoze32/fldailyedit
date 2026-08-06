@@ -61,10 +61,9 @@ prima di applicare un trasferimento.
 
 ## Roadmap / Lavori in corso
 
-Questi elementi sono pianificati e in corso di sviluppo:
+Questo elemento è pianificato e in corso di sviluppo:
 
-1. **Modalità di aggiornamento locale e supporto multi-base nella GUI** — eseguire la pipeline di aggiornamento direttamente dall'interfaccia grafica dell'installer sul PC dell'utente per aggiornare i propri salvataggi su diverse versioni supportate (**SP Football Life 2026**, **vanilla eFootball PES 2021** e **UML**).
-2. **Convertitore Pes Retro Stats e calcolatore OVR integrato** — integrazione completa del motore di conversione degli attributi e del calcolo dell'overall rating (OVR) ponderato per ruolo nella pipeline e nel flusso di lavoro (lo script attuale in `tools/` è un prototipo iniziale).
+1. **Aggiornamento locale nella GUI (sostituisce la distribuzione separata di più basi)** — anziché distribuire basi precompilate separate per ogni patch, verrà aggiunta una modalità di aggiornamento locale direttamente nell'interfaccia grafica dell'app affinché gli utenti possano eseguire la pipeline sui propri salvataggi (**SP Football Life 2026**, **vanilla eFootball PES 2021** e **UML**).
 
 ## Sicurezza e limitazioni
 

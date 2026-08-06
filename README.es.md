@@ -60,10 +60,9 @@ plantilla. También verifica el club actual del jugador antes de aplicar un movi
 
 ## Hoja de ruta / Trabajo en curso
 
-Estos elementos están planificados y en desarrollo:
+Este elemento está planificado y en desarrollo:
 
-1. **Modo de actualización local y soporte multi-base en la GUI** — ejecutar el pipeline de actualización directamente desde la interfaz gráfica del instalador en el PC del usuario, permitiendo actualizar partidas guardadas propias para varias versiones (**SP Football Life 2026**, **vanilla eFootball PES 2021** y **UML**).
-2. **Conversor de Pes Retro Stats y calculador de OVR integrado** — integración completa del motor de conversión de atributos y cálculo de valoración general (OVR) ponderada por posición en el pipeline y flujo de trabajo (el script en `tools/` es actualmente un prototipo inicial).
+1. **Actualización local en la GUI (reemplaza la distribución separada de multi-bases)** — en lugar de distribuir bases preconstruidas separadas para cada parche, se añadirá un modo de actualización local directamente en la GUI del instalador para que los usuarios ejecuten la pipeline de transferencias en su propia partida guardada (**SP Football Life 2026**, **vanilla eFootball PES 2021** y **UML**).
 
 ## Seguridad y limitaciones
 

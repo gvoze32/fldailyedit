@@ -37,6 +37,8 @@ jobs:
           import re
           from pathlib import Path
 
+          output_path = Path(os.environ["GITHUB_OUTPUT"])
+          output_path.write_text("", encoding="utf-8")
           event = json.loads(
               Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8")
           )
@@ -56,17 +58,53 @@ jobs:
                   raise SystemExit(f"{name} must be a full lowercase Git SHA")
               return value
 
+          def checked_head_repository(value: object) -> str:
+              if not isinstance(value, str) or re.fullmatch(
+                  r"[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,99})/[A-Za-z0-9_.-]{1,100}",
+                  value,
+              ) is None:
+                  raise SystemExit("head repository must be a canonical owner/name")
+              return value
+
+          def checked_head_ref(value: object) -> str:
+              if (
+                  not isinstance(value, str)
+                  or len(value) > 255
+                  or any(ord(char) <= 32 or ord(char) == 127 for char in value)
+                  or any(char in value for char in ("~", "^", ":", "?", "*", "[", "\\"))
+                  or value == "@"
+                  or value.startswith("/")
+                  or value.endswith(("/", "."))
+                  or ".." in value
+                  or "@{" in value
+                  or any(
+                      not component
+                      or component.startswith(".")
+                      or component.endswith(".lock")
+                      for component in value.split("/")
+                  )
+              ):
+                  raise SystemExit("head ref must be a canonical Git branch name")
+              return value
+
           base = pull_request.get("base")
           head = pull_request.get("head")
           if not isinstance(base, dict) or not isinstance(head, dict):
               raise SystemExit("pull request must contain base and head objects")
+          head_repository = head.get("repo")
+          if not isinstance(head_repository, dict):
+              raise SystemExit("pull request head must contain a repository object")
           base_sha = checked_sha(base.get("sha"), "base SHA")
           head_sha = checked_sha(head.get("sha"), "head SHA")
+          head_repo = checked_head_repository(head_repository.get("full_name"))
+          head_ref = checked_head_ref(head.get("ref"))
 
           with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
               output.write(f"pr_number={number}\n")
               output.write(f"base_sha={base_sha}\n")
               output.write(f"head_sha={head_sha}\n")
+              output.write(f"head_repo={head_repo}\n")
+              output.write(f"head_ref={head_ref}\n")
           PY
 
       - name: Fetch head data and enforce boundary
@@ -129,7 +167,12 @@ jobs:
 
       - name: Validate materialized Player Update
         if: steps.boundary.outputs.player_path != ''
+        env:
+          HEAD_REF: ${{ steps.event.outputs.head_ref }}
+          HEAD_REPO: ${{ steps.event.outputs.head_repo }}
+          PLAYER_PATH: ${{ steps.boundary.outputs.player_path }}
         shell: bash
         run: |
           set -euo pipefail
+          python tools/check_player_proposal_origin.py --spec "$PLAYER_PATH" --base-repo "$GITHUB_REPOSITORY" --head-repo "$HEAD_REPO" --head-ref "$HEAD_REF"
           python run.py players validate

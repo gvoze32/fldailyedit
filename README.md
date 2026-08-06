@@ -60,10 +60,9 @@ member. It also checks the player's current club before applying a move.
 
 ## Roadmap / Work in progress
 
-These items are planned and in progress:
+This item is planned and in progress:
 
-1. **Local Update mode & Multi-Base Support in GUI** — support running the update pipeline locally directly within the installer GUI on the user's PC, allowing users to update their own save file across supported targets (**SP Football Life 2026**, **vanilla eFootball PES 2021**, and **UML**).
-2. **Integrated Pes Retro Stats Converter & OVR Calculator** — full integration of the attribute converter and position-weighted OVR calculation engine into the pipeline and workflow (the current script in `tools/` serves as an initial prototype).
+1. **Local Update in GUI (replaces separate multi-base distribution)** — instead of distributing separate pre-built bases for every patch, add a local update mode directly to the app GUI so users can run the transfer pipeline on their own save file across supported targets (**SP Football Life 2026**, **vanilla eFootball PES 2021**, and **UML**).
 
 ## Safety and limitations
 

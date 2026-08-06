@@ -51,10 +51,9 @@ Güncelleyici, başka bir oyuncu tarafından kullanılan forma numarasının üz
 
 ## Yol Haritası / Devam Eden Çalışmalar
 
-Planlanan ve geliştirilmekte olan özellikler:
+Planlanan ve geliştirilmekte olan özellik:
 
-1. **Arayüzde Yerel Güncelleme Modu ve Çoklu Temel Dosya Desteği** — güncelleme sürecini doğrudan kullanıcının bilgisayarındaki yükleyici arayüzünden çalıştırarak kullanıcıların kendi kayıt dosyalarını desteklenen sürümler (**SP Football Life 2026**, **vanilla eFootball PES 2021** ve **UML**) arasında güncellemelerini sağlamak.
-2. **Entegre Pes Retro Stats Dönüştürücü ve OVR Hesaplayıcı** — özellik dönüştürme ve mevki ağırlıklı genel yetenek (OVR) hesaplama motorunun iş akışına ve sürece tam entegrasyonu (`tools/` dizinindeki mevcut betik geçici bir prototiptir).
+1. **Arayüzde Yerel Güncelleme (ayrı çoklu temel dosya dağıtımının yerini alır)** — her yama için ayrı önceden derlenmiş temel dosyalar dağıtmak yerine, kullanıcıların kendi kayıt dosyaları üzerinde transfer sürecini çalıştırabilmesi için yükleyici arayüzüne yerel güncelleme modu eklenecektir (**SP Football Life 2026**, **vanilla eFootball PES 2021** ve **UML**).
 
 ## Güvenlik ve Sınırlamalar
 

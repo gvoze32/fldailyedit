@@ -51,10 +51,9 @@ Der Updater überschreibt keine Trikotnummer, die bereits von einem anderen Kade
 
 ## Roadmap / In Arbeit
 
-Diese Punkte sind geplant und in Arbeit:
+Dieser Punkt ist geplant und in Arbeit:
 
-1. **Lokaler Update-Modus & Multi-Base-Unterstützung im GUI** — Ausführung der Update-Pipeline direkt in der Installer-Benutzeroberfläche auf dem PC des Benutzers zur Aktualisierung eigener Speicherstände für verschiedene Zielversionen (**SP Football Life 2026**, **vanilla eFootball PES 2021** und **UML**).
-2. **Integrierter Pes Retro Stats Konverter & OVR-Rechner** — Vollständige Integration der Attributkonvertierung und positionsgewichteten Gesamtwert-Berechnung in Pipeline und Workflow (das aktuelle Skript in `tools/` dient als vorläufiger Prototyp).
+1. **Lokales Update im GUI (ersetzt die separate Multi-Base-Distribution)** — Anstatt separate vorgefertigte Basisdateien für jeden Patch zu verteilen, wird ein lokaler Update-Modus direkt in die Benutzeroberfläche der App integriert, sodass Benutzer die Transfer-Pipeline direkt auf ihren eigenen Speicherständen für verschiedene Zielversionen (**SP Football Life 2026**, **vanilla eFootball PES 2021** und **UML**) ausführen können.
 
 ## Sicherheit und Einschränkungen
 

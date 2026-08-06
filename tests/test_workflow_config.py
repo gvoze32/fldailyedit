@@ -5,6 +5,7 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
+import pytest
 
 
 FORM_PATH = Path(".github/ISSUE_TEMPLATE/player-update.yml")
@@ -179,6 +180,17 @@ def _workflow_step_script(name: str) -> str:
     return textwrap.dedent(match.group("script"))
 
 
+def _target_workflow_step_script(name: str) -> str:
+    text = PLAYER_TARGET_PATH.read_text(encoding="utf-8")
+    match = re.search(
+        rf"(?ms)^      - name: {re.escape(name)}$\n"
+        r".*?^        run: \|\n(?P<script>.*?)(?=^      - name:|\Z)",
+        text,
+    )
+    assert match is not None
+    return textwrap.dedent(match.group("script"))
+
+
 def _workflow_heredoc_script(marker: str) -> str:
     text = WORKFLOW_PATH.read_text(encoding="utf-8")
     start = text.index(marker) + len(marker)
@@ -323,9 +335,10 @@ def test_workflows_use_player_update_copy_on_public_surfaces():
     assert "- name: Generate Player Update" in generator
     assert 'COMMENT_BODY="Draft Player Update: $pr_url"' in generator
     assert '--title "Draft Player Update: $PLAYER_NAME"' in generator
+    assert "complete and CI-verified" in generator
+    assert "requires explicit human approval" in generator
     assert (
-        "This is an incomplete Player Update. Semantic validation must fail "
-        "until a human fills every required value."
+        "community-weighted estimate, not an official in-game rating"
         in generator
     )
 
@@ -430,11 +443,18 @@ def test_generate_workflow_uses_trusted_event_file_and_exact_machine_output():
     assert "fetch-depth: 0" in text
     assert "actions/setup-python@v7" in text
     assert 'python-version: "3.13"' in text
-    assert "python -m pip install -e ." in text
-    assert 'python run.py players generate-draft --event "$GITHUB_EVENT_PATH" --output-dir players' in text
-    assert 'startswith("SPEC_PATH=")' in text
-    assert 'startswith("PLAYER_NAME=")' in text
-    assert 'os.environ["GITHUB_OUTPUT"]' in text
+    assert (
+        'python run.py players generate-draft --event "$GITHUB_EVENT_PATH" '
+        '--output-dir players'
+        in text
+    )
+    assert "if len(lines) != 2:" in text
+    assert 'lines[0].startswith("SPEC_PATH=")' in text
+    assert 'lines[1].startswith("PLAYER_NAME=")' in text
+    assert text.index('lines[0].startswith("SPEC_PATH=")') < text.index(
+        'lines[1].startswith("PLAYER_NAME=")'
+    )
+    assert "os.environ[\"GITHUB_OUTPUT\"]" in text
     assert 'f"{name}<<{delimiter}\\n{value}\\n{delimiter}\\n"' in text
 
 
@@ -687,6 +707,139 @@ def test_ci_keeps_the_python_matrix_and_validates_specs_after_native_build():
     assert "\n  player-spec-pr:\n" not in text
 
 
+def _target_event_fixture() -> dict[str, object]:
+    return {
+        "number": 7,
+        "pull_request": {
+            "base": {"sha": "a" * 40},
+            "head": {
+                "sha": "b" * 40,
+                "repo": {"full_name": "owner/repo"},
+                "ref": "player-draft/issue-7",
+            },
+        },
+    }
+
+
+def _run_target_event_parser(
+    tmp_path: Path,
+    event: dict[str, object],
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    event_path = tmp_path / "event.json"
+    output_path = tmp_path / "github-output"
+    event_path.write_text(json.dumps(event), encoding="utf-8")
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "GITHUB_EVENT_PATH": str(event_path),
+            "GITHUB_OUTPUT": str(output_path),
+        }
+    )
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            _target_workflow_step_script("Read trusted pull request coordinates"),
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    return result, output_path
+
+
+def test_target_event_parser_emits_strict_head_repository_and_ref(
+    tmp_path: Path,
+) -> None:
+    result, output_path = _run_target_event_parser(
+        tmp_path,
+        _target_event_fixture(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert output_path.read_text(encoding="utf-8").splitlines() == [
+        "pr_number=7",
+        f"base_sha={'a' * 40}",
+        f"head_sha={'b' * 40}",
+        "head_repo=owner/repo",
+        "head_ref=player-draft/issue-7",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("part", "value"),
+    [
+        pytest.param("repo", None, id="missing-repository"),
+        pytest.param("repo", "owner", id="repository-without-owner-slash"),
+        pytest.param("repo", "owner/repo\nINJECTED=1", id="repository-control"),
+        pytest.param("ref", "", id="empty-ref"),
+        pytest.param("ref", 42, id="non-string-ref"),
+        pytest.param("ref", "player/update\nINJECTED=1", id="ref-control"),
+    ],
+)
+def test_target_event_parser_rejects_untrusted_head_coordinates(
+    tmp_path: Path,
+    part: str,
+    value: object,
+) -> None:
+    event = _target_event_fixture()
+    pull_request = event["pull_request"]
+    assert isinstance(pull_request, dict)
+    head = pull_request["head"]
+    assert isinstance(head, dict)
+    if part == "repo":
+        repo = head["repo"]
+        assert isinstance(repo, dict)
+        repo["full_name"] = value
+    else:
+        head["ref"] = value
+
+    result, output_path = _run_target_event_parser(tmp_path, event)
+
+    assert result.returncode != 0
+    assert output_path.read_text(encoding="utf-8") == ""
+
+
+def test_target_workflow_runs_origin_check_after_one_materialized_json() -> None:
+    text = PLAYER_TARGET_PATH.read_text(encoding="utf-8")
+    materialize = 'git show "${HEAD_SHA}:${PLAYER_PATH}" > "$PLAYER_PATH"'
+    origin_check = (
+        "python tools/check_player_proposal_origin.py "
+        '--spec "$PLAYER_PATH" '
+        '--base-repo "$GITHUB_REPOSITORY" '
+        '--head-repo "$HEAD_REPO" '
+        '--head-ref "$HEAD_REF"'
+    )
+    normalized_text = re.sub(r"\\\n\s*", " ", text)
+    validator = "python run.py players validate"
+
+    assert text.count(materialize) == 1
+    assert origin_check in normalized_text
+    assert "HEAD_REPO: ${{ steps.event.outputs.head_repo }}" in text
+    assert "HEAD_REF: ${{ steps.event.outputs.head_ref }}" in text
+    assert text.index(materialize) < text.index(
+        "python tools/check_player_proposal_origin.py"
+    )
+    assert text.index("python tools/check_player_proposal_origin.py") < text.index(
+        validator
+    )
+
+
+def test_generated_draft_pr_body_requires_explicit_human_review_copy() -> None:
+    text = WORKFLOW_PATH.read_text(encoding="utf-8")
+    body_start = text.index("printf -v PR_BODY")
+    body_end = text.index("\n          pr_url=", body_start)
+    pr_body = text[body_start:body_end]
+
+    assert "complete and CI-verified" in pr_body
+    assert "requires explicit human approval" in pr_body
+    assert (
+        "community-weighted estimate, not an official in-game rating"
+        in pr_body
+    )
+    assert "incomplete Player Update" not in pr_body
+
+
 def test_target_workflow_is_base_owned_read_only_and_runs_for_pull_requests():
     text = PLAYER_TARGET_PATH.read_text(encoding="utf-8")
 
@@ -758,13 +911,6 @@ def test_target_workflow_never_checks_out_or_executes_pull_request_head_code():
     )
 
 
-def test_generated_draft_pr_warns_that_semantic_validation_must_fail():
-    text = WORKFLOW_PATH.read_text(encoding="utf-8").lower()
-
-    assert (
-        "semantic validation must fail until a human fills every required value"
-        in text
-    )
 
 def test_sync_workflows_read_revision_from_checked_out_manifest_without_literal_drift():
     for path in SYNC_WORKFLOW_PATHS:

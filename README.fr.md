@@ -51,10 +51,9 @@ L'outil n'écrase pas un numéro de maillot déjà utilisé par un autre membre 
 
 ## Feuille de route / En cours de développement
 
-Ces éléments sont planifiés et en cours de développement :
+Cet élément est planifié et en cours de développement :
 
-1. **Mode de mise à jour locale et support multi-bases dans l'interface graphique** — exécuter le pipeline de mise à jour directement depuis l'interface de l'installateur sur le PC de l'utilisateur pour mettre à jour ses propres sauvegardes sur différentes versions cibles (**SP Football Life 2026**, **vanilla eFootball PES 2021** et **UML**).
-2. **Convertisseur Pes Retro Stats et calculateur d'OVR intégré** — intégration complète du moteur de conversion d'attributs et de calcul de note globale (OVR) pondérée selon le poste dans le pipeline et le flux de travail (le script actuel dans `tools/` sert de prototype initial).
+1. **Mise à jour locale dans l'interface graphique (remplace la distribution de bases multiples séparées)** — au lieu de distribuer des bases préconstruites distinctes pour chaque patch, un mode de mise à jour locale sera ajouté directement à l'interface de l'installateur afin que les utilisateurs puissent exécuter le pipeline sur leur propre sauvegarde (**SP Football Life 2026**, **vanilla eFootball PES 2021** et **UML**).
 
 ## Sécurité et limitations
 

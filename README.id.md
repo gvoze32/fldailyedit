@@ -60,10 +60,9 @@ Updater juga memeriksa klub pemain saat ini sebelum menerapkan perpindahan.
 
 ## Roadmap / Sedang dikerjakan
 
-Item-item berikut direncanakan dan dalam proses pengerjaan:
+Item berikut direncanakan dan sedang dalam proses pengerjaan:
 
-1. **Mode Pembaruan Lokal & Dukungan Multi-Base di GUI** — mendukung eksekusi pipeline pembaruan secara lokal langsung di dalam GUI installer pada PC pengguna, memungkinkan pengguna memperbarui file save mereka sendiri di berbagai target (**SP Football Life 2026**, **vanilla eFootball PES 2021**, dan **UML**).
-2. **Konverter Pes Retro Stats & Kalkulator OVR Terintegrasi** — integrasi penuh mesin konversi atribut dan kalkulator OVR berbobot posisi ke dalam pipeline dan alur kerja (skrip di `tools/` saat ini merupakan prototipe awal).
+1. **Pembaruan Lokal di GUI (menggantikan distribusi multi-base terpisah)** — alih-alih mendistribusikan base pre-built terpisah untuk setiap patch, fitur update lokal akan ditambahkan langsung ke GUI aplikasi agar pengguna dapat menjalankan pipeline transfer langsung pada save file milik mereka sendiri di berbagai target (**SP Football Life 2026**, **vanilla eFootball PES 2021**, dan **UML**).
 
 ## Keamanan dan keterbatasan
 

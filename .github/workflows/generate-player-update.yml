@@ -272,7 +272,7 @@ jobs:
         run: |
           set -euo pipefail
           printf -v PR_BODY \
-            'Closes #%s\n\nThis is an incomplete Player Update. Semantic validation must fail until a human fills every required value.' \
+            'Closes #%s\n\nThis Player Update is complete and CI-verified, but merging requires explicit human approval.\n\nThe proposed OVR is a community-weighted estimate, not an official in-game rating.' \
             "$ISSUE_NUMBER"
           pr_url="$(
             gh pr create \
