@@ -1,0 +1,1132 @@
+{
+  "schema_version": 1,
+  "source": {
+    "url": "https://github.com/xAranaktu/PES-2021-Cheat-Table/blob/master/PES%202021%20-%20v21.1.0.CT",
+    "license": "MIT",
+    "copyright": "Copyright (c) 2020 Paweł"
+  },
+  "nationalities": [
+    {
+      "id": 1,
+      "name": "Afghanistan",
+      "aliases": []
+    },
+    {
+      "id": 2,
+      "name": "Bahrain",
+      "aliases": []
+    },
+    {
+      "id": 3,
+      "name": "Bangladesh",
+      "aliases": []
+    },
+    {
+      "id": 4,
+      "name": "Bhutan",
+      "aliases": []
+    },
+    {
+      "id": 5,
+      "name": "Brunei",
+      "aliases": []
+    },
+    {
+      "id": 6,
+      "name": "Cambodia",
+      "aliases": []
+    },
+    {
+      "id": 7,
+      "name": "China",
+      "aliases": []
+    },
+    {
+      "id": 8,
+      "name": "Hong Kong",
+      "aliases": []
+    },
+    {
+      "id": 9,
+      "name": "India",
+      "aliases": []
+    },
+    {
+      "id": 10,
+      "name": "Indonesia",
+      "aliases": []
+    },
+    {
+      "id": 11,
+      "name": "Iran",
+      "aliases": []
+    },
+    {
+      "id": 12,
+      "name": "Iraq",
+      "aliases": []
+    },
+    {
+      "id": 13,
+      "name": "Japan",
+      "aliases": []
+    },
+    {
+      "id": 14,
+      "name": "Jordan",
+      "aliases": []
+    },
+    {
+      "id": 15,
+      "name": "North Korea",
+      "aliases": []
+    },
+    {
+      "id": 16,
+      "name": "South Korea",
+      "aliases": []
+    },
+    {
+      "id": 17,
+      "name": "Kuwait",
+      "aliases": []
+    },
+    {
+      "id": 18,
+      "name": "Laos",
+      "aliases": []
+    },
+    {
+      "id": 19,
+      "name": "Lebanon",
+      "aliases": []
+    },
+    {
+      "id": 20,
+      "name": "Macao",
+      "aliases": []
+    },
+    {
+      "id": 21,
+      "name": "Malaysia",
+      "aliases": []
+    },
+    {
+      "id": 22,
+      "name": "Maldives",
+      "aliases": []
+    },
+    {
+      "id": 23,
+      "name": "Mongolia",
+      "aliases": []
+    },
+    {
+      "id": 24,
+      "name": "Myanmar",
+      "aliases": []
+    },
+    {
+      "id": 25,
+      "name": "Nepal",
+      "aliases": []
+    },
+    {
+      "id": 26,
+      "name": "Oman",
+      "aliases": []
+    },
+    {
+      "id": 27,
+      "name": "Pakistan",
+      "aliases": []
+    },
+    {
+      "id": 28,
+      "name": "Palestine",
+      "aliases": []
+    },
+    {
+      "id": 29,
+      "name": "Philippines",
+      "aliases": []
+    },
+    {
+      "id": 30,
+      "name": "Qatar",
+      "aliases": []
+    },
+    {
+      "id": 31,
+      "name": "Saudi Arabia",
+      "aliases": []
+    },
+    {
+      "id": 32,
+      "name": "Singapore",
+      "aliases": []
+    },
+    {
+      "id": 33,
+      "name": "Sri Lanka",
+      "aliases": []
+    },
+    {
+      "id": 34,
+      "name": "Syria",
+      "aliases": []
+    },
+    {
+      "id": 36,
+      "name": "Thailand",
+      "aliases": []
+    },
+    {
+      "id": 37,
+      "name": "Uae",
+      "aliases": [
+        "United Arab Emirates"
+      ]
+    },
+    {
+      "id": 38,
+      "name": "Vietnam",
+      "aliases": []
+    },
+    {
+      "id": 39,
+      "name": "Yemen",
+      "aliases": []
+    },
+    {
+      "id": 40,
+      "name": "Kyrgyz Republic",
+      "aliases": []
+    },
+    {
+      "id": 41,
+      "name": "Tajikistan",
+      "aliases": []
+    },
+    {
+      "id": 42,
+      "name": "Turkmenistan",
+      "aliases": []
+    },
+    {
+      "id": 43,
+      "name": "East Timor",
+      "aliases": []
+    },
+    {
+      "id": 44,
+      "name": "Algeria",
+      "aliases": []
+    },
+    {
+      "id": 45,
+      "name": "Angola",
+      "aliases": []
+    },
+    {
+      "id": 46,
+      "name": "Benin",
+      "aliases": []
+    },
+    {
+      "id": 47,
+      "name": "Botswana",
+      "aliases": []
+    },
+    {
+      "id": 48,
+      "name": "Burkina Faso",
+      "aliases": []
+    },
+    {
+      "id": 49,
+      "name": "Burundi",
+      "aliases": []
+    },
+    {
+      "id": 50,
+      "name": "Cameroon",
+      "aliases": []
+    },
+    {
+      "id": 51,
+      "name": "Cape Verde",
+      "aliases": []
+    },
+    {
+      "id": 52,
+      "name": "Central African Rep.",
+      "aliases": []
+    },
+    {
+      "id": 53,
+      "name": "Chad",
+      "aliases": []
+    },
+    {
+      "id": 54,
+      "name": "The Comoros",
+      "aliases": [
+        "Comoros"
+      ]
+    },
+    {
+      "id": 55,
+      "name": "Congo Dr",
+      "aliases": [
+        "DR Congo"
+      ]
+    },
+    {
+      "id": 56,
+      "name": "Côte d'Ivoire",
+      "aliases": [
+        "Ivory Coast"
+      ]
+    },
+    {
+      "id": 57,
+      "name": "Djibouti",
+      "aliases": []
+    },
+    {
+      "id": 58,
+      "name": "Egypt",
+      "aliases": []
+    },
+    {
+      "id": 59,
+      "name": "Equatorial Guinea",
+      "aliases": []
+    },
+    {
+      "id": 60,
+      "name": "Eritrea",
+      "aliases": []
+    },
+    {
+      "id": 61,
+      "name": "Ethiopia",
+      "aliases": []
+    },
+    {
+      "id": 62,
+      "name": "Gabon",
+      "aliases": []
+    },
+    {
+      "id": 63,
+      "name": "Republic of the Gambia",
+      "aliases": [
+        "Gambia"
+      ]
+    },
+    {
+      "id": 64,
+      "name": "Ghana",
+      "aliases": []
+    },
+    {
+      "id": 65,
+      "name": "Guinea",
+      "aliases": []
+    },
+    {
+      "id": 66,
+      "name": "Guinea-Bissau",
+      "aliases": []
+    },
+    {
+      "id": 67,
+      "name": "Kenya",
+      "aliases": []
+    },
+    {
+      "id": 68,
+      "name": "Lesotho",
+      "aliases": []
+    },
+    {
+      "id": 69,
+      "name": "Liberia",
+      "aliases": []
+    },
+    {
+      "id": 70,
+      "name": "Libya",
+      "aliases": []
+    },
+    {
+      "id": 71,
+      "name": "Madagascar",
+      "aliases": []
+    },
+    {
+      "id": 72,
+      "name": "Malawi",
+      "aliases": []
+    },
+    {
+      "id": 73,
+      "name": "Mali",
+      "aliases": []
+    },
+    {
+      "id": 74,
+      "name": "Mauritania",
+      "aliases": []
+    },
+    {
+      "id": 75,
+      "name": "Mauritius",
+      "aliases": []
+    },
+    {
+      "id": 76,
+      "name": "Morocco",
+      "aliases": []
+    },
+    {
+      "id": 77,
+      "name": "Mozambique",
+      "aliases": []
+    },
+    {
+      "id": 78,
+      "name": "Namibia",
+      "aliases": []
+    },
+    {
+      "id": 79,
+      "name": "Niger",
+      "aliases": []
+    },
+    {
+      "id": 80,
+      "name": "Nigeria",
+      "aliases": []
+    },
+    {
+      "id": 81,
+      "name": "Rwanda",
+      "aliases": []
+    },
+    {
+      "id": 82,
+      "name": "Sao Tomé and Principe",
+      "aliases": [
+        "São Tomé and Príncipe"
+      ]
+    },
+    {
+      "id": 83,
+      "name": "Senegal",
+      "aliases": []
+    },
+    {
+      "id": 84,
+      "name": "Seychelles",
+      "aliases": []
+    },
+    {
+      "id": 85,
+      "name": "Sierra Leone",
+      "aliases": []
+    },
+    {
+      "id": 86,
+      "name": "Somalia",
+      "aliases": []
+    },
+    {
+      "id": 87,
+      "name": "South Africa",
+      "aliases": []
+    },
+    {
+      "id": 88,
+      "name": "Sudan",
+      "aliases": []
+    },
+    {
+      "id": 89,
+      "name": "Swaziland",
+      "aliases": [
+        "Eswatini"
+      ]
+    },
+    {
+      "id": 90,
+      "name": "Tanzania",
+      "aliases": []
+    },
+    {
+      "id": 91,
+      "name": "Togo",
+      "aliases": []
+    },
+    {
+      "id": 92,
+      "name": "Tunisia",
+      "aliases": []
+    },
+    {
+      "id": 93,
+      "name": "Uganda",
+      "aliases": []
+    },
+    {
+      "id": 94,
+      "name": "Zambia",
+      "aliases": []
+    },
+    {
+      "id": 95,
+      "name": "Zimbabwe",
+      "aliases": []
+    },
+    {
+      "id": 98,
+      "name": "Congo",
+      "aliases": [
+        "Congo Republic"
+      ]
+    },
+    {
+      "id": 100,
+      "name": "Réunion",
+      "aliases": []
+    },
+    {
+      "id": 103,
+      "name": "Anguilla",
+      "aliases": []
+    },
+    {
+      "id": 104,
+      "name": "Antiqua and Barbuda",
+      "aliases": []
+    },
+    {
+      "id": 105,
+      "name": "Aruba",
+      "aliases": []
+    },
+    {
+      "id": 106,
+      "name": "The Bahamas",
+      "aliases": []
+    },
+    {
+      "id": 107,
+      "name": "Barbados",
+      "aliases": []
+    },
+    {
+      "id": 108,
+      "name": "Belize",
+      "aliases": []
+    },
+    {
+      "id": 109,
+      "name": "Bermuda",
+      "aliases": []
+    },
+    {
+      "id": 110,
+      "name": "Canada",
+      "aliases": []
+    },
+    {
+      "id": 111,
+      "name": "Cayman Islands",
+      "aliases": []
+    },
+    {
+      "id": 112,
+      "name": "Costa Rica",
+      "aliases": []
+    },
+    {
+      "id": 113,
+      "name": "Cuba",
+      "aliases": []
+    },
+    {
+      "id": 114,
+      "name": "Dominica",
+      "aliases": []
+    },
+    {
+      "id": 115,
+      "name": "Dominican Republic",
+      "aliases": []
+    },
+    {
+      "id": 116,
+      "name": "El Salvador",
+      "aliases": []
+    },
+    {
+      "id": 117,
+      "name": "Grenada",
+      "aliases": []
+    },
+    {
+      "id": 118,
+      "name": "Guadeloupe",
+      "aliases": []
+    },
+    {
+      "id": 119,
+      "name": "Guatemala",
+      "aliases": []
+    },
+    {
+      "id": 120,
+      "name": "Haiti",
+      "aliases": []
+    },
+    {
+      "id": 121,
+      "name": "Honduras",
+      "aliases": []
+    },
+    {
+      "id": 122,
+      "name": "Jamaica",
+      "aliases": []
+    },
+    {
+      "id": 123,
+      "name": "Martinique",
+      "aliases": []
+    },
+    {
+      "id": 124,
+      "name": "Mexico",
+      "aliases": []
+    },
+    {
+      "id": 125,
+      "name": "Montserrat",
+      "aliases": []
+    },
+    {
+      "id": 126,
+      "name": "Netherlands Antilles",
+      "aliases": []
+    },
+    {
+      "id": 127,
+      "name": "Nicaragua",
+      "aliases": []
+    },
+    {
+      "id": 128,
+      "name": "Panama",
+      "aliases": []
+    },
+    {
+      "id": 129,
+      "name": "Puerto Rico",
+      "aliases": []
+    },
+    {
+      "id": 130,
+      "name": "Saint Kitts and Nevis",
+      "aliases": []
+    },
+    {
+      "id": 131,
+      "name": "Saint Lucia",
+      "aliases": []
+    },
+    {
+      "id": 132,
+      "name": "St Vincent and Grenadines",
+      "aliases": []
+    },
+    {
+      "id": 133,
+      "name": "Trinidad and Tobago",
+      "aliases": []
+    },
+    {
+      "id": 134,
+      "name": "Turks and Caicos Is.",
+      "aliases": []
+    },
+    {
+      "id": 135,
+      "name": "United States",
+      "aliases": [
+        "United States of America"
+      ]
+    },
+    {
+      "id": 136,
+      "name": "British Virgin Islands",
+      "aliases": []
+    },
+    {
+      "id": 137,
+      "name": "U.S. Virgin Islands",
+      "aliases": []
+    },
+    {
+      "id": 138,
+      "name": "French Guiana",
+      "aliases": []
+    },
+    {
+      "id": 139,
+      "name": "Suriname",
+      "aliases": []
+    },
+    {
+      "id": 140,
+      "name": "Curaçao",
+      "aliases": []
+    },
+    {
+      "id": 144,
+      "name": "Argentina",
+      "aliases": []
+    },
+    {
+      "id": 145,
+      "name": "Bolivia",
+      "aliases": []
+    },
+    {
+      "id": 146,
+      "name": "Brazil",
+      "aliases": []
+    },
+    {
+      "id": 147,
+      "name": "Chile",
+      "aliases": []
+    },
+    {
+      "id": 148,
+      "name": "Colombia",
+      "aliases": []
+    },
+    {
+      "id": 149,
+      "name": "Ecuador",
+      "aliases": []
+    },
+    {
+      "id": 150,
+      "name": "Paraguay",
+      "aliases": []
+    },
+    {
+      "id": 151,
+      "name": "Peru",
+      "aliases": []
+    },
+    {
+      "id": 152,
+      "name": "Uruguay",
+      "aliases": []
+    },
+    {
+      "id": 153,
+      "name": "Venezuela",
+      "aliases": []
+    },
+    {
+      "id": 159,
+      "name": "Gyuana",
+      "aliases": [
+        "Guyana"
+      ]
+    },
+    {
+      "id": 161,
+      "name": "American Samoa",
+      "aliases": []
+    },
+    {
+      "id": 162,
+      "name": "Australia",
+      "aliases": []
+    },
+    {
+      "id": 163,
+      "name": "Cook Islands",
+      "aliases": []
+    },
+    {
+      "id": 164,
+      "name": "Fiji",
+      "aliases": []
+    },
+    {
+      "id": 165,
+      "name": "New Caledonia",
+      "aliases": []
+    },
+    {
+      "id": 166,
+      "name": "New Zealand",
+      "aliases": []
+    },
+    {
+      "id": 167,
+      "name": "Papua New Guinea",
+      "aliases": []
+    },
+    {
+      "id": 168,
+      "name": "Samoa",
+      "aliases": []
+    },
+    {
+      "id": 169,
+      "name": "Solomon Islands",
+      "aliases": []
+    },
+    {
+      "id": 170,
+      "name": "Tahiti",
+      "aliases": []
+    },
+    {
+      "id": 171,
+      "name": "Tonga",
+      "aliases": []
+    },
+    {
+      "id": 172,
+      "name": "Vanuatu",
+      "aliases": []
+    },
+    {
+      "id": 176,
+      "name": "Guam",
+      "aliases": []
+    },
+    {
+      "id": 184,
+      "name": "Palau",
+      "aliases": []
+    },
+    {
+      "id": 189,
+      "name": "Israel",
+      "aliases": []
+    },
+    {
+      "id": 190,
+      "name": "Turkey",
+      "aliases": []
+    },
+    {
+      "id": 191,
+      "name": "Albania",
+      "aliases": []
+    },
+    {
+      "id": 192,
+      "name": "Andorra",
+      "aliases": []
+    },
+    {
+      "id": 193,
+      "name": "Armenia",
+      "aliases": []
+    },
+    {
+      "id": 194,
+      "name": "Austria",
+      "aliases": []
+    },
+    {
+      "id": 195,
+      "name": "Azerbaijan",
+      "aliases": []
+    },
+    {
+      "id": 196,
+      "name": "Belarus",
+      "aliases": []
+    },
+    {
+      "id": 197,
+      "name": "Belgium",
+      "aliases": []
+    },
+    {
+      "id": 198,
+      "name": "Bosnia and Herzegovina",
+      "aliases": []
+    },
+    {
+      "id": 199,
+      "name": "Bulgaria",
+      "aliases": []
+    },
+    {
+      "id": 200,
+      "name": "Croatia",
+      "aliases": []
+    },
+    {
+      "id": 201,
+      "name": "Cyprus",
+      "aliases": []
+    },
+    {
+      "id": 202,
+      "name": "Czech Republic",
+      "aliases": []
+    },
+    {
+      "id": 203,
+      "name": "Denmark",
+      "aliases": []
+    },
+    {
+      "id": 204,
+      "name": "England",
+      "aliases": []
+    },
+    {
+      "id": 205,
+      "name": "Estonia",
+      "aliases": []
+    },
+    {
+      "id": 206,
+      "name": "Faroe Islands",
+      "aliases": []
+    },
+    {
+      "id": 207,
+      "name": "Finland",
+      "aliases": []
+    },
+    {
+      "id": 208,
+      "name": "France",
+      "aliases": []
+    },
+    {
+      "id": 209,
+      "name": "Georgia",
+      "aliases": []
+    },
+    {
+      "id": 210,
+      "name": "Germany",
+      "aliases": []
+    },
+    {
+      "id": 211,
+      "name": "Greece",
+      "aliases": []
+    },
+    {
+      "id": 212,
+      "name": "Hungary",
+      "aliases": []
+    },
+    {
+      "id": 213,
+      "name": "Iceland",
+      "aliases": []
+    },
+    {
+      "id": 214,
+      "name": "Ireland",
+      "aliases": []
+    },
+    {
+      "id": 215,
+      "name": "Italy",
+      "aliases": []
+    },
+    {
+      "id": 216,
+      "name": "Kazakhstan",
+      "aliases": []
+    },
+    {
+      "id": 217,
+      "name": "Latvia",
+      "aliases": []
+    },
+    {
+      "id": 218,
+      "name": "Liechtenstein",
+      "aliases": []
+    },
+    {
+      "id": 219,
+      "name": "Lithuania",
+      "aliases": []
+    },
+    {
+      "id": 220,
+      "name": "Luxembourg",
+      "aliases": []
+    },
+    {
+      "id": 221,
+      "name": "Macedonia",
+      "aliases": [
+        "North Macedonia"
+      ]
+    },
+    {
+      "id": 222,
+      "name": "Malta",
+      "aliases": []
+    },
+    {
+      "id": 223,
+      "name": "Moldova",
+      "aliases": []
+    },
+    {
+      "id": 224,
+      "name": "Netherlands",
+      "aliases": []
+    },
+    {
+      "id": 225,
+      "name": "Northern Ireland",
+      "aliases": []
+    },
+    {
+      "id": 226,
+      "name": "Norway",
+      "aliases": []
+    },
+    {
+      "id": 227,
+      "name": "Poland",
+      "aliases": []
+    },
+    {
+      "id": 228,
+      "name": "Portugal",
+      "aliases": []
+    },
+    {
+      "id": 229,
+      "name": "Romania",
+      "aliases": []
+    },
+    {
+      "id": 230,
+      "name": "Russia",
+      "aliases": []
+    },
+    {
+      "id": 231,
+      "name": "San Marino",
+      "aliases": []
+    },
+    {
+      "id": 232,
+      "name": "Scotland",
+      "aliases": []
+    },
+    {
+      "id": 234,
+      "name": "Slovakia",
+      "aliases": []
+    },
+    {
+      "id": 235,
+      "name": "Slovenia",
+      "aliases": []
+    },
+    {
+      "id": 236,
+      "name": "Spain",
+      "aliases": []
+    },
+    {
+      "id": 237,
+      "name": "Sweden",
+      "aliases": []
+    },
+    {
+      "id": 238,
+      "name": "Switzerland",
+      "aliases": []
+    },
+    {
+      "id": 239,
+      "name": "Ukraine",
+      "aliases": []
+    },
+    {
+      "id": 240,
+      "name": "Uzbekistan",
+      "aliases": []
+    },
+    {
+      "id": 241,
+      "name": "Wales",
+      "aliases": []
+    },
+    {
+      "id": 245,
+      "name": "Gibraltar",
+      "aliases": []
+    },
+    {
+      "id": 250,
+      "name": "Monaco",
+      "aliases": []
+    },
+    {
+      "id": 260,
+      "name": "Others",
+      "aliases": []
+    },
+    {
+      "id": 298,
+      "name": "Taiwan",
+      "aliases": []
+    },
+    {
+      "id": 303,
+      "name": "Serbia",
+      "aliases": []
+    },
+    {
+      "id": 304,
+      "name": "Montenegro",
+      "aliases": []
+    },
+    {
+      "id": 310,
+      "name": "Sint Maarten",
+      "aliases": []
+    },
+    {
+      "id": 311,
+      "name": "Kosovo",
+      "aliases": []
+    },
+    {
+      "id": 312,
+      "name": "South Sudan",
+      "aliases": []
+    }
+  ]
+}
