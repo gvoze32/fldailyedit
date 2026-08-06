@@ -13,6 +13,17 @@ on:
       - "FLDailyEditInstaller.spec"
       - "pyproject.toml"
       - ".github/workflows/build-installer.yml"
+      - "data/major_clubs.json"
+      - "data/fotmob_teams_validated.json"
+      - "data/name_overrides.json"
+      - "data/team_aliases.json"
+      - "data/FL262_teams.txt"
+      - "vendor/pesXdecrypter/src/**"
+      - "config.py"
+      - "local_update.py"
+      - "run.py"
+      - "editor/**"
+      - "scraper/**"
 
 jobs:
   build:
@@ -29,6 +40,35 @@ jobs:
         run: |
           python -m pip install -e ".[installer-build]"
           python -m pip install -e ".[dev]"
+      - name: Prepare Windows crypto tools
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "pesXdecrypter_2021.7z"
+          $expected = "201800b731a8c90109b30afeef26fb0cdcd552d2910b322bbc253b000d6aa3a6"
+          Invoke-WebRequest `
+            -Uri "https://github.com/the4chancup/pesXdecrypter/releases/download/6.0.0/pesXdecrypter_2021.7z" `
+            -OutFile $archive
+          $actual = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "pesXdecrypter archive checksum mismatch: $actual"
+          }
+          $extract = Join-Path $env:RUNNER_TEMP "pesXdecrypter"
+          New-Item -ItemType Directory -Force -Path $extract | Out-Null
+          $sevenZip = Join-Path $env:ProgramFiles "7-Zip\7z.exe"
+          if (-not (Test-Path $sevenZip)) {
+            throw "7-Zip was not found at $sevenZip"
+          }
+          & $sevenZip x $archive "-o$extract" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not extract pesXdecrypter archive"
+          }
+          foreach ($name in @("decrypter21.exe", "encrypter21.exe")) {
+            $source = Join-Path $extract $name
+            if (-not (Test-Path $source)) {
+              throw "Missing crypto binary after extraction: $name"
+            }
+            Copy-Item -Force $source (Join-Path "vendor\pesXdecrypter" $name)
+          }
       - name: Run installer and release tests
         run: >-
           python -m pytest

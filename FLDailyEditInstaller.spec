@@ -1,11 +1,29 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 
+CRYPTO_BINARIES = [
+    (
+        "vendor/pesXdecrypter/decrypter21.exe",
+        "vendor/pesXdecrypter",
+    ),
+    (
+        "vendor/pesXdecrypter/encrypter21.exe",
+        "vendor/pesXdecrypter",
+    ),
+]
+RUNTIME_DATA = [
+    ("data/major_clubs.json", "data"),
+    ("data/fotmob_teams_validated.json", "data"),
+    ("data/name_overrides.json", "data"),
+    ("data/team_aliases.json", "data"),
+    ("data/FL262_teams.txt", "data"),
+]
+
 a = Analysis(
     ["installer/__main__.py"],
     pathex=["."],
-    binaries=[],
-    datas=[],
+    binaries=CRYPTO_BINARIES,
+    datas=RUNTIME_DATA,
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

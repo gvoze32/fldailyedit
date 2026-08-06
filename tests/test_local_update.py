@@ -7,6 +7,7 @@ import pytest
 from local_update import (
     CancellationToken,
     LocalUpdateCancelled,
+    LocalUpdateError,
     LocalUpdateProgress,
     LocalUpdateRequest,
     LocalUpdateResult,
@@ -139,6 +140,21 @@ def test_service_reports_ordered_progress_and_returns_result() -> None:
     assert result.target_path == Path("save/EDIT00000000")
     assert result.transfer_applied == 1
 
+
+
+def test_service_reports_scrape_failures_with_scraping_stage() -> None:
+    class ScrapeFailureRuntime(FakeRuntime):
+        def scrape(self, request, token):
+            raise RuntimeError("deep-club index is empty")
+
+    service = LocalUpdateService(ScrapeFailureRuntime())
+
+    with pytest.raises(LocalUpdateError) as caught:
+        service.execute(LocalUpdateRequest(Path("save/EDIT00000000")))
+
+    assert caught.value.code == "scrape_failed"
+    assert caught.value.stage is LocalUpdateStage.SCRAPING
+    assert "deep-club index is empty" in str(caught.value)
 
 def test_service_stops_before_apply_when_cancelled() -> None:
     token = CancellationToken()

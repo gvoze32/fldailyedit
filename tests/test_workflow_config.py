@@ -1147,12 +1147,22 @@ def test_installer_spec_is_one_file_windowed_and_excludes_sensitive_payloads():
     assert "upx=False" in text
     assert "COLLECT(" not in text
 
+    for resource in (
+        "data/major_clubs.json",
+        "data/fotmob_teams_validated.json",
+        "data/name_overrides.json",
+        "data/team_aliases.json",
+        "data/FL262_teams.txt",
+        "vendor/pesXdecrypter/decrypter21.exe",
+        "vendor/pesXdecrypter/encrypter21.exe",
+    ):
+        assert resource in text
+
     lowered = text.lower()
     for forbidden in (
         "edit00000000",
         "transfer_summary",
         "credentials",
-        "pesxdecrypter",
     ):
         assert forbidden not in lowered
 
@@ -1172,6 +1182,11 @@ def test_installer_workflow_builds_tests_and_smoke_tests_on_windows():
         ".github/workflows/build-installer.yml",
         "tools/publish_release_assets.py",
         "tests/test_release_publisher.py",
+        "config.py",
+        "local_update.py",
+        "run.py",
+        "editor/**",
+        "scraper/**",
     ):
         assert path_filter in text
 
@@ -1179,6 +1194,18 @@ def test_installer_workflow_builds_tests_and_smoke_tests_on_windows():
     assert 'python-version: "3.12"' in build
     assert 'python -m pip install -e ".[installer-build]"' in build
     assert 'python -m pip install -e ".[dev]"' in build
+    for path_filter in (
+        "data/major_clubs.json",
+        "data/fotmob_teams_validated.json",
+        "data/name_overrides.json",
+        "data/team_aliases.json",
+        "data/FL262_teams.txt",
+    ):
+        assert f'      - "{path_filter}"' in text
+    assert "pesXdecrypter_2021.7z" in build
+    assert "201800b731a8c90109b30afeef26fb0cdcd552d2910b322bbc253b000d6aa3a6" in build
+    assert "decrypter21.exe" in build
+    assert "encrypter21.exe" in build
     for test_path in (
         "tests/test_installer_catalog.py",
         "tests/test_installer_paths.py",

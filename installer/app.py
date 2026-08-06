@@ -240,7 +240,7 @@ _ERROR_TITLES = {
     "reparse_point": "The save folder is not available",
     "recovery_failed": "The original save could not be restored",
     "replace_failed": "The save could not be replaced",
-    "runtime_error": "The local update could not be completed",
+    "scrape_failed": "Could not fetch update data",
     "staging_failed": "The downloaded save could not be prepared",
     "target_changed": "The save file changed during installation",
     "target_locked": "Close the game and try again",
@@ -1326,14 +1326,28 @@ class InstallerApplication:
         )
         self._mode_buttons: dict[InstallerMode, ttk.Radiobutton] = {}
 
-        release_button = ttk.Radiobutton(
+        release_group = ttk.Frame(
             frame,
+            relief="groove",
+            borderwidth=1,
+            padding=_SPACE_S,
+        )
+        release_group.grid(
+            row=2,
+            column=0,
+            sticky="ew",
+            pady=(_SPACE_S, 0),
+        )
+        release_group.columnconfigure(0, weight=1)
+
+        release_button = ttk.Radiobutton(
+            release_group,
             text=UI_COPY["release_mode"],
             value=InstallerMode.RELEASE.value,
             variable=self._mode_var,
             command=self._select_mode,
         )
-        release_button.grid(row=2, column=0, sticky="w", pady=(_SPACE_S, 0))
+        release_button.grid(row=0, column=0, sticky="w")
         self._mode_buttons[InstallerMode.RELEASE] = release_button
 
         self._catalog_status_var = tkinter.StringVar(
@@ -1341,9 +1355,9 @@ class InstallerApplication:
             value="Checking for available updates…",
         )
         self._wrapped_label(
-            frame,
+            release_group,
             textvariable=self._catalog_status_var,
-        ).grid(row=3, column=0, sticky="ew", pady=(0, _SPACE_M))
+        ).grid(row=1, column=0, sticky="ew", pady=(0, _SPACE_XS))
 
         self._record_var = tkinter.StringVar(self.root)
         self._record_buttons: dict[Channel, ttk.Radiobutton] = {}
@@ -1359,10 +1373,13 @@ class InstallerApplication:
                 UI_COPY["deep_description"],
             ),
         )
-        row = 4
+        choices_frame = ttk.Frame(release_group, padding=(_SPACE_S, 0))
+        choices_frame.grid(row=2, column=0, sticky="ew")
+        choices_frame.columnconfigure(0, weight=1)
+        row = 0
         for channel, title, description in choices:
             button = ttk.Radiobutton(
-                frame,
+                choices_frame,
                 text=title,
                 value=channel.value,
                 variable=self._record_var,
@@ -1371,7 +1388,7 @@ class InstallerApplication:
             )
             button.grid(row=row, column=0, sticky="w", pady=(_SPACE_S, 0))
             self._record_buttons[channel] = button
-            self._wrapped_label(frame, text=description).grid(
+            self._wrapped_label(choices_frame, text=description).grid(
                 row=row + 1,
                 column=0,
                 sticky="ew",
@@ -1380,18 +1397,32 @@ class InstallerApplication:
             )
             row += 2
 
-        local_button = ttk.Radiobutton(
+        local_group = ttk.Frame(
             frame,
+            relief="groove",
+            borderwidth=1,
+            padding=_SPACE_S,
+        )
+        local_group.grid(
+            row=3,
+            column=0,
+            sticky="ew",
+            pady=(_SPACE_M, 0),
+        )
+        local_group.columnconfigure(0, weight=1)
+
+        local_button = ttk.Radiobutton(
+            local_group,
             text=UI_COPY["local_mode"],
             value=InstallerMode.LOCAL.value,
             variable=self._mode_var,
             command=self._select_mode,
         )
-        local_button.grid(row=8, column=0, sticky="w", pady=(_SPACE_M, 0))
+        local_button.grid(row=0, column=0, sticky="w")
         self._mode_buttons[InstallerMode.LOCAL] = local_button
 
-        self._wrapped_label(frame, text=UI_COPY["local_description"]).grid(
-            row=9,
+        self._wrapped_label(local_group, text=UI_COPY["local_description"]).grid(
+            row=1,
             column=0,
             sticky="ew",
             padx=(_RADIO_DESCRIPTION_INDENT, 0),
@@ -1399,17 +1430,17 @@ class InstallerApplication:
         )
         self._local_deep_var = tkinter.BooleanVar(self.root, value=False)
         self._local_deep_button = ttk.Checkbutton(
-            frame,
-            text="Deep — Expanded coverage",
+            local_group,
+            text=UI_COPY["deep_title"],
             variable=self._local_deep_var,
             command=self._select_local_deep,
         )
         self._local_deep_button.grid(
-            row=10,
+            row=2,
             column=0,
             sticky="w",
             padx=(_RADIO_DESCRIPTION_INDENT, 0),
-            pady=(0, _SPACE_M),
+            pady=(0, _SPACE_XS),
         )
         return frame
 

@@ -46,6 +46,7 @@ from installer.catalog import (
 )
 from local_update import (
     CancellationToken,
+    LocalUpdateError,
     LocalUpdateProgress,
     LocalUpdateRequest,
     LocalUpdateResult,
@@ -309,6 +310,14 @@ def test_error_copy_maps_stable_codes_and_keeps_diagnostic_text() -> None:
         (
             CatalogError("unavailable_channel", "no release for pes2021-vanilla"),
             "This save is not available for the selected game",
+        ),
+        (
+            LocalUpdateError(
+                "scrape_failed",
+                "Could not fetch update data: deep-club index is empty",
+                stage=LocalUpdateStage.SCRAPING,
+            ),
+            "Could not fetch update data",
         ),
     )
 
@@ -1739,35 +1748,44 @@ def _layout_application(monkeypatch) -> InstallerApplication:
     return application
 
 
-def test_update_frame_places_prebuilt_first_and_keeps_local_copy_together(
+def test_update_frame_groups_prebuilt_and_local_coverage_controls(
     monkeypatch,
 ) -> None:
     application = _layout_application(monkeypatch)
 
     frame = application._build_update_frame()
 
-    mode_rows = {
-        child.options.get("text"): child.grid_options["row"]
-        for child in frame.children
-        if child.options.get("text")
-        in {
-            installer_app.UI_COPY["local_mode"],
-            installer_app.UI_COPY["local_description"],
-            installer_app.UI_COPY["release_mode"],
-        }
-    }
-    local_deep_row = next(
-        child.grid_options["row"]
-        for child in frame.children
+    groups = [
+        child for child in frame.children if child.options.get("relief") == "groove"
+    ]
+    assert len(groups) == 2
+    release_group, local_group = sorted(
+        groups,
+        key=lambda group: group.grid_options["row"],
+    )
+    assert release_group.grid_options["row"] == 2
+    assert local_group.grid_options["row"] == 3
+
+    release_button = next(
+        child
+        for child in release_group.children
+        if child.options.get("text") == installer_app.UI_COPY["release_mode"]
+    )
+    local_button = next(
+        child
+        for child in local_group.children
+        if child.options.get("text") == installer_app.UI_COPY["local_mode"]
+    )
+    assert release_button.parent is release_group
+    assert local_button.parent is local_group
+
+    local_deep = next(
+        child
+        for child in local_group.children
         if child.options.get("variable") is application._local_deep_var
     )
+    assert local_deep.parent is local_group
     assert application._mode_var.value == InstallerMode.RELEASE.value
-    assert mode_rows == {
-        installer_app.UI_COPY["release_mode"]: 2,
-        installer_app.UI_COPY["local_mode"]: 8,
-        installer_app.UI_COPY["local_description"]: 9,
-    }
-    assert local_deep_row == 10
 
 
 def test_save_frame_places_browse_right_of_location_viewport(monkeypatch) -> None:

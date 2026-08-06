@@ -191,7 +191,16 @@ class LocalUpdateService:
 
         try:
             emit(LocalUpdateProgress(LocalUpdateStage.SCRAPING))
-            transfers = self._runtime.scrape(request, cancellation)
+            try:
+                transfers = self._runtime.scrape(request, cancellation)
+            except LocalUpdateError:
+                raise
+            except Exception as error:
+                raise LocalUpdateError(
+                    "scrape_failed",
+                    f"Could not fetch update data: {error}",
+                    stage=LocalUpdateStage.SCRAPING,
+                ) from error
             cancellation.raise_if_cancelled()
             if not transfers:
                 return LocalUpdateResult(
