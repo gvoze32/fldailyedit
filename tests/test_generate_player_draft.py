@@ -835,6 +835,27 @@ def test_create_writer_verifies_decrypts_loads_and_always_cleans_up(
     assert tuple(path.parent.iterdir()) == (path,)
 
 
+def test_writer_loads_largest_decrypted_dat_when_data_dat_is_missing(
+    monkeypatch, tmp_path
+):
+    source = make_source()
+    proposal = proposal_for(source)
+    event_path = tmp_path / "event.json"
+    event_path.write_text(json.dumps(issue_event()), encoding="utf-8")
+    install_fetch(monkeypatch, source)
+    base_path, fake_edit, _calls = install_verified_base(
+        monkeypatch, tmp_path, proposal
+    )
+    decrypted = tmp_path / "decrypted"
+    (decrypted / "data.dat").rename(decrypted / "alternate.dat")
+
+    write_player_draft(
+        event_path, tmp_path / "players", base_edit_path=base_path
+    )
+
+    assert fake_edit.loaded_path == decrypted / "alternate.dat"
+
+
 def test_completed_spec_load_failure_is_normalized_and_writes_nothing(
     monkeypatch, tmp_path
 ):

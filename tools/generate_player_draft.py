@@ -799,7 +799,15 @@ def write_player_draft(
         raise PlayerDraftError(f"cannot decrypt verified base: {exc}") from exc
     try:
         edit_file = EditFile()
-        edit_file.load(decrypted / "data.dat")
+        data_path = decrypted / "data.dat"
+        if not data_path.exists():
+            dat_files = list(decrypted.glob("*.dat"))
+            if not dat_files:
+                raise PlayerDraftError(
+                    f"decryption produced no .dat files in {decrypted}"
+                )
+            data_path = max(dat_files, key=lambda path: path.stat().st_size)
+        edit_file.load(data_path)
         completed_player_ids = _base_and_completed_player_ids(edit_file)
         if request.operation == "create":
             payload = build_player_draft(
