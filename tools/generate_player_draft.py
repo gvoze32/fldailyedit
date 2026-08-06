@@ -19,14 +19,15 @@ from editor import crypto
 from editor.editfile import EditFile
 from editor.player_spec import (
     PlayerSpecError,
+    _load_proposal_spec,
     load_base_manifest,
     load_player_specs,
     normalize_player_identity,
     player_slug,
     verify_base_file,
 )
+from scraper.pes_retro_snapshot import profile_from_snapshot, profile_to_snapshot
 from scraper.pes21_proposal import Pes21Proposal, map_pes21_proposal
-from scraper.pes_retro_snapshot import profile_to_snapshot
 from scraper.pes_retro_stats import (
     PesRetroStatsError,
     PesRetroStatsProfile,
@@ -507,6 +508,188 @@ def build_player_draft(
     }
 
 
+_MAX_PROPOSAL_BYTES = 2 * 1024 * 1024
+
+
+def _proposal_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise PlayerDraftError(f"proposal contains duplicate JSON key {key!r}")
+        result[key] = value
+    return result
+
+
+def _load_generated_proposal(path: Path) -> Mapping[str, object]:
+    try:
+        with path.open("rb") as handle:
+            raw_bytes = handle.read(_MAX_PROPOSAL_BYTES + 1)
+        if len(raw_bytes) > _MAX_PROPOSAL_BYTES:
+            raise PlayerDraftError("proposal JSON exceeds the maximum size")
+        payload = json.loads(
+            raw_bytes.decode("utf-8"),
+            object_pairs_hook=_proposal_json_object,
+        )
+    except PlayerDraftError:
+        raise
+    except RecursionError:
+        raise PlayerDraftError(
+            "cannot read generated proposal: JSON is too deeply nested"
+        ) from None
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise PlayerDraftError(f"cannot read generated proposal: {exc}") from None
+    return _mapping(payload, "proposal")
+
+
+def _canonical_value(value: object) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _first_proposal_difference(
+    expected: object,
+    actual: object,
+    path: str = "",
+) -> str | None:
+    if isinstance(expected, Mapping) and isinstance(actual, Mapping):
+        keys = sorted(set(expected) | set(actual))
+        for key in keys:
+            child = f"{path}.{key}" if path else str(key)
+            if key not in expected or key not in actual:
+                return child
+            difference = _first_proposal_difference(expected[key], actual[key], child)
+            if difference is not None:
+                return difference
+        return None
+    if isinstance(expected, list) and isinstance(actual, list):
+        if len(expected) != len(actual):
+            return path or "$"
+        if expected != actual:
+            expected_items = sorted(_canonical_value(item) for item in expected)
+            actual_items = sorted(_canonical_value(item) for item in actual)
+            if expected_items == actual_items:
+                return path or "$"
+        for index, (expected_item, actual_item) in enumerate(
+            zip(expected, actual, strict=True)
+        ):
+            child = f"{path}[{index}]" if path else f"[{index}]"
+            difference = _first_proposal_difference(
+                expected_item, actual_item, child
+            )
+            if difference is not None:
+                return difference
+        return None
+    if type(expected) is not type(actual) or expected != actual:
+        return path or "$"
+    return None
+
+
+def validate_generated_proposal(
+    path: Path, edit_file: EditFile
+) -> Mapping[str, object]:
+    """Recompute one generated proposal from its embedded offline evidence."""
+
+    path = Path(path)
+    actual = _load_generated_proposal(path)
+    try:
+        _load_proposal_spec(path, actual)
+    except PlayerSpecError as exc:
+        raise PlayerDraftError(str(exc)) from None
+    try:
+        operation = actual["operation"]
+        identity = _mapping(actual["identity"], "proposal identity")
+        evidence = _mapping(actual["evidence"], "proposal evidence")
+        source_snapshot = actual["source"]
+        if not isinstance(operation, str):
+            raise PlayerDraftError("proposal operation must be text")
+        player_name = identity["name"]
+        profile_url = evidence["profile_url"]
+        current_team = evidence["current_team"]
+        effective_date = evidence["effective_date"]
+        proof_urls = evidence["proof_urls"]
+        issue_number = evidence["issue_number"]
+        issue_url = evidence["issue_url"]
+        if (
+            not isinstance(player_name, str)
+            or not isinstance(profile_url, str)
+            or not isinstance(current_team, str)
+            or not isinstance(effective_date, str)
+            or not isinstance(proof_urls, list)
+            or not isinstance(issue_number, int)
+            or isinstance(issue_number, bool)
+            or not isinstance(issue_url, str)
+        ):
+            raise PlayerDraftError("proposal evidence is incomplete")
+        try:
+            source = profile_from_snapshot(source_snapshot)
+        except ValueError as exc:
+            message = str(exc)
+            if "snapshot_sha256 mismatch" in message:
+                source_data = (
+                    source_snapshot.get("data")
+                    if isinstance(source_snapshot, Mapping)
+                    else None
+                )
+                source_club = (
+                    source_data.get("current_club")
+                    if isinstance(source_data, Mapping)
+                    else None
+                )
+                field = (
+                    "data.current_club"
+                    if source_club != current_team
+                    else "snapshot_sha256"
+                )
+                raise PlayerDraftError(
+                    f"proposal mismatch at source.{field}"
+                ) from None
+            raise
+        request = PlayerDraftRequest(
+            operation=operation,
+            player_name=player_name,
+            profile_url=profile_url,
+            current_team=current_team,
+            effective_date=effective_date,
+            proof_urls=tuple(proof_urls),
+            issue_number=issue_number,
+            issue_url=issue_url,
+        )
+        proposal = map_pes21_proposal(
+            source, effective_date=date.fromisoformat(effective_date)
+        )
+        completed_player_ids = _base_and_completed_player_ids(edit_file)
+        if operation == "create":
+            expected = build_player_draft(
+                request,
+                source,
+                proposal,
+                edit_file=edit_file,
+                nationality_catalog=load_nationality_catalog(),
+                completed_player_ids=completed_player_ids,
+                team_aliases=_load_team_aliases(),
+            )
+        else:
+            expected = build_player_draft(
+                request,
+                source,
+                proposal,
+                edit_file=edit_file,
+            )
+    except PlayerDraftError:
+        raise
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise PlayerDraftError(f"cannot recompute generated proposal: {exc}") from None
+
+    difference = _first_proposal_difference(expected, actual)
+    if difference is not None:
+        raise PlayerDraftError(f"proposal mismatch at {difference}")
+    return actual
+
+
 def _load_event(event_path: Path) -> Mapping[str, object]:
     try:
         raw = json.loads(event_path.read_text(encoding="utf-8"))
@@ -543,11 +726,11 @@ def _write_exclusive_atomic(destination: Path, content: str) -> None:
 def _configured_player_ids() -> set[int]:
     """Return completed configured IDs after loading all specs."""
 
-    specs = load_player_specs()
+    specs = load_player_specs(allow_proposals=True)
     return {
         spec.identity.pes_id
         for spec in specs
-        if type(spec.identity.pes_id) is int
+        if spec.proposal is None and type(spec.identity.pes_id) is int
     }
 
 
@@ -555,12 +738,22 @@ def _base_and_completed_player_ids(edit_file: EditFile) -> set[int]:
     player_ids = _configured_player_ids()
     try:
         players = edit_file.get_all_players()
-    except Exception:
-        return player_ids
-    if isinstance(players, Mapping):
-        player_ids.update(
-            player_id for player_id in players if type(player_id) is int
+    except Exception as exc:
+        raise PlayerDraftError(
+            f"cannot read verified base players: {exc}"
+        ) from None
+    if not isinstance(players, Mapping):
+        raise PlayerDraftError(
+            "cannot read verified base players: expected a mapping"
         )
+    invalid_ids = tuple(
+        player_id for player_id in players if type(player_id) is not int
+    )
+    if invalid_ids:
+        raise PlayerDraftError(
+            "cannot read verified base players: invalid player IDs"
+        )
+    player_ids.update(players)
     return player_ids
 
 

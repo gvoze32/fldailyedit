@@ -41,7 +41,6 @@ from editor import logger as transfer_logger
 from editor.player_spec import (
     PlayerSpec,
     PlayerSpecError,
-    IncompletePlayerSpecError,
     SpecResult,
     apply_player_specs,
     assess_create,
@@ -65,6 +64,7 @@ from scraper.fotmob import (
 )
 from tools.generate_player_draft import (
     PlayerDraftError,
+    validate_generated_proposal,
     write_player_draft,
 )
 from scraper.matcher import NameMatcher
@@ -1729,7 +1729,7 @@ def _require_valid_edit(edit_file: EditFile, stage: str) -> None:
 
 
 def cmd_players_validate(args) -> None:
-    """Validate the pristine digest, global specs, and semantic applicability."""
+    """Validate the pristine base and recompute trusted proposals offline."""
     base_path = Path(config.BASE_EDIT_PATH)
     if not base_path.exists():
         print(f"Pristine base not found: {base_path}")
@@ -1740,33 +1740,86 @@ def cmd_players_validate(args) -> None:
         print(f"Pristine base verification failed: {exc}")
         raise SystemExit(2) from exc
 
+    decrypted = None
     try:
-        specs = load_player_specs()
-        validate_spec_set(specs)
-    except IncompletePlayerSpecError as exc:
-        print(f"Player Update validation failed: incomplete draft {exc.path.name}")
-        print(f"Missing human fields: {', '.join(exc.missing_fields)}")
-        raise SystemExit(2) from exc
-    decrypted = crypto.decrypt(base_path)
-    try:
+        decrypted = crypto.decrypt(base_path)
         edit_file = EditFile()
         edit_file.load(_decrypted_data_file(decrypted))
         _require_valid_edit(edit_file, "Pristine base")
-        results = _assess_player_specs(edit_file, specs, manifest.revision)
-        _print_player_spec_results(specs, results)
-        invalid_results = _invalid_player_spec_validation_results(
-            specs,
-            results,
-            manifest.revision,
-        )
-        if invalid_results:
-            print(
-                "Player Update validation failed: "
-                f"{len(invalid_results)} current active update(s) are invalid."
+
+        try:
+            specs = load_player_specs(allow_proposals=True)
+            validate_spec_set(specs)
+        except PlayerSpecError as exc:
+            print(f"Player Update validation failed: {exc}")
+            raise SystemExit(2) from exc
+
+        proposal_specs = tuple(
+            sorted(
+                (
+                    spec
+                    for spec in specs
+                    if getattr(spec, "proposal", None) is not None
+                ),
+                key=lambda item: item.path.name,
             )
+        )
+        completed_specs = tuple(
+            spec for spec in specs if getattr(spec, "proposal", None) is None
+        )
+        proposal_failures = False
+        for spec in proposal_specs:
+            try:
+                validate_generated_proposal(spec.path, edit_file)
+            except (PlayerDraftError, PlayerSpecError) as exc:
+                print(
+                    "Player Update validation failed: "
+                    f"{spec.path.name}: {exc}"
+                )
+                proposal_failures = True
+        if proposal_failures:
             raise SystemExit(2)
+
+        if proposal_specs:
+            proposal_results = _assess_player_specs(
+                edit_file, proposal_specs, manifest.revision
+            )
+            invalid_proposals = _invalid_player_spec_validation_results(
+                proposal_specs, proposal_results, manifest.revision
+            )
+            if invalid_proposals:
+                for result in invalid_proposals:
+                    print(
+                        "Player Update validation failed: "
+                        f"{result.name} (PES ID {result.pes_id}): "
+                        f"{result.status} ({result.reason})"
+                    )
+                raise SystemExit(2)
+            for spec in proposal_specs:
+                print(
+                    f"  {spec.identity.name} (PES ID {spec.identity.pes_id}): "
+                    "proposal_ready (requires human review)"
+                )
+
+        results = _assess_player_specs(
+            edit_file, completed_specs, manifest.revision
+        )
+        if completed_specs:
+            _print_player_spec_results(completed_specs, results)
+            invalid_results = _invalid_player_spec_validation_results(
+                completed_specs,
+                results,
+                manifest.revision,
+            )
+            if invalid_results:
+                print(
+                    "Player Update validation failed: "
+                    f"{len(invalid_results)} current active update(s) are invalid."
+                )
+                raise SystemExit(2)
     finally:
-        crypto.cleanup_temp(decrypted)
+        if decrypted is not None:
+            crypto.cleanup_temp(decrypted)
 
 
 def _machine_json_string(value: str) -> str:

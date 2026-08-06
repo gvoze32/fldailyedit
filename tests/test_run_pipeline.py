@@ -1,6 +1,9 @@
 """Integration-style coverage for the scrape-to-roster planning pipeline."""
 
 from argparse import Namespace
+import json
+from copy import deepcopy
+from pathlib import Path
 from types import SimpleNamespace
 
 
@@ -367,7 +370,11 @@ def _prepare_players_validate_result(
             else (_ for _ in ()).throw(AssertionError("unexpected base path"))
         ),
     )
-    monkeypatch.setattr(run, "load_player_specs", lambda: (spec,))
+    monkeypatch.setattr(
+        run,
+        "load_player_specs",
+        lambda *_args, **_kwargs: (spec,),
+    )
     monkeypatch.setattr(run, "validate_spec_set", lambda _specs: None)
     monkeypatch.setattr(
         run,
@@ -379,8 +386,264 @@ def _prepare_players_validate_result(
     monkeypatch.setattr(run, "EditFile", FakeEditFile)
     monkeypatch.setattr(run.crypto, "decrypt", lambda _path: decrypted)
     monkeypatch.setattr(run.crypto, "cleanup_temp", lambda _path: None)
-
     return run.cmd_players_validate
+
+
+def _materialize_generated_proposal_validation_fixture(
+    tmp_path: Path,
+    *,
+    operation: str = "create",
+) -> dict[str, object]:
+    from tests.test_generate_player_draft import (
+        FakeEditFile,
+        build_create_kwargs,
+        issue_event,
+        make_source,
+        marco_source,
+        proposal_for,
+        update_request,
+    )
+    from tools.generate_player_draft import (
+        build_player_draft,
+        parse_player_issue_event,
+    )
+
+    if operation == "create":
+        source = make_source()
+        proposal = proposal_for(source)
+        payload = build_player_draft(
+            parse_player_issue_event(issue_event()),
+            source,
+            proposal,
+            **build_create_kwargs(proposal),
+        )
+        filename = "dastan-satpaev.json"
+    elif operation == "update":
+        source = marco_source()
+        proposal = proposal_for(source)
+        payload = build_player_draft(
+            update_request(),
+            source,
+            proposal,
+            edit_file=FakeEditFile(proposal),
+        )
+        filename = "marco-palestra.json"
+    else:
+        raise AssertionError(f"unsupported test proposal operation: {operation}")
+
+    proposal_dir = tmp_path / "players"
+    proposal_dir.mkdir()
+    proposal_path = proposal_dir / filename
+    proposal_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    base = tmp_path / "EDIT00000000"
+    base.write_bytes(b"pristine")
+    decrypted = tmp_path / "decrypted-proposal"
+    decrypted.mkdir()
+    (decrypted / "data.dat").write_bytes(b"decrypted")
+
+    class ValidatedFakeEditFile(FakeEditFile):
+        def load(self, path: Path) -> None:
+            self.loaded_path = Path(path)
+
+        def validate_integrity(self):
+            return {"valid": True, "errors": [], "warnings": [], "metrics": {}}
+
+    return {
+        "payload": payload,
+        "proposal_dir": proposal_dir,
+        "proposal_path": proposal_path,
+        "base": base,
+        "decrypted": decrypted,
+        "edit_file": ValidatedFakeEditFile(proposal),
+    }
+
+
+def _configure_proposal_validation(monkeypatch, fixture: dict[str, object]) -> None:
+    import run
+    from editor.player_spec import BaseManifest
+
+    base = fixture["base"]
+    decrypted = fixture["decrypted"]
+    assert isinstance(base, Path)
+    assert isinstance(decrypted, Path)
+    monkeypatch.setattr(run.config, "BASE_EDIT_PATH", base, raising=False)
+    monkeypatch.setattr(
+        run.config,
+        "PLAYER_SPECS_DIR",
+        fixture["proposal_dir"],
+        raising=False,
+    )
+    monkeypatch.setattr(
+        run,
+        "verify_base_file",
+        lambda path: (
+            BaseManifest("fl26-u2.2-national-squads", "irrelevant")
+            if path == base
+            else (_ for _ in ()).throw(AssertionError("unexpected base path"))
+        ),
+    )
+    monkeypatch.setattr(run, "EditFile", lambda: fixture["edit_file"])
+    monkeypatch.setattr(run.crypto, "decrypt", lambda _path: decrypted)
+    monkeypatch.setattr(run.crypto, "cleanup_temp", lambda _path: None)
+
+
+def _forbid_profile_fetch(monkeypatch) -> None:
+    async def fail_fetch(_url: str):
+        pytest.fail("validation must not fetch")
+
+    monkeypatch.setattr(
+        "tools.generate_player_draft.fetch_pes_retro_stats_profile",
+        fail_fetch,
+    )
+
+
+def test_cmd_players_validate_accepts_one_materialized_proposal_offline(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    import run
+
+    fixture = _materialize_generated_proposal_validation_fixture(tmp_path)
+    _configure_proposal_validation(monkeypatch, fixture)
+    _forbid_profile_fetch(monkeypatch)
+
+    run.cmd_players_validate(Namespace())
+
+    output = capsys.readouterr().out
+    assert "Dastan Satpaev" in output
+    assert "proposal_ready" in output
+
+
+
+def test_cmd_players_validate_rejects_existing_identity_create_proposal(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    import run
+    from editor.models import PlayerInfo
+
+    fixture = _materialize_generated_proposal_validation_fixture(tmp_path)
+    edit_file = fixture["edit_file"]
+    edit_file.players[100] = PlayerInfo(100, "Dastan Satpaev", "D. Satpaev")
+    _configure_proposal_validation(monkeypatch, fixture)
+    _forbid_profile_fetch(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc_info:
+        run.cmd_players_validate(Namespace())
+
+    assert exc_info.value.code == 2
+    output = capsys.readouterr().out
+    assert "matching_identity_exists" in output
+    assert "proposal_ready" not in output
+
+def _tamper_source_field(payload: dict[str, object]) -> None:
+    payload["source"]["data"]["current_club"] = "Inter Milan"
+
+
+def _tamper_source_hash(payload: dict[str, object]) -> None:
+    payload["source"]["snapshot_sha256"] = "0" * 64
+
+
+def _tamper_converted_pes_field(payload: dict[str, object]) -> None:
+    payload["pes"]["abilities"]["speed"] += 1
+
+
+def _tamper_allocated_id(payload: dict[str, object]) -> None:
+    payload["identity"]["pes_id"] += 1
+
+
+def _tamper_update_patch_baseline(payload: dict[str, object]) -> None:
+    payload["pes"]["abilities"]["speed"]["from"] -= 1
+
+
+def _tamper_ovr_value(payload: dict[str, object]) -> None:
+    payload["draft"]["ovr_review"]["positions"][0]["proposal_tenths"] += 1
+
+
+def _tamper_canonical_order(payload: dict[str, object]) -> None:
+    positions = payload["draft"]["ovr_review"]["positions"]
+    payload["draft"]["ovr_review"]["positions"] = list(reversed(positions))
+
+
+@pytest.mark.parametrize(
+    ("operation", "mutate", "json_path"),
+    [
+        pytest.param(
+            "create",
+            _tamper_source_field,
+            "source.data.current_club",
+            id="source-field",
+        ),
+        pytest.param(
+            "create",
+            _tamper_source_hash,
+            "source.snapshot_sha256",
+            id="source-hash",
+        ),
+        pytest.param(
+            "create",
+            _tamper_converted_pes_field,
+            "pes.abilities.speed",
+            id="converted-pes-field",
+        ),
+        pytest.param(
+            "create",
+            _tamper_allocated_id,
+            "identity.pes_id",
+            id="allocated-id",
+        ),
+        pytest.param(
+            "update",
+            _tamper_update_patch_baseline,
+            "pes.abilities.speed.from",
+            id="update-patch-baseline",
+        ),
+        pytest.param(
+            "create",
+            _tamper_ovr_value,
+            "draft.ovr_review.positions[0].proposal_tenths",
+            id="ovr-value",
+        ),
+        pytest.param(
+            "create",
+            _tamper_canonical_order,
+            "draft.ovr_review.positions",
+            id="canonical-order",
+        ),
+    ],
+)
+def test_cmd_players_validate_rejects_tampered_proposal_offline(
+    monkeypatch,
+    tmp_path,
+    capsys,
+    operation,
+    mutate,
+    json_path,
+):
+    import run
+
+    fixture = _materialize_generated_proposal_validation_fixture(
+        tmp_path,
+        operation=operation,
+    )
+    payload = deepcopy(fixture["payload"])
+    mutate(payload)
+    proposal_path = fixture["proposal_path"]
+    assert isinstance(proposal_path, Path)
+    proposal_path.write_text(json.dumps(payload), encoding="utf-8")
+    _configure_proposal_validation(monkeypatch, fixture)
+    _forbid_profile_fetch(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc_info:
+        run.cmd_players_validate(Namespace())
+
+    assert exc_info.value.code == 2
+    output = capsys.readouterr().out
+    assert json_path in output
+
 
 
 @pytest.mark.parametrize(

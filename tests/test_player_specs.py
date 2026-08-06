@@ -1,5 +1,8 @@
 import json
 import struct
+from copy import deepcopy
+from dataclasses import FrozenInstanceError
+from typing import Callable
 
 import pytest
 
@@ -124,6 +127,255 @@ def valid_dastan_payload():
 
 def write_payload(directory, filename, payload):
     (directory / filename).write_text(json.dumps(payload), encoding="utf-8")
+
+
+def complete_generated_proposal(operation: str = "create") -> dict[str, object]:
+    from tests.test_generate_player_draft import (
+        FakeEditFile,
+        build_create_kwargs,
+        issue_event,
+        make_source,
+        marco_source,
+        proposal_for,
+        update_request,
+    )
+    from tools.generate_player_draft import (
+        build_player_draft,
+        parse_player_issue_event,
+    )
+
+    if operation == "create":
+        source = make_source()
+        proposal = proposal_for(source)
+        return build_player_draft(
+            parse_player_issue_event(issue_event()),
+            source,
+            proposal,
+            **build_create_kwargs(proposal),
+        )
+    if operation == "update":
+        source = marco_source()
+        proposal = proposal_for(source)
+        return build_player_draft(
+            update_request(),
+            source,
+            proposal,
+            edit_file=FakeEditFile(proposal),
+        )
+    raise AssertionError(f"unsupported test proposal operation: {operation}")
+
+
+def write_generated_proposal(directory, operation: str = "create"):
+    payload = complete_generated_proposal(operation)
+    filename = (
+        "dastan-satpaev.json"
+        if operation == "create"
+        else "marco-palestra.json"
+    )
+    write_payload(directory, filename, payload)
+    return payload
+
+
+@pytest.mark.parametrize("operation", ["create", "update"])
+def test_mature_proposals_require_human_approval_by_default(tmp_path, operation):
+    from editor.player_spec import PlayerSpecError, load_player_specs
+
+    write_generated_proposal(tmp_path, operation)
+
+    with pytest.raises(PlayerSpecError, match="requires human approval"):
+        load_player_specs(tmp_path)
+
+
+@pytest.mark.parametrize("operation", ["create", "update"])
+def test_proposal_aware_loader_returns_exact_immutable_metadata(tmp_path, operation):
+    from editor.player_spec import load_player_specs
+
+    payload = write_generated_proposal(tmp_path, operation)
+
+    spec = load_player_specs(tmp_path, allow_proposals=True)[0]
+
+    assert spec.operation == operation
+    assert spec.proposal is not None
+    assert spec.proposal.generator == "pes-retro-mature-proposal-v1"
+    assert spec.proposal.needs_human_review is True
+    assert spec.proposal.source_snapshot == payload["source"]
+    assert spec.proposal.ovr_review == payload["draft"]["ovr_review"]
+    assert spec.proposal.issue_number == 42
+    assert (
+        spec.proposal.issue_url
+        == "https://github.com/gvoze32/fldailyedit/issues/42"
+    )
+    assert spec.proposal.submitted_team == "Chelsea FC"
+    with pytest.raises(FrozenInstanceError):
+        setattr(spec.proposal, "generator", "untrusted-generator")
+    with pytest.raises(TypeError):
+        spec.proposal.source_snapshot["model"] = "untrusted-model"
+    with pytest.raises(TypeError):
+        spec.proposal.ovr_review["mode"] = "untrusted-mode"
+    with pytest.raises(TypeError):
+        spec.proposal.source_snapshot["data"]["current_club"] = "untrusted-club"
+    with pytest.raises(TypeError):
+        spec.proposal.ovr_review["positions"][0]["proposal_tenths"] = 1
+
+
+def test_proposal_metadata_lists_reject_unbound_list_mutation(tmp_path):
+    from editor.player_spec import load_player_specs
+
+    payload = write_generated_proposal(tmp_path)
+    spec = load_player_specs(tmp_path, allow_proposals=True)[0]
+    assert spec.proposal is not None
+    positions = spec.proposal.ovr_review["positions"]
+    expected_positions = payload["draft"]["ovr_review"]["positions"]
+
+    assert positions == expected_positions
+    assert expected_positions == positions
+    with pytest.raises(TypeError):
+        list.__setitem__(positions, 0, {"untrusted": True})
+    assert positions == expected_positions
+
+
+def test_proposal_update_with_unsupported_source_position_uses_any_codec_candidate(
+    tmp_path,
+):
+    from dataclasses import replace
+    from types import MappingProxyType
+
+    from editor.player_spec import load_player_specs
+    from tests.test_generate_player_draft import (
+        FakeEditFile,
+        SOURCE_POSITIONS,
+        current_profile,
+        marco_source,
+        proposal_for,
+        update_request,
+    )
+    from tools.generate_player_draft import (
+        build_player_draft,
+        validate_generated_proposal,
+    )
+
+    positions = {position: None for position in SOURCE_POSITIONS}
+    positions.update({"RB": "A", "RWB": "★", "RMF": "B"})
+    source = marco_source(positions=MappingProxyType(positions))
+    proposal = proposal_for(source)
+    assert proposal.registered_position is None
+    edit_file = FakeEditFile(proposal)
+    edit_file.profiles[162196] = replace(
+        current_profile(proposal, speed=proposal.abilities["speed"] - 1),
+        registered_position="CF",
+        registered_position_id=12,
+    )
+    payload = build_player_draft(
+        update_request(),
+        source,
+        proposal,
+        edit_file=edit_file,
+    )
+    path = tmp_path / "marco-palestra.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    spec = load_player_specs(tmp_path, allow_proposals=True)[0]
+
+    assert spec.identity.pes_id == 162196
+    assert validate_generated_proposal(path, edit_file) == payload
+
+
+def test_player_spec_loader_rejects_oversized_json_before_decoding(tmp_path):
+    from editor.player_spec import PlayerSpecError, load_player_specs
+
+    payload = json.dumps(complete_generated_proposal())
+    assert len(payload.encode("utf-8")) < 2 * 1024 * 1024
+    path = tmp_path / "dastan-satpaev.json"
+    path.write_text(payload + " " * (2 * 1024 * 1024), encoding="utf-8")
+
+    with pytest.raises(PlayerSpecError, match="exceeds the maximum size"):
+        load_player_specs(tmp_path, allow_proposals=True)
+
+
+def test_player_spec_loader_translates_deep_json_recursion(tmp_path, monkeypatch):
+    import editor.player_spec as player_spec
+    from editor.player_spec import PlayerSpecError, load_player_specs
+
+    path = tmp_path / "deep.json"
+    path.write_text("{}", encoding="utf-8")
+
+    def raise_recursion(*args, **kwargs):
+        raise RecursionError("too deeply nested")
+
+    monkeypatch.setattr(player_spec.json, "loads", raise_recursion)
+    with pytest.raises(PlayerSpecError, match="JSON is too deeply nested"):
+        load_player_specs(tmp_path, allow_proposals=True)
+
+
+
+def _add_old_draft_missing(payload: dict[str, object]) -> None:
+    payload["draft"]["missing"] = []
+
+
+def _null_issue_number(payload: dict[str, object]) -> None:
+    payload["evidence"]["issue_number"] = None
+
+
+
+def _null_review_flag(payload: dict[str, object]) -> None:
+    payload["draft"]["needs_human_review"] = None
+
+def _add_unknown_draft_key(payload: dict[str, object]) -> None:
+    payload["draft"]["unexpected"] = True
+
+
+def _malform_source_snapshot(payload: dict[str, object]) -> None:
+    payload["source"]["snapshot_sha256"] = "not-a-sha256"
+
+
+def _mismatch_operation_and_ovr_mode(payload: dict[str, object]) -> None:
+    payload["draft"]["ovr_review"]["mode"] = "comparison"
+
+
+def _invalidate_ovr_shape(payload: dict[str, object]) -> None:
+    del payload["draft"]["ovr_review"]["positions"]
+
+
+@pytest.mark.parametrize(
+    ("mutate", "diagnostic"),
+    [
+        pytest.param(_add_old_draft_missing, "draft.*missing", id="old-missing"),
+        pytest.param(_null_review_flag, "needs_human_review", id="null-review-flag"),
+        pytest.param(
+            _add_unknown_draft_key,
+            "draft.*unexpected",
+            id="unknown-key",
+        ),
+        pytest.param(
+            _malform_source_snapshot,
+            "source|snapshot_sha256",
+            id="malformed-snapshot",
+        ),
+        pytest.param(
+            _mismatch_operation_and_ovr_mode,
+            "ovr_review.*mode|mode.*create",
+            id="operation-mode-mismatch",
+        ),
+        pytest.param(
+            _invalidate_ovr_shape,
+            "ovr_review.*positions",
+            id="invalid-ovr-shape",
+        ),
+    ],
+)
+def test_proposal_aware_loader_rejects_noncanonical_schema(
+    tmp_path,
+    mutate: Callable[[dict[str, object]], None],
+    diagnostic: str,
+):
+    from editor.player_spec import PlayerSpecError, load_player_specs
+
+    payload = deepcopy(complete_generated_proposal())
+    mutate(payload)
+    write_payload(tmp_path, "dastan-satpaev.json", payload)
+
+    with pytest.raises(PlayerSpecError, match=diagnostic):
+        load_player_specs(tmp_path, allow_proposals=True)
 
 
 def test_verify_base_file_matches_bundled_edit():

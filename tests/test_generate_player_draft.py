@@ -706,8 +706,10 @@ def write_payload(tmp_path: Path, payload: dict[str, object], name: str) -> Path
 
 
 @pytest.mark.parametrize("operation", ["create", "update"])
-def test_schema_v2_generated_drafts_raise_exact_incomplete_error(tmp_path, operation):
-    from editor.player_spec import IncompletePlayerSpecError, load_player_specs
+def test_schema_v2_generated_drafts_require_human_approval_by_default(
+    tmp_path, operation
+):
+    from editor.player_spec import PlayerSpecError, load_player_specs
 
     if operation == "create":
         source = make_source()
@@ -728,10 +730,8 @@ def test_schema_v2_generated_drafts_raise_exact_incomplete_error(tmp_path, opera
         filename = "marco-palestra.json"
     write_payload(tmp_path, payload, filename)
 
-    with pytest.raises(IncompletePlayerSpecError) as exc_info:
+    with pytest.raises(PlayerSpecError, match="requires human approval"):
         load_player_specs(tmp_path)
-
-    assert exc_info.value.missing_fields == ()
 
 
 @pytest.mark.parametrize(
@@ -741,7 +741,7 @@ def test_schema_v2_generated_drafts_raise_exact_incomplete_error(tmp_path, opera
 def test_any_file_with_a_draft_marker_is_never_loaded_as_a_completed_spec(
     tmp_path, mutation
 ):
-    from editor.player_spec import IncompletePlayerSpecError, load_player_specs
+    from editor.player_spec import PlayerSpecError, load_player_specs
 
     source = make_source()
     proposal = proposal_for(source)
@@ -763,9 +763,8 @@ def test_any_file_with_a_draft_marker_is_never_loaded_as_a_completed_spec(
         payload["draft"]["extra"] = True
     write_payload(tmp_path, payload, "dastan-satpaev.json")
 
-    with pytest.raises(IncompletePlayerSpecError) as exc_info:
+    with pytest.raises(PlayerSpecError, match="requires human approval"):
         load_player_specs(tmp_path)
-    assert exc_info.value.missing_fields == ()
 
 
 def install_fetch(monkeypatch, source: PesRetroStatsProfile) -> list[str]:
@@ -848,7 +847,7 @@ def test_completed_spec_load_failure_is_normalized_and_writes_nothing(
         monkeypatch, tmp_path, proposal
     )
 
-    def fail_load_player_specs():
+    def fail_load_player_specs(**_kwargs):
         raise OSError("completed specs unreadable")
 
     monkeypatch.setattr(
@@ -1069,6 +1068,69 @@ def test_untrusted_event_is_rejected_before_profile_fetch(monkeypatch, tmp_path)
         write_player_draft(event_path, output_dir)
     assert fetched == []
     assert not output_dir.exists()
+
+
+def test_validate_generated_proposal_fails_closed_on_base_player_accessor(
+    monkeypatch,
+    tmp_path,
+):
+    from tools import player_proposal_resolution
+    from tools.generate_player_draft import validate_generated_proposal
+
+    source = make_source()
+    proposal = proposal_for(source)
+    payload = build_player_draft(
+        parse_player_issue_event(issue_event()),
+        source,
+        proposal,
+        **build_create_kwargs(proposal),
+    )
+    path = tmp_path / "dastan-satpaev.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    class FlakyEditFile(FakeEditFile):
+        def __init__(self, proposal):
+            super().__init__(proposal)
+            self.player_accesses = 0
+
+        def get_all_players(self):
+            self.player_accesses += 1
+            if self.player_accesses == 1:
+                raise RuntimeError("base player accessor failed")
+            return super().get_all_players()
+
+    allocation_called = False
+    original_allocate = player_proposal_resolution.allocate_created_player_id
+
+    def record_allocation(*args, **kwargs):
+        nonlocal allocation_called
+        allocation_called = True
+        return original_allocate(*args, **kwargs)
+
+    monkeypatch.setattr(
+        player_proposal_resolution,
+        "allocate_created_player_id",
+        record_allocation,
+    )
+    edit_file = FlakyEditFile(proposal)
+
+    with pytest.raises(PlayerDraftError, match="cannot read verified base players"):
+        validate_generated_proposal(path, edit_file)
+
+def test_validate_generated_proposal_translates_deep_json_recursion(
+    tmp_path, monkeypatch
+):
+    import tools.generate_player_draft as generate_player_draft
+
+    path = tmp_path / "deep.json"
+    path.write_text("{}", encoding="utf-8")
+
+    def raise_recursion(*args, **kwargs):
+        raise RecursionError("too deeply nested")
+
+    monkeypatch.setattr(generate_player_draft.json, "loads", raise_recursion)
+    with pytest.raises(PlayerDraftError, match="JSON is too deeply nested"):
+        generate_player_draft.validate_generated_proposal(path, object())
 
 @pytest.mark.parametrize("player_name", ["Dastan  Satpaev", "Dastan\u00a0Satpaev"])
 def test_noncanonical_player_name_whitespace_is_rejected_before_profile_fetch(

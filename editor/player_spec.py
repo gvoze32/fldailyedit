@@ -26,21 +26,86 @@ from editor.player_codec import (
     patch_player_entry,
     serialize_created_player,
 )
+from scraper.pes_retro_snapshot import profile_from_snapshot
+from scraper.pes21_proposal import map_pes21_proposal
+from tools.player_proposal_review import validate_ovr_review_shape
 
 
 class PlayerSpecError(ValueError):
     """Raised when a player specification is malformed or ambiguous."""
 
 
-class IncompletePlayerSpecError(PlayerSpecError):
-    """Raised when generated draft placeholders still need human review."""
+class _FrozenList(tuple[object, ...]):
+    """A tuple-backed JSON-list-compatible immutable sequence."""
 
-    def __init__(self, path: Path, missing_fields: tuple[str, ...]) -> None:
-        super().__init__(f"incomplete draft {path.name}")
-        self.path = path
-        self.missing_fields = missing_fields
+    def __new__(cls, values=()):
+        return tuple.__new__(cls, values)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, (list, tuple)):
+            return tuple.__eq__(self, tuple(other))
+        return NotImplemented
+
+    def __ne__(self, other: object) -> bool:
+        result = self.__eq__(other)
+        if result is NotImplemented:
+            return NotImplemented
+        return not result
+
+    def _immutable(self, *args: object, **kwargs: object) -> None:
+        raise TypeError("frozen proposal metadata")
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    __iadd__ = _immutable
+    __imul__ = _immutable
+    append = _immutable
+    clear = _immutable
+    extend = _immutable
+    insert = _immutable
+    pop = _immutable
+    remove = _immutable
+    reverse = _immutable
+    sort = _immutable
+
+    def copy(self) -> "_FrozenList":
+        return self
 
 
+_MAX_PLAYER_SPEC_BYTES = 2 * 1024 * 1024
+
+
+def _freeze_metadata(value: object) -> object:
+    """Recursively freeze JSON containers while retaining list equality."""
+
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {key: _freeze_metadata(nested) for key, nested in value.items()}
+        )
+    if isinstance(value, list):
+        return _FrozenList(_freeze_metadata(nested) for nested in value)
+    if isinstance(value, tuple):
+        return tuple(_freeze_metadata(nested) for nested in value)
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class ProposalMetadata:
+    generator: str
+    needs_human_review: bool
+    source_snapshot: Mapping[str, object]
+    ovr_review: Mapping[str, object]
+    issue_number: int
+    issue_url: str
+    submitted_team: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "source_snapshot", _freeze_metadata(self.source_snapshot)
+        )
+        object.__setattr__(
+            self, "ovr_review", _freeze_metadata(self.ovr_review)
+        )
 @dataclass(frozen=True, slots=True)
 class BaseManifest:
     revision: str
@@ -110,6 +175,7 @@ class PlayerSpec:
     evidence: Evidence
     create: CreatePlayerData | None
     patches: Mapping[str, FieldPatch]
+    proposal: ProposalMetadata | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,17 +208,10 @@ _TOP_LEVEL_FIELDS = frozenset(
         "pes",
     }
 )
-_DRAFT_FIELDS = frozenset({"needs_human_review", "missing"})
-_DRAFT_TOP_LEVEL_FIELDS = _TOP_LEVEL_FIELDS | frozenset({"source", "draft"})
-_DRAFT_SOURCE_FIELDS = frozenset(
-    {
-        "profile_url",
-        "date_of_birth",
-        "nationality",
-        "positions",
-        "current_club",
-    }
+_PROPOSAL_DRAFT_FIELDS = frozenset(
+    {"generator", "needs_human_review", "ovr_review"}
 )
+_DRAFT_TOP_LEVEL_FIELDS = _TOP_LEVEL_FIELDS | frozenset({"source", "draft"})
 _DRAFT_EVIDENCE_FIELDS = frozenset(
     {
         "profile_url",
@@ -163,16 +222,12 @@ _DRAFT_EVIDENCE_FIELDS = frozenset(
         "issue_url",
     }
 )
-_DRAFT_PROFILE_URL_RE = _PES_RETRO_STATS_PROFILE_RE
 _DRAFT_ISSUE_PATH_RE = re.compile(
     r"/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/"
     r"(?P<issue_number>[1-9][0-9]*)\Z"
 )
 _LIFECYCLE_FIELDS = frozenset({"status", "reason", "superseded_by"})
 _IDENTITY_FIELDS = frozenset(
-    {"name", "print_name", "aliases", "pes_id", "pes_retro_stats_id"}
-)
-_DRAFT_IDENTITY_FIELDS = frozenset(
     {"name", "print_name", "aliases", "pes_id", "pes_retro_stats_id"}
 )
 _EVIDENCE_FIELDS = frozenset(
@@ -238,9 +293,22 @@ def _json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 def _read_json(path: Path, subject: str) -> object:
     try:
-        return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_json_object)
+        with path.open("rb") as handle:
+            raw_bytes = handle.read(_MAX_PLAYER_SPEC_BYTES + 1)
+        if len(raw_bytes) > _MAX_PLAYER_SPEC_BYTES:
+            raise PlayerSpecError(
+                f"{subject} JSON exceeds the maximum size"
+            )
+        return json.loads(
+            raw_bytes.decode("utf-8"),
+            object_pairs_hook=_json_object,
+        )
     except PlayerSpecError:
         raise
+    except RecursionError:
+        raise PlayerSpecError(
+            f"could not load {subject} {path}: JSON is too deeply nested"
+        ) from None
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise PlayerSpecError(f"could not load {subject} {path}: {exc}") from exc
 
@@ -761,321 +829,314 @@ def _generated_draft_https_url(
     return url
 
 
-_CREATE_DRAFT_MISSING = (
-    "identity.pes_id",
-    "identity.print_name",
-    "pes.player_id",
-    "pes.print_name",
-    "pes.team_id",
-    "pes.team_name",
-    "pes.nationality_id",
-    "pes.skin_color",
-    "pes.iris_color",
-)
+def _reject_proposal_nulls(value: object, context: str) -> None:
+    if value is None:
+        raise PlayerSpecError(f"{context} must not be null")
+    if isinstance(value, Mapping):
+        for key, nested in value.items():
+            _reject_proposal_nulls(nested, f"{context}.{key}")
+    elif isinstance(value, list):
+        for index, nested in enumerate(value):
+            _reject_proposal_nulls(nested, f"{context}[{index}]")
 
 
-def _validate_generated_create_pes(
-    value: object, identity_name: str, context: str
-) -> None:
-    pes = _object(value, context)
-    _validate_keys(pes, _CREATE_FIELDS, _CREATE_REQUIRED_FIELDS, context)
-    for field in (
-        "player_id",
-        "print_name",
-        "team_id",
-        "team_name",
-        "nationality_id",
-        "skin_color",
-        "iris_color",
-    ):
-        if pes[field] is not None:
-            raise PlayerSpecError(f"{context} {field} must be null")
-    if _validate_pes_string(_text(pes, "name", context), "name") != identity_name:
-        raise PlayerSpecError(f"{context} name must match identity name")
-
-    registered_position = _text(pes, "registered_position", context).upper()
-    if registered_position not in POSITION_NAMES:
-        raise PlayerSpecError(
-            f"{context} registered_position {registered_position!r} is unknown"
-        )
-    positions = _object(
-        pes.get("position_proficiency"), f"{context} position_proficiency"
-    )
-    unknown_positions = set(positions) - set(POSITION_NAMES)
-    if unknown_positions:
-        raise PlayerSpecError(
-            f"{context} position_proficiency has unknown positions: "
-            f"{sorted(unknown_positions)}"
-        )
-    for position in positions:
-        field = f"position_{position.lower()}"
-        _integer(
-            positions,
-            position,
-            0,
-            (1 << FIELD_SPECS[field].width) - 1,
-            f"{context} position_proficiency",
-        )
-    if positions.get(registered_position) != 2:
-        raise PlayerSpecError(
-            f"{context} registered_position must have position_proficiency 2"
-        )
-
-    abilities = _object(pes.get("abilities"), f"{context} abilities")
-    if set(abilities) != set(ABILITY_FIELDS):
-        raise PlayerSpecError(f"{context} abilities must contain every ability")
-    for field in ABILITY_FIELDS:
-        _integer(abilities, field, 40, 99, f"{context} abilities")
-
-    for field in (
-        "age",
-        "height",
-        "weight",
-        "playing_style",
-        "strong_foot",
-        "weak_foot_usage",
-        "weak_foot_accuracy",
-        "form",
-        "injury_resistance",
-    ):
-        _codec_integer(pes, field, context)
-    preferred_shirt_number = pes.get("preferred_shirt_number")
-    if preferred_shirt_number is not None:
-        _integer(pes, "preferred_shirt_number", 1, 99, context)
-    _named_values(
-        pes.get("player_skills"), f"{context} player_skills", PLAYER_SKILL_FIELDS
-    )
-    _named_values(pes.get("com_styles"), f"{context} com_styles", COM_STYLE_FIELDS)
-
-
-def _generated_draft_missing_fields(
-    raw: Mapping[str, object], path: Path
-) -> tuple[str, ...] | None:
-    if "draft" not in raw:
-        return None
-
+def _load_proposal_spec(path: Path, raw: Mapping[str, object]) -> PlayerSpec:
     context = f"player spec {path}"
+    _validate_keys(raw, _DRAFT_TOP_LEVEL_FIELDS, _DRAFT_TOP_LEVEL_FIELDS, context)
+    for field in ("lifecycle", "applies_to", "identity", "evidence", "pes", "draft"):
+        _reject_proposal_nulls(raw[field], f"{context}.{field}")
+
+    schema_version = _integer(raw, "schema_version", 2, 2, context)
+    operation = _text(raw, "operation", context)
+    if operation not in {"create", "update"}:
+        raise PlayerSpecError(f"{context} operation must be create or update")
+
+    lifecycle_context = f"{context} lifecycle"
+    lifecycle = _object(raw.get("lifecycle"), lifecycle_context)
+    _validate_keys(
+        lifecycle,
+        frozenset({"status"}),
+        frozenset({"status"}),
+        lifecycle_context,
+    )
+    if lifecycle["status"] != "active":
+        raise PlayerSpecError(f"{lifecycle_context} status must be active")
+
+    applies_to = _string_list(raw.get("applies_to"), f"{context} applies_to")
+    if len(applies_to) != 1 or raw["applies_to"] != list(applies_to):
+        raise PlayerSpecError(
+            f"{context} applies_to must contain one exact revision"
+        )
+
+    identity_context = f"{context} identity"
+    identity = _load_identity(raw.get("identity"))
+    if (
+        identity.name != " ".join(identity.name.split())
+        or len(identity.name.encode("utf-8")) > 60
+        or not normalize_player_identity(identity.name)
+    ):
+        raise PlayerSpecError(f"{identity_context} name is not canonical")
+    if identity.print_name is None:
+        raise PlayerSpecError(
+            f"{identity_context} print_name is required for a complete proposal"
+        )
+    if (
+        identity.print_name != " ".join(identity.print_name.split())
+        or len(identity.print_name.encode("utf-8")) > 60
+    ):
+        raise PlayerSpecError(f"{identity_context} print_name is not canonical")
+    if raw["identity"].get("aliases") != [identity.name]:
+        raise PlayerSpecError(
+            f"{identity_context} aliases must contain the exact submitted name"
+        )
+    if path.stem != player_slug(identity.name):
+        raise PlayerSpecError(
+            f"player spec filename {path.name!r} does not match identity name "
+            f"{identity.name!r}"
+        )
+    if len(path.name.encode("utf-8")) > 240:
+        raise PlayerSpecError(
+            f"player spec filename {path.name!r} exceeds 240 UTF-8 bytes"
+        )
+
+    source_context = f"{context} source"
+    source_raw = _object(raw.get("source"), source_context)
     try:
-        _validate_keys(
-            raw,
-            _DRAFT_TOP_LEVEL_FIELDS,
-            _DRAFT_TOP_LEVEL_FIELDS,
-            context,
-        )
-        _integer(raw, "schema_version", 2, 2, context)
-
-        operation = raw.get("operation")
-        if operation not in {"create", "update"}:
-            raise PlayerSpecError(f"{context} operation must be create or update")
-        expected = _CREATE_DRAFT_MISSING if operation == "create" else ()
-
-        lifecycle_context = f"{context} lifecycle"
-        lifecycle = _object(raw["lifecycle"], lifecycle_context)
-        _validate_keys(
-            lifecycle,
-            frozenset({"status"}),
-            frozenset({"status"}),
-            lifecycle_context,
-        )
-        if lifecycle["status"] != "active":
-            raise PlayerSpecError(f"{lifecycle_context} status must be active")
-
-        applies_to = _string_list(raw["applies_to"], f"{context} applies_to")
-        if raw["applies_to"] != list(applies_to) or len(applies_to) != 1:
-            raise PlayerSpecError(
-                f"{context} applies_to must contain one exact revision"
+        source = profile_from_snapshot(source_raw)
+    except (KeyError, TypeError, ValueError) as exc:
+        message = str(exc)
+        if "snapshot_sha256 mismatch" in message:
+            evidence_candidate = raw.get("evidence")
+            candidate_team = (
+                evidence_candidate.get("current_team")
+                if isinstance(evidence_candidate, Mapping)
+                else None
             )
+            source_data = source_raw.get("data")
+            source_club = (
+                source_data.get("current_club")
+                if isinstance(source_data, Mapping)
+                else None
+            )
+            field = (
+                "data.current_club"
+                if isinstance(candidate_team, str) and source_club != candidate_team
+                else "snapshot_sha256"
+            )
+            raise PlayerSpecError(
+                f"{source_context}.{field}: {message}"
+            ) from None
+        raise PlayerSpecError(f"{source_context} is invalid: {exc}") from None
+    if source.player_id != identity.pes_retro_stats_id:
+        raise PlayerSpecError(
+            f"{source_context} player_id must match identity pes_retro_stats_id"
+        )
+    if source.profile_url != source.profile_url.strip():
+        raise PlayerSpecError(f"{source_context} profile_url is not canonical")
+    if normalize_player_identity(source.name) != normalize_player_identity(
+        identity.name
+    ):
+        raise PlayerSpecError(f"{source_context} name must match identity name")
 
-        identity_context = f"{context} identity"
-        identity = _object(raw["identity"], identity_context)
-        _validate_keys(
-            identity,
-            _DRAFT_IDENTITY_FIELDS,
-            _DRAFT_IDENTITY_FIELDS,
-            identity_context,
+    evidence_context = f"{context} evidence"
+    evidence_raw = _object(raw.get("evidence"), evidence_context)
+    _validate_keys(
+        evidence_raw,
+        _DRAFT_EVIDENCE_FIELDS,
+        _DRAFT_EVIDENCE_FIELDS,
+        evidence_context,
+    )
+    evidence_profile = _generated_draft_https_url(
+        evidence_raw["profile_url"], f"{evidence_context} profile_url", None
+    )
+    if evidence_profile != source.profile_url:
+        raise PlayerSpecError(
+            f"{evidence_context} profile_url must match source profile_url"
         )
-        name = _generated_source_text(
-            identity["name"], f"{identity_context} name"
+    proof_raw = evidence_raw["proof_urls"]
+    if not isinstance(proof_raw, list) or not proof_raw or len(proof_raw) > 10:
+        raise PlayerSpecError(
+            f"{evidence_context} proof_urls must be a non-empty list"
         )
-        if len(name.encode("utf-8")) > 60 or not normalize_player_identity(name):
-            raise PlayerSpecError(f"{identity_context} name is not canonical")
-        if identity["aliases"] != [name]:
-            raise PlayerSpecError(
-                f"{identity_context} aliases must contain the exact submitted name"
-            )
-        pes_retro_stats_id = _generated_draft_text(
-            identity["pes_retro_stats_id"],
-            f"{identity_context} pes_retro_stats_id",
-            36,
+    proof_urls = tuple(
+        _generated_draft_https_url(
+            item, f"{evidence_context} proof_urls[{index}]", 300
         )
-        if not _PES_RETRO_STATS_UUID_RE.fullmatch(pes_retro_stats_id):
-            raise PlayerSpecError(
-                f"{identity_context} pes_retro_stats_id must be a canonical UUID"
-            )
-        if operation == "create":
-            if identity["print_name"] is not None or identity["pes_id"] is not None:
+        for index, item in enumerate(proof_raw)
+    )
+    if len(set(proof_urls)) != len(proof_urls):
+        raise PlayerSpecError(
+            f"{evidence_context} proof_urls contains duplicate URLs"
+        )
+    effective_date_raw = _generated_draft_text(
+        evidence_raw["effective_date"], f"{evidence_context} effective_date", 10
+    )
+    if not _ISO_DATE_RE.fullmatch(effective_date_raw):
+        raise PlayerSpecError(
+            f"{evidence_context} effective_date must use YYYY-MM-DD"
+        )
+    try:
+        effective_date = date.fromisoformat(effective_date_raw)
+    except ValueError:
+        raise PlayerSpecError(
+            f"{evidence_context} effective_date must be a valid date"
+        ) from None
+    submitted_team = _generated_draft_text(
+        evidence_raw["current_team"], f"{evidence_context} current_team", 100
+    )
+    issue_number = evidence_raw["issue_number"]
+    if (
+        isinstance(issue_number, bool)
+        or not isinstance(issue_number, int)
+        or issue_number <= 0
+    ):
+        raise PlayerSpecError(
+            f"{evidence_context} issue_number must be a positive integer"
+        )
+    issue_url = _generated_draft_https_url(
+        evidence_raw["issue_url"], f"{evidence_context} issue_url", 500
+    )
+    parsed_issue_url = urlsplit(issue_url)
+    issue_match = _DRAFT_ISSUE_PATH_RE.fullmatch(parsed_issue_url.path)
+    if (
+        parsed_issue_url.hostname != "github.com"
+        or parsed_issue_url.query
+        or parsed_issue_url.fragment
+        or issue_match is None
+        or int(issue_match.group("issue_number")) != issue_number
+    ):
+        raise PlayerSpecError(
+            f"{evidence_context} issue_url must match issue_number"
+        )
+
+    try:
+        mapped = map_pes21_proposal(source, effective_date=effective_date)
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise PlayerSpecError(
+            f"{source_context} cannot be mapped to PES 2021: {exc}"
+        ) from None
+
+    if operation == "create":
+        try:
+            create = _load_create(raw.get("pes"), identity)
+        except PlayerSpecError as exc:
+            message = str(exc)
+            if "player_id must match identity pes_id" in message:
                 raise PlayerSpecError(
-                    f"{identity_context} create PES placeholders must be null"
-                )
+                    f"{context} identity.pes_id: {message}"
+                ) from None
+            raise
+        patches: Mapping[str, FieldPatch] = MappingProxyType({})
+        registered_position = create.registered_position
+        position_proficiency = create.position_proficiency
+    else:
+        create = None
+        patches = _load_update(raw.get("pes"))
+        registered_position = mapped.registered_position
+        position_proficiency = mapped.position_proficiency
+
+    draft_context = f"{context} draft"
+    draft = _object(raw.get("draft"), draft_context)
+    _validate_keys(
+        draft,
+        _PROPOSAL_DRAFT_FIELDS,
+        _PROPOSAL_DRAFT_FIELDS,
+        draft_context,
+    )
+    generator = _generated_draft_text(
+        draft["generator"], f"{draft_context} generator", 100
+    )
+    if generator != "pes-retro-mature-proposal-v1":
+        raise PlayerSpecError(
+            f"{draft_context} generator must be "
+            "'pes-retro-mature-proposal-v1'"
+        )
+    if draft["needs_human_review"] is not True:
+        raise PlayerSpecError(
+            f"{draft_context} needs_human_review must be true"
+        )
+    review = _object(draft["ovr_review"], f"{draft_context} ovr_review")
+    if isinstance(registered_position, str):
+        registered_position_candidates = (registered_position,)
+    elif operation == "update":
+        registered_position_candidates = POSITION_NAMES
+    else:
+        raise PlayerSpecError(
+            f"{draft_context}.ovr_review.positions: requires a registered position"
+        )
+    ovr_validation_error: Exception | None = None
+    for candidate_position in registered_position_candidates:
+        try:
+            validate_ovr_review_shape(
+                review,
+                operation=operation,
+                registered_position=candidate_position,
+                position_proficiency=position_proficiency,
+            )
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            ovr_validation_error = exc
         else:
-            _generated_source_text(
-                identity["print_name"], f"{identity_context} print_name"
-            )
-            _integer(identity, "pes_id", 1, 0xFFFFFFFF, identity_context)
+            ovr_validation_error = None
+            break
+    if ovr_validation_error is not None:
+        message = str(ovr_validation_error)
+        field = (
+            "positions[0].proposal_tenths"
+            if "tenths" in message and "delta" not in message
+            else "positions[0].delta_tenths"
+            if "delta" in message
+            else "positions"
+            if "positions" not in review
+            else "mode"
+            if "mode" in message
+            else "positions"
+            if "position" in message
+            else "model"
+        )
+        raise PlayerSpecError(
+            f"{draft_context}.ovr_review.{field}: {message}"
+        ) from None
+    evidence = Evidence(
+        profile_url=evidence_profile,
+        proof_urls=proof_urls,
+        effective_date=effective_date,
+        reason="",
+    )
+    proposal = ProposalMetadata(
+        generator=generator,
+        needs_human_review=True,
+        source_snapshot=source_raw,
+        ovr_review=review,
+        issue_number=issue_number,
+        issue_url=issue_url,
+        submitted_team=submitted_team,
+    )
+    return PlayerSpec(
+        path=path,
+        schema_version=schema_version,
+        operation=operation,
+        lifecycle_status="active",
+        lifecycle_reason="",
+        superseded_by=None,
+        applies_to=applies_to,
+        identity=identity,
+        evidence=evidence,
+        create=create,
+        patches=patches,
+        proposal=proposal,
+    )
 
-        if path.stem != player_slug(name):
-            raise PlayerSpecError(
-                f"player spec filename {path.name!r} does not match identity name {name!r}"
-            )
-        if len(path.name.encode("utf-8")) > 240:
-            raise PlayerSpecError(
-                f"player spec filename {path.name!r} exceeds 240 UTF-8 bytes"
-            )
-
-        source_context = f"{context} source"
-        source = _object(raw["source"], source_context)
-        _validate_keys(
-            source,
-            _DRAFT_SOURCE_FIELDS,
-            _DRAFT_SOURCE_FIELDS,
-            source_context,
-        )
-        source_profile = _generated_draft_https_url(
-            source["profile_url"], f"{source_context} profile_url", None
-        )
-        profile_match = _DRAFT_PROFILE_URL_RE.fullmatch(source_profile)
-        if (
-            profile_match is None
-            or profile_match.group("prefix") != pes_retro_stats_id[:8]
-        ):
-            raise PlayerSpecError(
-                f"{source_context} profile_url must match the source identity"
-            )
-        birth_date = _generated_source_text(
-            source["date_of_birth"], f"{source_context} date_of_birth"
-        )
-        if not _ISO_DATE_RE.fullmatch(birth_date):
-            raise PlayerSpecError(
-                f"{source_context} date_of_birth must use YYYY-MM-DD"
-            )
-        date.fromisoformat(birth_date)
-        for field in ("nationality", "current_club"):
-            _generated_source_text(source[field], f"{source_context} {field}")
-        positions = source["positions"]
-        if not isinstance(positions, list):
-            raise PlayerSpecError(f"{source_context} positions must be a list")
-        normalized_positions = tuple(
-            _generated_source_text(position, f"{source_context} positions")
-            for position in positions
-        )
-        if len(set(normalized_positions)) != len(normalized_positions):
-            raise PlayerSpecError(
-                f"{source_context} positions must not contain duplicates"
-            )
-
-        evidence_context = f"{context} evidence"
-        evidence = _object(raw["evidence"], evidence_context)
-        _validate_keys(
-            evidence,
-            _DRAFT_EVIDENCE_FIELDS,
-            _DRAFT_EVIDENCE_FIELDS,
-            evidence_context,
-        )
-        evidence_profile = _generated_draft_https_url(
-            evidence["profile_url"], f"{evidence_context} profile_url", None
-        )
-        raw_proof_urls = evidence["proof_urls"]
-        if (
-            not isinstance(raw_proof_urls, list)
-            or not raw_proof_urls
-            or len(raw_proof_urls) > 10
-        ):
-            raise PlayerSpecError(
-                f"{evidence_context} proof_urls must be a non-empty list"
-            )
-        proof_urls = tuple(
-            _generated_draft_https_url(
-                url, f"{evidence_context} proof_urls", 300
-            )
-            for url in raw_proof_urls
-        )
-        if len(set(proof_urls)) != len(proof_urls):
-            raise PlayerSpecError(
-                f"{evidence_context} proof_urls contains duplicate URLs"
-            )
-        effective_date = _generated_draft_text(
-            evidence["effective_date"], f"{evidence_context} effective_date", 10
-        )
-        if not _ISO_DATE_RE.fullmatch(effective_date):
-            raise PlayerSpecError(
-                f"{evidence_context} effective_date must use YYYY-MM-DD"
-            )
-        date.fromisoformat(effective_date)
-        _generated_draft_text(
-            evidence["current_team"], f"{evidence_context} current_team", 100
-        )
-        issue_number = evidence["issue_number"]
-        if (
-            isinstance(issue_number, bool)
-            or not isinstance(issue_number, int)
-            or issue_number <= 0
-        ):
-            raise PlayerSpecError(
-                f"{evidence_context} issue_number must be a positive integer"
-            )
-        issue_url = _generated_draft_https_url(
-            evidence["issue_url"], f"{evidence_context} issue_url", 500
-        )
-        parsed_issue_url = urlsplit(issue_url)
-        issue_match = _DRAFT_ISSUE_PATH_RE.fullmatch(parsed_issue_url.path)
-        if (
-            parsed_issue_url.hostname != "github.com"
-            or parsed_issue_url.query
-            or parsed_issue_url.fragment
-            or issue_match is None
-            or int(issue_match.group("issue_number")) != issue_number
-        ):
-            raise PlayerSpecError(
-                f"{evidence_context} issue_url must match issue_number"
-            )
-        if evidence_profile != source_profile:
-            raise PlayerSpecError(
-                f"{evidence_context} profile_url must match source profile_url"
-            )
-
-        if operation == "create":
-            _validate_generated_create_pes(
-                raw["pes"], name, f"{context} create PES proposal"
-            )
-        else:
-            _load_update(raw["pes"])
-
-        draft_context = f"{context} draft"
-        draft = _object(raw["draft"], draft_context)
-        _validate_keys(draft, _DRAFT_FIELDS, _DRAFT_FIELDS, draft_context)
-        if draft["needs_human_review"] is not True:
-            raise PlayerSpecError(
-                f"{draft_context} needs_human_review must be true"
-            )
-        missing = draft["missing"]
-        if (
-            not isinstance(missing, list)
-            or any(not isinstance(field, str) for field in missing)
-            or tuple(missing) != expected
-        ):
-            raise PlayerSpecError(
-                f"{draft_context} missing must exactly match {list(expected)}"
-            )
-        return expected
-    except (PlayerSpecError, ValueError):
-        return ()
-
-
-def _load_one_spec(path: Path) -> PlayerSpec:
+def _load_one_spec(
+    path: Path, *, allow_proposals: bool = False
+) -> PlayerSpec:
     raw = _object(_read_json(path, "player spec"), f"player spec {path}")
-    missing_fields = _generated_draft_missing_fields(raw, path)
-    if missing_fields is not None:
-        raise IncompletePlayerSpecError(path, missing_fields)
+    if "draft" in raw:
+        if not allow_proposals:
+            raise PlayerSpecError(
+                f"player spec {path.name} requires human approval"
+            )
+        return _load_proposal_spec(path, raw)
+
     _validate_keys(raw, _TOP_LEVEL_FIELDS, _TOP_LEVEL_FIELDS, f"player spec {path}")
 
     schema_version = _integer(raw, "schema_version", 2, 2, f"player spec {path}")
@@ -1136,6 +1197,7 @@ def _load_one_spec(path: Path) -> PlayerSpec:
         evidence=evidence,
         create=create,
         patches=patches,
+        proposal=None,
     )
 
 
@@ -1148,7 +1210,8 @@ def validate_spec_set(specs: tuple[PlayerSpec, ...]) -> None:
         identity = spec.identity
         if identity.pes_id in pes_ids:
             raise PlayerSpecError(
-                f"duplicate PES ID {identity.pes_id} in {pes_ids[identity.pes_id]} and {spec.path}"
+                f"duplicate PES ID {identity.pes_id} in "
+                f"{pes_ids[identity.pes_id]} and {spec.path}"
             )
         pes_ids[identity.pes_id] = spec.path
         if identity.pes_retro_stats_id in pes_retro_stats_ids:
@@ -1162,21 +1225,28 @@ def validate_spec_set(specs: tuple[PlayerSpec, ...]) -> None:
             normalized = normalize_player_identity(alias)
             if normalized in aliases and aliases[normalized] != spec.path:
                 raise PlayerSpecError(
-                    f"duplicate normalized alias {alias!r} in {aliases[normalized]} and {spec.path}"
+                    f"duplicate normalized alias {alias!r} in "
+                    f"{aliases[normalized]} and {spec.path}"
                 )
             aliases[normalized] = spec.path
 
 
 def load_player_specs(
     directory: str | Path | None = None,
+    *,
+    allow_proposals: bool = False,
 ) -> tuple[PlayerSpec, ...]:
     """Load all player spec JSON files in deterministic filename order."""
     specs_dir = Path(directory) if directory is not None else config.PLAYER_SPECS_DIR
     try:
         paths = sorted(specs_dir.glob("*.json"), key=lambda path: path.name)
     except OSError as exc:
-        raise PlayerSpecError(f"could not list player spec directory {specs_dir}: {exc}") from exc
-    specs = tuple(_load_one_spec(path) for path in paths)
+        raise PlayerSpecError(
+            f"could not list player spec directory {specs_dir}: {exc}"
+        ) from exc
+    specs = tuple(
+        _load_one_spec(path, allow_proposals=allow_proposals) for path in paths
+    )
     validate_spec_set(specs)
     return specs
 
