@@ -38,7 +38,7 @@ Windows 安装程序是面向新手的推荐方式。安装程序界面目前仅
 
 > [!WARNING]
 > 初始可执行文件尚未签名，因此 Windows SmartScreen 可能会显示警告。继续前，请将下载的文件与[最新版本](https://github.com/gvoze32/fldailyedit/releases/tag/latest)中发布的 `FLDailyEditInstaller.exe.sha256` 进行比较。
-
+> 如果 Windows 通过 Smart App Control 阻止安装程序，请打开 **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control settings**，然后切换为 **Off**。或者右键单击下载的文件，打开 **Properties**，如果有 **Unblock** 选项请勾选。
 如需不使用安装程序手动安装，请下载公开的 [Fast 发布 ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) 或 [Deep 发布 ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip)。解压 `EDIT00000000`，备份当前存档，然后将解压出的文件复制到：
 
 `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\`

@@ -48,7 +48,7 @@ SPFL/PES/UML, и этот режим не скачивает готовую уд
 
 > [!WARNING]
 > Первоначальный исполняемый файл не подписан, поэтому Windows SmartScreen может показать предупреждение. Перед продолжением сравните скачанный файл с опубликованным `FLDailyEditInstaller.exe.sha256` в [последнем выпуске](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
-
+> Если Windows блокирует установщик через Smart App Control, откройте **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control settings** и переключите параметр в **Off**. В качестве альтернативы щёлкните правой кнопкой мыши по скачанному файлу, откройте **Properties** и установите флажок **Unblock**, если он доступен.
 Для ручной установки без установщика скачайте общедоступный [ZIP выпуска Fast](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) или [ZIP выпуска Deep](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip). Извлеките `EDIT00000000`, создайте резервную копию текущего сохранения и скопируйте извлечённый файл в:
 
 `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\`

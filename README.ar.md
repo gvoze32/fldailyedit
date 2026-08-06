@@ -48,7 +48,7 @@ SPFL/PES/UML، ولا ينزّل هذا المسار إصدارًا بعيدًا
 
 > [!WARNING]
 > الملف التنفيذي الأولي غير موقّع، لذلك قد يعرض Windows SmartScreen تحذيرًا. قبل المتابعة، قارن الملف المنزّل بملف `FLDailyEditInstaller.exe.sha256` المنشور في [أحدث إصدار](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
-
+> إذا حظر Windows المُثبّت عبر Smart App Control، فافتح **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control settings** وبدّله إلى **Off**. وبدلًا من ذلك، انقر بزر الماوس الأيمن على الملف المنزّل، وافتح **Properties** وحدد **Unblock** إن كان متاحًا.
 للتثبيت اليدوي من دون المُثبِّت، نزّل [ملف ZIP لإصدار Fast](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) أو [ملف ZIP لإصدار Deep](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip) العام. استخرج `EDIT00000000`، وأنشئ نسخة احتياطية من ملف الحفظ الحالي، ثم انسخ الملف المستخرج إلى:
 
 `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\`

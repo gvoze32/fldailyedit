@@ -1665,3 +1665,122 @@ def test_local_progress_presentation_covers_stages_and_commit_lock() -> None:
     )
     assert committing.controls_locked is True
     assert "Finishing the local update" in committing.status
+class _LayoutWidget:
+    def __init__(self, parent=None, **options):
+        self.parent = parent
+        self.options = options
+        self.children = []
+        self.grid_options = {}
+        self.rowconfigure_calls = []
+        if parent is not None and hasattr(parent, "children"):
+            parent.children.append(self)
+
+    def bind(self, *_args, **_kwargs):
+        pass
+
+    def columnconfigure(self, *_args, **_kwargs):
+        pass
+
+    def configure(self, **options):
+        self.options.update(options)
+
+    def create_window(self, *_args, **_kwargs):
+        return "location-window"
+
+    def grid(self, **options):
+        self.grid_options = options
+
+    def rowconfigure(self, row, **options):
+        self.rowconfigure_calls.append((row, options))
+
+    def yview(self, *_args):
+        pass
+
+    def set(self, *_args):
+        pass
+
+
+class _LayoutVariable:
+    def __init__(self, _root, value=None):
+        self.value = value
+
+
+class _LayoutStyle:
+    def __init__(self, _root):
+        pass
+
+    def lookup(self, _style, _option):
+        return "white"
+
+
+class _LayoutTkinter:
+    BooleanVar = _LayoutVariable
+    Canvas = _LayoutWidget
+    StringVar = _LayoutVariable
+
+
+class _LayoutTtk:
+    Button = _LayoutWidget
+    Checkbutton = _LayoutWidget
+    Frame = _LayoutWidget
+    Label = _LayoutWidget
+    Radiobutton = _LayoutWidget
+    Scrollbar = _LayoutWidget
+    Style = _LayoutStyle
+
+
+def _layout_application(monkeypatch) -> InstallerApplication:
+    monkeypatch.setattr(installer_app, "tkinter", _LayoutTkinter)
+    monkeypatch.setattr(installer_app, "ttk", _LayoutTtk)
+    application = object.__new__(installer_app.InstallerApplication)
+    application.root = object()
+    application._body = _LayoutWidget()
+    application._wrapped_labels = []
+    return application
+
+
+def test_update_frame_keeps_local_description_with_local_mode(monkeypatch) -> None:
+    application = _layout_application(monkeypatch)
+
+    frame = application._build_update_frame()
+
+    mode_rows = {
+        child.options.get("text"): child.grid_options["row"]
+        for child in frame.children
+        if child.options.get("text")
+        in {
+            installer_app.UI_COPY["local_mode"],
+            installer_app.UI_COPY["local_description"],
+            installer_app.UI_COPY["release_mode"],
+        }
+    }
+    local_deep_row = next(
+        child.grid_options["row"]
+        for child in frame.children
+        if child.options.get("variable") is application._local_deep_var
+    )
+    assert mode_rows == {
+        installer_app.UI_COPY["local_mode"]: 2,
+        installer_app.UI_COPY["local_description"]: 3,
+        installer_app.UI_COPY["release_mode"]: 5,
+    }
+    assert local_deep_row == 4
+
+
+def test_save_frame_places_browse_before_location_viewport(monkeypatch) -> None:
+    application = _layout_application(monkeypatch)
+    application._bind_location_scrolling = lambda _widget: None
+
+    frame = application._build_save_frame()
+
+    browse_row = next(
+        child
+        for child in frame.children
+        if any(
+            grandchild.options.get("text") == "Browse…"
+            for grandchild in child.children
+        )
+    )
+    assert browse_row.grid_options["row"] == 2
+    assert application._location_canvas.parent.grid_options["row"] == 3
+    assert (3, {"weight": 1}) in frame.rowconfigure_calls

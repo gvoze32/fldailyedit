@@ -354,6 +354,17 @@ def test_localized_readmes_are_installer_first_and_keep_public_manual_fallbacks(
         assert "installer" not in roadmap.casefold(), path
 
 
+def test_localized_readmes_document_smart_app_control_bypass():
+    for path, *_ in README_INSTALLER_CONTRACTS:
+        text = path.read_text(encoding="utf-8")
+        assert (
+            "Settings → Privacy & security → Windows Security → "
+            "App & browser control → Smart App Control settings"
+        ) in text, path
+        assert "Properties" in text, path
+        assert "Unblock" in text, path
+
+
 def test_workflows_use_player_update_copy_on_public_surfaces():
     generator = WORKFLOW_PATH.read_text(encoding="utf-8")
     target = PLAYER_TARGET_PATH.read_text(encoding="utf-8")
@@ -951,13 +962,6 @@ def test_target_workflow_never_checks_out_or_executes_pull_request_head_code():
 
 
 
-def test_sync_workflows_read_revision_from_checked_out_manifest_without_literal_drift():
-    for path in SYNC_WORKFLOW_PATHS:
-        text = path.read_text(encoding="utf-8")
-        assert 'json.load(open("data/base_manifest.json", encoding="utf-8"))["revision"]' in text
-        assert 'BASE_REVISION="$(' in text
-        assert '--base-revision "$BASE_REVISION"' in text
-        assert '--base-revision fl26-u2.2-national-squads' not in text
 
 
 
@@ -969,7 +973,7 @@ def test_sync_workflows_validate_package_and_transfer_complete_channel_payloads(
 
     for path, display_channel, channel in workflows:
         text = path.read_text(encoding="utf-8")
-        apply_position = text.index("          python run.py players apply")
+        transfer_position = text.index("          python run.py run \\")
         validation_position = text.index("      - name: Validate final save")
         package_position = text.index(
             f"      - name: Package public {display_channel} save"
@@ -980,7 +984,7 @@ def test_sync_workflows_validate_package_and_transfer_complete_channel_payloads(
         )
 
         assert (
-            apply_position
+            transfer_position
             < validation_position
             < package_position
             < payload_position
@@ -1010,10 +1014,11 @@ def test_sync_workflows_validate_package_and_transfer_complete_channel_payloads(
         assert f"name: release-${{{{ github.run_id }}}}-{channel}" in payload
         assert "path: release-payload/" in payload
         assert "retention-days: 1" in payload
+        report = text[report_position:]
+        assert "if: always()" not in report
         assert (
-            "        if: always()\n"
-            "        uses: actions/upload-artifact@v7"
-            in text[report_position:]
+            f"name: updated-fl-save-and-reports-${{{{ github.run_id }}}}-{channel}"
+            in report
         )
 
 
@@ -1230,3 +1235,25 @@ def test_installer_publish_job_is_serialized_and_uploads_exact_release_assets():
     actions = re.findall(r"(?m)^\s*uses:\s+([^@\s]+)@", text)
     assert actions
     assert all(action.startswith("actions/") for action in actions)
+def test_sync_workflows_do_not_publish_unverified_player_spec_mutations() -> None:
+    for path in SYNC_WORKFLOW_PATHS:
+        sync, _publish = path.read_text(encoding="utf-8").split(
+            "\n  publish:\n", 1
+        )
+        assert "python run.py players validate" in sync
+        assert "python run.py players apply" not in sync
+def test_sync_workflows_do_not_upload_partial_save_artifacts() -> None:
+    workflows = (
+        (Path(".github/workflows/sync-fast.yml"), "fast"),
+        (Path(".github/workflows/sync-deep.yml"), "deep"),
+    )
+    for path, channel in workflows:
+        text = path.read_text(encoding="utf-8")
+        report = text.split(
+            "      - name: Upload Updated Save File & Visual Reports", 1
+        )[1]
+        assert "if: always()" not in report
+        assert (
+            f"name: updated-fl-save-and-reports-${{{{ github.run_id }}}}-{channel}"
+            in report
+        )

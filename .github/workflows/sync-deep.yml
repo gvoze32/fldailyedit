@@ -37,7 +37,6 @@ jobs:
         run: |
           python run.py validate --edit-file base/EDIT00000000
           python run.py players validate
-          BASE_REVISION="$(python -c 'import json; print(json.load(open("data/base_manifest.json", encoding="utf-8"))["revision"])')"
           mkdir -p output
           cp base/EDIT00000000 output/EDIT00000000
           python run.py run \
@@ -45,10 +44,7 @@ jobs:
             --deep \
             --edit-file output/EDIT00000000 \
             --in-place
-          python run.py players apply \
-            --base-revision "$BASE_REVISION" \
-            --edit-file output/EDIT00000000 \
-            --in-place
+
 
       - name: Validate final save
         run: python run.py validate --edit-file output/EDIT00000000
@@ -72,10 +68,9 @@ jobs:
           retention-days: 1
 
       - name: Upload Updated Save File & Visual Reports
-        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: updated-fl-save-and-reports
+          name: updated-fl-save-and-reports-${{ github.run_id }}-deep
           path: |
             output/EDIT00000000
             output/transfer_summary.md

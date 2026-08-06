@@ -48,7 +48,7 @@ SPFL/PES/UML e questo percorso non scarica una versione precompilata remota.
 
 > [!WARNING]
 > L'eseguibile iniziale non è firmato, quindi Windows SmartScreen potrebbe mostrare un avviso. Prima di continuare, confronta il file scaricato con il `FLDailyEditInstaller.exe.sha256` pubblicato nell'[ultima versione](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
-
+> Se Windows blocca il programma di installazione tramite Smart App Control, apri **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control settings** e imposta **Off**. In alternativa, fai clic destro sul file scaricato, apri **Properties** e seleziona **Unblock**, se disponibile.
 Per un'installazione manuale senza il programma di installazione, scarica lo [ZIP pubblico Fast](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) o lo [ZIP pubblico Deep](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip). Estrai `EDIT00000000`, crea una copia di sicurezza del salvataggio corrente, quindi copia il file estratto in:
 
 `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\`

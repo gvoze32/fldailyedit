@@ -40,7 +40,7 @@ bir sürümü indirmez.
 
 > [!WARNING]
 > İlk yürütülebilir dosya imzasızdır; bu nedenle Windows SmartScreen bir uyarı gösterebilir. Devam etmeden önce indirilen dosyayı [en son sürümde](https://github.com/gvoze32/fldailyedit/releases/tag/latest) yayımlanan `FLDailyEditInstaller.exe.sha256` ile karşılaştırın.
-
+> Windows yükleyiciyi Smart App Control üzerinden engellerse, **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control settings** yolunu açın ve **Off** konumuna getirin. Alternatif olarak indirilen dosyaya sağ tıklayın, **Properties** seçeneğini açın ve varsa **Unblock** kutusunu işaretleyin.
 Yükleyici olmadan elle kurulum için herkese açık [Fast sürüm ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) veya [Deep sürüm ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip) dosyasını indirin. `EDIT00000000` dosyasını çıkarın, mevcut kayıt dosyanızı yedekleyin ve çıkarılan dosyayı şuraya kopyalayın:
 
 `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\`

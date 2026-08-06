@@ -46,6 +46,7 @@ the SPFL/PES/UML label, and this path does not download a prebuilt remote releas
 
 > [!WARNING]
 > The initial executable is unsigned, so Windows SmartScreen may display a warning. Before continuing, compare the downloaded file against the published `FLDailyEditInstaller.exe.sha256` on the [latest release](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
+> If Windows blocks the installer through Smart App Control, open **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control settings** and switch it to **Off**. Alternatively, right-click the downloaded file, open **Properties**, and check **Unblock** if available.
 
 For a manual installation without the installer, download the public [Fast release ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) or [Deep release ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip). Extract `EDIT00000000`, back up your current save, then copy the extracted file to:
 
