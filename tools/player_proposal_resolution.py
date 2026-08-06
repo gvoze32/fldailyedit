@@ -228,17 +228,18 @@ def derive_generic_appearance(uuid_text: str) -> tuple[int, int]:
 
 
 def _meaningful_final_token(name: str) -> str:
-    for token in reversed(name.split()):
-        start = 0
-        end = len(token)
-        while start < end and unicodedata.category(token[start])[0] in "CZPS":
-            start += 1
-        while end > start and unicodedata.category(token[end - 1])[0] in "CZPS":
-            end -= 1
-        candidate = token[start:end]
-        if candidate and any(character.isalnum() for character in candidate):
-            return candidate
-    raise ValueError("player name must contain a meaningful surname token")
+    tokens = name.split()
+    token = tokens[-1]
+    start = 0
+    end = len(token)
+    while start < end and unicodedata.category(token[start])[0] in "CZPS":
+        start += 1
+    while end > start and unicodedata.category(token[end - 1])[0] in "CZPS":
+        end -= 1
+    candidate = token[start:end]
+    if candidate:
+        return candidate
+    return " ".join(tokens)
 
 
 def derive_print_name(player_name: str) -> str:
@@ -272,7 +273,12 @@ def _team_index(edit_file: EditFile) -> dict[str, list[TeamInfo]]:
     for team in teams.values():
         if not isinstance(team, TeamInfo):
             raise ValueError("EditFile team accessor returned invalid team metadata")
-        key = _team_lookup_key(team.name, f"team {team.team_id} name")
+        if not isinstance(team.name, str):
+            raise ValueError(f"team {team.team_id} name must be a string")
+        normalized_name = unicodedata.normalize("NFKC", team.name)
+        key = normalize_player_identity(normalized_name)
+        if not key:
+            continue
         index.setdefault(key, []).append(team)
     return index
 

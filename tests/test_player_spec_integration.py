@@ -224,12 +224,6 @@ def test_approved_create_proposal_frees_slot_applies_and_survives_roundtrip(
     try:
         edit_file = EditFile()
         edit_file.load(decrypted / "data.dat")
-        all_team_info = edit_file.get_all_team_info()
-        edit_file.get_all_team_info = lambda: {
-            team_id: team
-            for team_id, team in all_team_info.items()
-            if any(character.isalnum() for character in team.name)
-        }
         assert edit_file.release_player(126925, 102) is True
         assert edit_file.get_team_roster(102).player_index(126925) == -1
         source_profile = make_source()

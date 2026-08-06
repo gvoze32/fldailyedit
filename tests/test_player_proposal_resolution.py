@@ -436,6 +436,9 @@ def test_print_name_is_unicode_safe_and_uses_the_trimmed_final_token(name, expec
     assert result == expected
     assert unicodedata.is_normalized("NFC", result)
 
+def test_print_name_falls_back_to_normalized_full_name_when_final_token_is_punctuation():
+    assert derive_print_name("  John   ...  ") == "JOHN ..."
+
 
 def test_print_name_accepts_exactly_sixty_utf8_bytes():
     surname = "é" * 30
@@ -473,6 +476,19 @@ def test_create_team_requires_exact_canonical_or_validated_alias_matches(
 
     assert team is edit_file.teams[expected_team_id]
 
+
+
+def test_create_team_ignores_unaddressable_placeholder_team_names(edit_file):
+    edit_file.teams[140] = TeamInfo(140, "-", "---")
+
+    team = resolve_create_team(
+        edit_file,
+        "Chelsea FC",
+        "Chelsea FC",
+        TEAM_ALIASES,
+    )
+
+    assert team is edit_file.teams[102]
 
 def test_create_team_rejects_conflicting_submitted_and_source_teams(edit_file):
     with pytest.raises(ValueError) as exc_info:
