@@ -330,9 +330,10 @@ def resolve_create_team(
             f"submitted team {submitted_team!r} conflicts with "
             f"source team {source_team!r}"
         )
-    if edit_file.get_team_roster(submitted.team_id) is None:
+    roster = edit_file.get_team_roster(submitted.team_id)
+    if roster is None or roster.roster_size == 0:
         raise ValueError(
-            f"team {submitted.name!r} ({submitted.team_id}) has no roster entry"
+            f"team {submitted.name!r} ({submitted.team_id}) has no roster"
         )
     return submitted
 

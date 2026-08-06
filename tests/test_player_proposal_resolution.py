@@ -513,6 +513,18 @@ def test_create_team_rejects_a_team_without_a_roster(edit_file):
         )
 
 
+def test_create_team_rejects_a_team_with_an_empty_roster(edit_file):
+    edit_file.rosters[102] = TeamData(102, [0] * 40)
+
+    with pytest.raises(ValueError, match="roster"):
+        resolve_create_team(
+            edit_file,
+            "Chelsea FC",
+            "Chelsea FC",
+            TEAM_ALIASES,
+        )
+
+
 def test_create_team_rejects_unknown_human_readable_names(edit_file):
     with pytest.raises(ValueError, match="Neverland United"):
         resolve_create_team(
