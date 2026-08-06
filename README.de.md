@@ -28,6 +28,17 @@ Das Windows-Installationsprogramm ist die empfohlene Wahl für Einsteiger. Die B
 4. Bestätigen Sie den erkannten Football-Life-2026-Ordner oder nutzen Sie bei Bedarf **Browse**.
 5. Wählen Sie **Download and install**. Das Programm prüft den Download, sichert den aktuellen Spielstand und ersetzt ihn atomar.
 
+**Einen vorhandenen Spielstand über die GUI aktualisieren:** Das Programm kann
+auch ein vom Benutzer ausgewähltes `EDIT00000000` im Standardlayout
+aktualisieren, statt eine vorbereitete Version zu installieren. Wählen Sie
+**Update my local save**, wählen Sie einen erkannten Speicherort oder verwenden
+Sie **Browse**, wählen Sie **Fast** oder **Deep** und anschließend **Apply
+update**. Der Assistent prüft den Spielstand vor der Änderung, erstellt eine
+Sicherung am selben Ort und zeigt Fortschritt, Ergebnis oder Diagnosedaten an.
+Die lokale Eignung hängt nicht von der SPFL/PES/UML-Kennzeichnung ab; dieser Weg
+lädt keine vorbereitete Remote-Version herunter.
+
+
 > [!WARNING]
 > Die erste ausführbare Datei ist nicht signiert, daher kann Windows SmartScreen eine Warnung anzeigen. Vergleichen Sie die heruntergeladene Datei vor dem Fortfahren mit der im [neuesten Release](https://github.com/gvoze32/fldailyedit/releases/tag/latest) veröffentlichten `FLDailyEditInstaller.exe.sha256`.
 

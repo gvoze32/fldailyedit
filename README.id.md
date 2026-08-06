@@ -36,6 +36,16 @@ Installer Windows adalah pilihan yang disarankan untuk pemula. Antarmuka install
 4. Konfirmasikan folder Football Life 2026 yang terdeteksi, atau gunakan **Browse** bila perlu.
 5. Pilih **Download and install**. Installer memverifikasi unduhan, mencadangkan save saat ini, lalu menggantinya secara atomik.
 
+**Memperbarui save yang ada melalui GUI:** Installer juga dapat memperbarui
+`EDIT00000000` ber-layout umum yang dipilih pengguna, bukan memasang rilis
+prebuilt. Pilih **Update my local save**, pilih lokasi yang terdeteksi atau
+gunakan **Browse**, pilih **Fast** atau **Deep**, lalu tinjau dan pilih
+**Apply update**. Wizard memvalidasi save sebelum perubahan, membuat backup di
+tempat, dan menampilkan progres, hasil, atau diagnostik. Kelayakan lokal tidak
+bergantung pada label SPFL/PES/UML, dan jalur ini tidak mengunduh rilis remote
+prebuilt.
+
+
 > [!WARNING]
 > Executable awal belum ditandatangani, sehingga Windows SmartScreen mungkin menampilkan peringatan. Sebelum melanjutkan, bandingkan file unduhan dengan `FLDailyEditInstaller.exe.sha256` yang diterbitkan pada [rilis terbaru](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
 

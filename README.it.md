@@ -36,6 +36,16 @@ Il programma di installazione per Windows è l'opzione consigliata ai principian
 4. Conferma la cartella Football Life 2026 rilevata oppure usa **Browse**, se necessario.
 5. Seleziona **Download and install**. Il programma verifica il download, crea un backup del salvataggio corrente e lo sostituisce in modo atomico.
 
+**Aggiornare un salvataggio esistente tramite la GUI:** il programma di
+installazione può anche aggiornare un `EDIT00000000` con layout comune scelto
+dall'utente, invece di installare una versione precompilata. Seleziona **Update
+my local save**, scegli una posizione rilevata oppure usa **Browse**, scegli
+**Fast** o **Deep** e, dopo la revisione, seleziona **Apply update**. La procedura
+verifica il salvataggio prima di modificarlo, crea un backup sul posto e mostra
+progresso, risultato o diagnostica. L'idoneità locale non dipende dall'etichetta
+SPFL/PES/UML e questo percorso non scarica una versione precompilata remota.
+
+
 > [!WARNING]
 > L'eseguibile iniziale non è firmato, quindi Windows SmartScreen potrebbe mostrare un avviso. Prima di continuare, confronta il file scaricato con il `FLDailyEditInstaller.exe.sha256` pubblicato nell'[ultima versione](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
 

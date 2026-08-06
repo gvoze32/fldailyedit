@@ -28,6 +28,16 @@ Windows yükleyici, yeni başlayanlar için önerilen seçenektir. Yükleyici ar
 4. Algılanan Football Life 2026 klasörünü doğrulayın veya gerekirse **Browse** seçeneğini kullanın.
 5. **Download and install** seçeneğini belirleyin. Yükleyici indirmeyi doğrular, mevcut kayıt dosyasını yedekler ve atomik olarak değiştirir.
 
+**Mevcut bir kayıt dosyasını GUI üzerinden güncelleme:** Yükleyici, önceden
+hazırlanmış bir sürümü kurmak yerine kullanıcının seçtiği ortak düzenli
+`EDIT00000000` dosyasını da güncelleyebilir. **Update my local save** seçeneğini
+belirleyin, algılanan bir konumu seçin veya **Browse** seçeneğini kullanın,
+**Fast** ya da **Deep** seçin ve incelemeden sonra **Apply update** seçeneğini
+belirleyin. Sihirbaz, değiştirmeden önce kayıt dosyasını doğrular, aynı konumda
+yedek oluşturur ve ilerlemeyi, sonucu veya tanılama bilgilerini gösterir. Yerel
+uygunluk SPFL/PES/UML etiketine bağlı değildir; bu yol önceden hazırlanmış uzak
+bir sürümü indirmez.
+
 > [!WARNING]
 > İlk yürütülebilir dosya imzasızdır; bu nedenle Windows SmartScreen bir uyarı gösterebilir. Devam etmeden önce indirilen dosyayı [en son sürümde](https://github.com/gvoze32/fldailyedit/releases/tag/latest) yayımlanan `FLDailyEditInstaller.exe.sha256` ile karşılaştırın.
 

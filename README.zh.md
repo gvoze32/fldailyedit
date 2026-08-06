@@ -28,6 +28,14 @@ Windows 安装程序是面向新手的推荐方式。安装程序界面目前仅
 4. 确认检测到的 Football Life 2026 文件夹；如有需要，请使用 **Browse**。
 5. 选择 **Download and install**。安装程序会验证下载内容、备份当前存档，并以原子方式替换存档。
 
+**通过 GUI 更新现有存档：** 安装程序也可以更新用户选择的通用布局
+`EDIT00000000`，而不是安装预制版本。选择 **Update my local save**，选择
+检测到的位置或使用 **Browse**，选择 **Fast** 或 **Deep**，检查后选择
+**Apply update**。向导会在修改前验证存档，创建原地备份，并显示进度、结果
+或诊断信息。本地更新资格不取决于 SPFL/PES/UML 标签，此路径不会下载远程
+预制版本。
+
+
 > [!WARNING]
 > 初始可执行文件尚未签名，因此 Windows SmartScreen 可能会显示警告。继续前，请将下载的文件与[最新版本](https://github.com/gvoze32/fldailyedit/releases/tag/latest)中发布的 `FLDailyEditInstaller.exe.sha256` 进行比较。
 
