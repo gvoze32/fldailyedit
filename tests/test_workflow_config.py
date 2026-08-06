@@ -263,7 +263,7 @@ def _remote_branch_fixture(
 
     _git(repository, "switch", "--create", branch_name)
     (repository / spec_path).parent.mkdir(parents=True)
-    (repository / spec_path).write_text(remote_spec, encoding="utf-8")
+    (repository / spec_path).write_bytes(remote_spec.encode("utf-8"))
     _git(repository, "add", "--", spec_path.as_posix())
     if extra_path:
         (repository / "unexpected.txt").write_text("unexpected\n", encoding="utf-8")
@@ -292,7 +292,7 @@ def _remote_branch_fixture(
         runner_repository = repository
 
     (runner_repository / spec_path).parent.mkdir(parents=True)
-    (runner_repository / spec_path).write_text(local_spec, encoding="utf-8")
+    (runner_repository / spec_path).write_bytes(local_spec.encode("utf-8"))
     runner_temp.mkdir()
     environment = os.environ.copy()
     environment.update(
