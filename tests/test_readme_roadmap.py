@@ -278,6 +278,57 @@ ROADMAP_FIXTURES = {
     ),
 }
 
+_LOCAL_MUTATION_FUTURE_MARKERS = {
+    Path("README.md"): ("future", "will be added"),
+    Path("README.id.md"): (
+        "direncanakan",
+        "akan ditambahkan",
+        "sedang dalam proses",
+    ),
+    Path("README.es.md"): (
+        "planificado",
+        "se añadirá",
+        "se añadira",
+    ),
+    Path("README.pt.md"): (
+        "planejado",
+        "será adicionado",
+        "sera adicionado",
+    ),
+    Path("README.ar.md"): (
+        "مخطط له",
+        "ستتم إضافة",
+        "سيتم إضافة",
+    ),
+    Path("README.zh.md"): ("已规划", "正在开发", "将"),
+    Path("README.it.md"): (
+        "pianificato",
+        "verrà aggiunta",
+        "verra aggiunta",
+    ),
+    Path("README.ru.md"): (
+        "запланирована",
+        "в разработке",
+        "будет добавлен",
+    ),
+    Path("README.de.md"): (
+        "geplant",
+        "wird ein lokaler update-modus",
+    ),
+    Path("README.fr.md"): (
+        "planifié",
+        "sera ajouté",
+        "sera ajoute",
+    ),
+    Path("README.tr.md"): (
+        "planlanan",
+        "geliştirilmekte",
+        "eklenecektir",
+    ),
+}
+
+
+
 _HEADING_RE = re.compile(r"(?m)^(#{1,6})\s+.+$")
 _BADGE_RE = re.compile(r"\[!\[[^\]]+\]\([^)]*\)\]\(([^)]+)\)")
 _LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
@@ -372,6 +423,8 @@ def test_readmes_preserve_immutable_structure_and_clean_roadmap(path: Path) -> N
         r"local.{0,200}(?:future|will be added)",
         normalized_roadmap,
     )
+    for forbidden_marker in _LOCAL_MUTATION_FUTURE_MARKERS[path]:
+        assert forbidden_marker.casefold() not in normalized_roadmap.casefold()
     if path == Path("README.md"):
         assert "common-layout" in normalized_roadmap or "standard" in normalized_roadmap.casefold()
         assert "Fast" in normalized_roadmap
