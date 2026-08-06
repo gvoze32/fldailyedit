@@ -18,65 +18,18 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 
 from editor import crypto
 from editor.editfile import EditFile
 from editor.player_codec import ABILITY_FIELDS, POSITION_NAMES
-
-# ---------------------------------------------------------------------------
-# Formula OVR PES 2021 — bobot per atribut per posisi
-# Berdasarkan reverse-engineering komunitas (pesmaster, pes-stats).
-# Nilai bobot adalah relatif; dinormalisasi otomatis saat kalkulasi.
-# ---------------------------------------------------------------------------
-#
-# Urutan posisi sesuai POSITION_NAMES:
-#  0=GK  1=CB  2=LB  3=RB  4=DMF  5=CMF  6=LMF  7=RMF
-#  8=AMF  9=LWF  10=RWF  11=SS  12=CF
-
-_POS_IDX = {pos: i for i, pos in enumerate(POSITION_NAMES)}
-
-_WEIGHTS: dict[str, list[float]] = {
-    #                          GK    CB    LB    RB    DMF   CMF   LMF   RMF   AMF   LWF   RWF   SS    CF
-    "attacking_awareness":   [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.10, 0.10, 0.10, 0.12, 0.15],
-    "ball_control":          [0.03, 0.08, 0.08, 0.08, 0.10, 0.15, 0.12, 0.12, 0.15, 0.14, 0.14, 0.14, 0.10],
-    "dribbling":             [0.03, 0.04, 0.08, 0.08, 0.05, 0.10, 0.12, 0.12, 0.14, 0.18, 0.18, 0.14, 0.10],
-    "tight_possession":      [0.03, 0.04, 0.04, 0.04, 0.05, 0.08, 0.08, 0.08, 0.10, 0.08, 0.08, 0.08, 0.05],
-    "low_pass":              [0.03, 0.05, 0.10, 0.10, 0.10, 0.14, 0.12, 0.12, 0.14, 0.08, 0.08, 0.10, 0.05],
-    "lofted_pass":           [0.03, 0.05, 0.10, 0.10, 0.05, 0.05, 0.08, 0.08, 0.05, 0.05, 0.05, 0.05, 0.05],
-    "finishing":             [0.03, 0.03, 0.03, 0.03, 0.03, 0.04, 0.04, 0.04, 0.10, 0.14, 0.14, 0.18, 0.25],
-    "heading":               [0.03, 0.10, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.06, 0.10],
-    "place_kicking":         [0.03, 0.03, 0.03, 0.03, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04],
-    "curl":                  [0.03, 0.03, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.05, 0.05, 0.05, 0.05, 0.05],
-    "speed":                 [0.03, 0.05, 0.10, 0.10, 0.05, 0.05, 0.10, 0.10, 0.10, 0.15, 0.15, 0.10, 0.10],
-    "acceleration":          [0.03, 0.05, 0.10, 0.10, 0.05, 0.05, 0.10, 0.10, 0.10, 0.15, 0.15, 0.10, 0.10],
-    "kicking_power":         [0.03, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.05],
-    "jump":                  [0.03, 0.10, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.04, 0.04, 0.04, 0.04, 0.06],
-    "physical_contact":      [0.03, 0.10, 0.10, 0.10, 0.10, 0.05, 0.05, 0.05, 0.04, 0.04, 0.04, 0.04, 0.04],
-    "balance":               [0.03, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04],
-    "stamina":               [0.03, 0.05, 0.10, 0.10, 0.10, 0.10, 0.10, 0.10, 0.08, 0.08, 0.08, 0.08, 0.06],
-    "defensive_awareness":   [0.05, 0.20, 0.16, 0.16, 0.16, 0.10, 0.10, 0.10, 0.05, 0.04, 0.04, 0.04, 0.03],
-    "ball_winning":          [0.03, 0.15, 0.10, 0.10, 0.15, 0.10, 0.05, 0.05, 0.04, 0.04, 0.04, 0.04, 0.03],
-    "aggression":            [0.03, 0.05, 0.05, 0.05, 0.06, 0.05, 0.05, 0.05, 0.04, 0.04, 0.04, 0.04, 0.04],
-    "gk_awareness":          [0.32, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00],
-    "catching":              [0.15, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00],
-    "clearing":              [0.05, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00],
-    "reflexes":              [0.15, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00],
-    "gk_reach":              [0.10, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00],
-}
+from editor.player_ovr import PlayerOvrError, calculate_ovr_tenths
 
 
-def calc_ovr(abilities: dict[str, int], position: str) -> float:
-    """Estimasi weighted-average OVR untuk posisi tertentu. Bobot dinormalisasi otomatis."""
-    idx = _POS_IDX.get(position.upper())
-    if idx is None:
-        raise ValueError(f"Unknown position: {position!r}. Valid: {list(POSITION_NAMES)}")
-    total_w = sum(_WEIGHTS[a][idx] for a in ABILITY_FIELDS)
-    if total_w == 0:
-        return 0.0
-    score = sum(_WEIGHTS[a][idx] * abilities.get(a, 40) for a in ABILITY_FIELDS)
-    return score / total_w
+def _format_ovr(value_tenths: int) -> str:
+    return f"{value_tenths // 10}.{value_tenths % 10}"
 
 
 def _apply_spec_patches(
@@ -124,9 +77,9 @@ def _print_ovr_table(abilities: dict[str, int], highlight: str | None = None) ->
     print(f"\n  {'Posisi':<8} {'OVR Est.':>9}")
     print(f"  {'-'*20}")
     for pos in POSITION_NAMES:
-        ovr = calc_ovr(abilities, pos)
+        ovr = calculate_ovr_tenths(abilities, pos)
         marker = " ◄" if pos == highlight else ""
-        print(f"  {pos:<8} {ovr:>8.1f}{marker}")
+        print(f"  {pos:<8} {_format_ovr(ovr):>8}{marker}")
 
 
 def _print_full_report(
@@ -154,10 +107,10 @@ def _print_full_report(
     print(f"  {'-'*55}")
 
     for attr in ABILITY_FIELDS:
-        bv = base_abs.get(attr, 40)
+        bv = base_abs[attr]
         line = f"  {attr:<25} {bv:>6}"
         if has_spec:
-            av = after_abs.get(attr, 40)  # type: ignore[union-attr]
+            av = after_abs[attr]  # type: ignore[index]
             gap = av - bv
             marker = " ◄" if gap != 0 else ""
             line += f" {av:>6} {gap:>+6}{marker}"
@@ -173,20 +126,24 @@ def _print_full_report(
         print(f"\n  {'Posisi':<8} {'Base OVR':>10} {'After OVR':>10} {'Δ':>6}")
         print(f"  {'-'*38}")
         for pos in POSITION_NAMES:
-            b_ovr = calc_ovr(base_abs, pos)
-            a_ovr = calc_ovr(after_abs, pos)  # type: ignore[arg-type]
-            delta = a_ovr - b_ovr
+            base_ovr = calculate_ovr_tenths(base_abs, pos)
+            after_ovr = calculate_ovr_tenths(after_abs, pos)  # type: ignore[arg-type]
+            delta = after_ovr - base_ovr
+            delta_text = f"{'+' if delta >= 0 else '-'}{_format_ovr(abs(delta))}"
             marker = " ◄" if pos == hl else ""
-            print(f"  {pos:<8} {b_ovr:>10.1f} {a_ovr:>10.1f} {delta:>+6.1f}{marker}")
+            print(
+                f"  {pos:<8} {_format_ovr(base_ovr):>10} "
+                f"{_format_ovr(after_ovr):>10} {delta_text:>6}{marker}"
+            )
     else:
         _print_ovr_table(base_abs, highlight=hl)
 
     # Changed attributes summary
     if has_spec:
         changed = [
-            (a, base_abs.get(a, 40), after_abs.get(a, 40))  # type: ignore[union-attr]
+            (a, base_abs[a], after_abs[a])  # type: ignore[index]
             for a in ABILITY_FIELDS
-            if base_abs.get(a, 40) != after_abs.get(a, 40)  # type: ignore[union-attr]
+            if base_abs[a] != after_abs[a]  # type: ignore[index]
         ]
         if changed:
             print(f"\n  {len(changed)} atribut berubah:")
@@ -217,10 +174,14 @@ def main() -> None:
         metavar="POS",
         help=f"Sorot posisi tertentu di output. Valid: {', '.join(POSITION_NAMES)}",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(sys.argv[1:])
 
     try:
         base_abs, base_pos = _load_base_abilities(args.player_id)
+        calculate_ovr_tenths(base_abs, base_pos)
+    except PlayerOvrError as exc:
+        print(f"ERROR: {exc}")
+        return
     except (FileNotFoundError, ValueError) as exc:
         print(f"ERROR: {exc}")
         return
@@ -232,6 +193,10 @@ def main() -> None:
             return
         try:
             after_abs = _apply_spec_patches(base_abs, args.spec)
+            calculate_ovr_tenths(after_abs, base_pos)
+        except PlayerOvrError as exc:
+            print(f"ERROR reading spec: {exc}")
+            return
         except Exception as exc:
             print(f"ERROR reading spec: {exc}")
             return
