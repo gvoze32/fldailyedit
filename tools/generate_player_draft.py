@@ -20,11 +20,13 @@ from editor.editfile import EditFile
 from editor.player_spec import (
     PlayerSpecError,
     load_base_manifest,
+    load_player_specs,
     normalize_player_identity,
     player_slug,
     verify_base_file,
 )
 from scraper.pes21_proposal import Pes21Proposal, map_pes21_proposal
+from scraper.pes_retro_snapshot import profile_to_snapshot
 from scraper.pes_retro_stats import (
     PesRetroStatsError,
     PesRetroStatsProfile,
@@ -36,6 +38,12 @@ from tools.player_draft_diff import (
     build_update_pes,
     resolve_update_player,
 )
+from tools.player_proposal_resolution import (
+    NationalityCatalog,
+    load_nationality_catalog,
+    resolve_create_fields,
+)
+from tools.player_proposal_review import build_ovr_review
 
 
 _LABEL = "generate-player-draft"
@@ -53,17 +61,6 @@ _HEADINGS = (
     "Proof URLs",
     "Contributor notes",
     "Confirmations",
-)
-CREATE_MISSING = (
-    "identity.pes_id",
-    "identity.print_name",
-    "pes.player_id",
-    "pes.print_name",
-    "pes.team_id",
-    "pes.team_name",
-    "pes.nationality_id",
-    "pes.skin_color",
-    "pes.iris_color",
 )
 _MAX_FILENAME_BYTES = 240
 _MAX_PLAYER_NAME_BYTES = 60
@@ -337,19 +334,6 @@ def _validated_source(
     return source_url
 
 
-def _source_payload(
-    source: PesRetroStatsProfile, profile_url: str
-) -> dict[str, object]:
-    return {
-        "profile_url": profile_url,
-        "date_of_birth": source.birth_date.isoformat(),
-        "nationality": source.nationality,
-        "positions": [
-            position for position, grade in source.positions.items() if grade is not None
-        ],
-        "current_club": source.current_club,
-    }
-
 
 def _evidence_payload(
     request: PlayerDraftRequest, profile_url: str
@@ -366,8 +350,16 @@ def _evidence_payload(
 
 def _create_pes(
     request: PlayerDraftRequest,
-    source: PesRetroStatsProfile,
     proposal: Pes21Proposal,
+    *,
+    player_id: int,
+    print_name: str,
+    team_id: int,
+    team_name: str,
+    nationality_id: int,
+    skin_color: int,
+    iris_color: int,
+    shirt_number: int | None,
 ) -> dict[str, object]:
     if proposal.registered_position is None:
         unsupported = ", ".join(proposal.unsupported_positions) or "unknown"
@@ -375,12 +367,12 @@ def _create_pes(
             f"Pes Retro Stats profile has unsupported registered position: {unsupported}"
         )
     result: dict[str, object] = {
-        "player_id": None,
+        "player_id": player_id,
         "name": request.player_name,
-        "print_name": None,
-        "team_id": None,
-        "team_name": None,
-        "nationality_id": None,
+        "print_name": print_name,
+        "team_id": team_id,
+        "team_name": team_name,
+        "nationality_id": nationality_id,
         "age": proposal.age,
         "height": proposal.height,
         "weight": proposal.weight,
@@ -399,14 +391,11 @@ def _create_pes(
         "abilities": dict(proposal.abilities),
         "player_skills": list(proposal.player_skills),
         "com_styles": list(proposal.com_styles),
-        "skin_color": None,
-        "iris_color": None,
+        "skin_color": skin_color,
+        "iris_color": iris_color,
     }
-    if (
-        type(source.shirt_number) is int
-        and 1 <= source.shirt_number <= 99
-    ):
-        result["preferred_shirt_number"] = source.shirt_number
+    if type(shirt_number) is int and 1 <= shirt_number <= 99:
+        result["preferred_shirt_number"] = shirt_number
     return result
 
 
@@ -416,11 +405,17 @@ def build_player_draft(
     proposal: Pes21Proposal,
     *,
     edit_file: EditFile | None = None,
+    nationality_catalog: NationalityCatalog | None = None,
+    completed_player_ids: set[int] | None = None,
+    team_aliases: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
-    """Build one schema-v2 create proposal or update base diff."""
+    """Build one complete, reviewable create or update proposal."""
 
     profile_url = _validated_source(request, source)
     _draft_filename(request.player_name)
+    if edit_file is None:
+        raise PlayerDraftError("a verified base EDIT file is required")
+
     identity: dict[str, object] = {
         "name": request.player_name,
         "print_name": None,
@@ -428,13 +423,39 @@ def build_player_draft(
         "pes_id": None,
         "pes_retro_stats_id": source.player_id,
     }
-    if request.operation == "create":
-        pes = _create_pes(request, source, proposal)
-        missing = list(CREATE_MISSING)
-    else:
-        if edit_file is None:
-            raise PlayerDraftError("update requires a verified base EDIT file")
-        try:
+    try:
+        if request.operation == "create":
+            resolution = resolve_create_fields(
+                edit_file,
+                source=source,
+                submitted_team=request.current_team,
+                completed_player_ids=(
+                    completed_player_ids if completed_player_ids is not None else set()
+                ),
+                nationality_catalog=nationality_catalog,
+                team_aliases=team_aliases,
+            )
+            pes = _create_pes(
+                request,
+                proposal,
+                player_id=resolution.player_id,
+                print_name=resolution.print_name,
+                team_id=resolution.team_id,
+                team_name=resolution.team_name,
+                nationality_id=resolution.nationality_id,
+                skin_color=resolution.skin_color,
+                iris_color=resolution.iris_color,
+                shirt_number=source.shirt_number,
+            )
+            identity["print_name"] = resolution.print_name
+            identity["pes_id"] = resolution.player_id
+            ovr_review = build_ovr_review(
+                operation="create",
+                proposal_abilities=proposal.abilities,
+                registered_position=proposal.registered_position or "",
+                position_proficiency=proposal.position_proficiency,
+            )
+        elif request.operation == "update":
             match = resolve_update_player(
                 edit_file,
                 canonical_name=request.player_name,
@@ -443,11 +464,31 @@ def build_player_draft(
                 proposal=proposal,
             )
             pes = build_update_pes(match.profile, proposal)
-        except PlayerDraftDiffError as exc:
-            raise PlayerDraftError(str(exc)) from None
-        identity["print_name"] = match.print_name
-        identity["pes_id"] = match.pes_id
-        missing = []
+            identity["print_name"] = match.print_name
+            identity["pes_id"] = match.pes_id
+            ovr_review = build_ovr_review(
+                operation="update",
+                base_abilities=match.profile.abilities,
+                proposal_abilities=proposal.abilities,
+                registered_position=(
+                    proposal.registered_position
+                    or match.profile.registered_position
+                ),
+                position_proficiency=proposal.position_proficiency,
+            )
+        else:
+            raise PlayerDraftError(f"unsupported operation: {request.operation!r}")
+    except PlayerDraftDiffError as exc:
+        raise PlayerDraftError(str(exc)) from None
+    except PlayerDraftError:
+        raise
+    except (TypeError, ValueError, KeyError, AttributeError) as exc:
+        raise PlayerDraftError(str(exc)) from None
+
+    try:
+        source_snapshot = profile_to_snapshot(source)
+    except (TypeError, ValueError, KeyError, AttributeError) as exc:
+        raise PlayerDraftError(f"cannot snapshot source profile: {exc}") from None
 
     return {
         "schema_version": 2,
@@ -455,10 +496,14 @@ def build_player_draft(
         "lifecycle": {"status": "active"},
         "applies_to": [load_base_manifest().revision],
         "identity": identity,
-        "source": _source_payload(source, profile_url),
+        "source": source_snapshot,
         "evidence": _evidence_payload(request, profile_url),
         "pes": pes,
-        "draft": {"needs_human_review": True, "missing": missing},
+        "draft": {
+            "generator": "pes-retro-mature-proposal-v1",
+            "needs_human_review": True,
+            "ovr_review": ovr_review,
+        },
     }
 
 
@@ -495,6 +540,40 @@ def _write_exclusive_atomic(destination: Path, content: str) -> None:
             temporary_path.unlink(missing_ok=True)
 
 
+def _configured_player_ids() -> set[int]:
+    """Return completed configured IDs after loading all specs."""
+
+    specs = load_player_specs()
+    return {
+        spec.identity.pes_id
+        for spec in specs
+        if type(spec.identity.pes_id) is int
+    }
+
+
+def _base_and_completed_player_ids(edit_file: EditFile) -> set[int]:
+    player_ids = _configured_player_ids()
+    try:
+        players = edit_file.get_all_players()
+    except Exception:
+        return player_ids
+    if isinstance(players, Mapping):
+        player_ids.update(
+            player_id for player_id in players if type(player_id) is int
+        )
+    return player_ids
+
+
+def _load_team_aliases() -> Mapping[str, str]:
+    try:
+        raw = json.loads(config.TEAM_ALIASES_FILE.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise PlayerDraftError(f"cannot load team aliases: {exc}") from None
+    if not isinstance(raw, Mapping):
+        raise PlayerDraftError("cannot load team aliases: expected an object")
+    return dict(raw)
+
+
 def write_player_draft(
     event_path: Path,
     output_dir: Path,
@@ -516,30 +595,42 @@ def write_player_draft(
     except Exception as exc:
         raise PlayerDraftError(f"cannot fetch player profile: {exc}") from exc
 
-    if request.operation == "update":
-        base_path = Path(base_edit_path or config.EDIT_FILE_PATH)
-        try:
-            verify_base_file(base_path)
-        except PlayerSpecError as exc:
-            raise PlayerDraftError(str(exc)) from None
-        try:
-            decrypted = crypto.decrypt(base_path)
-        except Exception as exc:
-            raise PlayerDraftError(f"cannot decrypt verified base: {exc}") from exc
-        try:
-            edit_file = EditFile()
-            edit_file.load(decrypted / "data.dat")
+    base_path = Path(base_edit_path or config.EDIT_FILE_PATH)
+    try:
+        verify_base_file(base_path)
+    except PlayerSpecError as exc:
+        raise PlayerDraftError(str(exc)) from None
+    try:
+        decrypted = crypto.decrypt(base_path)
+    except Exception as exc:
+        raise PlayerDraftError(f"cannot decrypt verified base: {exc}") from exc
+    try:
+        edit_file = EditFile()
+        edit_file.load(decrypted / "data.dat")
+        completed_player_ids = _base_and_completed_player_ids(edit_file)
+        if request.operation == "create":
             payload = build_player_draft(
-                request, source, proposal, edit_file=edit_file
+                request,
+                source,
+                proposal,
+                edit_file=edit_file,
+                nationality_catalog=load_nationality_catalog(),
+                completed_player_ids=completed_player_ids,
+                team_aliases=_load_team_aliases(),
             )
-        except PlayerDraftError:
-            raise
-        except Exception as exc:
-            raise PlayerDraftError(f"cannot load verified base: {exc}") from exc
-        finally:
-            crypto.cleanup_temp(decrypted)
-    else:
-        payload = build_player_draft(request, source, proposal)
+        else:
+            payload = build_player_draft(
+                request,
+                source,
+                proposal,
+                edit_file=edit_file,
+            )
+    except PlayerDraftError:
+        raise
+    except Exception as exc:
+        raise PlayerDraftError(f"cannot load verified base: {exc}") from exc
+    finally:
+        crypto.cleanup_temp(decrypted)
 
     filename = _draft_filename(request.player_name)
     output_dir.mkdir(parents=True, exist_ok=True)

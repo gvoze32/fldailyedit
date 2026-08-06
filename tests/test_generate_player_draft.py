@@ -8,12 +8,14 @@ from types import MappingProxyType
 
 import pytest
 
-import tools.generate_player_draft as generator
 
 from editor.models import PlayerInfo, TeamData, TeamInfo
 from editor.player_codec import PlayerAbilityProfile
+from editor.player_ovr import calculate_ovr_tenths, relevant_ovr_positions
 from scraper.pes21_proposal import Pes21Proposal, map_pes21_proposal
+from scraper.pes_retro_snapshot import profile_to_snapshot
 from scraper.pes_retro_stats import PesRetroStatsProfile
+from tools.player_proposal_resolution import load_nationality_catalog
 from tools.generate_player_draft import (
     PlayerDraftError,
     PlayerDraftRequest,
@@ -114,17 +116,28 @@ EXPECTED_ABILITIES = {
     "reflexes": 40,
     "gk_reach": 40,
 }
-CREATE_MISSING_EXPECTED = (
-    "identity.pes_id",
-    "identity.print_name",
-    "pes.player_id",
-    "pes.print_name",
-    "pes.team_id",
-    "pes.team_name",
-    "pes.nationality_id",
-    "pes.skin_color",
-    "pes.iris_color",
-)
+TEAM_ALIASES = {"The Blues": "Chelsea FC"}
+
+
+def assert_no_missing_keys(value: object) -> None:
+    if isinstance(value, dict):
+        assert "missing" not in value
+        for nested in value.values():
+            assert_no_missing_keys(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            assert_no_missing_keys(nested)
+
+
+def assert_no_nulls(value: object) -> None:
+    if isinstance(value, dict):
+        for nested in value.values():
+            assert_no_nulls(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            assert_no_nulls(nested)
+    else:
+        assert value is not None
 
 
 def issue_body(**overrides: str) -> str:
@@ -316,6 +329,53 @@ class FakeEditFile:
         return self.profiles.get(player_id)
 
 
+def build_create_kwargs(proposal: Pes21Proposal) -> dict[str, object]:
+    return {
+        "edit_file": FakeEditFile(proposal),
+        "nationality_catalog": load_nationality_catalog(),
+        "completed_player_ids": set(),
+        "team_aliases": TEAM_ALIASES,
+    }
+
+
+def expected_ovr_review(
+    operation: str,
+    proposal: Pes21Proposal,
+    *,
+    base_abilities: dict[str, int] | None = None,
+) -> dict[str, object]:
+    if operation == "create":
+        registered_position = proposal.registered_position
+        position_proficiency = proposal.position_proficiency
+    else:
+        base_profile = current_profile(proposal)
+        registered_position = base_profile.registered_position
+        position_proficiency = base_profile.position_proficiency
+    assert registered_position is not None
+    positions = relevant_ovr_positions(registered_position, position_proficiency)
+    rows: list[dict[str, object]] = []
+    for position in positions:
+        proposal_tenths = calculate_ovr_tenths(proposal.abilities, position)
+        if operation == "create":
+            rows.append({"position": position, "proposal_tenths": proposal_tenths})
+        else:
+            assert base_abilities is not None
+            base_tenths = calculate_ovr_tenths(base_abilities, position)
+            rows.append(
+                {
+                    "position": position,
+                    "base_tenths": base_tenths,
+                    "proposal_tenths": proposal_tenths,
+                    "delta_tenths": proposal_tenths - base_tenths,
+                }
+            )
+    return {
+        "model": "pes2021-community-estimate-v1",
+        "mode": "new_player" if operation == "create" else "comparison",
+        "positions": rows,
+    }
+
+
 def update_request() -> PlayerDraftRequest:
     return parse_player_issue_event(
         issue_event(
@@ -460,30 +520,28 @@ def test_supported_operations_are_accepted(operation: str):
     assert parse_player_issue_event(issue_event(Operation=operation)).operation == operation
 
 
-def test_create_draft_contains_the_complete_source_proposal_and_exact_missing_list():
+def test_create_draft_contains_every_resolved_field_and_exact_review_metadata():
     request = parse_player_issue_event(issue_event())
     source = make_source()
+    proposal = proposal_for(source)
 
-    payload = build_player_draft(request, source, proposal_for(source))
+    payload = build_player_draft(
+        request, source, proposal, **build_create_kwargs(proposal)
+    )
 
-    assert generator.CREATE_MISSING == CREATE_MISSING_EXPECTED
     assert payload["schema_version"] == 2
     assert payload["operation"] == "create"
     assert payload["lifecycle"] == {"status": "active"}
     assert payload["identity"] == {
         "name": "Dastan Satpaev",
-        "print_name": None,
+        "print_name": "SATPAEV",
         "aliases": ["Dastan Satpaev"],
-        "pes_id": None,
+        "pes_id": 224427,
         "pes_retro_stats_id": PROFILE_UUID,
     }
-    assert payload["source"] == {
-        "profile_url": PROFILE_URL,
-        "date_of_birth": "2008-08-12",
-        "nationality": "Kazakhstan",
-        "positions": ["LWF", "RWF", "SS", "CF"],
-        "current_club": "Chelsea FC",
-    }
+    assert payload["identity"]["pes_id"] == payload["pes"]["player_id"]
+    assert payload["identity"]["pes_id"] is not None
+    assert payload["source"] == profile_to_snapshot(source)
     assert payload["evidence"] == {
         "profile_url": PROFILE_URL,
         "proof_urls": ["https://example.com/official-proof"],
@@ -493,13 +551,13 @@ def test_create_draft_contains_the_complete_source_proposal_and_exact_missing_li
         "issue_url": "https://github.com/gvoze32/fldailyedit/issues/42",
     }
     assert payload["pes"] == {
-        "player_id": None,
+        "player_id": 224427,
         "name": "Dastan Satpaev",
-        "print_name": None,
-        "team_id": None,
-        "team_name": None,
+        "print_name": "SATPAEV",
+        "team_id": 101,
+        "team_name": "Chelsea FC",
         "preferred_shirt_number": 36,
-        "nationality_id": None,
+        "nationality_id": 216,
         "age": 17,
         "height": 176,
         "weight": 73,
@@ -514,19 +572,28 @@ def test_create_draft_contains_the_complete_source_proposal_and_exact_missing_li
         "abilities": EXPECTED_ABILITIES,
         "player_skills": ["double_touch", "long_range_shooting"],
         "com_styles": ["incisive_run"],
-        "skin_color": None,
-        "iris_color": None,
+        "skin_color": 9,
+        "iris_color": 17,
     }
     assert payload["draft"] == {
+        "generator": "pes-retro-mature-proposal-v1",
         "needs_human_review": True,
-        "missing": list(CREATE_MISSING_EXPECTED),
+        "ovr_review": expected_ovr_review("create", proposal),
     }
+    assert_no_missing_keys(payload)
+    for key, value in payload.items():
+        if key != "source":
+            assert_no_nulls(value)
 
 
 def test_create_draft_omits_an_out_of_range_source_shirt_number():
     source = make_source(shirt_number=100)
+    proposal = proposal_for(source)
     payload = build_player_draft(
-        parse_player_issue_event(issue_event()), source, proposal_for(source)
+        parse_player_issue_event(issue_event()),
+        source,
+        proposal,
+        **build_create_kwargs(proposal),
     )
     assert "preferred_shirt_number" not in payload["pes"]
 
@@ -535,21 +602,29 @@ def test_create_draft_rejects_an_unsupported_registered_position():
     positions = {position: None for position in SOURCE_POSITIONS}
     positions["RWB"] = "★"
     source = make_source(positions=MappingProxyType(positions))
+    proposal = proposal_for(source)
 
     with pytest.raises(PlayerDraftError, match="unsupported registered position"):
         build_player_draft(
-            parse_player_issue_event(issue_event()), source, proposal_for(source)
+            parse_player_issue_event(issue_event()),
+            source,
+            proposal,
+            **build_create_kwargs(proposal),
         )
 
 
 def test_submitted_name_must_match_the_fetched_source_identity():
     source = make_source(name="Other Player")
+    proposal = proposal_for(source)
     with pytest.raises(
         PlayerDraftError,
         match="^Pes Retro Stats profile name does not match Player name$",
     ):
         build_player_draft(
-            parse_player_issue_event(issue_event()), source, proposal_for(source)
+            parse_player_issue_event(issue_event()),
+            source,
+            proposal,
+            **build_create_kwargs(proposal),
         )
 
 
@@ -570,12 +645,19 @@ def test_update_draft_resolves_base_identity_and_emits_only_exact_changes():
         "pes_id": 162196,
         "pes_retro_stats_id": MARCO_UUID,
     }
+    assert payload["source"] == profile_to_snapshot(source)
     assert payload["pes"] == {
         "abilities": {"speed": {"from": 79, "to": 80}}
     }
     assert "registered_position" not in payload["pes"]
     assert "RWB" not in payload["pes"].get("position_proficiency", {})
-    assert payload["draft"] == {"needs_human_review": True, "missing": []}
+    assert payload["draft"] == {
+        "generator": "pes-retro-mature-proposal-v1",
+        "needs_human_review": True,
+        "ovr_review": expected_ovr_review(
+            "update", proposal, base_abilities=dict(edit_file.profiles[162196].abilities)
+        ),
+    }
 
 
 def test_update_draft_requires_a_loaded_base_edit_file():
@@ -629,10 +711,13 @@ def test_schema_v2_generated_drafts_raise_exact_incomplete_error(tmp_path, opera
 
     if operation == "create":
         source = make_source()
+        proposal = proposal_for(source)
         payload = build_player_draft(
-            parse_player_issue_event(issue_event()), source, proposal_for(source)
+            parse_player_issue_event(issue_event()),
+            source,
+            proposal,
+            **build_create_kwargs(proposal),
         )
-        expected = CREATE_MISSING_EXPECTED
         filename = "dastan-satpaev.json"
     else:
         source = marco_source()
@@ -640,19 +725,18 @@ def test_schema_v2_generated_drafts_raise_exact_incomplete_error(tmp_path, opera
         payload = build_player_draft(
             update_request(), source, proposal, edit_file=FakeEditFile(proposal)
         )
-        expected = ()
         filename = "marco-palestra.json"
     write_payload(tmp_path, payload, filename)
 
     with pytest.raises(IncompletePlayerSpecError) as exc_info:
         load_player_specs(tmp_path)
 
-    assert exc_info.value.missing_fields == expected
+    assert exc_info.value.missing_fields == ()
 
 
 @pytest.mark.parametrize(
     "mutation",
-    ["schema", "uuid", "profile", "pes-shape", "missing"],
+    ["schema", "uuid", "profile", "pes-shape", "extra-draft"],
 )
 def test_any_file_with_a_draft_marker_is_never_loaded_as_a_completed_spec(
     tmp_path, mutation
@@ -660,19 +744,23 @@ def test_any_file_with_a_draft_marker_is_never_loaded_as_a_completed_spec(
     from editor.player_spec import IncompletePlayerSpecError, load_player_specs
 
     source = make_source()
+    proposal = proposal_for(source)
     payload = build_player_draft(
-        parse_player_issue_event(issue_event()), source, proposal_for(source)
+        parse_player_issue_event(issue_event()),
+        source,
+        proposal,
+        **build_create_kwargs(proposal),
     )
     if mutation == "schema":
         payload["schema_version"] = 1
     elif mutation == "uuid":
         payload["identity"]["pes_retro_stats_id"] = MARCO_UUID
     elif mutation == "profile":
-        payload["source"]["profile_url"] = MARCO_URL
+        payload["source"]["data"]["profile_url"] = MARCO_URL
     elif mutation == "pes-shape":
         payload["pes"].pop("age")
     else:
-        payload["draft"]["missing"] = list(reversed(CREATE_MISSING_EXPECTED))
+        payload["draft"]["extra"] = True
     write_payload(tmp_path, payload, "dastan-satpaev.json")
 
     with pytest.raises(IncompletePlayerSpecError) as exc_info:
@@ -693,28 +781,93 @@ def install_fetch(monkeypatch, source: PesRetroStatsProfile) -> list[str]:
     return fetched
 
 
-def test_create_writer_fetches_once_without_verifying_or_decrypting_base(
-    monkeypatch, tmp_path
-):
-    event_path = tmp_path / "event.json"
-    event_path.write_text(json.dumps(issue_event()), encoding="utf-8")
-    fetched = install_fetch(monkeypatch, make_source())
+def install_verified_base(
+    monkeypatch, tmp_path: Path, proposal: Pes21Proposal, *, changed: bool = True
+) -> tuple[Path, FakeEditFile, list[tuple[str, Path]]]:
+    base_path = tmp_path / "EDIT00000000"
+    base_path.write_bytes(b"encrypted")
+    decrypted = tmp_path / "decrypted"
+    decrypted.mkdir()
+    (decrypted / "data.dat").write_bytes(b"plain")
+    fake_edit = FakeEditFile(proposal, changed=changed)
+    calls: list[tuple[str, Path]] = []
     monkeypatch.setattr(
         "tools.generate_player_draft.verify_base_file",
-        lambda *_args: pytest.fail("create must not verify the base"),
+        lambda path: calls.append(("verify", Path(path))),
     )
     monkeypatch.setattr(
         "tools.generate_player_draft.crypto.decrypt",
-        lambda *_args: pytest.fail("create must not decrypt the base"),
+        lambda path: calls.append(("decrypt", Path(path))) or decrypted,
+    )
+    monkeypatch.setattr(
+        "tools.generate_player_draft.crypto.cleanup_temp",
+        lambda path: calls.append(("cleanup", Path(path))),
+    )
+    monkeypatch.setattr("tools.generate_player_draft.EditFile", lambda: fake_edit)
+    return base_path, fake_edit, calls
+
+
+def test_create_writer_verifies_decrypts_loads_and_always_cleans_up(
+    monkeypatch, tmp_path
+):
+    source = make_source()
+    proposal = proposal_for(source)
+    event_path = tmp_path / "event.json"
+    event_path.write_text(json.dumps(issue_event()), encoding="utf-8")
+    fetched = install_fetch(monkeypatch, source)
+    base_path, fake_edit, calls = install_verified_base(
+        monkeypatch, tmp_path, proposal
     )
 
-    path = write_player_draft(event_path, tmp_path / "players")
+    path = write_player_draft(
+        event_path, tmp_path / "players", base_edit_path=base_path
+    )
     payload = json.loads(path.read_text(encoding="utf-8"))
 
     assert fetched == [PROFILE_URL]
     assert path.name == "dastan-satpaev.json"
     assert payload["schema_version"] == 2
+    assert fake_edit.loaded_path == tmp_path / "decrypted" / "data.dat"
+    assert calls == [
+        ("verify", base_path),
+        ("decrypt", base_path),
+        ("cleanup", tmp_path / "decrypted"),
+    ]
     assert tuple(path.parent.iterdir()) == (path,)
+
+
+def test_completed_spec_load_failure_is_normalized_and_writes_nothing(
+    monkeypatch, tmp_path
+):
+    source = make_source()
+    proposal = proposal_for(source)
+    event_path = tmp_path / "event.json"
+    event_path.write_text(json.dumps(issue_event()), encoding="utf-8")
+    install_fetch(monkeypatch, source)
+    base_path, _fake_edit, calls = install_verified_base(
+        monkeypatch, tmp_path, proposal
+    )
+
+    def fail_load_player_specs():
+        raise OSError("completed specs unreadable")
+
+    monkeypatch.setattr(
+        "tools.generate_player_draft.load_player_specs", fail_load_player_specs
+    )
+    output_dir = tmp_path / "players"
+
+    with pytest.raises(
+        PlayerDraftError,
+        match=r"^cannot load verified base: completed specs unreadable$",
+    ):
+        write_player_draft(event_path, output_dir, base_edit_path=base_path)
+
+    assert calls == [
+        ("verify", base_path),
+        ("decrypt", base_path),
+        ("cleanup", tmp_path / "decrypted"),
+    ]
+    assert not output_dir.exists()
 
 
 def test_update_writer_verifies_decrypts_loads_and_always_cleans_up(
@@ -767,7 +920,13 @@ def test_update_writer_verifies_decrypts_loads_and_always_cleans_up(
         ("cleanup", decrypted),
     ]
     assert fake_edit.loaded_path == decrypted / "data.dat"
-    assert json.loads(path.read_text(encoding="utf-8"))["draft"]["missing"] == []
+    assert json.loads(path.read_text(encoding="utf-8"))["draft"] == {
+        "generator": "pes-retro-mature-proposal-v1",
+        "needs_human_review": True,
+        "ovr_review": expected_ovr_review(
+            "update", proposal, base_abilities=dict(fake_edit.profiles[162196].abilities)
+        ),
+    }
 
 
 def test_update_verification_failure_never_decrypts_or_creates_output(
@@ -854,10 +1013,15 @@ def test_existing_slug_collision_is_rejected_without_modification(monkeypatch, t
     output_dir.mkdir()
     destination = output_dir / "dastan-satpaev.json"
     destination.write_text("reviewed-content\n", encoding="utf-8")
-    install_fetch(monkeypatch, make_source())
+    source = make_source()
+    proposal = proposal_for(source)
+    install_fetch(monkeypatch, source)
+    base_path, _fake_edit, _calls = install_verified_base(
+        monkeypatch, tmp_path, proposal
+    )
 
     with pytest.raises(PlayerDraftError):
-        write_player_draft(event_path, output_dir)
+        write_player_draft(event_path, output_dir, base_edit_path=base_path)
     assert destination.read_text(encoding="utf-8") == "reviewed-content\n"
     assert tuple(output_dir.iterdir()) == (destination,)
 
@@ -868,11 +1032,18 @@ def test_concurrent_publication_has_one_winner_and_no_partial_file(
     event_path = tmp_path / "event.json"
     event_path.write_text(json.dumps(issue_event()), encoding="utf-8")
     output_dir = tmp_path / "players"
-    install_fetch(monkeypatch, make_source())
+    source = make_source()
+    proposal = proposal_for(source)
+    install_fetch(monkeypatch, source)
+    base_path, _fake_edit, _calls = install_verified_base(
+        monkeypatch, tmp_path, proposal
+    )
 
     def attempt() -> Path | PlayerDraftError:
         try:
-            return write_player_draft(event_path, output_dir)
+            return write_player_draft(
+                event_path, output_dir, base_edit_path=base_path
+            )
         except PlayerDraftError as exc:
             return exc
 
