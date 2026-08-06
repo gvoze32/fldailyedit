@@ -241,6 +241,10 @@ def _use_noncanonical_uuid(snapshot: Snapshot) -> None:
     _data(snapshot)["player_id"] = "0ce2dbde-9CD9-423C-A90A-35B07DF6A967"
 
 
+def _use_unsupported_uuid_version(snapshot: Snapshot) -> None:
+    _data(snapshot)["player_id"] = "0ce2dbde-6cd9-623c-a90a-35b07df6a967"
+
+
 def _mismatch_uuid_prefix(snapshot: Snapshot) -> None:
     _data(snapshot)["player_id"] = "f77d9c27-9cd9-423c-a90a-35b07df6a967"
 
@@ -281,6 +285,9 @@ def _use_invalid_hash(snapshot: Snapshot) -> None:
         ),
         pytest.param(_use_noncanonical_url, True, id="noncanonical-url"),
         pytest.param(_use_noncanonical_uuid, True, id="noncanonical-uuid"),
+        pytest.param(
+            _use_unsupported_uuid_version, True, id="unsupported-uuid-version"
+        ),
         pytest.param(_mismatch_uuid_prefix, True, id="uuid-prefix-mismatch"),
         pytest.param(_mismatch_url_short_id, True, id="url-short-id-mismatch"),
         pytest.param(_use_invalid_hash, False, id="invalid-hash"),

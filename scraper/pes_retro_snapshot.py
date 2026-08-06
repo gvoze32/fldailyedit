@@ -166,6 +166,8 @@ def _profile_from_data(data: dict[str, object]) -> PesRetroStatsProfile:
         raise _invalid("invalid player_id") from None
     if str(parsed_player_id) != player_id:
         raise _invalid("noncanonical player_id")
+    if parsed_player_id.version not in (1, 2, 3, 4, 5):
+        raise _invalid("unsupported player_id UUID version")
 
     short_id = _required_text(data, "short_id")
     profile_url = _required_text(data, "profile_url")
