@@ -61,9 +61,16 @@ prima di applicare un trasferimento.
 
 ## Roadmap / Lavori in corso
 
-Questo elemento è pianificato e in corso di sviluppo:
+È stato rilasciato l'aggiornamento della GUI per i salvataggi locali:
 
-1. **Aggiornamento locale nella GUI (sostituisce la distribuzione separata di più basi)** — anziché distribuire basi precompilate separate per ogni patch, verrà aggiunta una modalità di aggiornamento locale direttamente nell'interfaccia grafica dell'app affinché gli utenti possano eseguire la pipeline sui propri salvataggi (**SP Football Life 2026**, **vanilla eFootball PES 2021** e **UML**).
+1. **Aggiornamento locale nella GUI** — la procedura guidata in quattro passaggi
+   ora aggiorna un salvataggio `EDIT00000000` selezionato dall'utente e con layout
+   comune convalidato, con copertura **Fast** o **Deep**. L'idoneità locale è
+   indipendente dall'etichetta SPFL/PES/UML del salvataggio; il salvataggio viene
+   controllato prima della mutazione e riceve un backup sul posto, quindi viene
+   sostituito solo da un risultato verificato atomicamente. Questo non pubblica
+   nuovi asset remoti: le versioni scaricabili restano limitate a target
+   FL26/SPFL convalidati.
 
 ## Sicurezza e limitazioni
 

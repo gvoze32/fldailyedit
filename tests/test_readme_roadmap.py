@@ -191,57 +191,90 @@ ROADMAP_FIXTURES = {
     Path("README.md"): (
         "## Roadmap / Work in progress",
         "Local Update",
-        "multi-base",
+        "the four-step wizard updates",
+        "validated common-layout",
+        "Local eligibility is independent of the save’s SPFL/PES/UML label",
+        "downloadable releases remain validated FL26/SPFL targets",
     ),
     Path("README.id.md"): (
         "## Roadmap / Sedang dikerjakan",
         "Pembaruan Lokal",
-        "multi-base",
+        "wizard empat langkah kini memperbarui",
+        "ber-layout umum tervalidasi",
+        "Kelayakan lokal tidak bergantung pada label SPFL/PES/UML",
+        "rilis yang dapat diunduh tetap hanya menargetkan FL26/SPFL tervalidasi",
     ),
     Path("README.es.md"): (
         "## Hoja de ruta / Trabajo en curso",
         "Actualización local",
-        "multi-bases",
+        "el asistente de cuatro pasos ya actualiza",
+        "diseño común validado",
+        "La elegibilidad local es independiente de la etiqueta SPFL/PES/UML",
+        "las versiones descargables siguen limitadas a objetivos FL26/SPFL validados",
     ),
     Path("README.pt.md"): (
         "## Roteiro / Trabalho em andamento",
         "Atualização Local",
-        "múltiplas bases",
+        "o assistente de quatro etapas agora atualiza",
+        "layout comum validado",
+        "A elegibilidade local independe do rótulo SPFL/PES/UML",
+        "as versões para download continuam restritas a alvos FL26/SPFL validados",
     ),
     Path("README.ar.md"): (
         "## خارطة الطريق / قيد التطوير",
         "التحديث المحلي",
-        "القواعد المتعددة",
+        "يحدّث المعالج المكوّن من أربع خطوات الآن",
+        "ذي التخطيط المشترك المتحقق منه",
+        "لا تعتمد أهلية التحديث المحلي على تسمية SPFL/PES/UML",
+        "تظل الإصدارات القابلة للتنزيل مقتصرة على أهداف FL26/SPFL المتحقق منها",
     ),
     Path("README.zh.md"): (
         "## 路线图 / 进行中的工作",
         "本地更新模式",
-        "多个预构建基础文件",
+        "四步向导现已可",
+        "采用已验证通用布局",
+        "本地更新资格不受存档的 SPFL/PES/UML 标签影响",
+        "可下载版本仍仅面向已验证的 FL26/SPFL 目标",
     ),
     Path("README.it.md"): (
         "## Roadmap / Lavori in corso",
         "Aggiornamento locale",
-        "più basi",
+        "la procedura guidata in quattro passaggi ora aggiorna",
+        "layout comune convalidato",
+        "L'idoneità locale è indipendente dall'etichetta SPFL/PES/UML",
+        "le versioni scaricabili restano limitate a target FL26/SPFL convalidati",
     ),
     Path("README.ru.md"): (
         "## План развития / В работе",
         "Локальное обновление",
-        "отдельных баз",
+        "четырёхшаговый мастер теперь обновляет",
+        "проверенной общей структурой",
+        "Допуск к локальному обновлению не зависит от метки SPFL/PES/UML",
+        "загружаемые выпуски по-прежнему предназначены только для проверенных целей FL26/SPFL",
     ),
     Path("README.de.md"): (
         "## Roadmap / In Arbeit",
         "Lokales Update",
-        "Multi-Base-Distribution",
+        "der vierstufige Assistent aktualisiert jetzt",
+        "validiertem Standardlayout",
+        "Die lokale Eignung ist unabhängig von der SPFL/PES/UML-Kennzeichnung",
+        "herunterladbare Releases bleiben auf validierte FL26/SPFL-Ziele beschränkt",
     ),
     Path("README.fr.md"): (
         "## Feuille de route / En cours de développement",
         "Mise à jour locale",
-        "bases multiples",
+        "l'assistant en quatre étapes met désormais à jour",
+        "structure commune validée",
+        "L'éligibilité locale est indépendante de l'étiquette SPFL/PES/UML",
+        "les versions téléchargeables restent limitées aux cibles FL26/SPFL validées",
     ),
     Path("README.tr.md"): (
         "## Yol Haritası / Devam Eden Çalışmalar",
         "Yerel Güncelleme",
-        "çoklu temel dosya",
+        "dört adımlı sihirbaz artık",
+        "doğrulanmış ortak düzene",
+        "Yerel uygunluk, kaydın SPFL/PES/UML etiketinden bağımsızdır",
+        "indirilebilir sürümler yalnızca doğrulanmış FL26/SPFL hedefleriyle sınırlı kalır",
     ),
 }
 
@@ -303,7 +336,14 @@ def _roadmap_section(text: str, heading: str) -> str:
 def test_readmes_preserve_immutable_structure_and_clean_roadmap(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     structure = README_STRUCTURE_FIXTURES[path]
-    roadmap_heading, local_update, multi_base = ROADMAP_FIXTURES[path]
+    (
+        roadmap_heading,
+        local_update,
+        delivered_update,
+        validated_layout,
+        label_independence,
+        remote_fl26_only,
+    ) = ROADMAP_FIXTURES[path]
 
     assert _heading_counts(text) == structure["heading_counts"]
     assert _badge_targets(text) == structure["badge_targets"]
@@ -311,20 +351,34 @@ def test_readmes_preserve_immutable_structure_and_clean_roadmap(path: Path) -> N
     assert _relative_links(text) == structure["relative_links"]
 
     roadmap = _roadmap_section(text, roadmap_heading)
+    normalized_roadmap = " ".join(roadmap.split())
+    compact_roadmap = re.sub(r"\s+", "", roadmap)
     planned_items = _PLANNED_ITEM_RE.findall(roadmap)
+    assert len(planned_items) == 1
+    assert local_update in planned_items[0]
+    for required in (
+        delivered_update,
+        validated_layout,
+        label_independence,
+        remote_fl26_only,
+        "`EDIT00000000`",
+        "SPFL/PES/UML",
+    ):
+        assert re.sub(r"\s+", "", required) in compact_roadmap
+
+    assert "Future: Multi-target local updates" not in normalized_roadmap
+    assert not re.search(
+        r"(?is)(?:future|will be added).{0,200}local|"
+        r"local.{0,200}(?:future|will be added)",
+        normalized_roadmap,
+    )
     if path == Path("README.md"):
-        assert len(planned_items) == 2
-        delivered, future = planned_items
-        assert local_update in delivered
-        assert "Fast" in roadmap
-        assert "Deep" in roadmap
-        assert "in-place backup" in roadmap
-        assert "atomically" in roadmap
-        assert "future" in future.casefold()
-        assert "PES 2021" in roadmap
-        assert "UML" in roadmap
-    else:
-        assert len(planned_items) == 1
-        assert local_update in planned_items[0]
-        assert multi_base in planned_items[0]
-    assert not ("ovr" in roadmap.casefold() and "pes retro" in roadmap.casefold())
+        assert "common-layout" in normalized_roadmap or "standard" in normalized_roadmap.casefold()
+        assert "Fast" in normalized_roadmap
+        assert "Deep" in normalized_roadmap
+        assert "in-place backup" in normalized_roadmap
+        assert "atomically" in normalized_roadmap
+        assert "remote" in normalized_roadmap.casefold()
+        assert "FL26" in normalized_roadmap
+
+    assert not ("ovr" in normalized_roadmap.casefold() and "pes retro" in normalized_roadmap.casefold())

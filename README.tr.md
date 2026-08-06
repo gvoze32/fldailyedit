@@ -51,9 +51,15 @@ Güncelleyici, başka bir oyuncu tarafından kullanılan forma numarasının üz
 
 ## Yol Haritası / Devam Eden Çalışmalar
 
-Planlanan ve geliştirilmekte olan özellik:
+Yerel kayıtlar için GUI güncellemesi kullanıma sunuldu:
 
-1. **Arayüzde Yerel Güncelleme (ayrı çoklu temel dosya dağıtımının yerini alır)** — her yama için ayrı önceden derlenmiş temel dosyalar dağıtmak yerine, kullanıcıların kendi kayıt dosyaları üzerinde transfer sürecini çalıştırabilmesi için yükleyici arayüzüne yerel güncelleme modu eklenecektir (**SP Football Life 2026**, **vanilla eFootball PES 2021** ve **UML**).
+1. **Arayüzde Yerel Güncelleme** — dört adımlı sihirbaz artık kullanıcı tarafından
+   seçilen, doğrulanmış ortak düzene sahip `EDIT00000000` kaydını **Fast** veya
+   **Deep** kapsamıyla günceller. Yerel uygunluk, kaydın SPFL/PES/UML etiketinden
+   bağımsızdır; kayıt değişiklikten önce kontrol edilir ve yerinde yedeklenir,
+   ardından yalnızca atomik olarak doğrulanmış bir sonuçla değiştirilir. Bu işlem
+   yeni uzak varlıkları yayımlamaz: indirilebilir sürümler yalnızca doğrulanmış
+   FL26/SPFL hedefleriyle sınırlı kalır.
 
 ## Güvenlik ve Sınırlamalar
 

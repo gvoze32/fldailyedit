@@ -60,10 +60,15 @@ Updater juga memeriksa klub pemain saat ini sebelum menerapkan perpindahan.
 
 ## Roadmap / Sedang dikerjakan
 
-Item berikut direncanakan dan sedang dalam proses pengerjaan:
+Pembaruan GUI untuk save lokal telah tersedia:
 
-1. **Pembaruan Lokal di GUI (menggantikan distribusi multi-base terpisah)** — alih-alih mendistribusikan base pre-built terpisah untuk setiap patch, fitur update lokal akan ditambahkan langsung ke GUI aplikasi agar pengguna dapat menjalankan pipeline transfer langsung pada save file milik mereka sendiri di berbagai target (**SP Football Life 2026**, **vanilla eFootball PES 2021**, dan **UML**).
-
+1. **Pembaruan Lokal di GUI** — wizard empat langkah kini memperbarui save
+   `EDIT00000000` yang dipilih pengguna dan ber-layout umum tervalidasi, dengan
+   cakupan **Fast** atau **Deep**. Kelayakan lokal tidak bergantung pada label
+   SPFL/PES/UML save; save diperiksa sebelum mutasi dan diberi cadangan di
+   tempat, lalu hanya diganti dengan hasil yang diverifikasi secara atomik. Ini
+   tidak menerbitkan aset remote baru: rilis yang dapat diunduh tetap hanya
+   menargetkan FL26/SPFL tervalidasi.
 ## Keamanan dan keterbatasan
 
 - Eksekusi lokal membuat cadangan bergilir serta menggunakan enkripsi atomik yang terverifikasi.

@@ -51,9 +51,16 @@ L'outil n'écrase pas un numéro de maillot déjà utilisé par un autre membre 
 
 ## Feuille de route / En cours de développement
 
-Cet élément est planifié et en cours de développement :
+La mise à jour de l'interface graphique pour les sauvegardes locales est livrée :
 
-1. **Mise à jour locale dans l'interface graphique (remplace la distribution de bases multiples séparées)** — au lieu de distribuer des bases préconstruites distinctes pour chaque patch, un mode de mise à jour locale sera ajouté directement à l'interface de l'installateur afin que les utilisateurs puissent exécuter le pipeline sur leur propre sauvegarde (**SP Football Life 2026**, **vanilla eFootball PES 2021** et **UML**).
+1. **Mise à jour locale dans l'interface graphique** — l'assistant en quatre
+   étapes met désormais à jour une sauvegarde `EDIT00000000` sélectionnée par
+   l'utilisateur et dotée d'une structure commune validée, avec une couverture
+   **Fast** ou **Deep**. L'éligibilité locale est indépendante de l'étiquette
+   SPFL/PES/UML de la sauvegarde ; la sauvegarde est contrôlée avant la mutation
+   et reçoit une copie de sauvegarde sur place, puis n'est remplacée que par un
+   résultat vérifié atomiquement. Cela ne publie pas de nouveaux actifs distants :
+   les versions téléchargeables restent limitées aux cibles FL26/SPFL validées.
 
 ## Sécurité et limitations
 

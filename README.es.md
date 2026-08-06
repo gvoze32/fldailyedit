@@ -60,9 +60,16 @@ plantilla. También verifica el club actual del jugador antes de aplicar un movi
 
 ## Hoja de ruta / Trabajo en curso
 
-Este elemento está planificado y en desarrollo:
+La actualización de la GUI para partidas locales ya está entregada:
 
-1. **Actualización local en la GUI (reemplaza la distribución separada de multi-bases)** — en lugar de distribuir bases preconstruidas separadas para cada parche, se añadirá un modo de actualización local directamente en la GUI del instalador para que los usuarios ejecuten la pipeline de transferencias en su propia partida guardada (**SP Football Life 2026**, **vanilla eFootball PES 2021** y **UML**).
+1. **Actualización local en la GUI** — el asistente de cuatro pasos ya actualiza
+   una partida `EDIT00000000` seleccionada por el usuario y con diseño común
+   validado, con cobertura **Fast** o **Deep**. La elegibilidad local es
+   independiente de la etiqueta SPFL/PES/UML de la partida; la partida se
+   comprueba antes de la mutación y recibe una copia de seguridad en el propio
+   lugar, y solo se reemplaza por un resultado verificado atómicamente. Esto no
+   publica nuevos activos remotos: las versiones descargables siguen limitadas
+   a objetivos FL26/SPFL validados.
 
 ## Seguridad y limitaciones
 

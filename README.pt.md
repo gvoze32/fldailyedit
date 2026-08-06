@@ -51,9 +51,15 @@ O atualizador não substitui um número de camisa que já esteja sendo usado por
 
 ## Roteiro / Trabalho em andamento
 
-Este item está planejado e em desenvolvimento:
+O modo de atualização da GUI para arquivos locais foi entregue:
 
-1. **Atualização Local na GUI (substitui a distribuição separada de múltiplas bases)** — em vez de distribuir bases pré-construídas separadas para cada patch, será adicionado um modo de atualização local diretamente na interface do instalador para que os usuários executem o pipeline no seu próprio arquivo de salvamento (**SP Football Life 2026**, **vanilla eFootball PES 2021** e **UML**).
+1. **Atualização Local na GUI** — o assistente de quatro etapas agora atualiza
+   um arquivo de salvamento `EDIT00000000` escolhido pelo usuário e com layout
+   comum validado, com cobertura **Fast** ou **Deep**. A elegibilidade local
+   independe do rótulo SPFL/PES/UML do arquivo; o arquivo é verificado antes da
+   mutação e recebe um backup no local, sendo substituído apenas por um resultado
+   verificado atomicamente. Isso não publica novos ativos remotos: as versões
+   para download continuam restritas a alvos FL26/SPFL validados.
 
 ## Segurança e limitações
 
