@@ -121,6 +121,123 @@ def test_cmd_run_routes_through_shared_local_update_service(
     assert "Warning: report warning" in output
 
 
+def test_local_runtime_rejects_invalid_save_without_backup_or_target_text(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import run
+    from local_update import (
+        CancellationToken,
+        LocalUpdateError,
+        LocalUpdateRequest,
+        LocalUpdateStage,
+    )
+
+    edit_path = tmp_path / "EDIT00000000"
+    original = b"encrypted-save"
+    edit_path.write_bytes(original)
+    decrypted = tmp_path / "decrypted-invalid"
+    decrypted.mkdir()
+    (decrypted / "data.dat").write_bytes(b"decrypted")
+
+    class InvalidEditFile:
+        def load(self, _path: Path) -> None:
+            pass
+
+        def validate_integrity(self) -> dict[str, object]:
+            return {
+                "valid": False,
+                "errors": ["bad common layout"],
+                "warnings": [],
+                "metrics": {},
+            }
+
+    monkeypatch.setattr(run, "EditFile", InvalidEditFile)
+    monkeypatch.setattr(run.crypto, "decrypt", lambda _path: decrypted)
+    monkeypatch.setattr(run.crypto, "cleanup_temp", lambda _path: None)
+    backup_calls: list[Path] = []
+    monkeypatch.setattr(run.backup_mod, "create_backup", backup_calls.append)
+
+    with pytest.raises(LocalUpdateError) as caught:
+        run._RunLocalUpdateRuntime().validate_and_prepare(
+            LocalUpdateRequest(edit_path), (), CancellationToken()
+        )
+
+    assert caught.value.code == "invalid_save"
+    assert caught.value.stage is LocalUpdateStage.VALIDATING
+    assert "FL26" not in str(caught.value)
+    assert "Football Life 2026" not in str(caught.value)
+    assert backup_calls == []
+    assert edit_path.read_bytes() == original
+
+
+def test_local_runtime_uses_selected_input_without_opening_configured_base(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import run
+    from local_update import CancellationToken, LocalUpdateRequest
+
+    selected_input = tmp_path / "selected" / "EDIT00000000"
+    selected_input.parent.mkdir()
+    selected_input.write_bytes(b"selected-encrypted-save")
+    configured_base = tmp_path / "base" / "EDIT00000000"
+    configured_base.parent.mkdir()
+    configured_base.write_bytes(b"bundled-fl26-base")
+    decrypted = tmp_path / "decrypted-selected"
+    decrypted.mkdir()
+    data_dat = decrypted / "data.dat"
+    data_dat.write_bytes(b"selected-decrypted-save")
+
+    loaded_paths: list[Path] = []
+
+    class FakeEditFile:
+        def __init__(self) -> None:
+            self._data = bytearray(b"selected-decrypted-save")
+
+        def load(self, path: Path) -> None:
+            loaded_paths.append(Path(path))
+
+        def validate_integrity(self) -> dict[str, object]:
+            return {"valid": True, "errors": [], "warnings": [], "metrics": {}}
+
+    opened_paths: list[Path] = []
+    original_open = Path.open
+
+    def guarded_open(path: Path, *args, **kwargs):
+        opened_paths.append(path)
+        if path == configured_base:
+            raise AssertionError("local validation must not open the configured base")
+        return original_open(path, *args, **kwargs)
+
+    decrypt_paths: list[Path] = []
+
+    def fake_decrypt(path: Path) -> Path:
+        decrypt_paths.append(Path(path))
+        return decrypted
+
+    monkeypatch.setattr(run.config, "BASE_EDIT_PATH", configured_base, raising=False)
+    monkeypatch.setattr(
+        run,
+        "load_base_manifest",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("local validation must not load the base manifest")
+        ),
+    )
+    monkeypatch.setattr(Path, "open", guarded_open)
+    monkeypatch.setattr(run, "EditFile", FakeEditFile)
+    monkeypatch.setattr(run.crypto, "decrypt", fake_decrypt)
+    monkeypatch.setattr(run.crypto, "cleanup_temp", lambda _path: None)
+
+    runtime = run._RunLocalUpdateRuntime()
+    prepared = runtime.validate_and_prepare(
+        LocalUpdateRequest(selected_input), (), CancellationToken()
+    )
+    try:
+        assert decrypt_paths == [selected_input]
+        assert loaded_paths == [data_dat]
+        assert configured_base not in opened_paths
+    finally:
+        runtime.cleanup(prepared)
+
 def test_players_help_uses_player_update_language(monkeypatch, capsys):
     import run
 

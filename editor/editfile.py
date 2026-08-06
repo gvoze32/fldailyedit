@@ -3,14 +3,14 @@ Binary edit file reader/writer.
 
 Reads the decrypted data.dat and provides functions to:
 - Parse the header to get entry counts
-- Calculate table offsets dynamically (handles FL26 differences from vanilla PES21)
+- Calculate table offsets dynamically for the supported PES edit-file layout
 - Read all players (ID + name)
 - Read all teams (ID + name)
 - Read team rosters (from Team-Player Table)
 - Move players between teams (the core transfer operation)
 
 All offsets are calculated from the header — nothing is hardcoded except entry sizes
-and field positions within entries, which are the same across PES20/21/FL26.
+and field positions within the supported PES edit-file layout.
 """
 import logging
 import struct
@@ -161,7 +161,7 @@ def assign_smart_shirt_number(
 
 class EditFile:
     """
-    Reads and modifies a decrypted PES 2021 / FL26 data.dat file.
+    Reads and modifies a decrypted data.dat file using the supported PES edit-file layout.
 
     Usage:
         ef = EditFile("path/to/data.dat")
@@ -1282,7 +1282,7 @@ class EditFile:
     # ──────────────────────────────────────────────────────────
 
     def validate_integrity(self) -> dict[str, object]:
-        """Validate FL26 table bounds and cross-table roster invariants."""
+        """Validate supported PES edit-file table bounds and cross-table roster invariants."""
         errors: list[str] = []
         warnings: list[str] = []
 
@@ -1290,7 +1290,7 @@ class EditFile:
         if len(self._data) != expected_size:
             errors.append(
                 f"data.dat size is {len(self._data):,}; expected {expected_size:,} bytes "
-                "for the FL26/PES21 layout"
+                "for the supported PES edit-file layout"
             )
 
         count_limits = {

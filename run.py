@@ -12,7 +12,7 @@ Usage:
 Workflow:
     1. Collect and reconcile FotMob, Wikipedia, and Sortitoutsi transfers
     2. Decrypt and validate the edit file (pesXdecrypter)
-    3. Load the current FL26 catalog and roster state
+    3. Load the selected save’s current player/roster state
     4. Match identities and plan safe roster actions
     5. Apply verified transfers, validate, re-encrypt, and log
 """
@@ -849,7 +849,7 @@ def cmd_inspect(args):
 
 
 def cmd_validate(args):
-    """Validate an encrypted FL26 edit file and return a shell-friendly status."""
+    """Validate an encrypted edit file with a supported PES edit-file layout."""
     edit_path = Path(args.edit_file)
     print(f"Validating {edit_path}...")
     temp_dir = crypto.decrypt(edit_path)
@@ -863,9 +863,12 @@ def cmd_validate(args):
         for error in report["errors"]:
             print(f"ERROR: {error}")
         if report["valid"]:
-            print("PASS: save structure matches known-good Football Life 2026 files")
+            print("PASS: save structure matches the supported PES edit-file layout")
             return
-        print(f"FAIL: {len(report['errors'])} integrity error(s)")
+        print(
+            f"FAIL: {len(report['errors'])} supported PES edit-file layout "
+            "error(s)"
+        )
         raise SystemExit(2)
     finally:
         crypto.cleanup_temp(temp_dir)
@@ -1113,7 +1116,7 @@ def _scrape_run_transfers(args):
 
 def _load_match_database(edit_file: EditFile):
     """Build roster-aware player and club indexes from one validated save."""
-    print("\n📋 Reading FL26 database...")
+    print("\n📋 Reading selected save database...")
     players = edit_file.get_all_players()
     edit_file._player_cache = players
     teams_info = edit_file.get_all_team_info()
@@ -1384,7 +1387,7 @@ class _RunMutation:
 
 
 class _RunLocalUpdateRuntime:
-    """Adapter from the shared service lifecycle to the existing FL26 pipeline."""
+    """Adapter from the shared service lifecycle to the verified edit-file pipeline."""
 
     @staticmethod
     def _args(request: LocalUpdateRequest) -> argparse.Namespace:
@@ -1471,14 +1474,14 @@ class _RunLocalUpdateRuntime:
             integrity = edit_file.validate_integrity()
             if not integrity["valid"]:
                 details = [
-                    "Input save failed FL26 integrity validation; no changes were written."
+                    "Input save failed supported edit-file integrity validation; no changes were written."
                 ]
                 details.extend(f"  - {error}" for error in integrity["errors"][:20])
                 remaining = len(integrity["errors"]) - 20
                 if remaining > 0:
                     details.append(f"  ... and {remaining} more errors")
                 details.append(
-                    "Use a known-good Football Life 2026 EDIT00000000 as the local save."
+                    "Use a standard EDIT00000000 save with a supported layout."
                 )
                 raise LocalUpdateError(
                     "invalid_save",
@@ -1515,7 +1518,7 @@ class _RunLocalUpdateRuntime:
             lock.release()
             raise LocalUpdateError(
                 "invalid_save",
-                f"Could not load the selected FL26 save: {error}",
+                f"Could not load the selected save: {error}",
                 stage=LocalUpdateStage.VALIDATING,
             ) from error
 
@@ -1879,7 +1882,7 @@ class _RunLocalUpdateRuntime:
 
 
 def build_local_update_service() -> LocalUpdateService:
-    """Return the shared FL26 service used by CLI and installer GUI."""
+    """Return the shared local update service used by CLI and installer GUI."""
 
     return LocalUpdateService(_RunLocalUpdateRuntime())
 
@@ -2051,7 +2054,10 @@ def _require_valid_edit(edit_file: EditFile, stage: str) -> None:
     report = edit_file.validate_integrity()
     if report["valid"]:
         return
-    print(f"{stage} failed FL26 integrity validation; no audits were written.")
+    print(
+        f"{stage} failed supported PES edit-file layout validation; "
+        "no audits were written."
+    )
     for error in report["errors"][:20]:
         print(f"  - {error}")
     raise SystemExit(2)
@@ -2597,7 +2603,9 @@ def main():
 
 
     # validate
-    p_validate = sub.add_parser("validate", help="Validate an encrypted FL26 edit file")
+    p_validate = sub.add_parser(
+        "validate", help="Validate an encrypted edit file with a supported PES edit-file layout"
+    )
     p_validate.add_argument("--edit-file", type=str, required=True, help="Path to edit00000000")
     p_validate.set_defaults(func=cmd_validate)
 
