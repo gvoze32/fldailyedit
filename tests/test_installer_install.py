@@ -681,12 +681,26 @@ def test_restore_failure_retains_backup_and_reports_recovery_failed(
         if path == target:
             return "0" * 64
         return real_hash(path)
-
-    def fail_restore(source: Path, destination_path: Path) -> None:
-        raise OSError("no-replace restore failed")
-
     monkeypatch.setattr(install_module, "_file_sha256", wrong_installed_hash)
-    monkeypatch.setattr(install_module, "_move_no_replace", fail_restore)
+
+    class FailingWindowsRecoveryAdapter:
+        def snapshot(self, _path: Path) -> object:
+            return object()
+
+        def move_verified_no_replace(
+            self,
+            _source: Path,
+            _target: Path,
+            _expected: object,
+        ) -> None:
+            raise OSError("no-replace restore failed")
+
+    if install_module._WINDOWS:
+        monkeypatch.setattr(
+            install_module,
+            "_WINDOWS_ADAPTER",
+            FailingWindowsRecoveryAdapter(),
+        )
 
     with pytest.raises(InstallError) as caught:
         _install(archive_path, destination, record)

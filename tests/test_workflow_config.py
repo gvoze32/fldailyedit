@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -189,6 +190,33 @@ def _target_workflow_step_script(name: str) -> str:
     )
     assert match is not None
     return textwrap.dedent(match.group("script"))
+
+def _bash_command() -> list[str]:
+    if os.name != "nt":
+        return ["bash", "-c"]
+
+    bash_path = shutil.which("bash")
+    if bash_path is not None:
+        resolved_bash = Path(bash_path).resolve()
+        system_root = Path(
+            os.environ.get("SystemRoot", r"C:\Windows")
+        ).resolve()
+        if resolved_bash.parent.as_posix().casefold() != (
+            (system_root / "System32").as_posix().casefold()
+        ):
+            return [str(resolved_bash), "-c"]
+
+    git_path = shutil.which("git")
+    if git_path is not None:
+        git_root = Path(git_path).resolve().parent.parent
+        for candidate in (
+            git_root / "bin" / "bash.exe",
+            git_root / "usr" / "bin" / "bash.exe",
+        ):
+            if candidate.is_file():
+                return [str(candidate), "-c"]
+
+    raise FileNotFoundError("Git Bash executable not found")
 
 
 def _workflow_heredoc_script(marker: str) -> str:
@@ -591,7 +619,10 @@ def test_remote_branch_recovery_accepts_the_exact_generated_spec(tmp_path):
     )
 
     result = subprocess.run(
-        ["bash", "-c", _workflow_step_script("Verify an existing base-repository branch")],
+        [
+            *_bash_command(),
+            _workflow_step_script("Verify an existing base-repository branch"),
+        ],
         cwd=repository,
         env=environment,
         capture_output=True,
@@ -620,7 +651,10 @@ def test_remote_branch_recovery_survives_an_advanced_default_from_shallow_checko
     assert not shallow_marker.exists()
 
     result = subprocess.run(
-        ["bash", "-c", _workflow_step_script("Verify an existing base-repository branch")],
+        [
+            *_bash_command(),
+            _workflow_step_script("Verify an existing base-repository branch"),
+        ],
         cwd=repository,
         env=environment,
         capture_output=True,
@@ -641,7 +675,10 @@ def test_remote_branch_recovery_rejects_a_different_spec_blob(tmp_path):
     )
 
     result = subprocess.run(
-        ["bash", "-c", _workflow_step_script("Verify an existing base-repository branch")],
+        [
+            *_bash_command(),
+            _workflow_step_script("Verify an existing base-repository branch"),
+        ],
         cwd=repository,
         env=environment,
         capture_output=True,
@@ -661,7 +698,10 @@ def test_remote_branch_recovery_rejects_an_additional_changed_path(tmp_path):
     )
 
     result = subprocess.run(
-        ["bash", "-c", _workflow_step_script("Verify an existing base-repository branch")],
+        [
+            *_bash_command(),
+            _workflow_step_script("Verify an existing base-repository branch"),
+        ],
         cwd=repository,
         env=environment,
         capture_output=True,
@@ -737,8 +777,7 @@ def _run_target_event_parser(
     )
     result = subprocess.run(
         [
-            "bash",
-            "-c",
+            *_bash_command(),
             _target_workflow_step_script("Read trusted pull request coordinates"),
         ],
         env=environment,
