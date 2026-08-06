@@ -21,6 +21,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from typing import cast
 
 from editor import crypto
 from editor.editfile import EditFile
@@ -35,15 +36,27 @@ def _format_ovr(value_tenths: int) -> str:
 def _apply_spec_patches(
     abilities: dict[str, int],
     spec_path: Path,
-) -> dict[str, int]:
-    """Apply 'to' values dari player spec JSON ke abilities dict."""
+) -> dict[str, object]:
+    """Apply raw 'to' values from a player spec to an ability map."""
     raw = json.loads(spec_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise PlayerOvrError("OVR spec must be an object")
     pes = raw.get("pes", {})
+    if not isinstance(pes, dict):
+        raise PlayerOvrError("OVR spec pes must be an object")
     ab_patches = pes.get("abilities", {})
-    result = dict(abilities)
+    if not isinstance(ab_patches, dict):
+        raise PlayerOvrError("OVR spec abilities must be an object")
+
+    result: dict[str, object] = dict(abilities)
     for field, patch in ab_patches.items():
-        if isinstance(patch, dict) and "to" in patch:
-            result[field] = int(patch["to"])
+        if field not in ABILITY_FIELDS:
+            raise PlayerOvrError(f"unsupported OVR ability patch: {field!r}")
+        if not isinstance(patch, dict) or "to" not in patch:
+            raise PlayerOvrError(
+                f"OVR ability patch {field!r} must contain a 'to' value"
+            )
+        result[field] = patch["to"]
     return result
 
 
@@ -192,7 +205,9 @@ def main() -> None:
             print(f"ERROR: spec file not found: {args.spec}")
             return
         try:
-            after_abs = _apply_spec_patches(base_abs, args.spec)
+            after_abs = cast(
+                dict[str, int], _apply_spec_patches(base_abs, args.spec)
+            )
             calculate_ovr_tenths(after_abs, base_pos)
         except PlayerOvrError as exc:
             print(f"ERROR reading spec: {exc}")
