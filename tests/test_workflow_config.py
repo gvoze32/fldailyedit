@@ -744,14 +744,15 @@ def test_generate_workflow_does_not_put_untrusted_event_data_in_shell_structure(
     assert text.count("shell: bash") == len(run_blocks)
 
 
-def test_ci_uses_linux_matrix_and_windows_gate():
+def test_ci_uses_linux_and_windows_with_single_python_version():
     text = CI_PATH.read_text(encoding="utf-8")
     matrix_job = text.split("\n  test:\n", 1)[1]
     native_build = "make -C vendor/pesXdecrypter"
     validator = "python run.py players validate"
 
-    for version in ("3.10", "3.11", "3.12", "3.13"):
-        assert f'python-version: "{version}"' in matrix_job
+    assert matrix_job.count('python-version: "3.12"') == 2
+    for version in ("3.10", "3.11", "3.13"):
+        assert f'python-version: "{version}"' not in matrix_job
     assert "os: ubuntu-latest" in matrix_job
     assert 'os: windows-latest\n            python-version: "3.12"' in matrix_job
     assert "macos-latest" not in text
