@@ -76,7 +76,7 @@ Generated proposals contain a draft-only `source` snapshot sufficient to rerun c
 - source player skills and COM playing styles;
 - `snapshot_sha256`, computed over canonical UTF-8 JSON of the normalized snapshot excluding the hash field.
 
-No fetched HTML, Next.js payload, response headers, or runtime fetch timestamp is stored. Equal source data produces byte-identical snapshot JSON. CI validates the snapshot schema and hash, then reconstructs `PesRetroStatsProfile` and reruns the trusted converter. CI never refetches the live profile.
+No fetched HTML, Next.js payload, response headers, or runtime fetch timestamp is stored. Equal source data produces byte-identical snapshot JSON. `snapshot_sha256` proves internal integrity, not web authenticity. CI validates the snapshot schema and hash, then reconstructs `PesRetroStatsProfile` and reruns the trusted converter without refetching the live profile. Source provenance is enforced separately by the same-repository generator-branch gate described below.
 
 The canonical profile URL remains in completed `evidence`; the source snapshot is removed during approval.
 
@@ -240,7 +240,7 @@ Draft evidence retains issue number, issue URL, submitted current team, canonica
 
 A complete proposal may validly report `waiting` for an environmental apply condition such as a full destination roster. That does not make its data incomplete.
 
-CI success means the proposal is complete, authentic, reproducible, and semantically safe to review. It does not mean approved.
+CI success means the proposal is complete, internally consistent, reproducible, semantically safe to review, and admitted by the workflow provenance gate. It does not mean approved.
 
 ### Apply gate
 
@@ -277,6 +277,15 @@ The generator workflow continues to run only for the exact maintainer-applied la
 - reviewers must inspect converted attributes, internal resolution, and `draft.ovr_review`.
 
 The PR validator continues to check out trusted base code, fetch only the advertised head object, enforce the one-player-file boundary, and materialize only the validated JSON blob. It does not execute head code, refetch the source, expose secrets, or gain new permissions.
+
+Any JSON containing `draft.generator` is accepted only when all of these event-derived conditions hold before semantic validation:
+
+- the pull-request head repository exactly equals the base repository;
+- the head ref is exactly `player-draft/issue-<positive-integer>`;
+- that integer equals the validated `evidence.issue_number`;
+- the validated issue URL names the same repository and issue number.
+
+A generated-proposal-shaped JSON from a fork, arbitrary branch, or mismatched issue is rejected. Direct one-file contribution PRs remain supported only as completed specifications without `source` or `draft` metadata. The snapshot hash then provides reproducible integrity inside the trusted generator branch; it is not treated as a signature.
 
 Unknown or malformed source data, aliases, mappings, IDs, patches, and OVR values fail closed. Errors name the first invalid human-readable field or position and never include fetched HTML, issue-body dumps, decrypted bytes, or other large untrusted payloads.
 
@@ -315,12 +324,14 @@ Unknown or malformed source data, aliases, mappings, IDs, patches, and OVR value
 - `players apply` rejects an unapproved complete proposal.
 - `players approve` converts a validated proposal atomically and is non-idempotent.
 - Approved output passes completed-spec validation and normal apply semantics.
-- Tampered snapshot, converted field, internal ID, base patch, or OVR review blocks validation and approval.
+- Inconsistent tampering of snapshot, converted field, internal ID, base patch, or OVR review blocks validation and approval; coordinated generated-proposal fabrication from a fork or arbitrary branch is blocked by the workflow provenance gate.
 - Existing completed specifications continue to validate and apply unchanged.
 
 ### Workflow
 
 - Exact label, permissions, branch, one-file boundary, trusted checkout, and no-head-code invariants remain enforced.
+- Same-repository generator origin is required only for proposal metadata; fork/direct completed-spec PRs remain supported.
+- Fork proposal, arbitrary same-repository branch, issue-number mismatch, and issue-URL mismatch are rejected before semantic validation.
 - Draft PR body contains the human-approval and OVR-estimate notices.
 - Machine output remains exactly `SPEC_PATH` then `PLAYER_NAME`.
 
@@ -330,7 +341,7 @@ Unknown or malformed source data, aliases, mappings, IDs, patches, and OVR value
 2. A canonical Retro profile for a new player produces a complete create proposal with automatically resolved player, team, and nationality IDs, deterministic print name and generic appearance, and proposal OVR.
 3. Neither operation requires a maintainer to enter or infer a raw PES ID.
 4. Generated proposals contain no `null`, no `missing`, and no unresolved placeholder.
-5. Trusted CI reproduces source conversion, internal resolution, and OVR without network access and detects any tampering.
+5. Trusted CI reproduces source conversion, internal resolution, and OVR without network access, detects internal inconsistencies, and accepts generator metadata only from the matching same-repository issue branch.
 6. Complete unapproved proposals pass validation but cannot be applied.
 7. Explicit human approval converts a proposal into the existing completed-spec format without manual JSON editing.
 8. OVR weights and formula exist only in `editor/player_ovr.py`; OVR never becomes a save field.
