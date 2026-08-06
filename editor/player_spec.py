@@ -1334,6 +1334,17 @@ def approve_player_proposal(path: str | Path, edit_file: "EditFile") -> Path:
     from tools.generate_player_draft import validate_generated_proposal
 
     validated = validate_generated_proposal(proposal_path, edit_file)
+    candidate = _load_proposal_spec(proposal_path, validated)
+    all_players = edit_file.get_all_players()
+    if candidate.operation == "create":
+        assessment = assess_create(edit_file, candidate, all_players)
+    else:
+        assessment = assess_update(edit_file, candidate, all_players)
+    if assessment.status not in {"ready", "waiting"}:
+        raise PlayerSpecError(
+            f"player proposal {proposal_path} is no longer applicable: "
+            f"{assessment.reason}"
+        )
     completed = dict(
         _object(validated, f"player proposal {proposal_path}")
     )

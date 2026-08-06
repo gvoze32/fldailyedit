@@ -284,6 +284,44 @@ def test_direct_apply_helpers_reject_human_review_proposals(
     assert bytes(edit_file._data) == before
 
 
+
+def test_approve_rejects_create_when_base_identity_appears(
+    tmp_path, monkeypatch
+):
+    from editor.models import PlayerInfo
+    from editor.player_spec import PlayerSpecError, approve_player_proposal
+
+    path, _proposal, edit_file = write_approval_proposal(
+        tmp_path, monkeypatch, "create"
+    )
+    edit_file.players[224999] = PlayerInfo(
+        224999,
+        "Dastan Satpaev",
+        "SATPAEV",
+    )
+    before = path.read_bytes()
+
+    with pytest.raises(PlayerSpecError, match="no longer applicable"):
+        approve_player_proposal(path, edit_file)
+
+    assert path.read_bytes() == before
+
+
+def test_approve_allows_create_when_destination_roster_is_full(
+    tmp_path, monkeypatch
+):
+    from editor.models import TeamData
+    from editor.player_spec import approve_player_proposal
+
+    path, _proposal, edit_file = write_approval_proposal(
+        tmp_path, monkeypatch, "create"
+    )
+    edit_file.rosters[101] = TeamData(101, list(range(1, 41)))
+
+    approve_player_proposal(path, edit_file)
+
+    assert "draft" not in json.loads(path.read_text(encoding="utf-8"))
+
 @pytest.mark.parametrize("operation", ["update", "create"])
 def test_approve_player_proposal_transforms_exact_completed_shape(
     tmp_path,

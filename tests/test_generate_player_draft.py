@@ -328,6 +328,55 @@ class FakeEditFile:
     def get_player_ability_profile(self, player_id):
         return self.profiles.get(player_id)
 
+    def get_edited_player_entry(self, player_id):
+        if player_id != 162196:
+            return None
+        from editor.player_codec import (
+            COM_STYLE_FIELDS,
+            PLAYER_SKILL_FIELDS,
+            patch_player_entry,
+        )
+        from tests.test_player_specs import PALESTRA_ENTRY
+
+        profile = self.profiles[player_id]
+        updates = dict(profile.abilities)
+        updates.update(
+            {
+                "nationality_id": profile.nationality_id,
+                "height": profile.height,
+                "weight": profile.weight,
+                "age": profile.age,
+                "registered_position": profile.registered_position_id,
+                "playing_style": profile.playing_style,
+                "strong_foot": profile.strong_foot,
+                "weak_foot_usage": profile.weak_foot_usage,
+                "weak_foot_accuracy": profile.weak_foot_accuracy,
+                "form": profile.form,
+                "injury_resistance": profile.injury_resistance,
+            }
+        )
+        updates.update(
+            {
+                f"position_{position.lower()}": value
+                for position, value in profile.position_proficiency.items()
+            }
+        )
+        updates.update(
+            {
+                f"skill_{skill}": int(skill in profile.player_skills)
+                for skill in PLAYER_SKILL_FIELDS
+            }
+        )
+        updates.update(
+            {
+                f"com_style_{style}": int(style in profile.com_styles)
+                for style in COM_STYLE_FIELDS
+            }
+        )
+        return patch_player_entry(PALESTRA_ENTRY, updates)
+
+
+
 
 def build_create_kwargs(proposal: Pes21Proposal) -> dict[str, object]:
     return {
