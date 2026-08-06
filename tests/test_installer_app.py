@@ -196,6 +196,33 @@ def test_invalid_choices_are_rejected_without_publishing_a_change() -> None:
     assert changes == []
 
 
+def test_release_controller_rejects_local_policy_target() -> None:
+    local_record = _record(target_id=GameTarget.LOCAL.value)
+    controller = InstallerController()
+    controller.set_catalog(Catalog(1, (local_record,)))
+
+    assert controller.select_record(local_record) is False
+    assert controller.state.selected_record is None
+
+
+def test_release_compatibility_rejects_local_policy_target(tmp_path: Path) -> None:
+    local_record = _record(target_id=GameTarget.LOCAL.value)
+    save = tmp_path / "save"
+    save.mkdir()
+    (save / "EDIT00000000").write_bytes(b"local-policy")
+    location = SaveLocation(GameTarget.LOCAL, "Selected local save", save)
+    controller = InstallerController(
+        state=InstallerState(
+            catalog=Catalog(1, (local_record,)),
+            selected_record=local_record,
+            locations=(location,),
+            selected_location=location,
+        )
+    )
+
+    assert controller._has_compatible_location() is False
+
+
 def test_review_starts_progress_with_same_choices() -> None:
     controller, fast, _, fl_location, _ = _controller_with_choices()
     controller.select_record(fast)
@@ -311,6 +338,24 @@ def _next_event(
             ) from error
         if isinstance(event, event_type):
             return event
+
+
+def test_worker_rejects_local_policy_target_from_release_install(
+    monkeypatch, tmp_path: Path
+) -> None:
+    local_record = _record(target_id=GameTarget.LOCAL.value)
+    location = SaveLocation(
+        GameTarget.LOCAL,
+        "Selected local save",
+        tmp_path / "save",
+    )
+    worker = InstallerWorker()
+    monkeypatch.setattr(worker, "start", lambda: None)
+
+    with pytest.raises(ValueError, match="incompatible"):
+        worker.install(local_record, location)
+
+    assert worker._install_pending is False
 
 
 def _progress_controller(
@@ -1359,6 +1404,61 @@ def test_local_browse_accepts_non_2026_save_layout(
     ]
     assert application._browse_pending is True
     assert application._browse_error_var.value == "Checking selected folder…"
+
+
+def test_release_browse_rejects_local_policy_target(
+    monkeypatch, tmp_path: Path
+) -> None:
+    local_record = _record(target_id=GameTarget.LOCAL.value)
+    controller = InstallerController(
+        state=InstallerState(
+            catalog=Catalog(1, (local_record,)),
+            selected_record=local_record,
+        )
+    )
+    selected = tmp_path / "save"
+    selected.mkdir()
+
+    class BrowseVar:
+        def __init__(self) -> None:
+            self.value = ""
+
+        def set(self, value: str) -> None:
+            self.value = value
+
+    class BrowseButton:
+        def focus_set(self) -> None:
+            pass
+
+    class BrowseWorker:
+        def __init__(self) -> None:
+            self.calls: list[tuple[Path, GameTarget, str]] = []
+
+        def validate_destination(
+            self, path: Path, target: GameTarget, game_name: str
+        ) -> None:
+            self.calls.append((path, target, game_name))
+
+    worker = BrowseWorker()
+    application = object.__new__(installer_app.InstallerApplication)
+    application.controller = controller
+    application.root = None
+    application.worker = worker
+    application._browse_pending = False
+    application._browse_error_var = BrowseVar()
+    application._browse_button = BrowseButton()
+    application._render = lambda _state: None
+    monkeypatch.setattr(
+        installer_app,
+        "filedialog",
+        type("Dialog", (), {"askdirectory": staticmethod(lambda **_: str(selected))}),
+    )
+
+    application._browse()
+
+    assert worker.calls == []
+    assert application._browse_pending is False
+    assert "not supported" in application._browse_error_var.value
 
 def test_local_mode_accepts_a_non_fl26_save_location(tmp_path: Path) -> None:
     save = tmp_path / "2025" / "save"

@@ -397,6 +397,8 @@ class InstallerController:
             or self.state.catalog is None
         ):
             return False
+        if record.target_id == GameTarget.LOCAL.value:
+            return False
         selected = next(
             (
                 catalog_record
@@ -467,6 +469,7 @@ class InstallerController:
             and location is not None
             and any(candidate == location for candidate in self.state.locations)
             and record is not None
+            and record.target_id != GameTarget.LOCAL.value
             and location.target.value == record.target_id
         )
 
@@ -653,7 +656,11 @@ class InstallerWorker:
         self._commands.put(_ValidateDestination(path, target, game_name))
 
     def install(self, record: ReleaseRecord, location: SaveLocation) -> None:
-        if location.target.value != record.target_id:
+        if (
+            record.target_id == GameTarget.LOCAL.value
+            or location.target is GameTarget.LOCAL
+            or location.target.value != record.target_id
+        ):
             raise ValueError("record and save location are incompatible")
         self.start()
         with self._state_lock:
@@ -1919,7 +1926,7 @@ class InstallerApplication:
         if state.locations:
             if local_mode:
                 self._location_status_var.set(
-                    f"{compatible_count} existing save "
+                    f"{compatible_count} existing "
                     f"{'save' if compatible_count == 1 else 'saves'} found."
                 )
             else:
@@ -2185,6 +2192,10 @@ class InstallerApplication:
                 return
             try:
                 target = GameTarget(record.target_id)
+                if target is GameTarget.LOCAL:
+                    raise ValueError(
+                        "the local policy marker is only valid for local saves"
+                    )
             except ValueError as error:
                 self._browse_error_var.set(
                     f"The selected update target is not supported.\n{error}"
