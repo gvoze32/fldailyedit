@@ -122,7 +122,11 @@ def test_event_parser_accepts_only_positive_number_and_full_lowercase_shas(tmp_p
                 "number": 42,
                 "pull_request": {
                     "base": {"sha": "a" * 40},
-                    "head": {"sha": "b" * 40},
+                    "head": {
+                        "sha": "b" * 40,
+                        "repo": {"full_name": "gvoze32/fldailyedit"},
+                        "ref": "player-draft/issue-42",
+                    },
                 },
             }
         ),
@@ -146,6 +150,8 @@ def test_event_parser_accepts_only_positive_number_and_full_lowercase_shas(tmp_p
         "pr_number=42",
         f"base_sha={'a' * 40}",
         f"head_sha={'b' * 40}",
+        "head_repo=gvoze32/fldailyedit",
+        "head_ref=player-draft/issue-42",
     ]
 
 
