@@ -48,8 +48,7 @@ jobs:
           python run.py players apply \
             --base-revision "$BASE_REVISION" \
             --edit-file output/EDIT00000000 \
-            --in-place \
-            --allow-overflow-release
+            --in-place
 
       - name: Validate final save
         run: python run.py validate --edit-file output/EDIT00000000

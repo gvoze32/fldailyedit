@@ -8,6 +8,13 @@
 FL Daily Edit updates SP Football Life 2026 and eFootball PES 2021 squads by
 applying real-world transfers to an `EDIT00000000` save file.
 
+> **Current limitation — new-player creation is temporarily disabled while we
+> repair and verify a save/appearance issue.**
+>
+> Transfers for players already in the save and reviewed updates to existing
+> players remain supported. Missing players are skipped, and a full destination
+> roster is skipped by default instead of releasing an existing player.
+
 ## Compatibility
 
 The bundled base targets **SP Football Life 2026**. It requires:
@@ -80,12 +87,27 @@ All current roadmap items are complete. We are waiting for the next useful idea.
 - Saves are validated before and after roster changes.
 - A process lock prevents two runs from writing the same output at once.
 - Incomplete FotMob snapshots abort the run instead of producing a partial save.
-- Ambiguous player matches, source-club mismatches, and full destination squads
-  are skipped.
+- Ambiguous player matches and source-club mismatches are skipped.
+- Full destination squads are skipped by default; the transfer updater never
+  releases an existing player automatically.
+- `--allow-overflow-release` is a separate, explicit transfer-only option. It
+  requires complete position and OVR metadata and may release a safe candidate
+  to make room. If that metadata is incomplete, the run fails closed.
 - Wikipedia, Sortitoutsi, and Transfermarkt are supplemental. An outage in one
   of these sources does not invalidate a complete FotMob snapshot.
-- `--allow-overflow-release` fails closed because the bundled catalog does not
-  contain complete position and OVR data for every player.
+
+**Transfer updates vs. Player Updates**
+
+These are separate workflows:
+
+- `run` processes transfers for players who already exist in the save. If a
+  destination club is full, that transfer is skipped; other safe transfers in
+  the same run can still apply.
+- `players apply` applies reviewed attribute changes. Existing-player `update`
+  specs are supported.
+- New-player `create` specs remain loadable and reviewable, but are temporarily
+  disabled after appearance/save safety testing. Applying one returns
+  `create_temporarily_unavailable` and leaves the save byte-for-byte unchanged.
 
 ## Run locally
 
@@ -161,9 +183,18 @@ cited evidence, and reviewed PES data. Create updates contain a proposed
 complete player record and destination roster data. Existing-player updates
 contain only supported values that differ from the verified base; every change
 records literal `from` and `to` values.
+Create records remain schema-supported for review and future re-enablement.
+Only existing-player `update` records currently mutate saves; applying a
+completed `create` returns `create_temporarily_unavailable` without changing
+the save.
 Supported update groups are abilities, position proficiency, playing style,
 player skills, COM styles, nationality, physical/basic settings, and
 registered position.
+- Generated OVR review values are community estimates. The current RB
+  calculator includes only the published major weights; it is not the complete
+  Konami formula.
+- Player drafts generated with the previous OVR model identifier must be
+  regenerated before validation; no v1-to-v2 migration is implicit.
 
 ### Simple issue path
 

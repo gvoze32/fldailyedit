@@ -13,37 +13,41 @@ __all__ = (
     "relevant_ovr_positions",
 )
 
-OVR_MODEL: Final = "pes2021-community-estimate-v1"
+OVR_MODEL: Final = "pes2021-community-estimate-v2"
 
 
 class PlayerOvrError(ValueError):
     """Raised when OVR inputs are invalid or a position has no weights."""
 
 
-# Values are the prototype weights expressed as integer hundredths.  The
-# position order is deliberately inherited from editor.player_codec.
+# Values are integer weights; the position order is inherited from
+# editor.player_codec.  The RB column uses the published PES 2021 major
+# weights and leaves unspecified attributes at zero until the complete
+# formula is available:
+# https://www.reddit.com/r/WEPES/comments/1v0e6h0/
+# how_pes_2021_calculates_overall_rating_i/
 _WEIGHTS: Mapping[str, tuple[int, ...]] = MappingProxyType(
     {
-        "attacking_awareness": (5, 5, 5, 5, 5, 5, 5, 5, 10, 10, 10, 12, 15),
-        "ball_control": (3, 8, 8, 8, 10, 15, 12, 12, 15, 14, 14, 14, 10),
-        "dribbling": (3, 4, 8, 8, 5, 10, 12, 12, 14, 18, 18, 14, 10),
-        "tight_possession": (3, 4, 4, 4, 5, 8, 8, 8, 10, 8, 8, 8, 5),
-        "low_pass": (3, 5, 10, 10, 10, 14, 12, 12, 14, 8, 8, 10, 5),
-        "lofted_pass": (3, 5, 10, 10, 5, 5, 8, 8, 5, 5, 5, 5, 5),
-        "finishing": (3, 3, 3, 3, 3, 4, 4, 4, 10, 14, 14, 18, 25),
-        "heading": (3, 10, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 10),
-        "place_kicking": (3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4),
-        "curl": (3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5),
-        "speed": (3, 5, 10, 10, 5, 5, 10, 10, 10, 15, 15, 10, 10),
-        "acceleration": (3, 5, 10, 10, 5, 5, 10, 10, 10, 15, 15, 10, 10),
-        "kicking_power": (3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5),
-        "jump": (3, 10, 5, 5, 5, 5, 5, 5, 4, 4, 4, 4, 6),
-        "physical_contact": (3, 10, 10, 10, 10, 5, 5, 5, 4, 4, 4, 4, 4),
-        "balance": (3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4),
-        "stamina": (3, 5, 10, 10, 10, 10, 10, 10, 8, 8, 8, 8, 6),
-        "defensive_awareness": (5, 20, 16, 16, 16, 10, 10, 10, 5, 4, 4, 4, 3),
-        "ball_winning": (3, 15, 10, 10, 15, 10, 5, 5, 4, 4, 4, 4, 3),
-        "aggression": (3, 5, 5, 5, 6, 5, 5, 5, 4, 4, 4, 4, 4),
+        "attacking_awareness": (5, 5, 5, 0, 5, 5, 5, 5, 10, 10, 10, 12, 15),
+        "ball_control": (3, 8, 8, 7, 10, 15, 12, 12, 15, 14, 14, 14, 10),
+        "dribbling": (3, 4, 8, 0, 5, 10, 12, 12, 14, 18, 18, 14, 10),
+        "tight_possession": (3, 4, 4, 0, 5, 8, 8, 8, 10, 8, 8, 8, 5),
+        "low_pass": (3, 5, 10, 0, 10, 14, 12, 12, 14, 8, 8, 10, 5),
+        "lofted_pass": (3, 5, 10, 7, 5, 5, 8, 8, 5, 5, 5, 5, 5),
+        "finishing": (3, 3, 3, 0, 3, 4, 4, 4, 10, 14, 14, 18, 25),
+        "heading": (3, 10, 5, 0, 5, 5, 5, 5, 5, 5, 5, 6, 10),
+        "place_kicking": (3, 3, 3, 0, 4, 4, 4, 4, 4, 4, 4, 4, 4),
+        "curl": (3, 3, 4, 0, 4, 4, 4, 4, 5, 5, 5, 5, 5),
+        "speed": (3, 5, 10, 8, 5, 5, 10, 10, 10, 15, 15, 10, 10),
+        "acceleration": (3, 5, 10, 6, 5, 5, 10, 10, 10, 15, 15, 10, 10),
+        "kicking_power": (3, 4, 4, 0, 4, 4, 4, 4, 4, 4, 4, 4, 5),
+        "jump": (3, 10, 5, 6, 5, 5, 5, 5, 4, 4, 4, 4, 6),
+        "physical_contact": (3, 10, 10, 0, 10, 5, 5, 5, 4, 4, 4, 4, 4),
+        "balance": (3, 4, 4, 0, 4, 4, 4, 4, 4, 4, 4, 4, 4),
+        "stamina": (3, 5, 10, 8, 10, 10, 10, 10, 8, 8, 8, 8, 6),
+        "defensive_awareness": (5, 20, 16, 8, 16, 10, 10, 10, 5, 4, 4, 4, 3),
+        "ball_winning": (3, 15, 10, 0, 15, 10, 5, 5, 4, 4, 4, 4, 3),
+        "aggression": (3, 5, 5, 0, 6, 5, 5, 5, 4, 4, 4, 4, 4),
         "gk_awareness": (32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
         "catching": (15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
         "clearing": (5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),

@@ -16,11 +16,11 @@
 - Target base revision remains exactly `fl26-u2.2-national-squads`.
 - A canonical Retro profile must produce a complete update or create proposal with no `null`, `missing`, or unresolved placeholder.
 - Contributors and maintainers never enter raw PES player, team, or nationality IDs.
-- Source model is exactly `pes-retro-normalized-v1`; generator model is exactly `pes-retro-mature-proposal-v1`; OVR model is exactly `pes2021-community-estimate-v1`.
+- Source model is exactly `pes-retro-normalized-v1`; generator model is exactly `pes-retro-mature-proposal-v1`; OVR model is exactly `pes2021-community-estimate-v2`. The RB table contains the published major weights only until the complete formula is available.
 - CI must not refetch Pes Retro Stats; it recomputes from the embedded normalized snapshot and verified base.
 - `snapshot_sha256` proves internal integrity, not web authenticity; proposal metadata is accepted only from the matching same-repository `player-draft/issue-<N>` branch and issue evidence.
 - OVR is derived review metadata only. It never chooses abilities, mutates a save field, releases a player, or represents an official in-game rating.
-- OVR uses integer hundredth weights and exact half-up tenths: `(weighted_sum * 20 + total_weight) // (2 * total_weight)`.
+- OVR uses integer weights and exact half-up tenths: `(weighted_sum * 20 + total_weight) // (2 * total_weight)`. It remains a community estimate, not an official in-game formula.
 - Created-player IDs occupy `200000..299999` and use the UUID-seeded circular allocation specified in the design.
 - Create appearance uses exact `appearance-palette-v1`: `(3,17), (2,17), (4,17), (1,17), (5,17), (12,16), (30,17), (9,17)`.
 - Complete unapproved proposals validate successfully but `players apply` must reject them without a bypass flag.
@@ -160,7 +160,7 @@ Expected: collection error because `editor.player_ovr` does not exist.
 Create `editor/player_ovr.py` with the prototype table converted to integer hundredths and this calculation shape:
 
 ```python
-OVR_MODEL = "pes2021-community-estimate-v1"
+OVR_MODEL = "pes2021-community-estimate-v2"
 
 
 class PlayerOvrError(ValueError):
@@ -435,7 +435,7 @@ assert build_ovr_review(
     registered_position="RB",
     position_proficiency={"RB": 2, "RWF": 1},
 ) == {
-    "model": "pes2021-community-estimate-v1",
+    "model": "pes2021-community-estimate-v2",
     "mode": "comparison",
     "positions": [
         {

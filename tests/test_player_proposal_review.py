@@ -27,7 +27,7 @@ def expected_update_review() -> dict[str, object]:
     base = ability_vector()
     proposal = proposal_vector()
     return {
-        "model": "pes2021-community-estimate-v1",
+        "model": "pes2021-community-estimate-v2",
         "mode": "comparison",
         "positions": [
             {
@@ -47,7 +47,7 @@ def expected_update_review() -> dict[str, object]:
 def expected_create_review() -> dict[str, object]:
     proposal = proposal_vector()
     return {
-        "model": "pes2021-community-estimate-v1",
+        "model": "pes2021-community-estimate-v2",
         "mode": "new_player",
         "positions": [
             {
@@ -80,7 +80,7 @@ def test_update_ovr_review_has_the_exact_comparison_shape() -> None:
         position_proficiency=POSITION_PROFICIENCY,
     )
 
-    assert OVR_MODEL == "pes2021-community-estimate-v1"
+    assert OVR_MODEL == "pes2021-community-estimate-v2"
     assert review == expected_update_review()
     assert validate(review, "update") is None
 
@@ -156,7 +156,7 @@ def _remove_row_key(review: dict[str, object]) -> None:
 @pytest.mark.parametrize(
     ("mutation", "value"),
     [
-        (_set_model, "pes2021-community-estimate-v2"),
+        (_set_model, "pes2021-community-estimate-v1"),
         (_set_model, True),
         (_set_mode, "new_player"),
         (_set_mode, True),

@@ -8,6 +8,13 @@
 FL Daily Edit actualiza las plantillas de SP Football Life 2026 y eFootball PES 2021 mediante
 la aplicación de transferencias reales a un archivo guardado `EDIT00000000`.
 
+> **Limitación actual: la creación de nuevos jugadores está temporalmente desactivada mientras
+> reparamos y verificamos un problema de apariencia/guardado.**
+>
+> Las transferencias de jugadores que ya están en el guardado y las actualizaciones revisadas
+> de jugadores existentes siguen siendo compatibles. Los jugadores faltantes se omiten, y una
+> plantilla de destino llena se omite de forma predeterminada en lugar de liberar a un jugador existente.
+
 ## Compatibilidad
 
 La base incluida está destinada a **SP Football Life 2026**. Requiere:
@@ -49,10 +56,10 @@ disponibles, el comparador local recurre a los nombres de jugadores y equipos
 integrados en el archivo guardado seleccionado, por lo que la ruta de
 actualización local empaquetada puede ejecutarse sin ellos.
 
-
 > [!WARNING]
 > El ejecutable inicial no está firmado, por lo que Windows SmartScreen puede mostrar una advertencia. Antes de continuar, comparar el archivo descargado con el `FLDailyEditInstaller.exe.sha256` publicado en la [versión más reciente](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
 > Si Windows bloquea el instalador mediante Smart App Control, abra **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control settings** y cámbielo a **Off**. Como alternativa, haga clic derecho en el archivo descargado, abra **Properties** y marque **Unblock** si está disponible.
+
 Para realizar una instalación manual sin el instalador, descargar el [ZIP público Fast](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) o el [ZIP público Deep](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip). Extraer `EDIT00000000`, crear una copia de seguridad del archivo guardado actual y copiar el archivo extraído en:
 
 `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\`
@@ -82,12 +89,27 @@ Todos los elementos actuales de la hoja de ruta están terminados. Esperamos la 
 - Los archivos guardados se validan antes y después de los cambios en las plantillas.
 - Un bloqueo de proceso evita que dos ejecuciones escriban al mismo tiempo en la misma salida.
 - Las instantáneas incompletas de FotMob interrumpen la ejecución en lugar de producir un archivo guardado parcial.
-- Se omiten las coincidencias ambiguas de jugadores, las discrepancias del club de origen y las plantillas de destino
-  completas.
+- Se omiten las coincidencias ambiguas de jugadores y las discrepancias del club de origen.
+- Las plantillas de destino llenas se omiten de forma predeterminada; el actualizador de transferencias
+  nunca libera a un jugador existente automáticamente.
+- `--allow-overflow-release` es una opción explícita y separada solo para transferencias. Requiere
+  metadatos completos de posición y OVR y puede liberar a un candidato seguro para hacer espacio.
+  Si esos metadatos están incompletos, la ejecución falla de forma segura cerrando el proceso.
 - Wikipedia, Sortitoutsi y Transfermarkt son fuentes complementarias. Una interrupción en una
   de estas fuentes no invalida una instantánea completa de FotMob.
-- `--allow-overflow-release` falla de forma segura porque el catálogo incluido no
-  contiene datos completos de posición y OVR para todos los jugadores.
+
+**Actualizaciones de transferencias frente a Player Updates**
+
+Son flujos de trabajo separados:
+
+- `run` procesa transferencias para jugadores que ya existen en el archivo guardado. Si un club
+  de destino está lleno, esa transferencia se omite; otras transferencias seguras en la misma
+  ejecución aún pueden aplicarse.
+- `players apply` aplica cambios de atributos revisados. Se admiten especificaciones `update`
+  de jugadores existentes.
+- Las especificaciones `create` de nuevos jugadores siguen siendo cargables y revisables, pero
+  están temporalmente desactivadas tras las pruebas de seguridad de apariencia/guardado. Aplicar
+  una devuelve `create_temporarily_unavailable` y deja el archivo guardado byte por byte sin cambios.
 
 ## Ejecución local
 
@@ -148,7 +170,6 @@ python run.py run --help
 | `validate` | Verificar las inscripciones en las plantillas y las asignaciones de los planes de juego |
 | `repair` | Reparar una base heredada mediante archivos guardados de referencia |
 
-
 `run` solo gestiona transferencias: nunca carga ni aplica Player Updates. Para combinar
 ambos flujos de trabajo, primero se debe ejecutar el comando de transferencias sobre un archivo guardado de salida y luego ejecutar
 `players apply --in-place` sobre ese mismo archivo guardado.
@@ -163,9 +184,16 @@ evidencia citada y datos de PES revisados. Las actualizaciones de creación cont
 registro completo del jugador y datos de la plantilla de destino. Las actualizaciones de jugadores existentes
 contienen únicamente valores compatibles que difieren de la base verificada; cada cambio
 registra valores literales `from` y `to`.
+Los registros `create` siguen siendo compatibles con el esquema para su revisión y futura reactivación.
+Actualmente, solo los registros `update` de jugadores existentes modifican los archivos guardados; aplicar
+un `create` completado devuelve `create_temporarily_unavailable` sin modificar el archivo guardado.
 Los grupos de actualización compatibles son habilidades, dominio de posiciones, estilo de juego,
 habilidades del jugador, estilos COM, nacionalidad, configuración física/básica y
 posición registrada.
+- Los valores de revisión de OVR generados son estimaciones de la comunidad. La calculadora actual
+  de RB solo incluye los pesos principales publicados; no es la fórmula completa de Konami.
+- Los borradores de jugadores generados con el identificador de modelo OVR anterior deben
+  regenerarse antes de la validación; no hay migración implícita de v1 a v2.
 
 ### Flujo sencillo mediante un issue
 

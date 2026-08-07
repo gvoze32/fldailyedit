@@ -1431,7 +1431,35 @@ def test_create_serializer_emits_usable_created_appearance_defaults(tmp_path):
     assert appearance_entry[64] == 0x10 | spec.create.iris_color
 
 
-def test_full_roster_returns_waiting_without_mutation(tmp_path, monkeypatch):
+
+def test_create_is_temporarily_unavailable_before_mutation(tmp_path, monkeypatch):
+    import editor.player_spec as player_spec
+
+    edit_file = make_player_spec_edit_file(roster_size=39)
+    before = bytes(edit_file._data)
+    spec = dastan_spec(tmp_path)
+    monkeypatch.setattr(
+        player_spec,
+        "apply_create",
+        lambda *args, **kwargs: pytest.fail("disabled create must not dispatch"),
+    )
+
+    result = player_spec.apply_player_spec(
+        edit_file,
+        spec,
+        REVISION,
+        {},
+    )
+
+    assert (result.status, result.reason) == (
+        "rejected",
+        "create_temporarily_unavailable",
+    )
+    assert edit_file.player_count == 1
+    assert bytes(edit_file._data) == before
+
+
+def test_create_is_disabled_even_when_roster_is_full(tmp_path, monkeypatch):
     from editor.player_spec import apply_create
 
     edit_file = make_player_spec_edit_file(roster_size=40)
@@ -1446,99 +1474,30 @@ def test_full_roster_returns_waiting_without_mutation(tmp_path, monkeypatch):
     result = apply_create(edit_file, spec, {})
 
     assert (result.status, result.reason) == (
-        "waiting",
-        "destination_roster_full",
+        "rejected",
+        "create_temporarily_unavailable",
     )
     assert edit_file.player_count == 1
     assert bytes(edit_file._data) == before
 
 
-def test_create_registers_linked_roster_and_game_plan_and_is_idempotent(
-    tmp_path,
-):
-    from editor.editfile import GP_LINEUP
+def test_create_is_disabled_even_when_roster_has_space(tmp_path):
     from editor.player_spec import apply_create
-
-    edit_file = make_player_spec_edit_file(roster_size=39)
-    spec = dastan_spec(tmp_path)
-    assert spec.create is not None
-
-    result = apply_create(edit_file, spec, {})
-
-    assert result.status == "created"
-    assert edit_file.player_count == 2
-    assert struct.unpack_from("<H", edit_file._data, 0x60)[0] == 2
-    profile = edit_file.get_player_ability_profile(spec.identity.pes_id)
-    assert profile is not None
-    assert profile.abilities == spec.create.abilities
-    roster = edit_file.get_team_roster(spec.create.team_id)
-    assert roster is not None
-    assert roster.player_ids[39] == spec.identity.pes_id
-    assert roster.shirt_numbers[39] == spec.create.preferred_shirt_number
-    assert edit_file._data[edit_file.game_plan_start + GP_LINEUP + 39] == 39
-
-    before_second_run = bytes(edit_file._data)
-    current_players = edit_file.get_all_players(include_base_db=False)
-    second_result = apply_create(edit_file, spec, current_players)
-
-    assert second_result.status == "already_applied"
-    assert edit_file.player_count == 2
-    assert bytes(edit_file._data) == before_second_run
-
-
-def test_create_rolls_back_bytes_header_counts_and_offsets_when_roster_add_fails(
-    tmp_path,
-    monkeypatch,
-):
-    from editor.editfile import HDR_PLAYER_COUNT
-    from editor.player_spec import PlayerSpecError, apply_create
 
     edit_file = make_player_spec_edit_file(roster_size=39)
     before = bytes(edit_file._data)
-    before_count = edit_file.player_count
-    offset_fields = (
-        "player_start",
-        "team_start",
-        "manager_start",
-        "competition_start",
-        "stadium_start",
-        "unknown_start",
-        "team_player_start",
-        "competition_entry_start",
-        "game_plan_start",
+    result = apply_create(edit_file, dastan_spec(tmp_path), {})
+
+    assert (result.status, result.reason) == (
+        "rejected",
+        "create_temporarily_unavailable",
     )
-    before_offsets = tuple(getattr(edit_file, field) for field in offset_fields)
-    monkeypatch.setattr(edit_file, "add_player", lambda *args, **kwargs: False)
-
-    with pytest.raises(PlayerSpecError, match="could not register"):
-        apply_create(edit_file, dastan_spec(tmp_path), {})
-
+    assert edit_file.player_count == 1
     assert bytes(edit_file._data) == before
-    assert edit_file.player_count == before_count
-    assert struct.unpack_from("<H", edit_file._data, HDR_PLAYER_COUNT)[0] == before_count
-    assert tuple(getattr(edit_file, field) for field in offset_fields) == before_offsets
 
 
-def test_create_allows_an_unused_id_below_existing_created_ids(tmp_path):
-    from editor.editfile import PLAYER_ENTRY_SIZE
-    from editor.player_spec import apply_create
 
-    edit_file = make_player_spec_edit_file(roster_size=39)
-    struct.pack_into("<I", edit_file._data, edit_file.player_start, DASTAN_ID + 1)
-    struct.pack_into("<I", edit_file._data, edit_file.player_start + 4, DASTAN_ID + 1)
-    struct.pack_into(
-        "<I",
-        edit_file._data,
-        edit_file.player_start + PLAYER_ENTRY_SIZE,
-        DASTAN_ID + 1,
-    )
-    spec = dastan_spec(tmp_path)
 
-    result = apply_create(edit_file, spec, {})
-
-    assert result.status == "created"
-    assert edit_file.player_count == 2
-    assert edit_file.get_player_ability_profile(DASTAN_ID) is not None
 
 
 def test_create_rejects_id_collision_with_different_normalized_identity(tmp_path):
@@ -1913,7 +1872,7 @@ def test_inactive_lifecycle_is_reported_before_revision_or_save_access(
     )
 
 
-def test_waiting_create_does_not_block_valid_update(tmp_path):
+def test_disabled_create_does_not_block_valid_update(tmp_path):
     from editor.player_spec import apply_player_specs
 
     edit_file = make_combined_fixture(chelsea_roster_size=40)
@@ -1924,39 +1883,40 @@ def test_waiting_create_does_not_block_valid_update(tmp_path):
         current_players(edit_file),
     )
 
-    assert [(result.name, result.status) for result in results] == [
-        ("Dastan Satpaev", "waiting"),
-        ("Marco Palestra", "updated"),
+    assert [(result.name, result.status, result.reason) for result in results] == [
+        ("Dastan Satpaev", "rejected", "create_temporarily_unavailable"),
+        ("Marco Palestra", "updated", "patched"),
     ]
     assert edit_file.get_player_ability_profile(162196).abilities["speed"] == 80
-def test_explicit_overflow_release_allows_essential_create(tmp_path):
+
+
+def test_disabled_create_never_mutates_for_create(tmp_path):
     from editor.player_spec import apply_player_specs
 
     edit_file = make_combined_fixture(chelsea_roster_size=40)
     players = current_players(edit_file)
+    before = bytes(edit_file._data)
 
     results = apply_player_specs(
         edit_file,
         (dastan_spec(tmp_path), marco_spec(tmp_path)),
         REVISION,
         players,
-        allow_overflow_release=True,
     )
 
-    assert [(result.name, result.status) for result in results] == [
-        ("Dastan Satpaev", "created"),
-        ("Marco Palestra", "updated"),
+    assert [(result.name, result.status, result.reason) for result in results] == [
+        ("Dastan Satpaev", "rejected", "create_temporarily_unavailable"),
+        ("Marco Palestra", "updated", "patched"),
     ]
+    assert bytes(edit_file._data) != before
     roster = edit_file.get_team_roster(102)
     assert roster is not None
     assert roster.roster_size == 40
-    assert roster.has_player(DASTAN_ID)
-    assert not roster.has_player(100040)
-    assert edit_file.get_all_players(include_base_db=False)[DASTAN_ID].name == (
-        "Dastan Satpaev"
-    )
+    assert not roster.has_player(DASTAN_ID)
+    assert roster.has_player(100040)
+    assert DASTAN_ID not in edit_file.get_all_players(include_base_db=False)
 
-def test_update_before_eligible_create_keeps_cache_mapping_safe(tmp_path):
+def test_update_before_disabled_create_keeps_cache_mapping_safe(tmp_path):
     from dataclasses import replace
 
     from editor.player_spec import apply_player_specs
@@ -1974,18 +1934,16 @@ def test_update_before_eligible_create_keeps_cache_mapping_safe(tmp_path):
         players,
     )
 
-    assert [(result.name, result.status) for result in results] == [
-        ("Marco Palestra", "updated"),
-        ("Dastan Satpaev", "created"),
+    assert [(result.name, result.status, result.reason) for result in results] == [
+        ("Marco Palestra", "updated", "patched"),
+        ("Dastan Satpaev", "rejected", "create_temporarily_unavailable"),
     ]
     assert all(result.diagnostic is None for result in results)
-    assert edit_file.get_all_players(include_base_db=False)[DASTAN_ID].name == (
-        "Dastan Satpaev"
-    )
+    assert edit_file.get_all_players(include_base_db=False).get(DASTAN_ID) is None
 
 
 
-def test_conflict_does_not_block_independent_waiting_spec_and_order_is_deterministic(
+def test_disabled_create_does_not_block_conflicting_update_and_order_is_deterministic(
     tmp_path,
 ):
     from editor.player_spec import apply_player_specs
@@ -2000,51 +1958,12 @@ def test_conflict_does_not_block_independent_waiting_spec_and_order_is_determini
     )
 
     assert [(result.name, result.status) for result in results] == [
-        ("Dastan Satpaev", "waiting"),
+        ("Dastan Satpaev", "rejected"),
         ("Marco Palestra", "conflict"),
     ]
     assert bytes(edit_file._data) == before
 
 
-def test_created_player_is_visible_to_later_identity_assessment(tmp_path):
-    from dataclasses import replace
-
-    from editor.player_spec import apply_player_specs
-
-    first = dastan_spec(tmp_path)
-    second = replace(
-        first,
-        path=tmp_path / "z-satpaev.json",
-        identity=replace(
-            first.identity,
-            name="SATPAEV",
-            print_name="OTHER",
-            aliases=("Different Prospect",),
-            pes_id=DASTAN_ID + 1,
-            pes_retro_stats_id="f77d9c28-8f02-4dbe-b877-4c13724a4886",
-        ),
-        create=replace(
-            first.create,
-            player_id=DASTAN_ID + 1,
-            name="SATPAEV",
-            print_name="OTHER",
-            preferred_shirt_number=37,
-        ),
-    )
-    edit_file = make_player_spec_edit_file(roster_size=38)
-    results = apply_player_specs(
-        edit_file,
-        (second, first),
-        REVISION,
-        current_players(edit_file),
-    )
-
-    assert [(result.status, result.reason, result.pes_id) for result in results] == [
-        ("created", "created_and_registered", DASTAN_ID),
-        ("already_applied", "matching_identity_exists", DASTAN_ID),
-    ]
-    assert len(edit_file.get_team_roster(102).roster) == 39
-    assert edit_file.get_all_players(include_base_db=False).get(DASTAN_ID + 1) is None
 
 
 @pytest.mark.parametrize(
@@ -2086,7 +2005,7 @@ def test_failed_mutation_rolls_back_only_that_spec(
     )
 
     assert [(result.name, result.status, result.reason) for result in results] == [
-        ("Dastan Satpaev", "created", "created_and_registered"),
+        ("Dastan Satpaev", "rejected", "create_temporarily_unavailable"),
         ("Marco Palestra", "rejected", expected_reason),
     ]
     if failure_mode == "exception":
@@ -2096,10 +2015,7 @@ def test_failed_mutation_rolls_back_only_that_spec(
     else:
         assert results[1].diagnostic is None
     assert edit_file.get_edited_player_entry(162196) == marco_before
-    assert edit_file.get_team_roster(102).player_index(DASTAN_ID) != -1
-    assert edit_file.get_all_players(include_base_db=False)[DASTAN_ID].name == (
-        "Dastan Satpaev"
-    )
+    assert DASTAN_ID not in edit_file.get_all_players(include_base_db=False)
 
 
 def test_batch_is_a_byte_for_byte_noop_when_no_spec_changes(tmp_path):
@@ -2121,7 +2037,7 @@ def test_batch_is_a_byte_for_byte_noop_when_no_spec_changes(tmp_path):
     )
 
     assert [(result.name, result.status) for result in results] == [
-        ("Dastan Satpaev", "waiting"),
+        ("Dastan Satpaev", "rejected"),
         ("Marco Palestra", "already_applied"),
     ]
     assert bytes(edit_file._data) == before

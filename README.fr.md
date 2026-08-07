@@ -3,84 +3,108 @@
 # FL Daily Edit
 
 [![Version Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Licence : MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Licence: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-FL Daily Edit met à jour les effectifs de SP Football Life 2026 et eFootball PES 2021 en appliquant les transferts du monde réel à un fichier de sauvegarde `EDIT00000000`.
+FL Daily Edit met à jour les effectifs de SP Football Life 2026 et d'eFootball PES 2021
+en appliquant les transferts réels à un fichier de sauvegarde `EDIT00000000`.
+
+> **Restriction actuelle — la création de nouveaux joueurs est temporairement désactivée le temps
+> de corriger et de vérifier une anomalie liée aux sauvegardes et à l'apparence.**
+>
+> Les transferts pour les joueurs déjà présents dans la sauvegarde et les mises à jour révisées
+> pour les joueurs existants restent pleinement pris en charge. Les joueurs absents sont ignorés
+> et un effectif de destination complet est ignoré par défaut plutôt que de libérer un joueur existant.
 
 ## Compatibilité
 
-La base fournie cible **SP Football Life 2026**. Elle requiert :
+La base fournie est destinée à **SP Football Life 2026**. Elle requiert :
 
 - Football Life 26 Update 2.2
 - SmokePatch's National Squads Update
 
-Elle n'est pas compatible avec UML, les versions antérieures de FL26 ou les installations sans la mise à jour des équipes nationales. Démarrez une nouvelle carrière en Ligue des Masters ou Deviens une Légende après avoir installé la sauvegarde.
+Elle n'est pas compatible avec UML, les versions antérieures de FL26 ou les installations
+sans mise à jour des équipes nationales. Démarrez une nouvelle carrière en Ligue des Masters
+ou Vers une Légende après avoir installé le fichier de sauvegarde.
 
-La [base incluse](base/EDIT00000000) est le [Gondowan's Mid-Summer EDIT](https://www.reddit.com/r/SPFootballLife/comments/1v7z782/release_gondowans_midsummer_edit_file_more_than/), daté du 27 juillet 2026. Elle comprend plus de 500 transferts, des notes, postes et numéros de maillot mis à jour, des retours de prêt, des entraîneurs, des compositions et les changements de promotion ou relégation. Elle ne crée pas de joueurs et n'ajoute pas de clubs promus de troisième division.
+La [base incluse](base/EDIT00000000) correspond au fichier
+[Gondowan's Mid-Summer EDIT](https://www.reddit.com/r/SPFootballLife/comments/1v7z782/release_gondowans_midsummer_edit_file_more_than/)
+du 27 juillet 2026. Elle intègre plus de 500 transferts, des notes générales actualisées,
+les postes, les numéros de maillot, les retours de prêt, les entraîneurs, les compositions d'équipe
+ainsi que les montées et descentes. Elle ne crée pas de joueurs et n'ajoute pas les clubs promus de troisième division.
 
 ## Programme d’installation Windows
 
-Le programme d’installation Windows est l’option recommandée aux débutants. L’interface du programme d’installation est actuellement disponible uniquement en anglais. Les téléchargements validés actuels ciblent **uniquement Football Life 2026 Update 2.2 + SmokePatch's National Squads Update**. La détection d’eFootball PES 2021 vanilla est disponible, mais l’installation reste désactivée jusqu’à la publication d’une base validée correspondante.
+Le programme d'installation Windows est l'option recommandée pour les débutants. L’interface du programme d’installation est actuellement disponible uniquement en anglais. Les téléchargements validés actuels sont **exclusivement destinés à Football Life 2026 Update 2.2 + SmokePatch's National Squads Update**. La détection d’eFootball PES 2021 vanilla est disponible, mais l’installation reste désactivée jusqu’à la publication d’une base validée correspondante.
 
 1. Téléchargez [FLDailyEditInstaller.exe](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.exe).
 2. Fermez le jeu.
-3. Choisissez **Fast** ou **Deep**. Ce sont deux choix distincts de couverture des mises à jour, chacun affichant son heure de génération.
-4. Confirmez le dossier Football Life 2026 détecté ou utilisez **Browse** si nécessaire.
-5. Sélectionnez **Download and install**. Le programme vérifie le téléchargement, sauvegarde le fichier actuel et le remplace de manière atomique.
+3. Choisissez **Fast** ou **Deep**. Ce sont des options distinctes d'étendue de mise à jour, affichant chacune la date et l'heure de génération.
+4. Confirmez le dossier détecté de Football Life 2026, ou utilisez **Browse** si nécessaire.
+5. Cliquez sur **Download and install**. L'installateur vérifie le téléchargement, sauvegarde le fichier actuel et le remplace de manière atomique.
 
-**Mettre à jour une sauvegarde existante via l’interface graphique :** le
-programme peut aussi mettre à jour un `EDIT00000000` au format commun choisi par
-l’utilisateur, au lieu d’installer une version précompilée. Sélectionnez
-**Update my local save**, choisissez un emplacement détecté ou utilisez
-**Browse**, choisissez **Fast** ou **Deep**, puis sélectionnez **Apply update**
-après vérification. L’assistant valide la sauvegarde avant toute modification,
-crée une copie de sécurité sur place et affiche la progression, le résultat ou
-les diagnostics. L’éligibilité locale ne dépend pas du libellé SPFL/PES/UML et
-ce mode ne télécharge pas de version précompilée distante. Lorsque ces catalogues
-SPFL externes optionnels ne sont pas disponibles, le moteur de correspondance
-local utilise les noms de joueurs et d’équipes intégrés à la sauvegarde
-sélectionnée, permettant ainsi au mode de mise à jour locale intégré de
-fonctionner sans eux.
-
+**Mettre à jour une sauvegarde existante via l'interface graphique :** L'installateur
+peut également mettre à jour un fichier `EDIT00000000` au format standard sélectionné
+par l'utilisateur, au lieu d'installer une version précompilée. Choisissez
+**Update my local save**, sélectionnez un emplacement détecté ou utilisez
+**Browse**, choisissez **Fast** ou **Deep** et après vérification, cliquez sur
+**Apply update**. L'assistant valide la sauvegarde avant toute modification, crée
+une sauvegarde de secours au même endroit et affiche la progression, le résultat ou
+les diagnostics. L'éligibilité locale ne dépend pas de l'étiquette SPFL/PES/UML,
+et cette méthode ne télécharge pas de build distant précompilé. Lorsque ces catalogues
+externes optionnels de SPFL ne sont pas disponibles, le comparateur local utilise
+les noms de joueurs et d'équipes intégrés dans la sauvegarde sélectionnée, permettant
+au processus de mise à jour locale de fonctionner sans eux.
 
 > [!WARNING]
-> L’exécutable initial n’est pas signé, Windows SmartScreen peut donc afficher un avertissement. Avant de continuer, comparez le fichier téléchargé avec le `FLDailyEditInstaller.exe.sha256` publié dans la [dernière version](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
-> Si Windows bloque le programme d’installation via Smart App Control, ouvrez **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control settings** et passez-le sur **Off**. Sinon, faites un clic droit sur le fichier téléchargé, ouvrez **Properties** et cochez **Unblock** si l’option est disponible.
-Pour une installation manuelle sans le programme, téléchargez le [ZIP public Fast](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) ou le [ZIP public Deep](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip). Extrayez `EDIT00000000`, sauvegardez votre fichier actuel, puis copiez le fichier extrait vers :
+> L’exécutable initial n’est pas signé, Windows SmartScreen peut donc afficher un avertissement. Avant de continuer, comparez le fichier téléchargé avec le fichier `FLDailyEditInstaller.exe.sha256` publié sur la [dernière version](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
+> Si Windows bloque l'installateur via Smart App Control, ouvrez **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control settings** et passez sur **Off**. Vous pouvez également faire un clic droit sur le fichier téléchargé, ouvrir **Properties** et cocher **Unblock** si l'option est présente.
+
+Pour une installation manuelle sans installateur, téléchargez le [ZIP public de la version Fast](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) ou le [ZIP public de la version Deep](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip). Extrayez `EDIT00000000`, sauvegardez votre fichier actuel et copiez le fichier extrait dans :
 
 `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\`
 
-Pour une exécution à la demande ou une liste de clubs personnalisée, forkez le dépôt et utilisez **Run workflow** depuis l'onglet Actions.
+Pour une exécution à la demande ou pour cibler une liste personnalisée de clubs, forkez le dépôt et utilisez **Run workflow** depuis l'onglet Actions.
 
 ## Ce qui est mis à jour
 
-- Transferts, départs libres, prêts et retours de prêt
-- Numéros de maillot disponibles depuis les données d'effectif FotMob
+- Transferts, ruptures de contrat, prêts et retours de prêt
+- Numéros de maillot disponibles d'après les données d'effectif FotMob
 - Identités des joueurs vérifiées par rapport à l'effectif actuel de FL26
-- Compositions et plans de jeu affectés par les mouvements d'effectif
-- Rapports de transferts et journaux d'audit JSON Lines
+- Compositions et plans de jeu ajustés selon les mouvements d'effectif
+- Rapports de transfert et journaux d'audit JSON Lines
 - Sauvegardes précompilées quotidiennes via GitHub Actions
-- Créations de joueurs et corrections d'attributs revues via des commandes explicites Player Update
+- Créations de joueurs et corrections d'attributs révisées via les commandes explicites Player Update
 
-L'outil n'écrase pas un numéro de maillot déjà utilisé par un autre membre de l'équipe. Il vérifie également le club actuel du joueur avant d'appliquer un transfert.
+L'outil ne remplace pas un numéro de maillot déjà attribué à un autre membre de l'effectif.
+Il contrôle également le club actuel du joueur avant d'appliquer tout transfert.
 
 ## Feuille de route / Terminée pour l’instant
 
 Tous les éléments actuels de la feuille de route sont terminés. Nous attendons la prochaine idée utile.
 
-## Sécurité et limitations
+## Sécurité et limites
 
-- Les exécutions locales créent des sauvegardes rotatives et utilisent un chiffrement atomique vérifié.
+- Les exécutions locales créent des sauvegardes tournantes et utilisent un chiffrement atomique vérifié.
 - Les sauvegardes sont validées avant et après chaque modification d'effectif.
-- Un verrouillage de processus empêche deux exécutions d'écrire sur la même sortie en même temps.
-- Les instantanés FotMob incomplets interrompent l'exécution au lieu de produire une sauvegarde partielle.
-- Les correspondances de joueurs ambiguës, les discordances de club d'origine et les effectifs cibles complets sont ignorés.
-- Wikipedia, Sortitoutsi et Transfermarkt sont complémentaires. Une panne de l'une de ces sources n'invalide pas un instantané complet de FotMob.
-- `--allow-overflow-release` échoue de manière sécurisée car le catalogue inclus ne contient pas les données complètes de poste et de note globale (OVR) pour chaque joueur.
+- Un verrouillage de processus empêche deux exécutions d'écrire simultanément dans la même sortie.
+- Les instantanés FotMob incomplets interrompent l'exécution plutôt que de générer une sauvegarde partielle.
+- Les correspondances ambiguës et les incohérences de club d'origine sont ignorées.
+- Les effectifs de destination complets sont ignorés par défaut ; l'outil de transfert ne libère jamais automatiquement un joueur existant.
+- `--allow-overflow-release` est une option distincte et explicite réservée aux transferts. Elle exige des métadonnées complètes sur les postes et l'OVR et peut libérer un candidat sans risque pour faire de la place. Si ces métadonnées sont incomplètes, l'exécution s'arrête en toute sécurité.
+- Wikipedia, Sortitoutsi et Transfermarkt sont des sources complémentaires. Une indisponibilité de l'une d'elles n'invalide pas un instantané complet de FotMob.
+
+**Mises à jour des transferts vs Player Updates**
+
+Il s'agit de flux de travail distincts :
+
+- `run` traite les transferts pour les joueurs déjà présents dans la sauvegarde. Si un club de destination est complet, ce transfert est ignoré ; les autres transferts sûrs de la même exécution peuvent toujours être appliqués.
+- `players apply` applique les modifications d'attributs révisées. Les spécifications `update` pour les joueurs existants sont prises en charge.
+- Les spécifications `create` pour les nouveaux joueurs restent chargeables et révisables, mais sont temporairement désactivées suite aux tests de sécurité sur les sauvegardes et l'apparence. L'application de l'une d'elles renvoie `create_temporarily_unavailable` et laisse la sauvegarde strictement inchangée octet par octet.
 
 ## Exécution locale
 
-La configuration locale est prise en charge sous macOS, Linux et Windows via WSL. Python 3.10 ou supérieur est requis.
+La configuration locale est prise en charge sous macOS, Linux et Windows via WSL. Python 3.10
+ou supérieur est requis.
 
 ```bash
 git clone https://github.com/gvoze32/fldailyedit.git
@@ -136,27 +160,32 @@ python run.py run --help
 | `validate` | Vérifier les inscriptions dans les effectifs et les plans de jeu |
 | `repair` | Réparer une base héritée à l'aide de sauvegardes de référence |
 
-
-`run` gère uniquement les transferts : il ne charge ni n'applique jamais les Player Updates. Pour combiner les deux flux de travail, exécutez d'abord la commande de transferts sur une sauvegarde de sortie, puis lancez `players apply --in-place` sur cette même sauvegarde.
+`run` gère uniquement les transferts : il ne charge ni n'applique jamais les Player Updates.
+Pour combiner les deux flux de travail, exécutez d'abord la commande de transferts sur une
+sauvegarde de sortie, puis lancez `players apply --in-place` sur cette même sauvegarde.
 
 ## Player Updates
 
 Chaque Player Update validée est un fichier JSON conforme au schéma v2 par joueur sous `players/`. Elle enregistre une `operation` (`create` ou `update`), un cycle de vie (`active`, `upstreamed` ou `retired`), les révisions de base exactes dans `applies_to`, l'identité stable du joueur et la provenance UUID/profil Pes Retro Stats, les preuves citées et les données PES révisées. Les créations contiennent une proposition de profil complet du joueur et les données d'effectif cible. Les mises à jour de joueurs existants contiennent uniquement les valeurs compatibles différentes de la base vérifiée ; chaque modification consigne les valeurs littérales `from` et `to`.
+Les enregistrements `create` restent pris en charge par le schéma à des fins de révision et de réactivation future. Actuellement, seuls les enregistrements `update` de joueurs existants modifient les sauvegardes ; l'application d'un `create` terminé renvoie `create_temporarily_unavailable` sans modifier la sauvegarde.
 Les groupes pris en charge sont les compétences, la maîtrise des postes, le style de jeu, les aptitudes de joueur, les styles COM, la nationalité, les paramètres physiques/de base et le poste enregistré.
+- Les valeurs de révision d'OVR générées sont des estimations communautaires. Le calculateur actuel pour les arrières droits (RB) n'inclut que les coefficients principaux publiés ; il ne s'agit pas de la formule complète de Konami.
+- Les brouillons de joueurs générés avec l'ancien identifiant de modèle OVR doivent être régénérés avant toute validation ; il n'y a pas de migration implicite de v1 vers v2.
 
 ### Méthode simple via une Issue
 
-1. Ouvrez le [formulaire d'issue de mise à jour de joueur](.github/ISSUE_TEMPLATE/player-update.yml). Entrez le `Player name` exactement tel qu'il apparaît sur un profil canonique `Pes Retro Stats`, fournissez les URL de preuve et attendez qu'un mainteneur applique le label exact `generate-player-draft`.
+1. Ouvrez le [formulaire d'issue de mise à jour de joueur](.github/ISSUE_TEMPLATE/player-update.yml). Entrez le `Player name` exactement tel qu'il apparaît sur un profil canonique `Pes Retro Stats profile`, fournissez les URL de preuve et attendez qu'un mainteneur applique le label exact `generate-player-draft`.
 2. Le workflow configuré récupère ce profil et ouvre une PR en brouillon contenant une proposition `players/<player-slug>.json` au format schéma v2. Il extrait du profil l'instantané source, l'identité, les paramètres physiques, les données de poste, les compétences, le style de jeu, les aptitudes et les styles COM.
 3. Pour une création, seules les valeurs propres au jeu non disponibles à la source restent listées dans `draft.missing` : les ID PES et noms d'affichage, l'ID et le nom de l'équipe, l'ID de nationalité, la couleur de peau et la couleur des yeux. Un contributeur ou un mainteneur doit les renseigner. Pour une mise à jour, le générateur retrouve le joueur dans la base vérifiée et ne produit que les différences réelles `from`/`to`. Un poste source non pris en charge par PES 2021, tel que `RWB`, est omis plutôt que réassigné, y compris pour le changement de poste enregistré.
-4. Un contributeur et un mainteneur vérifient chaque valeur générée. L'intégration continue n'accepte une Player Update que si la PR ajoute ou modifie exactement un chemin JSON canonique de joueur et que le validateur sémantique réussit.
+4. Un contributeur et un mainteneur vérifient chaque valeur générée comme une proposition non approuvée. L'intégration continue n'accepte une Player Update que si la PR ajoute ou modifie exactement un chemin JSON canonique de joueur et que le validateur sémantique partagé réussit.
 5. La fusion de la PR constitue l'approbation humaine. Il n'y a pas d'indicateur `approved` distinct dans le fichier JSON.
 
-Toute proposition générée échouera à la validation complète. Pour convertir les données au schéma v2 complet, supprimez les champs de brouillon `evidence.current_team`, `evidence.issue_number` et `evidence.issue_url` ; conservez les champs canoniques `evidence.profile_url`, `evidence.proof_urls` et `evidence.effective_date` ; et ajoutez une valeur `evidence.reason` non vide et révisée. Conservez l'UUID canonique dans `identity.pes_retro_stats_id` et uniquement les données de jeu revues dans `pes`. Pour une création, complétez également tous les champs requis listés dans `draft.missing`. Les ID PES des joueurs créés doivent être uniques et d'au moins `0x100000` (1 048 576) ; l'allocateur de propositions reste dans cette plage réservée. Enfin, retirez les objets de premier niveau `source` et `draft` avant la validation finale.
+Toute proposition générée échouera à la validation complète. Pour convertir les données au schéma v2 complet, supprimez les champs de brouillon `evidence.current_team`, `evidence.issue_number` et `evidence.issue_url` ; conservez les champs canoniques `evidence.profile_url`, `evidence.proof_urls` révisées et `evidence.effective_date` exacte ; et ajoutez une valeur `evidence.reason` non vide et révisée. Conservez l'UUID canonique dans `identity.pes_retro_stats_id` et uniquement les données de jeu revues dans `pes`. Pour une création, complétez également tous les champs requis listés dans `draft.missing`. Les ID PES des joueurs créés doivent être uniques et d'au moins `0x100000` (1 048 576) ; l'allocateur de propositions reste dans cette plage réservée.
+Enfin, retirez les objets de premier niveau `source` et `draft`, qui sont des métadonnées de brouillon générées uniquement pour la révision, avant la validation finale.
 
 ### Méthode directe via une PR sur un seul fichier
 
-Un contributeur expérimenté peut ignorer le brouillon généré et ouvrir directement une PR ajoutant ou modifiant exactement un fichier `players/<player-slug>.json` complet. Renseignez la provenance UUID/profil dans `identity` et `evidence`, les preuves, les valeurs PES revues, les références attendues, le cycle de vie et la révision de base exacte, puis exécutez `python run.py players validate` avant de demander une relecture. N'incluez pas les métadonnées `source` ou `draft`. N'ajoutez aucune autre modification de code ou de documentation dans cette PR.
+Un contributeur expérimenté peut ignorer le brouillon généré et ouvrir directement une PR ajoutant ou modifiant exactement un fichier `players/<player-slug>.json` complet. Renseignez la provenance UUID/profil dans `identity` et `evidence`, les preuves, les valeurs PES revues, les références attendues, le cycle de vie et la révision de base exacte, puis exécutez `python run.py players validate` avant de demander une relecture. N'incluez pas les métadonnées `source` ou `draft` du brouillon généré. N'ajoutez aucune autre modification de code ou de documentation dans cette PR.
 
 L'application s'effectue toujours par commande explicite et requiert la révision exacte de `data/base_manifest.json` ; une non-concordance de révision échoue avant le déchiffrement de la sauvegarde cible.
 
@@ -182,7 +211,7 @@ Sans `--from-base`, une exécution standard reprend depuis la dernière sortie v
 
 ## Sources de transferts
 
-FotMob fournit l'historique principal des transferts et les métadonnées des effectifs. Les listes saisonnières de Wikipedia, les soumissions de transferts activées de SortitoutSI et les enregistrements datés et vérifiés de Transfermarkt complètent ou confirment les mouvements. Les profils de Pes Retro Stats fournissent des propositions dérivées de la source pour les brouillons de Player Update.
+FotMob fournit l'historique principal des transferts et les métadonnées des effectifs. Les listes saisonnières de Wikipedia, les soumissions de transferts activées de SortitoutSI et les enregistrements datés et vérifiés de Transfermarkt complètent ou confirment les mouvements. Les profils de Pes Retro Stats fournissent des propositions dérivées de la source et non approuvées pour les brouillons de Player Update.
 
 Les données provenant de différentes sources sont réconciliées sans perdre leurs dates, identifiants, citations ou liens de preuve. Les événements sans date, à effet futur, contradictoires ou ambigus ne peuvent pas mettre à jour la sauvegarde d'eux-mêmes.
 

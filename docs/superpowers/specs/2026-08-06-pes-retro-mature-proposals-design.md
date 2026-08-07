@@ -154,7 +154,7 @@ relevant_ovr_positions(
 ) -> tuple[str, ...]
 ```
 
-Convert the prototype's two-decimal weights to integer hundredths. For one position, `weighted_sum` is the sum of each integer weight multiplied by its ability value, and `total_weight` is the sum of those integer weights. Use exact integer half-up rounding:
+Use integer weights for the shared calculation. The RB column currently contains only the published major weights; unspecified RB attributes remain zero until the complete formula is available. For one position, `weighted_sum` is the sum of each integer weight multiplied by its ability value, and `total_weight` is the sum of those integer weights. Use exact integer half-up rounding:
 
 ```text
 ovr_tenths = (weighted_sum * 20 + total_weight) // (2 * total_weight)
@@ -179,7 +179,7 @@ The exact draft object is:
   "generator": "pes-retro-mature-proposal-v1",
   "needs_human_review": true,
   "ovr_review": {
-    "model": "pes2021-community-estimate-v1",
+    "model": "pes2021-community-estimate-v2",
     "mode": "comparison",
     "positions": []
   }
@@ -213,7 +213,7 @@ Schema rules:
 - `generator` is exactly `pes-retro-mature-proposal-v1`.
 - `needs_human_review` is exactly `true`.
 - OVR review keys are exactly `model`, `mode`, and `positions`.
-- OVR model is exactly `pes2021-community-estimate-v1`.
+- OVR model is exactly `pes2021-community-estimate-v2`; it remains a community estimate, not the official Konami formula.
 - Update mode is `comparison`; create mode is `new_player`.
 - Positions are non-empty, duplicate-free, canonically ordered, and exactly equal to the relevant proposal positions.
 - OVR values are integers, not bools, in `400..990`.

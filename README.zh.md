@@ -7,6 +7,10 @@
 
 FL Daily Edit 通过将现实世界中的转会应用到 `EDIT00000000` 存档文件，更新 SP Football Life 2026 和 eFootball PES 2021 的阵容。
 
+> **当前限制 — 在我们修复并验证存档/外观问题期间，暂时禁用新球员创建功能。**
+>
+> 仍支持存档中已有球员的转会以及现有球员的已审核更新。缺失的球员将被跳过；若目标球队阵容已满，默认会跳过该操作，而不是解约现有球员。
+
 ## 兼容性
 
 随附的基础存档适用于 **SP Football Life 2026**。需要：
@@ -36,10 +40,10 @@ Windows 安装程序是面向新手的推荐方式。安装程序界面目前仅
 预制版本。当这些可选的外部 SPFL 目录不可用时，本地匹配器将回退使用所选
 存档中内置的球员和球队名称，因此打包的本地更新路径无需这些目录即可运行。
 
-
 > [!WARNING]
 > 初始可执行文件尚未签名，因此 Windows SmartScreen 可能会显示警告。继续前，请将下载的文件与[最新版本](https://github.com/gvoze32/fldailyedit/releases/tag/latest)中发布的 `FLDailyEditInstaller.exe.sha256` 进行比较。
 > 如果 Windows 通过 Smart App Control 阻止安装程序，请打开 **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control settings**，然后切换为 **Off**。或者右键单击下载的文件，打开 **Properties**，如果有 **Unblock** 选项请勾选。
+
 如需不使用安装程序手动安装，请下载公开的 [Fast 发布 ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) 或 [Deep 发布 ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip)。解压 `EDIT00000000`，备份当前存档，然后将解压出的文件复制到：
 
 `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\`
@@ -68,9 +72,18 @@ Windows 安装程序是面向新手的推荐方式。安装程序界面目前仅
 - 更改阵容前后都会验证存档。
 - 进程锁可防止两个进程同时写入同一输出。
 - FotMob 快照不完整时，运行会中止，而不会生成残缺存档。
-- 球员匹配有歧义、来源俱乐部不符或目标球队满员时，会跳过相应操作。
+- 球员匹配有歧义、来源俱乐部不符时，会跳过相应操作。
+- 目标球队阵容已满时默认跳过；转会更新程序绝不会自动解约现有球员。
+- `--allow-overflow-release` 是一个独立的、仅用于转会的显式选项。它需要完整的球员位置和 OVR 元数据，并可以解约安全的候选球员以腾出名额。若元数据不完整，运行将安全关闭（fail-closed）。
 - Wikipedia、Sortitoutsi 和 Transfermarkt 是补充来源。其中任一来源中断，都不会使完整的 FotMob 快照失效。
-- `--allow-overflow-release` 采用失败时拒绝执行的方式，因为随附目录并不包含每名球员的完整位置和 OVR 数据。
+
+**转会更新 vs. 球员更新 (Player Updates)**
+
+这是两个独立的工作流：
+
+- `run` 仅处理存档中已有球员的转会。若目标俱乐部已满，则跳过该转会；同一运行中的其他安全转会仍可正常应用。
+- `players apply` 应用经审核的属性变更。支持现有球员的 `update` 规范。
+- 新球员的 `create` 规范仍可加载和审核，但在进行外观/存档安全性测试后已被暂时禁用。应用此类规范会返回 `create_temporarily_unavailable`，并保持存档逐字节不变。
 
 ## 本地运行
 
@@ -135,7 +148,10 @@ python run.py run --help
 ## 球员更新
 
 每个经审核的 Player Update 都是 `players/` 下每名球员一个的完整 schema-version-2 JSON 文件。文件记录 `operation`（`create` 或 `update`）、生命周期（`active`、`upstreamed` 或 `retired`）、精确的 `applies_to` 基础版本、稳定的球员身份信息和 Pes Retro Stats UUID/资料来源、带引用的证据，以及经审核的 PES 数据。创建更新包含拟定的完整球员记录和目标球队阵容数据。现有球员更新仅包含与已验证基础存档不同的受支持值；每项更改都会记录字面量 `from` 和 `to` 值。
-支持的更新分组包括能力值、位置熟练度、比赛风格、球员技能、COM 风格、国籍、身体/基本设置和注册位置。
+创建（`create`）记录在 schema 中仍受支持，以供审核和未来重新启用。目前只有现有球员的 `update` 记录会修改存档；应用已完成的 `create` 会返回 `create_temporarily_unavailable` 且不改变存档。
+受支持的更新分组包括能力值、位置熟练度、比赛风格、球员技能、COM 风格、国籍、身体/基本设置和注册位置。
+- 生成的 OVR 审核值为社区估算值。当前的右后卫（RB）计算器仅包含已公布的主要权重；并非 Konami 的完整公式。
+- 使用旧版 OVR 模型标识符生成的球员草稿必须在验证前重新生成；不支持从 v1 到 v2 的隐式迁移。
 
 ### 简易 Issue 流程
 
@@ -145,7 +161,8 @@ python run.py run --help
 4. 贡献者和维护者会将所有生成值作为尚未批准的提案逐一审核。仅当 PR 恰好新增或修改一个规范的球员 JSON 路径，且共享语义验证器成功通过时，CI 才会接受 Player Update。
 5. 合并 PR 仍代表人工批准状态。JSON 文件中没有单独的 `approved` 标志。
 
-每个生成的提案按预期都无法通过完整文件验证。要将其中生成的证据转换为完整的 schema v2，请删除仅供草稿使用的 `evidence.current_team`、`evidence.issue_number` 和 `evidence.issue_url` 字段；保留规范的 `evidence.profile_url`、经审核的 `evidence.proof_urls` 和 `evidence.effective_date`；再添加经审核且非空的 `evidence.reason`。将规范资料 UUID 持久保存为 `identity.pes_retro_stats_id`，并且只在 `pes` 中保留经审核的游戏数值。对于创建操作，还需补全 `draft.missing` 中列出的所有游戏本地字段。创建球员的 PES ID 必须唯一且至少为 `0x100000`（1,048,576）；提案分配器会保留在该预留范围内。随后删除顶层的 `source` 和 `draft` 对象；它们是仅供审核使用的生成草稿元数据。完成后再进行完整验证。
+每个生成的提案按预期都无法通过完整文件验证。要将其中生成的证据转换为完整的 schema v2，请删除仅供草稿使用的 `evidence.current_team`、`evidence.issue_number` 和 `evidence.issue_url` 字段；保留规范的 `evidence.profile_url`、经审核的 `evidence.proof_urls` 和 `evidence.effective_date`；再添加经审核且非空的 `evidence.reason`。将规范资料 UUID 持久保存为 `identity.pes_retro_stats_id`，并且只在 `pes` 中保留经审核的游戏数值。对于创建操作，还需补全 `draft.missing` 中列出的所有游戏本地字段。创建球员的 PES ID 必须唯一且至少为 `0x100000`（1,048,576）；提案分配器会保留在该预留范围内。
+随后删除顶层的 `source` 和 `draft` 对象；它们是仅供审核使用的生成草稿元数据。完成后再进行完整验证。
 
 ### 单文件 PR 直接流程
 

@@ -2323,22 +2323,6 @@ def _raise_for_player_spec_mutation_failures(
         "independent successful changes were preserved."
     )
     raise SystemExit(2)
-def _raise_for_player_spec_overflow_waiting(
-    results: tuple[SpecResult, ...],
-    *,
-    allow_overflow_release: bool,
-) -> None:
-    if not allow_overflow_release:
-        return
-    waiting = tuple(result for result in results if result.status == "waiting")
-    if not waiting:
-        return
-    print(
-        "Applying Player Updates failed: "
-        f"{len(waiting)} target roster(s) remain unresolved after the "
-        "explicit overflow-release request."
-    )
-    raise SystemExit(2)
 
 
 def cmd_players_apply(args) -> None:
@@ -2353,7 +2337,6 @@ def cmd_players_apply(args) -> None:
 
     edit_path = Path(args.edit_file)
     output_path = edit_path if args.in_place else Path(args.output)
-    allow_overflow_release = bool(getattr(args, "allow_overflow_release", False))
     if not edit_path.exists():
         print(f"Edit file not found: {edit_path}")
         raise SystemExit(2)
@@ -2388,26 +2371,13 @@ def cmd_players_apply(args) -> None:
         edit_file.load(data_file)
         _require_valid_edit(edit_file, "Input save")
 
-        if allow_overflow_release:
-            results = apply_player_specs(
-                edit_file,
-                specs,
-                manifest.revision,
-                edit_file.get_all_players(),
-                allow_overflow_release=True,
-            )
-        else:
-            results = apply_player_specs(
-                edit_file,
-                specs,
-                manifest.revision,
-                edit_file.get_all_players(),
-            )
-        _print_player_spec_results(specs, results)
-        _raise_for_player_spec_overflow_waiting(
-            results,
-            allow_overflow_release=allow_overflow_release,
+        results = apply_player_specs(
+            edit_file,
+            specs,
+            manifest.revision,
+            edit_file.get_all_players(),
         )
+        _print_player_spec_results(specs, results)
         changed_results = tuple(
             result for result in results if result.status in {"created", "updated"}
         )
@@ -2605,11 +2575,6 @@ def main():
     )
     p_players_apply.add_argument(
         "--edit-file", required=True, help="Path to input EDIT00000000"
-    )
-    p_players_apply.add_argument(
-        "--allow-overflow-release",
-        action="store_true",
-        help="Allow replacing one safe reserve when a target roster is full",
     )
     player_target = p_players_apply.add_mutually_exclusive_group(required=True)
     player_target.add_argument(

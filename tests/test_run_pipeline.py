@@ -963,7 +963,6 @@ def test_players_parser_dispatches_nested_apply(monkeypatch):
             "revision-1",
             "--edit-file",
             "source",
-            "--allow-overflow-release",
             "--output",
             "destination",
         ],
@@ -976,7 +975,35 @@ def test_players_parser_dispatches_nested_apply(monkeypatch):
     assert dispatched[0].edit_file == "source"
     assert dispatched[0].output == "destination"
     assert dispatched[0].in_place is False
-    assert dispatched[0].allow_overflow_release is True
+
+
+def test_players_parser_rejects_overflow_release_option(monkeypatch):
+    import run
+
+    monkeypatch.setattr(
+        run,
+        "cmd_players_apply",
+        lambda _args: pytest.fail("obsolete overflow option must fail in argparse"),
+    )
+    monkeypatch.setattr(
+        run.sys,
+        "argv",
+        [
+            "run.py",
+            "players",
+            "apply",
+            "--base-revision",
+            "revision-1",
+            "--edit-file",
+            "source",
+            "--allow-overflow-release",
+            "--output",
+            "destination",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        run.main()
 
 def test_players_parser_dispatches_approve_with_spec(monkeypatch):
     import run
@@ -1166,8 +1193,6 @@ def _prepare_players_apply_results(
     monkeypatch,
     tmp_path,
     results,
-    *,
-    allow_overflow_release=False,
 ):
     import run
     from editor.player_spec import BaseManifest, load_player_specs
@@ -1247,7 +1272,6 @@ def _prepare_players_apply_results(
                 output=str(output),
                 in_place=False,
                 base_revision="expected-revision",
-                allow_overflow_release=allow_overflow_release,
             )
         )
 
@@ -1321,7 +1345,7 @@ def test_players_apply_mixed_success_and_mutation_failure_persists_verified_succ
     assert "player specs" not in rendered.lower()
 
 
-def test_players_apply_overflow_mode_fails_when_no_safe_candidate(
+def test_players_apply_disabled_create_does_not_write_output(
     monkeypatch,
     tmp_path,
     capsys,
@@ -1335,21 +1359,20 @@ def test_players_apply_overflow_mode_fails_when_no_safe_candidate(
             SpecResult(
                 DASTAN_ID,
                 "Dastan Satpaev",
-                "waiting",
-                "no_safe_overflow_candidate",
+                "rejected",
+                "create_temporarily_unavailable",
             ),
         ),
-        allow_overflow_release=True,
     )
 
-    with pytest.raises(SystemExit) as exc_info:
-        invoke()
+    invoke()
 
-    assert exc_info.value.code == 2
     assert calls == ["validate"]
     assert source.read_bytes() == b"encrypted"
     assert output.exists() is False
-    assert "no_safe_overflow_candidate" in capsys.readouterr().out
+    assert "create_temporarily_unavailable" in capsys.readouterr().out
+
+
 def test_players_apply_audits_and_rebuilds_same_save_reports_after_roundtrip(
     monkeypatch, tmp_path
 ):

@@ -8,6 +8,13 @@
 FL Daily Edit memperbarui skuad SP Football Life 2026 dan eFootball PES 2021
 dengan menerapkan transfer dunia nyata ke file save `EDIT00000000`.
 
+> **Batasan saat ini — pembuatan pemain baru sementara dinonaktifkan karena
+> kami sedang memperbaiki dan memverifikasi masalah save/appearance.**
+>
+> Transfer pemain yang sudah ada di save dan pembaruan pemain yang sudah ditinjau
+> tetap didukung. Pemain yang belum ada akan dilewati, dan roster tujuan yang
+> penuh secara default dilewati tanpa melepas pemain lama.
+
 ## Kompatibilitas
 
 Base yang disertakan ditujukan untuk **SP Football Life 2026**. Base ini memerlukan:
@@ -82,12 +89,26 @@ Semua item roadmap saat ini telah selesai. Kami menunggu ide berguna berikutnya.
 - Save divalidasi sebelum dan sesudah perubahan roster.
 - Process lock mencegah dua proses menulis output yang sama secara bersamaan.
 - Snapshot FotMob yang tidak lengkap membatalkan proses alih-alih menghasilkan save parsial.
-- Kecocokan pemain yang ambigu, ketidakcocokan klub sumber, dan skuad tujuan yang
-  penuh akan dilewati.
+- Kecocokan pemain yang ambigu dan ketidakcocokan klub sumber akan dilewati.
+- Roster tujuan yang penuh secara default akan dilewati; updater transfer tidak
+  pernah melepas pemain lama secara otomatis.
+- `--allow-overflow-release` adalah opsi eksplisit khusus transfer. Opsi ini
+  membutuhkan metadata posisi dan OVR yang lengkap dan dapat melepas kandidat
+  yang aman untuk menyediakan slot. Jika metadata tidak lengkap, proses berhenti
+  secara fail-closed.
 - Wikipedia, Sortitoutsi, dan Transfermarkt merupakan sumber tambahan. Gangguan
   pada salah satu sumber tersebut tidak membatalkan snapshot FotMob yang lengkap.
-- `--allow-overflow-release` gagal secara tertutup karena katalog yang disertakan
-  tidak memuat data posisi dan OVR lengkap untuk setiap pemain.
+
+**Transfer dan Player Updates adalah alur yang berbeda**
+
+- `run` memproses transfer pemain yang sudah ada di save. Jika klub tujuan penuh,
+  transfer tersebut dilewati; transfer aman lainnya dalam run yang sama tetap
+  dapat diterapkan.
+- `players apply` menerapkan perubahan atribut yang sudah ditinjau. Spec
+  `update` untuk pemain yang sudah ada tetap didukung.
+- Spec `create` pemain baru tetap dapat dimuat dan ditinjau, tetapi sementara
+  dinonaktifkan setelah pengujian keamanan appearance/save. Penerapannya
+  menghasilkan `create_temporarily_unavailable` dan save tidak berubah sedikit pun.
 
 ## Jalankan secara lokal
 
@@ -163,9 +184,18 @@ UUID/profil Pes Retro Stats, bukti yang dikutip, dan data PES yang telah ditinja
 Pembaruan create berisi usulan record pemain lengkap dan data roster tujuan.
 Pembaruan untuk pemain yang sudah ada hanya berisi nilai yang didukung dan berbeda
 dari base terverifikasi; setiap perubahan mencatat nilai literal `from` dan `to`.
+Record `create` tetap didukung oleh schema untuk peninjauan dan pengaktifan
+kembali di masa depan. Saat ini hanya record `update` pemain yang sudah ada yang
+mengubah save; penerapan `create` selesai dengan
+`create_temporarily_unavailable` tanpa mengubah save.
 Kelompok pembaruan yang didukung adalah kemampuan, kecakapan posisi, gaya bermain,
 keahlian pemain, gaya COM, kewarganegaraan, pengaturan fisik/dasar, dan posisi
 terdaftar.
+- Nilai tinjauan OVR yang dihasilkan adalah perkiraan komunitas. Kalkulator RB saat
+  ini hanya mencakup bobot utama yang dipublikasikan; ini bukan formula lengkap
+  Konami.
+- Draf pemain yang dibuat dengan pengidentifikasi model OVR sebelumnya harus
+  dibuat ulang sebelum validasi; tidak ada migrasi v1-ke-v2 implisit.
 
 ### Jalur issue sederhana
 

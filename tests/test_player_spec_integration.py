@@ -200,7 +200,7 @@ def test_approved_update_proposal_applies_and_survives_encryption_roundtrip(
             crypto.cleanup_temp(reopened)
 
 
-def test_approved_create_proposal_frees_slot_applies_and_survives_roundtrip(
+def test_approved_create_proposal_is_valid_but_apply_is_disabled(
     tmp_path, monkeypatch
 ):
     import config
@@ -249,6 +249,7 @@ def test_approved_create_proposal_frees_slot_applies_and_survives_roundtrip(
         unapproved_bytes = proposal_path.read_bytes()
         from editor.player_spec import (
             approve_player_proposal,
+            apply_player_spec,
             assess_create,
         )
         from scraper.pes_retro_snapshot import profile_from_snapshot
@@ -288,33 +289,31 @@ def test_approved_create_proposal_frees_slot_applies_and_survives_roundtrip(
             edit_file.get_all_players(),
         )
         assert (assessment.status, assessment.reason) == ("ready", "eligible")
+        before_apply = bytes(edit_file._data)
         result = apply_player_spec(
             edit_file,
             completed,
             load_base_manifest().revision,
             edit_file.get_all_players(),
         )
-        assert result.status == "created"
-        assert edit_file.get_player_ability_profile(
-            completed.identity.pes_id
-        ) is not None
+        assert (result.status, result.reason) == (
+            "rejected",
+            "create_temporarily_unavailable",
+        )
+        assert bytes(edit_file._data) == before_apply
         assert edit_file.validate_integrity()["valid"] is True
         edit_file.save(decrypted / "data.dat")
 
-        output = tmp_path / "created-EDIT00000000"
+        output = tmp_path / "unchanged-EDIT00000000"
         crypto.encrypt(decrypted, output)
         reopened = crypto.decrypt(output)
         verified = EditFile()
         verified.load(reopened / "data.dat")
         assert verified.validate_integrity()["valid"] is True
-        _assert_decoded_profile_matches_proposal(
-            verified.get_player_ability_profile(completed.identity.pes_id),
-            proposal,
-            compare_registered_position=True,
-        )
+        assert verified.get_all_players().get(completed.identity.pes_id) is None
         assert verified.get_team_roster(102).player_index(
             completed.identity.pes_id
-        ) != -1
+        ) == -1
         unapproved_dir = tmp_path / "unapproved"
         unapproved_dir.mkdir()
         unapproved_path = unapproved_dir / proposal_path.name
@@ -356,9 +355,9 @@ def test_bundled_base_batch_survives_encryption_roundtrip(tmp_path):
             load_base_manifest().revision,
             edit_file.get_all_players(),
         )
-        assert {result.name: result.status for result in results} == {
-            "Dastan Satpaev": "waiting",
-            "Marco Palestra": "updated",
+        assert {result.name: (result.status, result.reason) for result in results} == {
+            "Dastan Satpaev": ("rejected", "create_temporarily_unavailable"),
+            "Marco Palestra": ("updated", "patched"),
         }
         assert edit_file.validate_integrity()["valid"] is True
         edit_file.save(decrypted / "data.dat")
@@ -386,7 +385,7 @@ def test_bundled_base_batch_survives_encryption_roundtrip(tmp_path):
             crypto.cleanup_temp(reopened)
 
 
-def test_bundled_base_create_survives_encryption_roundtrip(tmp_path):
+def test_bundled_base_create_is_rejected_without_mutation(tmp_path):
     source = tmp_path / "EDIT00000000"
     shutil.copy2("base/EDIT00000000", source)
     decrypted = crypto.decrypt(source)
@@ -396,48 +395,31 @@ def test_bundled_base_create_survives_encryption_roundtrip(tmp_path):
         edit_file.load(decrypted / "data.dat")
         assert edit_file.release_player(126925, 102) is True
         dastan = next(
-        spec for spec in load_player_specs() if spec.identity.pes_id == DASTAN_ID
+            spec for spec in load_player_specs() if spec.identity.pes_id == DASTAN_ID
         )
+        before = bytes(edit_file._data)
         result = apply_player_spec(
             edit_file,
             dastan,
             load_base_manifest().revision,
             edit_file.get_all_players(),
         )
-        assert result.status == "created"
-        assert len(edit_file.get_team_roster(102).roster) == 40
+        assert (result.status, result.reason) == (
+            "rejected",
+            "create_temporarily_unavailable",
+        )
+        assert bytes(edit_file._data) == before
         assert edit_file.validate_integrity()["valid"] is True
         edit_file.save(decrypted / "data.dat")
 
-        output = tmp_path / "created-EDIT00000000"
+        output = tmp_path / "unchanged-EDIT00000000"
         crypto.encrypt(decrypted, output)
         reopened = crypto.decrypt(output)
         verified = EditFile()
         verified.load(reopened / "data.dat")
         assert verified.validate_integrity()["valid"] is True
-        players = verified.get_all_players()
-        roster = verified.get_team_roster(102)
-        assert roster.player_index(DASTAN_ID) != -1
-        assert players[DASTAN_ID].name == "Dastan Satpaev"
-        assert players[DASTAN_ID].print_name == "SATPAEV"
-        assert [
-            players[player_id].name
-            for player_id in roster.roster
-            if player_id == DASTAN_ID
-        ] == ["Dastan Satpaev"]
-        before_rerun = bytes(verified._data)
-        rerun = apply_player_spec(
-            verified,
-            dastan,
-            load_base_manifest().revision,
-            verified.get_all_players(),
-        )
-        assert (rerun.status, rerun.reason) == (
-            "already_applied",
-            "matching_player_exists",
-        )
-        assert bytes(verified._data) == before_rerun
-
+        assert verified.get_all_players().get(DASTAN_ID) is None
+        assert verified.get_team_roster(102).player_index(DASTAN_ID) == -1
     finally:
         crypto.cleanup_temp(decrypted)
         if reopened is not None:

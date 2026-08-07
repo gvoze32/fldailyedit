@@ -32,6 +32,11 @@ from scraper.pes_retro_snapshot import profile_from_snapshot
 from scraper.pes21_proposal import map_pes21_proposal
 from tools.player_proposal_review import validate_ovr_review_shape
 
+# Create specs remain loadable and reviewable, but their save mutations stay
+# disabled until the game-side appearance format is proven safe end to end.
+PLAYER_CREATE_MUTATIONS_ENABLED = False
+PLAYER_CREATE_DISABLED_REASON = "create_temporarily_unavailable"
+
 
 class PlayerSpecError(ValueError):
     """Raised when a player specification is malformed or ambiguous."""
@@ -1494,21 +1499,18 @@ def apply_create(
     edit_file: "EditFile",
     spec: PlayerSpec,
     all_players: Mapping[int, "PlayerInfo"],
-    *,
-    allow_overflow_release: bool = False,
 ) -> SpecResult:
-    """Atomically serialize and register one reviewed created player."""
+    """Apply one reviewed create when create mutations are enabled."""
     if spec.proposal is not None:
         return _result(spec, "rejected", "human_review_required")
-
-    assessment = assess_create(edit_file, spec, all_players)
-    needs_overflow_release = (
-        assessment.status == "waiting"
-        and assessment.reason == "destination_roster_full"
-    )
-    if assessment.status != "ready" and not (
-        allow_overflow_release and needs_overflow_release
+    if spec.lifecycle_status != "active" or (
+        spec.operation != "create" or spec.create is None
     ):
+        return assess_create(edit_file, spec, all_players)
+    if not PLAYER_CREATE_MUTATIONS_ENABLED:
+        return _result(spec, "rejected", PLAYER_CREATE_DISABLED_REASON)
+    assessment = assess_create(edit_file, spec, all_players)
+    if assessment.status != "ready":
         return assessment
 
     create = spec.create
@@ -1521,15 +1523,6 @@ def apply_create(
     had_player_cache = hasattr(edit_file, "_player_cache")
     original_player_cache = getattr(edit_file, "_player_cache", None)
     try:
-        if needs_overflow_release:
-            edit_file._player_cache = all_players
-            _, overflow_player_id = edit_file.find_overflow_release_candidate(
-                create.team_id,
-                exclude_player_id=spec.identity.pes_id,
-            )
-            if not overflow_player_id:
-                return _result(spec, "waiting", "no_safe_overflow_candidate")
-
         player_entry, appearance_entry = serialize_created_player(create)
         edit_file.append_created_player(
             spec.identity.pes_id,
@@ -1541,7 +1534,6 @@ def apply_create(
             create.team_id,
             preferred_shirt_number=create.preferred_shirt_number,
             position=create.registered_position,
-            allow_overflow_release=allow_overflow_release,
         )
         if not added:
             raise PlayerSpecError(
@@ -1720,8 +1712,6 @@ def apply_player_spec(
     spec: PlayerSpec,
     base_revision: str,
     all_players: Mapping[int, "PlayerInfo"],
-    *,
-    allow_overflow_release: bool = False,
 ) -> SpecResult:
     """Apply one lifecycle-compatible spec with mutation isolation."""
     if spec.proposal is not None:
@@ -1734,6 +1724,8 @@ def apply_player_spec(
         )
     if base_revision not in spec.applies_to:
         return _result(spec, "needs_review", "base_revision_not_reviewed")
+    if spec.operation == "create" and not PLAYER_CREATE_MUTATIONS_ENABLED:
+        return _result(spec, "rejected", PLAYER_CREATE_DISABLED_REASON)
 
     original_data = bytes(edit_file._data)
     original_catalog_report = edit_file.player_catalog_report
@@ -1747,7 +1739,6 @@ def apply_player_spec(
                 edit_file,
                 spec,
                 all_players,
-                allow_overflow_release=allow_overflow_release,
             )
         elif spec.operation == "update":
             result = apply_update(edit_file, spec, all_players)
@@ -1788,8 +1779,6 @@ def apply_player_specs(
     specs: tuple[PlayerSpec, ...],
     base_revision: str,
     all_players: Mapping[int, "PlayerInfo"],
-    *,
-    allow_overflow_release: bool = False,
 ) -> tuple[SpecResult, ...]:
     """Apply independent specs in deterministic filename order."""
     ordered_specs = sorted(specs, key=lambda spec: spec.path.name)
@@ -1801,7 +1790,6 @@ def apply_player_specs(
             spec,
             base_revision,
             current_players,
-            allow_overflow_release=allow_overflow_release,
         )
         results.append(result)
         if result.status == "created":

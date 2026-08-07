@@ -419,7 +419,7 @@ def expected_ovr_review(
                 }
             )
     return {
-        "model": "pes2021-community-estimate-v1",
+        "model": "pes2021-community-estimate-v2",
         "mode": "new_player" if operation == "create" else "comparison",
         "positions": rows,
     }
