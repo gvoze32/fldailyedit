@@ -425,12 +425,13 @@ def _build_generic_appearance(player: CreatedPlayerRecord) -> bytes:
     appearance = bytearray(PLAYER_APPEARANCE_SIZE)
     _write_field(appearance, FieldSpec(0, 0, 32), player.player_id)
 
-    # Created IDs are absent from the base database, so the game must consume
-    # this serialized face, hairstyle, physique, and strip-style data.
-    _write_field(appearance, FieldSpec(4, 0, 1), 1)  # Edited face settings.
-    _write_field(appearance, FieldSpec(4, 1, 1), 1)  # Edited hairstyle settings.
-    _write_field(appearance, FieldSpec(4, 2, 1), 1)  # Edited physique settings.
-    _write_field(appearance, FieldSpec(4, 3, 1), 1)  # Edited strip style settings.
+    # A defaulted created player uses the serialized defaults and references
+    # itself as its base copy because it has no base-database appearance.
+    _write_field(appearance, FieldSpec(4, 0, 1), 0)  # Default face settings.
+    _write_field(appearance, FieldSpec(4, 1, 1), 0)  # Default hairstyle settings.
+    _write_field(appearance, FieldSpec(4, 2, 1), 0)  # Default physique settings.
+    _write_field(appearance, FieldSpec(4, 3, 1), 0)  # Default strip style settings.
+    _write_field(appearance, FieldSpec(8, 0, 32), player.player_id)
 
     # Populate the non-zero defaults from a newly created edited player. The
     # fields are sparse bitfields, so preserve the documented unknown bits.

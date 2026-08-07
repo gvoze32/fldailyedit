@@ -1335,10 +1335,12 @@ def test_create_serializer_builds_linked_player_and_appearance_records(tmp_path)
     assert int.from_bytes(player_entry[:4], "little") == spec.identity.pes_id
     assert int.from_bytes(player_entry[4:8], "little") == spec.identity.pes_id
     assert int.from_bytes(appearance_entry[:4], "little") == spec.identity.pes_id
-    # A created ID has no base-database appearance to fall back to. Its own
-    # serialized appearance must therefore be marked as edited and unlinked.
-    assert appearance_entry[8:12] == b"\0" * 4
-    assert appearance_entry[4] & 0x0F == 0x0F
+    # A newly created player uses the documented default appearance. The game
+    # resolves defaulted appearance fields through a self-referencing base copy.
+    assert appearance_entry[8:12] == spec.identity.pes_id.to_bytes(4, "little")
+    assert appearance_entry[4] & 0x0F == 0
+    assert (int.from_bytes(appearance_entry[4:6], "little") >> 4) & 0x3FFF == 23
+    assert (int.from_bytes(appearance_entry[6:8], "little") >> 2) & 0x03FF == 10
     assert appearance_entry[12:19] == bytes([0x77] * 7)
     assert appearance_entry[45] == spec.create.skin_color
     assert appearance_entry[64] == 0x10 | spec.create.iris_color
@@ -1408,8 +1410,8 @@ def test_create_serializer_emits_usable_created_appearance_defaults(tmp_path):
     assert _read_field(player_entry, FIELD_SPECS["star_player"]) == 7
     assert appearance_field(4, 4, 14) == 23
     assert appearance_field(6, 2, 10) == 10
-    assert appearance_entry[4] & 0x0F == 0x0F
-    assert appearance_entry[8:12] == b"\0" * 4
+    assert appearance_entry[4] & 0x0F == 0
+    assert appearance_entry[8:12] == spec.identity.pes_id.to_bytes(4, "little")
     assert appearance_entry[22:45] == bytes.fromhex(
         "70 77 07 07 70 77 77 70 77 77 77 77 07 77 77 77 "
         "70 07 77 07 77 77 77"
