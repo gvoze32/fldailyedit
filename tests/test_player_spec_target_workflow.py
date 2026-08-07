@@ -1,7 +1,9 @@
 import json
 import os
 import re
+import shutil
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -13,6 +15,34 @@ WORKFLOW_PATH = Path(".github/workflows/validate-player-update-pr.yml")
 
 def test_legacy_target_workflow_path_is_absent():
     assert not Path(".github/workflows/player-spec-pr.yml").exists()
+
+
+def _bash_command() -> list[str]:
+    if os.name != "nt":
+        return ["bash", "-c"]
+
+    bash_path = shutil.which("bash")
+    if bash_path is not None:
+        resolved_bash = Path(bash_path).resolve()
+        system_root = Path(
+            os.environ.get("SystemRoot", r"C:\Windows")
+        ).resolve()
+        if resolved_bash.parent.as_posix().casefold() != (
+            (system_root / "System32").as_posix().casefold()
+        ):
+            return [str(resolved_bash), "-c"]
+
+    git_path = shutil.which("git")
+    if git_path is not None:
+        git_root = Path(git_path).resolve().parent.parent
+        for candidate in (
+            git_root / "bin" / "bash.exe",
+            git_root / "usr" / "bin" / "bash.exe",
+        ):
+            if candidate.is_file():
+                return [str(candidate), "-c"]
+
+    raise FileNotFoundError("Git Bash executable not found")
 
 
 def _step_script(name: str) -> str:
@@ -39,8 +69,8 @@ def _git(cwd: Path, *args: str) -> str:
 
 def _workflow_environment() -> dict[str, str]:
     environment = os.environ.copy()
-    venv_bin = str(Path(".venv/bin").resolve())
-    environment["PATH"] = f"{venv_bin}:{environment['PATH']}"
+    python_bin = str(Path(sys.executable).parent.resolve())
+    environment["PATH"] = f"{python_bin}{os.pathsep}{environment.get('PATH', '')}"
     return environment
 
 
@@ -103,7 +133,7 @@ def _run_boundary(runner: Path, base_sha: str, head_sha: str, tmp_path: Path):
         }
     )
     result = subprocess.run(
-        ["bash", "-c", _step_script("Fetch head data and enforce boundary")],
+        [*_bash_command(), _step_script("Fetch head data and enforce boundary")],
         cwd=runner,
         env=environment,
         check=False,
@@ -138,7 +168,7 @@ def test_event_parser_accepts_only_positive_number_and_full_lowercase_shas(tmp_p
     )
 
     result = subprocess.run(
-        ["bash", "-c", _step_script("Read trusted pull request coordinates")],
+        [*_bash_command(), _step_script("Read trusted pull request coordinates")],
         env=environment,
         check=False,
         capture_output=True,
@@ -175,7 +205,7 @@ def test_event_parser_rejects_untrusted_coordinates(tmp_path, event):
     )
 
     result = subprocess.run(
-        ["bash", "-c", _step_script("Read trusted pull request coordinates")],
+        [*_bash_command(), _step_script("Read trusted pull request coordinates")],
         env=environment,
         check=False,
         capture_output=True,
@@ -196,12 +226,12 @@ def test_boundary_fetches_pull_ref_then_materializes_only_the_validated_blob(tmp
     )
     assert not (runner / player_path).exists()
 
-    environment = os.environ.copy()
+    environment = _workflow_environment()
     environment.update(
         {"HEAD_SHA": head_sha, "PLAYER_PATH": player_path.as_posix()}
     )
     materialize = subprocess.run(
-        ["bash", "-c", _step_script("Materialize validated Player Update")],
+        [*_bash_command(), _step_script("Materialize validated Player Update")],
         cwd=runner,
         env=environment,
         check=False,

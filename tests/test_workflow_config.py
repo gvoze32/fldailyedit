@@ -786,6 +786,8 @@ def _run_target_event_parser(
     output_path = tmp_path / "github-output"
     event_path.write_text(json.dumps(event), encoding="utf-8")
     environment = os.environ.copy()
+    python_bin = str(Path(sys.executable).parent.resolve())
+    environment["PATH"] = f"{python_bin}{os.pathsep}{environment.get('PATH', '')}"
     environment.update(
         {
             "GITHUB_EVENT_PATH": str(event_path),

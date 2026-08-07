@@ -36,7 +36,9 @@ belirleyin, algılanan bir konumu seçin veya **Browse** seçeneğini kullanın,
 belirleyin. Sihirbaz, değiştirmeden önce kayıt dosyasını doğrular, aynı konumda
 yedek oluşturur ve ilerlemeyi, sonucu veya tanılama bilgilerini gösterir. Yerel
 uygunluk SPFL/PES/UML etiketine bağlı değildir; bu yol önceden hazırlanmış uzak
-bir sürümü indirmez.
+bir sürümü indirmez. Bu isteğe bağlı harici SPFL katalogları mevcut olmadığında,
+yerel eşleştirici seçilen kayıt dosyasına gömülü oyuncu ve takım adlarını
+kullanır, böylece paketlenmiş yerel güncelleme yolu bunlar olmadan da çalışabilir.
 
 > [!WARNING]
 > İlk yürütülebilir dosya imzasızdır; bu nedenle Windows SmartScreen bir uyarı gösterebilir. Devam etmeden önce indirilen dosyayı [en son sürümde](https://github.com/gvoze32/fldailyedit/releases/tag/latest) yayımlanan `FLDailyEditInstaller.exe.sha256` ile karşılaştırın.

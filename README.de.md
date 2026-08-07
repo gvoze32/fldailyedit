@@ -36,7 +36,10 @@ Sie **Browse**, wählen Sie **Fast** oder **Deep** und anschließend **Apply
 update**. Der Assistent prüft den Spielstand vor der Änderung, erstellt eine
 Sicherung am selben Ort und zeigt Fortschritt, Ergebnis oder Diagnosedaten an.
 Die lokale Eignung hängt nicht von der SPFL/PES/UML-Kennzeichnung ab; dieser Weg
-lädt keine vorbereitete Remote-Version herunter.
+lädt keine vorbereitete Remote-Version herunter. Wenn diese optionalen externen
+SPFL-Kataloge nicht verfügbar sind, greift der lokale Abgleich auf die im
+ausgewählten Spielstand enthaltenen Spieler- und Teamnamen zurück, sodass die
+enthaltene lokale Aktualisierungsfunktion auch ohne sie ausgeführt werden kann.
 
 
 > [!WARNING]

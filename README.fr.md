@@ -36,7 +36,11 @@ l’utilisateur, au lieu d’installer une version précompilée. Sélectionnez
 après vérification. L’assistant valide la sauvegarde avant toute modification,
 crée une copie de sécurité sur place et affiche la progression, le résultat ou
 les diagnostics. L’éligibilité locale ne dépend pas du libellé SPFL/PES/UML et
-ce mode ne télécharge pas de version précompilée distante.
+ce mode ne télécharge pas de version précompilée distante. Lorsque ces catalogues
+SPFL externes optionnels ne sont pas disponibles, le moteur de correspondance
+local utilise les noms de joueurs et d’équipes intégrés à la sauvegarde
+sélectionnée, permettant ainsi au mode de mise à jour locale intégré de
+fonctionner sans eux.
 
 
 > [!WARNING]

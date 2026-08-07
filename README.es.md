@@ -44,7 +44,10 @@ local save**, elija una ubicación detectada o use **Browse**, elija **Fast** o
 valida el archivo antes de modificarlo, crea una copia de seguridad en el mismo
 lugar y muestra el progreso, el resultado o los diagnósticos. La elegibilidad
 local no depende de la etiqueta SPFL/PES/UML y esta ruta no descarga una versión
-precompilada remota.
+precompilada remota. Cuando esos catálogos externos opcionales de SPFL no están
+disponibles, el comparador local recurre a los nombres de jugadores y equipos
+integrados en el archivo guardado seleccionado, por lo que la ruta de
+actualización local empaquetada puede ejecutarse sin ellos.
 
 
 > [!WARNING]

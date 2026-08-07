@@ -35,7 +35,10 @@ detectado ou use **Browse**, escolha **Fast** ou **Deep** e, depois de revisar,
 selecione **Apply update**. O assistente valida o save antes da alteração, cria
 um backup no próprio local e mostra o progresso, o resultado ou os diagnósticos.
 A elegibilidade local não depende do rótulo SPFL/PES/UML, e esse caminho não
-baixa uma versão pré-compilada remota.
+baixa uma versão pré-compilada remota. Quando esses catálogos externos
+opcionais do SPFL não estão disponíveis, o comparador local recorre aos nomes de
+jogadores e times incorporados no save selecionado, permitindo que o caminho de
+atualização local integrado funcione sem eles.
 
 
 > [!WARNING]

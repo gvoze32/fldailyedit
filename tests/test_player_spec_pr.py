@@ -147,7 +147,7 @@ def test_player_contribution_rejects_malformed_name_status_records(record):
 
 def test_cli_reads_only_the_caller_supplied_changes_file(tmp_path):
     changes_file = tmp_path / "changes.tsv"
-    changes_file.write_text("A\tplayers/marco-palestra.json\n", encoding="utf-8")
+    changes_file.write_bytes(b"A\tplayers/marco-palestra.json\n")
 
     result = subprocess.run(
         [

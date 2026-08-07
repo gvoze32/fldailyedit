@@ -44,6 +44,10 @@ my local save**, scegli una posizione rilevata oppure usa **Browse**, scegli
 verifica il salvataggio prima di modificarlo, crea un backup sul posto e mostra
 progresso, risultato o diagnostica. L'idoneità locale non dipende dall'etichetta
 SPFL/PES/UML e questo percorso non scarica una versione precompilata remota.
+Quando questi cataloghi SPFL esterni opzionali non sono disponibili, il
+meccanismo di corrispondenza locale ricorre ai nomi di giocatori e squadre
+incorporati nel salvataggio selezionato, consentendo l'esecuzione della procedura
+di aggiornamento locale integrata anche senza di essi.
 
 
 > [!WARNING]
