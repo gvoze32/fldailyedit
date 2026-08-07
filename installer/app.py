@@ -944,7 +944,6 @@ _RADIO_DESCRIPTION_INDENT = 28
 _POLL_INTERVAL_MS = 50
 _PROGRESS_PULSE_MS = 12
 _MINIMUM_WRAP_WIDTH = 320
-_LOCATION_VIEWPORT_HEIGHT = 200
 
 
 class CloseDisposition(str, Enum):
@@ -1049,28 +1048,6 @@ def close_disposition(state: InstallerState) -> CloseDisposition:
     return CloseDisposition.CANCEL_AND_WAIT
 
 
-def scroll_fraction_for_item(
-    *,
-    view_top: int,
-    view_height: int,
-    content_height: int,
-    item_top: int,
-    item_height: int,
-) -> float | None:
-    """Return a canvas yview fraction only when an item is clipped."""
-
-    if content_height <= view_height:
-        return None
-    item_bottom = item_top + item_height
-    if item_top < view_top:
-        target_top = item_top
-    elif item_bottom > view_top + view_height:
-        target_top = item_bottom - view_height
-    else:
-        return None
-    maximum_top = content_height - view_height
-    target_top = min(max(target_top, 0), maximum_top)
-    return target_top / content_height
 
 
 def diagnostic_details(
@@ -1470,49 +1447,9 @@ class InstallerApplication:
             pady=(_SPACE_S, _SPACE_M),
         )
 
-        location_viewport = ttk.Frame(frame)
-        location_viewport.grid(row=2, column=0, sticky="nsew")
-        location_viewport.columnconfigure(0, weight=1)
-        location_viewport.rowconfigure(0, weight=1)
-        frame_background = ttk.Style(self.root).lookup("TFrame", "background")
-        self._location_canvas = tkinter.Canvas(
-            location_viewport,
-            background=frame_background,
-            borderwidth=0,
-            highlightthickness=0,
-            height=_LOCATION_VIEWPORT_HEIGHT,
-            takefocus=True,
-        )
-        self._location_canvas.grid(row=0, column=0, sticky="nsew")
-        self._location_scrollbar = ttk.Scrollbar(
-            location_viewport,
-            orient="vertical",
-            command=self._location_canvas.yview,
-            takefocus=True,
-        )
-        self._location_scrollbar.grid(row=0, column=1, sticky="ns")
-        self._location_canvas.configure(
-            yscrollcommand=self._location_scrollbar.set
-        )
-        self._location_holder = ttk.Frame(self._location_canvas)
+        self._location_holder = ttk.Frame(frame)
+        self._location_holder.grid(row=2, column=0, sticky="nsew")
         self._location_holder.columnconfigure(0, weight=1)
-        self._location_window = self._location_canvas.create_window(
-            (0, 0),
-            window=self._location_holder,
-            anchor="nw",
-        )
-        self._location_holder.bind(
-            "<Configure>",
-            self._on_location_holder_configure,
-            add="+",
-        )
-        self._location_canvas.bind(
-            "<Configure>",
-            self._on_location_canvas_configure,
-            add="+",
-        )
-        self._bind_location_scrolling(self._location_canvas)
-        self._bind_location_scrolling(self._location_holder)
         self._location_var = tkinter.StringVar(self.root)
         self._location_path_labels: list[ttk.Label] = []
 
@@ -1544,66 +1481,11 @@ class InstallerApplication:
         return frame
 
 
-    def _bind_location_scrolling(self, widget: tkinter.Misc) -> None:
-        widget.bind("<MouseWheel>", self._on_location_mousewheel, add="+")
-        widget.bind("<Button-4>", self._on_location_mousewheel, add="+")
-        widget.bind("<Button-5>", self._on_location_mousewheel, add="+")
-
-    def _on_location_holder_configure(
-        self,
-        _event: tkinter.Event[tkinter.Misc],
-    ) -> None:
-        self._location_canvas.configure(
-            scrollregion=self._location_canvas.bbox("all")
-        )
-
-    def _on_location_canvas_configure(
-        self,
-        event: tkinter.Event[tkinter.Misc],
-    ) -> None:
-        self._location_canvas.itemconfigure(
-            self._location_window,
-            width=event.width,
-        )
-
-    def _on_location_mousewheel(
-        self,
-        event: tkinter.Event[tkinter.Misc],
-    ) -> str:
-        button = getattr(event, "num", None)
-        delta = getattr(event, "delta", 0)
-        if button == 4 or delta > 0:
-            units = -1
-        elif button == 5 or delta < 0:
-            units = 1
-        else:
-            return "break"
-        self._location_canvas.yview_scroll(units, "units")
-        return "break"
-
-    def _ensure_location_visible(self, widget: tkinter.Misc) -> None:
-        if not widget.winfo_exists():
-            return
-        content_height = self._location_holder.winfo_reqheight()
-        view_height = self._location_canvas.winfo_height()
-        view_top = round(
-            self._location_canvas.yview()[0] * content_height
-        )
-        fraction = scroll_fraction_for_item(
-            view_top=view_top,
-            view_height=view_height,
-            content_height=content_height,
-            item_top=widget.winfo_y(),
-            item_height=widget.winfo_height(),
-        )
-        if fraction is not None:
-            self._location_canvas.yview_moveto(fraction)
 
     def _focus_location_button(self, widget: ttk.Radiobutton) -> None:
         if not widget.winfo_exists():
             return
         widget.focus_set()
-        self._ensure_location_visible(widget)
 
     def _build_review_frame(self) -> ttk.Frame:
         frame = ttk.Frame(self._body)
@@ -1947,14 +1829,6 @@ class InstallerApplication:
                 state="normal" if compatible else "disabled",
             )
             button.grid(row=row * 2, column=0, sticky="w")
-            self._bind_location_scrolling(button)
-            button.bind(
-                "<FocusIn>",
-                lambda _event, widget=button: self.root.after_idle(
-                    lambda: self._ensure_location_visible(widget)
-                ),
-                add="+",
-            )
             if location == state.selected_location:
                 selected_button = button
             path_label = self._wrapped_label(
@@ -1969,7 +1843,6 @@ class InstallerApplication:
                 padx=(_RADIO_DESCRIPTION_INDENT, 0),
                 pady=(_SPACE_XS, _SPACE_M),
             )
-            self._bind_location_scrolling(path_label)
         if state.locations:
             if local_mode:
                 self._location_status_var.set(

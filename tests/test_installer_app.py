@@ -1005,24 +1005,6 @@ def test_worker_reports_browse_validation_failure_as_a_typed_event(
         worker.close()
 
 
-def test_scroll_fraction_reveals_clipped_location_without_moving_visible_item() -> None:
-    assert installer_app.scroll_fraction_for_item(
-        view_top=0,
-        view_height=200,
-        content_height=600,
-        item_top=300,
-        item_height=40,
-    ) == pytest.approx(140 / 600)
-    assert (
-        installer_app.scroll_fraction_for_item(
-            view_top=200,
-            view_height=200,
-            content_height=600,
-            item_top=250,
-            item_height=40,
-        )
-        is None
-    )
 
 
 def test_open_save_folder_returns_false_when_startfile_fails(
@@ -1693,8 +1675,6 @@ class _LayoutWidget:
     def configure(self, **options):
         self.options.update(options)
 
-    def create_window(self, *_args, **_kwargs):
-        return "location-window"
 
     def grid(self, **options):
         self.grid_options = options
@@ -1702,11 +1682,6 @@ class _LayoutWidget:
     def rowconfigure(self, row, **options):
         self.rowconfigure_calls.append((row, options))
 
-    def yview(self, *_args):
-        pass
-
-    def set(self, *_args):
-        pass
 
 
 class _LayoutVariable:
@@ -1724,7 +1699,6 @@ class _LayoutStyle:
 
 class _LayoutTkinter:
     BooleanVar = _LayoutVariable
-    Canvas = _LayoutWidget
     StringVar = _LayoutVariable
 
 
@@ -1734,7 +1708,6 @@ class _LayoutTtk:
     Frame = _LayoutWidget
     Label = _LayoutWidget
     Radiobutton = _LayoutWidget
-    Scrollbar = _LayoutWidget
     Style = _LayoutStyle
 
 
@@ -1788,9 +1761,8 @@ def test_update_frame_groups_prebuilt_and_local_coverage_controls(
     assert application._mode_var.value == InstallerMode.RELEASE.value
 
 
-def test_save_frame_places_browse_right_of_location_viewport(monkeypatch) -> None:
+def test_save_frame_places_browse_right_of_location_list(monkeypatch) -> None:
     application = _layout_application(monkeypatch)
-    application._bind_location_scrolling = lambda _widget: None
 
     frame = application._build_save_frame()
 
@@ -1799,10 +1771,11 @@ def test_save_frame_places_browse_right_of_location_viewport(monkeypatch) -> Non
         for child in frame.children
         if child.options.get("text") == "Browse…"
     )
-    location_viewport = application._location_canvas.parent
+    location_list = application._location_holder
+    assert location_list.parent is frame
     assert browse_button.grid_options["row"] == 2
     assert browse_button.grid_options["column"] == 1
     assert browse_button.grid_options["sticky"] == "ne"
-    assert location_viewport.grid_options["row"] == 2
-    assert location_viewport.grid_options["column"] == 0
+    assert location_list.grid_options["row"] == 2
+    assert location_list.grid_options["column"] == 0
     assert (2, {"weight": 1}) in frame.rowconfigure_calls
