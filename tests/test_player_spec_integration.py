@@ -11,6 +11,8 @@ from editor.player_spec import (
     load_base_manifest,
     load_player_specs,
 )
+DASTAN_ID = 1_073_003
+
 
 
 def _assert_decoded_profile_matches_proposal(
@@ -377,7 +379,7 @@ def test_bundled_base_batch_survives_encryption_roundtrip(tmp_path):
         assert palestra.abilities["ball_control"] == 80
         assert palestra.abilities["tight_possession"] == 81
         assert palestra.abilities["lofted_pass"] == 83
-        assert verified.get_all_players().get(200000) is None
+        assert verified.get_all_players().get(DASTAN_ID) is None
     finally:
         crypto.cleanup_temp(decrypted)
         if reopened is not None:
@@ -394,7 +396,7 @@ def test_bundled_base_create_survives_encryption_roundtrip(tmp_path):
         edit_file.load(decrypted / "data.dat")
         assert edit_file.release_player(126925, 102) is True
         dastan = next(
-            spec for spec in load_player_specs() if spec.identity.pes_id == 200000
+        spec for spec in load_player_specs() if spec.identity.pes_id == DASTAN_ID
         )
         result = apply_player_spec(
             edit_file,
@@ -415,13 +417,13 @@ def test_bundled_base_create_survives_encryption_roundtrip(tmp_path):
         assert verified.validate_integrity()["valid"] is True
         players = verified.get_all_players()
         roster = verified.get_team_roster(102)
-        assert roster.player_index(200000) != -1
-        assert players[200000].name == "Dastan Satpaev"
-        assert players[200000].print_name == "SATPAEV"
+        assert roster.player_index(DASTAN_ID) != -1
+        assert players[DASTAN_ID].name == "Dastan Satpaev"
+        assert players[DASTAN_ID].print_name == "SATPAEV"
         assert [
             players[player_id].name
             for player_id in roster.roster
-            if player_id == 200000
+            if player_id == DASTAN_ID
         ] == ["Dastan Satpaev"]
         before_rerun = bytes(verified._data)
         rerun = apply_player_spec(

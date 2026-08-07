@@ -12,6 +12,8 @@ import pytest
 from editor.models import TeamData
 from scraper.models import MatchedTransfer, Transfer
 
+DASTAN_ID = 1_073_003
+
 
 def test_transfer_run_never_loads_or_applies_player_specs(
     monkeypatch, tmp_path, capsys
@@ -1294,7 +1296,7 @@ def test_players_apply_mixed_success_and_mutation_failure_persists_verified_succ
         tmp_path,
         (
             SpecResult(162196, "Marco Palestra", "updated", "patched"),
-            SpecResult(200000, "Dastan Satpaev", "rejected", "mutation_failed"),
+            SpecResult(DASTAN_ID, "Dastan Satpaev", "rejected", "mutation_failed"),
         ),
     )
 
@@ -1331,7 +1333,7 @@ def test_players_apply_overflow_mode_fails_when_no_safe_candidate(
         tmp_path,
         (
             SpecResult(
-                200000,
+                DASTAN_ID,
                 "Dastan Satpaev",
                 "waiting",
                 "no_safe_overflow_candidate",

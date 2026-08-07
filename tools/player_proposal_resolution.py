@@ -25,7 +25,9 @@ _CATALOG_SOURCE = {
     "license": "MIT",
     "copyright": "Copyright (c) 2020 Paweł",
 }
-_CREATED_PLAYER_IDS = range(200_000, 300_000)
+# PES 2021 edit-file player entries require created IDs >= 0x100000.
+# Keep the existing 100,000-slot capacity while moving it out of the base-ID range.
+_CREATED_PLAYER_IDS = range(0x100000, 0x100000 + 100_000)
 _APPEARANCE_PALETTE_V1 = (
     (3, 17),
     (2, 17),

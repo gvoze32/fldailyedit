@@ -75,6 +75,7 @@ class _FrozenList(tuple[object, ...]):
 
 
 _MAX_PLAYER_SPEC_BYTES = 2 * 1024 * 1024
+_MIN_CREATED_PLAYER_ID = 0x100000
 
 
 def _freeze_metadata(value: object) -> object:
@@ -584,6 +585,11 @@ def _load_create(value: object, identity: PlayerIdentity) -> CreatePlayerData:
     _validate_keys(raw, _CREATE_FIELDS, _CREATE_REQUIRED_FIELDS, "create PES data")
 
     player_id = _integer(raw, "player_id", 1, 0xFFFFFFFF, "create PES data")
+    if player_id < _MIN_CREATED_PLAYER_ID:
+        raise PlayerSpecError(
+            "created PES ID must be at least "
+            f"{_MIN_CREATED_PLAYER_ID} (0x{_MIN_CREATED_PLAYER_ID:X})"
+        )
     name = _validate_pes_string(_text(raw, "name", "create PES data"), "name")
     print_name = _validate_pes_string(
         _text(raw, "print_name", "create PES data"), "print_name"

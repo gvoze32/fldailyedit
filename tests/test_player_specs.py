@@ -8,6 +8,8 @@ import pytest
 
 
 REVISION = "fl26-u2.2-national-squads"
+DASTAN_ID = 1_073_003
+
 
 PALESTRA_ENTRY = bytes.fromhex(
     "9479020094790200d700b444000041233f2512073c5f730948e1f0083b220a4528"
@@ -59,7 +61,7 @@ def valid_dastan_payload():
             "name": "Dastan Satpaev",
             "print_name": "SATPAEV",
             "aliases": ["Dastan Satpaev"],
-            "pes_id": 200000,
+            "pes_id": DASTAN_ID,
             "pes_retro_stats_id": "f77d9c27-8f02-4dbe-b877-4c13724a4886",
         },
         "evidence": {
@@ -72,7 +74,7 @@ def valid_dastan_payload():
             "reason": "Chelsea included Satpaev in its 2026 pre-season squad before his contractual transfer date.",
         },
         "pes": {
-            "player_id": 200000,
+            "player_id": DASTAN_ID,
             "name": "Dastan Satpaev",
             "print_name": "SATPAEV",
             "team_id": 102,
@@ -821,6 +823,18 @@ def test_load_specs_rejects_filename_identity_and_duplicate_ids(tmp_path):
     write_payload(tmp_path, "dastan-satpaev.json", duplicate)
     with pytest.raises(PlayerSpecError, match="PES ID"):
         load_player_specs(tmp_path)
+def test_completed_create_specs_reject_ids_below_pes_created_range(tmp_path):
+    from editor.player_spec import PlayerSpecError, load_player_specs
+
+    payload = valid_dastan_payload()
+    payload["identity"]["pes_id"] = 200000
+    payload["pes"]["player_id"] = 200000
+    write_payload(tmp_path, "dastan-satpaev.json", payload)
+
+    with pytest.raises(PlayerSpecError, match="created PES ID"):
+        load_player_specs(tmp_path)
+
+
 
 def test_completed_specs_reject_schema_version_1(tmp_path):
     from editor.player_spec import PlayerSpecError, load_player_specs
@@ -1129,7 +1143,7 @@ def dastan_spec(tmp_path):
 
     write_payload(tmp_path, "dastan-satpaev.json", valid_dastan_payload())
     return next(
-        spec for spec in load_player_specs(tmp_path) if spec.identity.pes_id == 200000
+        spec for spec in load_player_specs(tmp_path) if spec.identity.pes_id == DASTAN_ID
     )
 
 
@@ -1508,13 +1522,13 @@ def test_create_allows_an_unused_id_below_existing_created_ids(tmp_path):
     from editor.player_spec import apply_create
 
     edit_file = make_player_spec_edit_file(roster_size=39)
-    struct.pack_into("<I", edit_file._data, edit_file.player_start, 200001)
-    struct.pack_into("<I", edit_file._data, edit_file.player_start + 4, 200001)
+    struct.pack_into("<I", edit_file._data, edit_file.player_start, DASTAN_ID + 1)
+    struct.pack_into("<I", edit_file._data, edit_file.player_start + 4, DASTAN_ID + 1)
     struct.pack_into(
         "<I",
         edit_file._data,
         edit_file.player_start + PLAYER_ENTRY_SIZE,
-        200001,
+        DASTAN_ID + 1,
     )
     spec = dastan_spec(tmp_path)
 
@@ -1522,7 +1536,7 @@ def test_create_allows_an_unused_id_below_existing_created_ids(tmp_path):
 
     assert result.status == "created"
     assert edit_file.player_count == 2
-    assert edit_file.get_player_ability_profile(200000) is not None
+    assert edit_file.get_player_ability_profile(DASTAN_ID) is not None
 
 
 def test_create_rejects_id_collision_with_different_normalized_identity(tmp_path):
@@ -1934,9 +1948,9 @@ def test_explicit_overflow_release_allows_essential_create(tmp_path):
     roster = edit_file.get_team_roster(102)
     assert roster is not None
     assert roster.roster_size == 40
-    assert roster.has_player(200000)
+    assert roster.has_player(DASTAN_ID)
     assert not roster.has_player(100040)
-    assert edit_file.get_all_players(include_base_db=False)[200000].name == (
+    assert edit_file.get_all_players(include_base_db=False)[DASTAN_ID].name == (
         "Dastan Satpaev"
     )
 
@@ -1963,7 +1977,7 @@ def test_update_before_eligible_create_keeps_cache_mapping_safe(tmp_path):
         ("Dastan Satpaev", "created"),
     ]
     assert all(result.diagnostic is None for result in results)
-    assert edit_file.get_all_players(include_base_db=False)[200000].name == (
+    assert edit_file.get_all_players(include_base_db=False)[DASTAN_ID].name == (
         "Dastan Satpaev"
     )
 
@@ -2004,12 +2018,12 @@ def test_created_player_is_visible_to_later_identity_assessment(tmp_path):
             name="SATPAEV",
             print_name="OTHER",
             aliases=("Different Prospect",),
-            pes_id=200001,
+            pes_id=DASTAN_ID + 1,
             pes_retro_stats_id="f77d9c28-8f02-4dbe-b877-4c13724a4886",
         ),
         create=replace(
             first.create,
-            player_id=200001,
+            player_id=DASTAN_ID + 1,
             name="SATPAEV",
             print_name="OTHER",
             preferred_shirt_number=37,
@@ -2024,11 +2038,11 @@ def test_created_player_is_visible_to_later_identity_assessment(tmp_path):
     )
 
     assert [(result.status, result.reason, result.pes_id) for result in results] == [
-        ("created", "created_and_registered", 200000),
-        ("already_applied", "matching_identity_exists", 200000),
+        ("created", "created_and_registered", DASTAN_ID),
+        ("already_applied", "matching_identity_exists", DASTAN_ID),
     ]
     assert len(edit_file.get_team_roster(102).roster) == 39
-    assert edit_file.get_all_players(include_base_db=False).get(200001) is None
+    assert edit_file.get_all_players(include_base_db=False).get(DASTAN_ID + 1) is None
 
 
 @pytest.mark.parametrize(
@@ -2080,8 +2094,8 @@ def test_failed_mutation_rolls_back_only_that_spec(
     else:
         assert results[1].diagnostic is None
     assert edit_file.get_edited_player_entry(162196) == marco_before
-    assert edit_file.get_team_roster(102).player_index(200000) != -1
-    assert edit_file.get_all_players(include_base_db=False)[200000].name == (
+    assert edit_file.get_team_roster(102).player_index(DASTAN_ID) != -1
+    assert edit_file.get_all_players(include_base_db=False)[DASTAN_ID].name == (
         "Dastan Satpaev"
     )
 

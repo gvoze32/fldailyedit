@@ -585,7 +585,7 @@ def test_create_draft_contains_every_resolved_field_and_exact_review_metadata():
         "name": "Dastan Satpaev",
         "print_name": "SATPAEV",
         "aliases": ["Dastan Satpaev"],
-        "pes_id": 224427,
+        "pes_id": 1073003,
         "pes_retro_stats_id": PROFILE_UUID,
     }
     assert payload["identity"]["pes_id"] == payload["pes"]["player_id"]
@@ -600,7 +600,7 @@ def test_create_draft_contains_every_resolved_field_and_exact_review_metadata():
         "issue_url": "https://github.com/gvoze32/fldailyedit/issues/42",
     }
     assert payload["pes"] == {
-        "player_id": 224427,
+        "player_id": 1073003,
         "name": "Dastan Satpaev",
         "print_name": "SATPAEV",
         "team_id": 101,

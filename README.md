@@ -197,6 +197,8 @@ fields; retain the canonical `evidence.profile_url`, reviewed
 non-empty `evidence.reason`. Persist the canonical profile UUID as
 `identity.pes_retro_stats_id` and only the reviewed gameplay values in `pes`.
 For a create, also complete every game-local field named by `draft.missing`.
+Created-player PES IDs must be unique and at least `0x100000` (1,048,576);
+the proposal allocator stays in that reserved range.
 Then remove the top-level `source` and `draft` objects, which are review-only
 generated-draft metadata, before completed validation.
 

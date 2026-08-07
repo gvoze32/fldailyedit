@@ -28,7 +28,7 @@ from tools.player_proposal_resolution import (
 
 
 UUID_TEXT = "f77d9c27-8f02-4dbe-b877-4c13724a4886"
-CREATED_PLAYER_IDS = range(200_000, 300_000)
+CREATED_PLAYER_IDS = range(0x100000, 0x100000 + 100_000)
 APPEARANCE_PALETTE_V1 = (
     (3, 17),
     (2, 17),
@@ -369,6 +369,12 @@ def test_player_id_starts_from_independently_derived_uuid_seed():
     expected = _seeded_player_id(UUID_TEXT)
 
     assert allocate_created_player_id(UUID_TEXT, set()) == expected
+def test_default_created_player_ids_use_pes_reserved_range():
+    allocated = allocate_created_player_id(UUID_TEXT, set())
+
+    assert allocated >= 0x100000
+
+
 
 
 def test_player_id_probes_the_next_circular_slot_after_a_collision():

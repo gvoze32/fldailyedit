@@ -10,7 +10,7 @@ Usage:
 Contoh:
     PYTHONPATH=. python3 tools/ovr_calc.py 162196
     PYTHONPATH=. python3 tools/ovr_calc.py 162196 --spec players/marco-palestra.json
-    PYTHONPATH=. python3 tools/ovr_calc.py 200000 --spec players/dastan-satpaev.json --position CF
+    PYTHONPATH=. python3 tools/ovr_calc.py 1073003 --spec players/dastan-satpaev.json --position CF
 """
 
 from __future__ import annotations
