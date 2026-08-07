@@ -424,19 +424,19 @@ def _fixed_utf8(value: str, size: int) -> bytes:
 def _build_generic_appearance(player: CreatedPlayerRecord) -> bytes:
     appearance = bytearray(PLAYER_APPEARANCE_SIZE)
     _write_field(appearance, FieldSpec(0, 0, 32), player.player_id)
-    
-    # All edited flags must be 0 to use default values from wiki.
-    _write_field(appearance, FieldSpec(4, 0, 1), 0)  # Edited face settings.
-    _write_field(appearance, FieldSpec(4, 1, 1), 0)  # Edited hairstyle settings.
-    _write_field(appearance, FieldSpec(4, 2, 1), 0)  # Edited physique settings.
-    _write_field(appearance, FieldSpec(4, 3, 1), 0)  # Edited strip style settings.
 
-    # Populate the non-zero defaults from a newly created edited player.  The
+    # Created IDs are absent from the base database, so the game must consume
+    # this serialized face, hairstyle, physique, and strip-style data.
+    _write_field(appearance, FieldSpec(4, 0, 1), 1)  # Edited face settings.
+    _write_field(appearance, FieldSpec(4, 1, 1), 1)  # Edited hairstyle settings.
+    _write_field(appearance, FieldSpec(4, 2, 1), 1)  # Edited physique settings.
+    _write_field(appearance, FieldSpec(4, 3, 1), 1)  # Edited strip style settings.
+
+    # Populate the non-zero defaults from a newly created edited player. The
     # fields are sparse bitfields, so preserve the documented unknown bits.
     for byte_offset, bit_offset, width, value in (
         (4, 4, 14, 23),  # Boots.
         (6, 2, 10, 10),  # Goalkeeper gloves.
-        (8, 0, 32, player.player_id),  # Defaulted players reference themselves.
         (22, 4, 4, 7),
         (23, 0, 4, 7),
         (23, 4, 4, 7),

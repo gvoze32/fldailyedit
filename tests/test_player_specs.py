@@ -1321,9 +1321,10 @@ def test_create_serializer_builds_linked_player_and_appearance_records(tmp_path)
     assert int.from_bytes(player_entry[:4], "little") == spec.identity.pes_id
     assert int.from_bytes(player_entry[4:8], "little") == spec.identity.pes_id
     assert int.from_bytes(appearance_entry[:4], "little") == spec.identity.pes_id
-    assert int.from_bytes(appearance_entry[8:12], "little") == spec.identity.pes_id
-    # All edited flags must be 0 to use default values from wiki (line 174-178).
-    assert not (appearance_entry[4] & ((1 << 0) | (1 << 1) | (1 << 2) | (1 << 3)))
+    # A created ID has no base-database appearance to fall back to. Its own
+    # serialized appearance must therefore be marked as edited and unlinked.
+    assert appearance_entry[8:12] == b"\0" * 4
+    assert appearance_entry[4] & 0x0F == 0x0F
     assert appearance_entry[12:19] == bytes([0x77] * 7)
     assert appearance_entry[45] == spec.create.skin_color
     assert appearance_entry[64] == 0x10 | spec.create.iris_color
@@ -1375,7 +1376,7 @@ def test_create_serializer_builds_linked_player_and_appearance_records(tmp_path)
     assert _read_field(player_entry, FIELD_SPECS["strong_foot"]) == 0
 
 
-def test_create_serializer_emits_documented_generic_appearance_defaults(tmp_path):
+def test_create_serializer_emits_usable_created_appearance_defaults(tmp_path):
     from editor.player_codec import FIELD_SPECS, _read_field, serialize_created_player
 
     spec = dastan_spec(tmp_path)
@@ -1393,7 +1394,8 @@ def test_create_serializer_emits_documented_generic_appearance_defaults(tmp_path
     assert _read_field(player_entry, FIELD_SPECS["star_player"]) == 7
     assert appearance_field(4, 4, 14) == 23
     assert appearance_field(6, 2, 10) == 10
-    assert appearance_entry[8:12] == struct.pack("<I", spec.identity.pes_id)
+    assert appearance_entry[4] & 0x0F == 0x0F
+    assert appearance_entry[8:12] == b"\0" * 4
     assert appearance_entry[22:45] == bytes.fromhex(
         "70 77 07 07 70 77 77 70 77 77 77 77 07 77 77 77 "
         "70 07 77 07 77 77 77"
