@@ -1321,11 +1321,11 @@ def test_create_serializer_builds_linked_player_and_appearance_records(tmp_path)
     assert int.from_bytes(player_entry[:4], "little") == spec.identity.pes_id
     assert int.from_bytes(player_entry[4:8], "little") == spec.identity.pes_id
     assert int.from_bytes(appearance_entry[:4], "little") == spec.identity.pes_id
-    assert int.from_bytes(appearance_entry[8:12], "little") == 0
+    assert int.from_bytes(appearance_entry[8:12], "little") == spec.identity.pes_id
     assert appearance_entry[4] & (1 << 2)
     assert appearance_entry[12:19] == bytes([0x77] * 7)
     assert appearance_entry[45] == spec.create.skin_color
-    assert appearance_entry[64] == spec.create.iris_color
+    assert appearance_entry[64] == 0x10 | spec.create.iris_color
     assert (
         player_entry[0x36:0x73].split(b"\0", 1)[0].decode()
         == spec.identity.name
@@ -1372,6 +1372,44 @@ def test_create_serializer_builds_linked_player_and_appearance_records(tmp_path)
     ):
         assert _read_field(player_entry, FIELD_SPECS[flag]) == 1
     assert _read_field(player_entry, FIELD_SPECS["strong_foot"]) == 0
+
+
+def test_create_serializer_emits_documented_generic_appearance_defaults(tmp_path):
+    from editor.player_codec import FIELD_SPECS, _read_field, serialize_created_player
+
+    spec = dastan_spec(tmp_path)
+    assert spec.create is not None
+    player_entry, appearance_entry = serialize_created_player(spec.create)
+
+    def appearance_field(byte_offset, bit_offset, width):
+        byte_count = (bit_offset + width + 7) // 8
+        chunk = int.from_bytes(
+            appearance_entry[byte_offset : byte_offset + byte_count],
+            "little",
+        )
+        return (chunk >> bit_offset) & ((1 << width) - 1)
+
+    assert _read_field(player_entry, FIELD_SPECS["star_player"]) == 7
+    assert appearance_field(4, 4, 14) == 23
+    assert appearance_field(6, 2, 10) == 10
+    assert appearance_entry[8:12] == struct.pack("<I", spec.identity.pes_id)
+    assert appearance_entry[22:45] == bytes.fromhex(
+        "70 77 07 07 70 77 77 70 77 77 77 77 07 77 77 77 "
+        "70 07 77 07 77 77 77"
+    )
+    assert appearance_field(48, 4, 4) == 7
+    assert appearance_field(49, 0, 4) == 7
+    assert appearance_field(49, 4, 4) == 7
+    assert appearance_field(51, 0, 4) == 7
+    assert appearance_field(51, 4, 4) == 7
+    assert appearance_field(56, 0, 3) == 1
+    assert appearance_field(56, 4, 3) == 1
+    assert appearance_field(58, 6, 2) == 3
+    assert appearance_field(59, 6, 2) == 1
+    assert appearance_field(60, 0, 3) == 2
+    assert appearance_field(60, 3, 3) == 1
+    assert appearance_field(63, 6, 2) == 3
+    assert appearance_entry[64] == 0x10 | spec.create.iris_color
 
 
 def test_full_roster_returns_waiting_without_mutation(tmp_path, monkeypatch):

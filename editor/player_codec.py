@@ -423,12 +423,76 @@ def _fixed_utf8(value: str, size: int) -> bytes:
 
 def _build_generic_appearance(player: CreatedPlayerRecord) -> bytes:
     appearance = bytearray(PLAYER_APPEARANCE_SIZE)
-    struct.pack_into("<I", appearance, 0, player.player_id)
-    appearance[4] |= 1 << 2  # Edited physique; face and hair remain generic.
+    _write_field(appearance, FieldSpec(0, 0, 32), player.player_id)
+    _write_field(appearance, FieldSpec(4, 2, 1), 1)  # Edited physique.
+
+    # Populate the non-zero defaults from a newly created edited player.  The
+    # fields are sparse bitfields, so preserve the documented unknown bits.
+    for byte_offset, bit_offset, width, value in (
+        (4, 4, 14, 23),  # Boots.
+        (6, 2, 10, 10),  # Goalkeeper gloves.
+        (8, 0, 32, player.player_id),  # Defaulted players reference themselves.
+        (22, 4, 4, 7),
+        (23, 0, 4, 7),
+        (23, 4, 4, 7),
+        (24, 0, 4, 7),
+        (25, 0, 4, 7),
+        (26, 4, 4, 7),
+        (27, 0, 4, 7),
+        (27, 4, 4, 7),
+        (28, 0, 4, 7),
+        (28, 4, 4, 7),
+        (29, 4, 4, 7),
+        (30, 0, 4, 7),
+        (30, 4, 4, 7),
+        (31, 0, 4, 7),
+        (31, 4, 4, 7),
+        (32, 0, 4, 7),
+        (32, 4, 4, 7),
+        (33, 0, 4, 7),
+        (33, 4, 4, 7),
+        (34, 0, 4, 7),
+        (35, 0, 4, 7),
+        (35, 4, 4, 7),
+        (36, 0, 4, 7),
+        (36, 4, 4, 7),
+        (37, 0, 4, 7),
+        (37, 4, 4, 7),
+        (38, 4, 4, 7),
+        (39, 0, 4, 7),
+        (40, 0, 4, 7),
+        (40, 4, 4, 7),
+        (41, 0, 4, 7),
+        (42, 0, 4, 7),
+        (42, 4, 4, 7),
+        (43, 0, 4, 7),
+        (43, 4, 4, 7),
+        (44, 0, 4, 7),
+        (44, 4, 4, 7),
+        (48, 4, 4, 7),
+        (49, 0, 4, 7),
+        (49, 4, 4, 7),
+        (51, 0, 4, 7),
+        (51, 4, 4, 7),
+        (56, 0, 3, 1),  # Hairstyle.
+        (56, 4, 3, 1),  # Cropped hairstyle.
+        (58, 6, 2, 3),  # Eyebrow density.
+        (59, 6, 2, 1),  # Eyebrow thickness.
+        (60, 0, 3, 2),  # Hair length.
+        (60, 3, 3, 1),  # Wave level.
+        (63, 6, 2, 3),  # Facial-hair thickness.
+        (64, 0, 4, player.iris_color & 0x0F),
+        (64, 4, 5, 1),  # Hair variation.
+    ):
+        _write_field(
+            appearance,
+            FieldSpec(byte_offset, bit_offset, width),
+            value,
+        )
+
     for offset in range(12, 19):
         appearance[offset] = 0x77  # Neutral value for both signed physique nibbles.
-    appearance[45] = player.skin_color
-    appearance[64] = player.iris_color
+    appearance[45] = player.skin_color & 0xFF
     return bytes(appearance)
 
 
@@ -447,6 +511,7 @@ def serialize_created_player(
         "age": player.age,
         "registered_position": POSITION_NAMES.index(player.registered_position),
         "playing_style": player.playing_style,
+        "star_player": 7,
         "strong_foot": player.strong_foot,
         "weak_foot_usage": player.weak_foot_usage,
         "weak_foot_accuracy": player.weak_foot_accuracy,
