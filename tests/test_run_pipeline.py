@@ -121,6 +121,69 @@ def test_cmd_run_routes_through_shared_local_update_service(
     assert "Warning: report warning" in output
 
 
+def test_match_database_uses_save_team_names_without_external_catalog(
+    monkeypatch, tmp_path
+):
+    import run
+    from editor.models import PlayerInfo, TeamData, TeamInfo
+
+    class Save:
+        player_catalog_report = SimpleNamespace(current_entries=0)
+
+        def get_all_players(self):
+            return {1001: PlayerInfo(1001, "Vanilla Player")}
+
+        def get_all_team_info(self):
+            return {101: TeamInfo(101, "Vanilla FC")}
+
+        def get_club_team_ids(self):
+            return {101}
+
+        def get_all_rosters(self):
+            return {101: TeamData(101, [1001] + [0] * 39)}
+
+    monkeypatch.setattr(
+        run.config,
+        "CURRENT_TEAMS_FILE",
+        tmp_path / "missing-teams.txt",
+    )
+
+    matcher, _, _, _ = run._load_match_database(Save())
+
+    assert matcher.match_team("Vanilla FC")[0] == 101
+
+
+def test_match_database_keeps_external_team_catalog_strict_for_reference_save(
+    monkeypatch, tmp_path
+):
+    import run
+    from editor.models import PlayerInfo, TeamData, TeamInfo
+
+    class Save:
+        player_catalog_report = SimpleNamespace(current_entries=1)
+
+        def get_all_players(self):
+            return {1001: PlayerInfo(1001, "Reference Player")}
+
+        def get_all_team_info(self):
+            return {101: TeamInfo(101, "Reference FC")}
+
+        def get_club_team_ids(self):
+            return {101}
+
+        def get_all_rosters(self):
+            return {101: TeamData(101, [1001] + [0] * 39)}
+
+    monkeypatch.setattr(
+        run.config,
+        "CURRENT_TEAMS_FILE",
+        tmp_path / "missing-teams.txt",
+    )
+
+    with pytest.raises(run.PlayerCatalogError, match="Could not read team catalog"):
+        run._load_match_database(Save())
+
+
 def test_local_runtime_rejects_invalid_save_without_backup_or_target_text(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -319,6 +319,31 @@ class TestReadPlayers:
         assert players[1003].name == "Neymar"
 
 
+    def test_read_players_without_external_catalog(self, monkeypatch, tmp_path):
+        import config
+
+        data = _build_mock_data(
+            num_players=2,
+            num_team_player=1,
+            player_entries=[
+                (1001, "Vanilla One"),
+                (1002, "Vanilla Two"),
+            ],
+            team_player_entries=[
+                (101, [1001, 1002], [1, 2]),
+            ],
+        )
+        monkeypatch.setattr(config, "CURRENT_PLAYERS_FILE", tmp_path / "missing.txt")
+        monkeypatch.setattr(config, "PLAYERS_CSV_FILE", tmp_path / "missing.csv")
+
+        edit_file = EditFile()
+        edit_file.load_bytes(data)
+
+        players = edit_file.get_all_players()
+
+        assert set(players) == {1001, 1002}
+        assert edit_file.player_catalog_report.current_entries == 0
+
 class TestReadTeams:
     def test_read_team_info(self):
         data = _build_mock_data(

@@ -358,10 +358,12 @@ class EditFile:
 
     def get_all_players(self, csv_path: Path | None = None, include_base_db: bool = True) -> dict[int, PlayerInfo]:
         """
-        Load the current FL26 player catalog and merge edited save players.
+        Load an optional external FL player catalog and merge edited save players.
 
+        When the external reference is unavailable, names embedded in the
+        selected save remain usable and any unknown roster IDs stay unmatched.
         The legacy CSV is used only for rostered IDs absent from the current
-        SmokePatch reference. It is never allowed to reintroduce stale free agents.
+        reference. It is never allowed to reintroduce stale free agents.
 
         Returns:
             {player_id: PlayerInfo}
@@ -398,9 +400,17 @@ class EditFile:
             for player_id in roster.player_ids
             if player_id
         }
+        current_path = (
+            config.CURRENT_PLAYERS_FILE
+            if config.CURRENT_PLAYERS_FILE.is_file()
+            else None
+        )
+        legacy_path = csv_path or (
+            config.PLAYERS_CSV_FILE if current_path is not None else None
+        )
         players, report = build_player_catalog(
-            current_path=config.CURRENT_PLAYERS_FILE,
-            legacy_csv_path=csv_path or config.PLAYERS_CSV_FILE,
+            current_path=current_path,
+            legacy_csv_path=legacy_path,
             edited_players=edited_players,
             roster_ids=roster_ids,
         )

@@ -1,4 +1,4 @@
-"""Load and validate the external Football Life player-name catalog."""
+"""Load and validate an optional external Football Life player-name catalog."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ MIN_CURRENT_PLAYER_CATALOG_SIZE = 25_000
 
 
 class PlayerCatalogError(RuntimeError):
-    """Raised when the local Football Life player catalog is incomplete."""
+    """Raised when an explicitly supplied player catalog is invalid or incomplete."""
 
 
 @dataclass(frozen=True)
@@ -116,16 +116,20 @@ def _load_legacy_roster_fallbacks(
 
 def build_player_catalog(
     *,
-    current_path: Path,
+    current_path: Path | None,
     legacy_csv_path: Path | None,
     edited_players: dict[int, PlayerInfo],
     roster_ids: set[int],
 ) -> tuple[dict[int, PlayerInfo], PlayerCatalogReport]:
-    """Build a current FL catalog and prove that every roster ID is represented."""
-    current_names = load_id_name_text(
-        current_path,
-        label="player",
-        minimum_entries=MIN_CURRENT_PLAYER_CATALOG_SIZE,
+    """Build a player catalog, optionally using an external current reference."""
+    current_names = (
+        load_id_name_text(
+            current_path,
+            label="player",
+            minimum_entries=MIN_CURRENT_PLAYER_CATALOG_SIZE,
+        )
+        if current_path is not None
+        else {}
     )
     players = {
         player_id: PlayerInfo(player_id, name, name)
@@ -180,7 +184,7 @@ def build_player_catalog(
             for player_id in roster_ids
         ),
     )
-    if missing:
+    if current_path is not None and missing:
         preview = ", ".join(str(player_id) for player_id in missing[:10])
         raise PlayerCatalogError(
             f"Player catalog misses {len(missing):,} roster IDs (first: {preview})"

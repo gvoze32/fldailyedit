@@ -43,6 +43,9 @@ release. Choose **Update my local save**, select a detected location or use
 The wizard validates the save before mutation, creates an in-place backup, and
 reports progress, results, or diagnostics. Local eligibility does not depend on
 the SPFL/PES/UML label, and this path does not download a prebuilt remote release.
+When those optional external SPFL catalogs are unavailable, the local matcher
+falls back to player and team names embedded in the selected save, so the
+packaged local-update path can run without them.
 
 > [!WARNING]
 > The initial executable is unsigned, so Windows SmartScreen may display a warning. Before continuing, compare the downloaded file against the published `FLDailyEditInstaller.exe.sha256` on the [latest release](https://github.com/gvoze32/fldailyedit/releases/tag/latest).

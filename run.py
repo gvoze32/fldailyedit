@@ -1121,10 +1121,27 @@ def _load_match_database(edit_file: EditFile):
     edit_file._player_cache = players
     teams_info = edit_file.get_all_team_info()
     club_ids = edit_file.get_club_team_ids()
-    current_team_names = load_id_name_text(
-        config.CURRENT_TEAMS_FILE,
-        label="team",
-        minimum_entries=700,
+
+    catalog_report = getattr(edit_file, "player_catalog_report", None)
+    current_catalog_entries = (
+        getattr(catalog_report, "current_entries", None)
+        if catalog_report is not None
+        else None
+    )
+    # The team reference is tied to the current player reference. If that
+    # SPFL catalog is unavailable, ignore any bundled team file as well: it
+    # may describe a different base than a ULM/vanilla save.
+    use_external_team_names = (
+        current_catalog_entries is None or current_catalog_entries > 0
+    )
+    current_team_names = (
+        load_id_name_text(
+            config.CURRENT_TEAMS_FILE,
+            label="team",
+            minimum_entries=700,
+        )
+        if use_external_team_names
+        else {}
     )
 
     team_name_to_id = {
@@ -1159,6 +1176,8 @@ def _load_match_database(edit_file: EditFile):
     team_player_map = {
         team_id: roster.roster for team_id, roster in all_rosters.items()
     }
+    if current_catalog_entries == 0:
+        print("  ⚠ External player catalog unavailable; using names from selected save")
     print(
         f"  {len(players)} players, {len(team_name_to_id)} playable clubs "
         "(national teams excluded)"

@@ -44,6 +44,21 @@ def test_current_catalog_covers_rosters_without_reintroducing_stale_free_agents(
     assert report.overall_ratings == 1
 
 
+def test_catalog_uses_save_players_without_external_reference():
+    players, report = player_catalog.build_player_catalog(
+        current_path=None,
+        legacy_csv_path=None,
+        edited_players={
+            42: PlayerInfo(42, "Vanilla Player", "V. Player"),
+        },
+        roster_ids={42, 99},
+    )
+
+    assert set(players) == {42}
+    assert players[42].name == "Vanilla Player"
+    assert report.current_entries == 0
+    assert report.missing_roster_ids == (99,)
+
 def test_catalog_rejects_missing_roster_id(monkeypatch, tmp_path):
     monkeypatch.setattr(player_catalog, "MIN_CURRENT_PLAYER_CATALOG_SIZE", 1)
     current = tmp_path / "current.txt"

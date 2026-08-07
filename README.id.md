@@ -44,6 +44,9 @@ gunakan **Browse**, pilih **Fast** atau **Deep**, lalu tinjau dan pilih
 tempat, dan menampilkan progres, hasil, atau diagnostik. Kelayakan lokal tidak
 bergantung pada label SPFL/PES/UML, dan jalur ini tidak mengunduh rilis remote
 prebuilt.
+Saat katalog SPFL eksternal opsional tersebut tidak tersedia, pencocokan lokal
+beralih ke nama pemain dan klub yang tersimpan di save terpilih, sehingga jalur
+pembaruan lokal dalam paket dapat berjalan tanpa katalog tersebut.
 
 
 > [!WARNING]
