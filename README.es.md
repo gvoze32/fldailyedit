@@ -199,6 +199,8 @@ conservar `evidence.profile_url`, `evidence.proof_urls` revisadas y
 y no vacío. Se debe conservar el UUID canónico del perfil como
 `identity.pes_retro_stats_id` y únicamente los valores de jugabilidad revisados en `pes`.
 Para una creación, también se deben completar todos los campos locales del juego indicados por `draft.missing`.
+Los ID de PES de jugadores creados deben ser únicos y de al menos `0x100000` (1,048,576);
+el asignador de propuestas se mantiene en ese rango reservado.
 Luego se deben eliminar los objetos de nivel superior `source` y `draft`, que son metadatos de borrador generado
 exclusivos de la revisión, antes de la validación de archivos completos.
 

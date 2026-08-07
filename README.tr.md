@@ -144,7 +144,7 @@ python run.py run --help
 
 1. [Oyuncu güncelleme issue formunu](.github/ISSUE_TEMPLATE/player-update.yml) açın. `Player name` kısmını `Pes Retro Stats` profiliyle birebir aynı girin, kanıt URL'lerini ekleyin ve `generate-player-draft` etiketini bekleyin.
 2. Yapılandırılan iş akışı profili çeker ve şema-v2 `players/<player-slug>.json` önerisini içeren bir taslak PR açar.
-3. Yeni oluşturma için yalnızca kaynakta bulunmayan oyun içi değerler `draft.missing` içinde listelenir. Güncelleme için ise sadece gerçek farklar üretilir.
+3. Yeni oluşturma için yalnızca kaynakta bulunmayan oyun içi değerler `draft.missing` içinde listelenir. Oluşturulan oyuncu PES ID'leri benzersiz ve en az `0x100000` (1.048.576) olmalıdır; öneri ayırıcı bu ayrılmış aralıkta kalır. Güncelleme için ise sadece gerçek farklar üretilir.
 4. Geliştiriciler öneriyi inceler. CI testi yalnızca bir oyuncu JSON dosyası eklendiğinde ve anlamsal doğrulayıcı başarılı olduğunda kabul eder.
 5. PR'ın birleştirilmesi (merge) nihai onaydır.
 

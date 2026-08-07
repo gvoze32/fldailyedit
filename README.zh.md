@@ -145,7 +145,7 @@ python run.py run --help
 4. 贡献者和维护者会将所有生成值作为尚未批准的提案逐一审核。仅当 PR 恰好新增或修改一个规范的球员 JSON 路径，且共享语义验证器成功通过时，CI 才会接受 Player Update。
 5. 合并 PR 仍代表人工批准状态。JSON 文件中没有单独的 `approved` 标志。
 
-每个生成的提案按预期都无法通过完整文件验证。要将其中生成的证据转换为完整的 schema v2，请删除仅供草稿使用的 `evidence.current_team`、`evidence.issue_number` 和 `evidence.issue_url` 字段；保留规范的 `evidence.profile_url`、经审核的 `evidence.proof_urls` 和 `evidence.effective_date`；再添加经审核且非空的 `evidence.reason`。将规范资料 UUID 持久保存为 `identity.pes_retro_stats_id`，并且只在 `pes` 中保留经审核的游戏数值。对于创建操作，还需补全 `draft.missing` 中列出的所有游戏本地字段。随后删除顶层的 `source` 和 `draft` 对象；它们是仅供审核使用的生成草稿元数据。完成后再进行完整验证。
+每个生成的提案按预期都无法通过完整文件验证。要将其中生成的证据转换为完整的 schema v2，请删除仅供草稿使用的 `evidence.current_team`、`evidence.issue_number` 和 `evidence.issue_url` 字段；保留规范的 `evidence.profile_url`、经审核的 `evidence.proof_urls` 和 `evidence.effective_date`；再添加经审核且非空的 `evidence.reason`。将规范资料 UUID 持久保存为 `identity.pes_retro_stats_id`，并且只在 `pes` 中保留经审核的游戏数值。对于创建操作，还需补全 `draft.missing` 中列出的所有游戏本地字段。创建球员的 PES ID 必须唯一且至少为 `0x100000`（1,048,576）；提案分配器会保留在该预留范围内。随后删除顶层的 `source` 和 `draft` 对象；它们是仅供审核使用的生成草稿元数据。完成后再进行完整验证。
 
 ### 单文件 PR 直接流程
 

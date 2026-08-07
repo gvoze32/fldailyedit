@@ -147,7 +147,7 @@ Unterstützte Update-Gruppen sind Fähigkeiten, Positionsbeherrschung, Spielstil
 
 1. Öffnen Sie das [Issue-Formular für Spieler-Updates](.github/ISSUE_TEMPLATE/player-update.yml). Geben Sie den `Player name` exakt so ein, wie er auf einem kanonischen `Pes Retro Stats`-Profil erscheint, fügen Sie Beleg-URLs bei und warten Sie auf das Label `generate-player-draft`.
 2. Der konfigurierte Generator-Workflow ruft das Profil ab und öffnet einen Entwurfs-PR mit einem `players/<player-slug>.json`-Vorschlag.
-3. Bei einer Erstellung bleiben nur spielinterne, in der Quelle nicht vorhandene Werte in `draft.missing` aufgeführt (PES-IDs, Anzeigenamen, Team-ID/Name, Nationalitäts-ID, Haut- und Augenfarbe), die von einem Mitwirkenden ergänzt werden müssen. Bei einer Aktualisierung werden nur tatsächliche Unterschiede generiert.
+3. Bei einer Erstellung bleiben nur spielinterne, in der Quelle nicht vorhandene Werte in `draft.missing` aufgeführt (PES-IDs, Anzeigenamen, Team-ID/Name, Nationalitäts-ID, Haut- und Augenfarbe), die von einem Mitwirkenden ergänzt werden müssen. PES-IDs erstellter Spieler müssen eindeutig sein und mindestens `0x100000` (1.048.576) betragen; der Vorschlags-Allokator bleibt in diesem reservierten Bereich. Bei einer Aktualisierung werden nur tatsächliche Unterschiede generiert.
 4. Mitwirkende und Maintainer überprüfen jeden Wert. CI akzeptiert ein Player Update nur, wenn der PR genau eine kanonische Spieler-JSON ändert und der semantische Validator erfolgreich durchläuft.
 5. Das Zusammenführen (Merge) des PRs gilt als finale Freigabe.
 

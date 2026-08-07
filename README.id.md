@@ -200,7 +200,9 @@ ditinjau, dan `evidence.effective_date`; lalu tambahkan `evidence.reason` yang t
 ditinjau dan tidak kosong. Simpan UUID profil kanonis sebagai
 `identity.pes_retro_stats_id` dan hanya nilai gameplay yang telah ditinjau di
 `pes`. Untuk create, lengkapi juga setiap field lokal gim yang disebutkan oleh
-`draft.missing`. Setelah itu, hapus objek tingkat teratas `source` dan `draft`,
+`draft.missing`. ID PES pemain yang dibuat harus unik dan setidaknya `0x100000` (1.048.576);
+alokator proposal tetap berada dalam rentang yang dicadangkan tersebut.
+Setelah itu, hapus objek tingkat teratas `source` dan `draft`,
 yang merupakan metadata draft hasil generator dan hanya digunakan untuk peninjauan,
 sebelum validasi lengkap.
 

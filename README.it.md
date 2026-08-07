@@ -206,7 +206,9 @@ riservati alla bozza `evidence.current_team`, `evidence.issue_number` ed
 aggiungi un valore `evidence.reason` sottoposto a revisione e non vuoto. Mantieni
 l'UUID canonico del profilo in `identity.pes_retro_stats_id` e soltanto i valori
 di gioco sottoposti a revisione in `pes`. Per una creazione, completa inoltre
-ogni campo specifico del gioco indicato da `draft.missing`. Infine, prima della
+ogni campo specifico del gioco indicato da `draft.missing`.
+Gli ID PES dei giocatori creati devono essere univoci e pari ad almeno `0x100000` (1.048.576);
+l'allocatore delle proposte rimane in tale intervallo riservato. Infine, prima della
 convalida dei file completi, rimuovi gli oggetti di primo livello `source` e
 `draft`, che sono metadati riservati alla revisione della bozza generata.
 
