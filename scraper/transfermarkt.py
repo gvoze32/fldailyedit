@@ -24,6 +24,11 @@ TRANSFERMARKT_HEADERS = {
 
 logger = logging.getLogger(__name__)
 
+
+class TransfermarktUnavailableError(RuntimeError):
+    """Expected upstream failure for the optional Transfermarkt source."""
+
+
 _LINK_RE = re.compile(
     r"\[([^\]]+)\]\((https?://[^\s)]+)(?:\s+\"([^\"]*)\")?\)"
 )
@@ -196,7 +201,7 @@ def parse_transfermarkt_markdown(
 async def _fetch_text(session: aiohttp.ClientSession, url: str) -> str:
     async with session.get(url) as response:
         if response.status != 200:
-            raise RuntimeError(f"HTTP {response.status}")
+            raise TransfermarktUnavailableError(f"HTTP {response.status}")
         return await response.text()
 
 
@@ -280,6 +285,13 @@ def fetch_transfermarkt_transfers(
                 since_date=since_date,
             )
         )
+    except (TransfermarktUnavailableError, aiohttp.ClientError, TimeoutError) as exc:
+        detail = str(exc) or type(exc).__name__
+        logger.debug(
+            "Transfermarkt supplemental source unavailable: %s",
+            detail,
+        )
+        return []
     except Exception as exc:
         logger.warning("Transfermarkt supplemental source unavailable: %s", exc)
         return []

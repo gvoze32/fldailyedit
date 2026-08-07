@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import date
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -456,6 +457,29 @@ def test_transfermarkt_fetch_uses_detailed_pages_and_stops_below_cutoff(monkeypa
     assert transfers[0].source_urls[0].endswith(
         "wettbewerb_id=alle&plus=1"
     )
+
+
+def test_transfermarkt_network_outage_is_quiet_fallback(monkeypatch, caplog):
+    from scraper import transfermarkt
+
+    async def fail_fetch(*args, **kwargs):
+        raise TimeoutError()
+
+    monkeypatch.setattr(
+        transfermarkt,
+        "_fetch_transfermarkt_transfers_async",
+        fail_fetch,
+    )
+
+    with caplog.at_level(logging.DEBUG, logger=transfermarkt.__name__):
+        assert transfermarkt.fetch_transfermarkt_transfers() == []
+
+    assert any(
+        record.levelno == logging.DEBUG
+        and "supplemental source unavailable" in record.message
+        for record in caplog.records
+    )
+    assert not any(record.levelno >= logging.WARNING for record in caplog.records)
 
 
 def test_reconciliation_enriches_complete_route_with_fast_signal():
