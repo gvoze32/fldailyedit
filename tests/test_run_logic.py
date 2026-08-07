@@ -14,6 +14,7 @@ from run import (
     _decide_roster_action,
     _dedupe_shirt_number_matches,
     _iso_date_arg,
+    _match_and_plan_transfers,
     _match_transfer_team,
     _match_transfers_statefully,
     _load_represented_fotmob_club_ids,
@@ -368,6 +369,124 @@ def test_team_matching_uses_full_name_and_rejects_conflicts():
     )
     assert unresolved.is_fully_matched is False
 
+
+def test_match_and_plan_retains_partial_matches_for_safety_accounting(
+    monkeypatch, tmp_path
+):
+    import run as run_module
+
+    class FakeMatcher:
+        def match_team(self, name):
+            if name == "Destination":
+                return 102, "Destination", 100.0
+            return None, "", 100.0
+
+        def match_player(self, *args, **kwargs):
+            return None, "", 0.0
+
+        def get_team_name(self, team_id):
+            return "Destination" if team_id == 102 else ""
+
+    monkeypatch.setattr(run_module.transfer_logger, "read_log", lambda **kwargs: [])
+    transfer = Transfer("Unknown Player", "Free Agent", "Destination")
+    roster_plan, fully_matched, _ = _match_and_plan_transfers(
+        [transfer],
+        FakeMatcher(),
+        80,
+        {102: [0] * 40},
+        {102: SimpleNamespace(player_ids=[0] * 40)},
+        {102},
+        SimpleNamespace(player_catalog_report=None),
+        tmp_path / "EDIT00000000",
+        allow_overflow_release=False,
+    )
+
+    assert fully_matched == []
+    assert [(item.action, item.reason) for item in roster_plan] == [
+        ("skip", "player_not_matched")
+    ]
+
+def test_planner_never_mutates_unresolved_team_identity():
+    partial = MatchedTransfer(
+        transfer=Transfer("Known Player", "Unknown Source", "Destination"),
+        player_id=1,
+        from_team_id=-1,
+        to_team_id=30,
+        player_confidence=100.0,
+        from_team_confidence=100.0,
+        to_team_confidence=100.0,
+    )
+
+    plan = _plan_roster_actions(
+        [partial],
+        {
+            20: SimpleNamespace(player_ids=list(range(1, 18)) + [0] * 23),
+            30: SimpleNamespace(player_ids=[0] * 40),
+        },
+        {20, 30},
+        SimpleNamespace(),
+        {id(partial): frozenset({20})},
+    )
+
+    assert [(item.action, item.reason) for item in plan] == [
+        ("skip", "source_team_not_matched")
+    ]
+
+def test_apply_counts_partial_skip_alongside_action(monkeypatch, tmp_path):
+    import run as run_module
+    from local_update import CancellationToken, LocalUpdateRequest
+
+    skipped_match = MatchedTransfer(
+        transfer=Transfer("Unknown Player", "Free Agent", "Destination"),
+        player_id=None,
+        from_team_id=None,
+        to_team_id=20,
+    )
+    moved_match = MatchedTransfer(
+        transfer=Transfer("Known Player", "Source", "Destination"),
+        player_id=1,
+        from_team_id=10,
+        to_team_id=20,
+        player_confidence=100.0,
+        from_team_confidence=100.0,
+        to_team_confidence=100.0,
+    )
+
+    class FakeEditFile:
+        def __init__(self):
+            self._data = bytearray(b"original")
+
+        def move_player(self, *args, **kwargs):
+            return True
+
+    prepared = SimpleNamespace(
+        edit_file=FakeEditFile(),
+        roster_plan=[
+            PlannedRosterAction(skipped_match, "skip", None, "player_not_matched"),
+            PlannedRosterAction(moved_match, "move", 10),
+        ],
+        output_path=tmp_path / "output",
+        edit_path=tmp_path / "input",
+        original_data=b"original",
+        backup_path=None,
+        pending_logs=[],
+        run_records=[],
+    )
+    monkeypatch.setattr(
+        run_module.backup_mod,
+        "create_backup",
+        lambda path: tmp_path / "backup",
+    )
+
+    result = _RunLocalUpdateRuntime().apply(
+        LocalUpdateRequest(prepared.edit_path),
+        prepared,
+        prepared.roster_plan,
+        CancellationToken(),
+    )
+
+    assert result.transfer_applied == 1
+    assert result.safety_skipped == 1
 
 def test_stateful_matching_keeps_identity_across_loan_chain():
     from scraper.matcher import NameMatcher

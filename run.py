@@ -617,12 +617,19 @@ def _plan_roster_actions(
         player_clubs.setdefault(player_id, set()).add(team_id)
 
     for match in matches:
-        player_id = match.player_id
-        if player_id is None:
-            planned.append(
-                PlannedRosterAction(match, "skip", None, "player_not_matched")
-            )
+        if not match.is_fully_matched:
+            if match.player_id is None:
+                reason = "player_not_matched"
+            elif match.from_team_id == UNRESOLVED_TEAM_ID:
+                reason = "source_team_not_matched"
+            elif match.to_team_id == UNRESOLVED_TEAM_ID:
+                reason = "destination_team_not_matched"
+            else:
+                reason = "transfer_not_fully_matched"
+            planned.append(PlannedRosterAction(match, "skip", None, reason))
             continue
+
+        player_id = match.player_id
 
         current_clubs = sorted(player_clubs.get(player_id, set()))
         if len(current_clubs) > 1:
@@ -1245,7 +1252,7 @@ def _match_and_plan_transfers(
     fully_matched = [match for match in matched if match.is_fully_matched]
     partial = [match for match in matched if not match.is_fully_matched]
     roster_plan = _plan_roster_actions(
-        fully_matched,
+        matched,
         all_rosters,
         club_ids,
         edit_file,
@@ -1627,15 +1634,9 @@ class _RunLocalUpdateRuntime:
         for planned_action in prepared.roster_plan:
             token.raise_if_cancelled()
             match = planned_action.match
-            player_id = match.player_id
             to_team_id = match.to_team_id
             transfer = match.transfer
-
-            if player_id is None:
-                continue
-
             action = planned_action.action
-            current_team_id = planned_action.current_team_id
             if action == "skip":
                 safety_skipped += 1
                 print(
@@ -1643,6 +1644,12 @@ class _RunLocalUpdateRuntime:
                     f"{planned_action.reason or 'state mismatch'}"
                 )
                 continue
+
+            player_id = match.player_id
+            if player_id is None:
+                continue
+
+            current_team_id = planned_action.current_team_id
             if action == "noop":
                 unchanged += 1
                 continue
