@@ -1322,7 +1322,8 @@ def test_create_serializer_builds_linked_player_and_appearance_records(tmp_path)
     assert int.from_bytes(player_entry[4:8], "little") == spec.identity.pes_id
     assert int.from_bytes(appearance_entry[:4], "little") == spec.identity.pes_id
     assert int.from_bytes(appearance_entry[8:12], "little") == spec.identity.pes_id
-    assert appearance_entry[4] & (1 << 2)
+    # All edited flags must be 0 to use default values from wiki (line 174-178).
+    assert not (appearance_entry[4] & ((1 << 0) | (1 << 1) | (1 << 2) | (1 << 3)))
     assert appearance_entry[12:19] == bytes([0x77] * 7)
     assert appearance_entry[45] == spec.create.skin_color
     assert appearance_entry[64] == 0x10 | spec.create.iris_color
