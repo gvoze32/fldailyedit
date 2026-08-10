@@ -190,9 +190,9 @@ the save.
 Supported update groups are abilities, position proficiency, playing style,
 player skills, COM styles, nationality, physical/basic settings, and
 registered position.
-- Generated OVR review values are community estimates. The current RB
-  calculator includes only the published major weights; it is not the complete
-  Konami formula.
+- Generated OVR review values are deterministic calculations based on the
+  published PES 2021 formula. They are a parity aid, not an independent
+  guarantee of the game runtime; proposed ability values still require review.
 - Player drafts generated with the previous OVR model identifier must be
   regenerated before validation; no v1-to-v2 migration is implicit.
 

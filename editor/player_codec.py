@@ -1,7 +1,9 @@
 """Bit-preserving codec for PES 2021 / Football Life player entries."""
 from dataclasses import dataclass
 import struct
+from pathlib import Path
 from typing import Mapping, Protocol
+import zlib
 
 PLAYER_DATA_SIZE = 0xF0
 PLAYER_APPEARANCE_SIZE = 0x48
@@ -419,11 +421,78 @@ def _fixed_utf8(value: str, size: int) -> bytes:
     if len(encoded) >= size:
         raise ValueError(f"{value!r} exceeds the {size - 1}-byte PES string limit")
     return encoded + bytes(size - len(encoded))
+def load_appearance_template_bytes(
+    raw: bytes | bytearray | memoryview, *, donor_player_id: int
+) -> bytes:
+    """Load one 72-byte appearance record from raw or WESYS data."""
+    if not isinstance(raw, (bytes, bytearray, memoryview)):
+        raise TypeError("PlayerAppearance.bin data must be bytes-like")
+    payload = raw
+    if len(payload) >= 8 and payload[3:8] == b"WESYS":
+        if len(payload) < 16:
+            raise ValueError("PlayerAppearance.bin WESYS header is truncated")
+        compressed_size = struct.unpack_from("<I", payload, 8)[0]
+        expected_size = struct.unpack_from("<I", payload, 12)[0]
+        compressed_end = 16 + compressed_size
+        if compressed_size <= 0 or compressed_end > len(payload):
+            raise ValueError("PlayerAppearance.bin WESYS payload is truncated")
+        try:
+            payload = zlib.decompress(payload[16:compressed_end])
+        except zlib.error as exc:
+            raise ValueError(
+                "PlayerAppearance.bin WESYS payload is not valid zlib data"
+            ) from exc
+        if expected_size and len(payload) != expected_size:
+            raise ValueError(
+                f"PlayerAppearance.bin decompressed size is {len(payload)}; "
+                f"expected {expected_size}"
+            )
+    if len(payload) % PLAYER_APPEARANCE_SIZE:
+        raise ValueError(
+            f"PlayerAppearance.bin data must be divisible by "
+            f"{PLAYER_APPEARANCE_SIZE}; got {len(payload)} bytes"
+        )
+    for offset in range(0, len(payload), PLAYER_APPEARANCE_SIZE):
+        if struct.unpack_from("<I", payload, offset)[0] == donor_player_id:
+            return bytes(payload[offset : offset + PLAYER_APPEARANCE_SIZE])
+    raise ValueError(f"appearance template for player {donor_player_id} was not found")
 
 
-def _build_generic_appearance(player: CreatedPlayerRecord) -> bytes:
+def load_appearance_template(path: Path, *, donor_player_id: int) -> bytes:
+    """Load one 72-byte appearance record from a raw or WESYS file."""
+    return load_appearance_template_bytes(
+        Path(path).read_bytes(), donor_player_id=donor_player_id
+    )
+
+def _overlay_appearance_identity(
+    appearance: bytearray, player: CreatedPlayerRecord
+) -> None:
+    """Update only identity and requested appearance colors in a template."""
+    if len(appearance) != PLAYER_APPEARANCE_SIZE:
+        raise ValueError(
+            f"appearance template must be {PLAYER_APPEARANCE_SIZE} bytes"
+        )
+    _write_field(appearance, FieldSpec(0, 0, 32), player.player_id)
+    _write_field(appearance, FieldSpec(8, 0, 32), player.player_id)
+    _write_field(
+        appearance,
+        FieldSpec(64, 0, 4),
+        player.iris_color & 0x0F,
+    )
+    appearance[45] = player.skin_color & 0xFF
+
+
+def _build_generic_appearance(
+    player: CreatedPlayerRecord, *, template: bytes | None = None
+) -> bytes:
+    if template is not None:
+        appearance = bytearray(template)
+        _overlay_appearance_identity(appearance, player)
+        return bytes(appearance)
     appearance = bytearray(PLAYER_APPEARANCE_SIZE)
     _write_field(appearance, FieldSpec(0, 0, 32), player.player_id)
+
+
 
     # A defaulted created player uses the serialized defaults and references
     # itself as its base copy because it has no base-database appearance.
@@ -504,8 +573,10 @@ def _build_generic_appearance(player: CreatedPlayerRecord) -> bytes:
 
 def serialize_created_player(
     player: CreatedPlayerRecord,
+    *,
+    appearance_template: bytes | None = None,
 ) -> tuple[bytes, bytes]:
-    """Serialize one reviewed created-player record and its generic appearance."""
+    """Serialize one reviewed created-player record and its appearance."""
     entry = bytearray(PLAYER_DATA_SIZE)
     struct.pack_into("<I", entry, 0, player.player_id)
     struct.pack_into("<I", entry, 4, player.player_id)
@@ -551,4 +622,7 @@ def serialize_created_player(
         player.print_name,
         PLAYER_DATA_SIZE - PLAYER_NATIONAL_PRINT_NAME_OFFSET,
     )
-    return bytes(entry), _build_generic_appearance(player)
+    return bytes(entry), _build_generic_appearance(
+        player,
+        template=appearance_template,
+    )

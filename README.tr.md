@@ -157,7 +157,7 @@ python run.py run --help
 İncelenen her Player Update, `players/` altında oyuncu başına şema-v2 formatında eksiksiz bir JSON dosyasıdır. Bir işlemi (`operation`: `create` veya `update`), bir yaşam döngüsünü (`active`, `upstreamed` veya `retired`), `applies_to` içindeki kesin temel sürümleri, kararlı oyuncu kimliğini ve Pes Retro Stats UUID/profil kaynağını, kaynak gösterilen kanıtları ve incelenen PES verilerini kaydeder. Oluşturma güncellemeleri, önerilen eksiksiz bir oyuncu kaydı ve hedef kadro verilerini içerir. Mevcut oyuncu güncellemeleri, yalnızca doğrulanmış temelden farklı olan desteklenen değerleri içerir; her değişiklik birebir `from` ve `to` değerlerini kaydeder.
 `create` kayıtları, inceleme ve gelecekte yeniden etkinleştirme amacıyla şema tarafından desteklenmeye devam eder. Şu anda yalnızca mevcut oyuncu `update` kayıtları kayıt dosyalarını değiştirir; tamamlanmış bir `create` uygulamak, kaydı değiştirmeden `create_temporarily_unavailable` döndürür.
 Desteklenen güncelleme grupları yetenekler, mevki yetkinliği, oyun tarzı, oyuncu becerileri, COM tarzları, uyruk, fiziksel/temel ayarlar ve kayıtlı mevkidir.
-- Oluşturulan GEN (OVR) inceleme değerleri topluluk tahminleridir. Mevcut RB hesaplayıcısı yalnızca yayınlanan ana ağırlıkları içerir; Konami'nin tam formülü değildir.
+- Oluşturulan GEN (OVR) inceleme değerleri, yayınlanan PES 2021 formülüne dayanan deterministik hesaplamalardır. Oyun çalışma zamanının bağımsız bir garantisi değil, bir eşitlik yardımcısıdır; önerilen yetenek değerleri yine de inceleme gerektirir.
 - Önceki OVR model tanımlayıcısıyla oluşturulan oyuncu taslakları, doğrulamadan önce yeniden oluşturulmalıdır; v1'den v2'ye örtük bir geçiş yoktur.
 
 ### Kolay Issue Yolu

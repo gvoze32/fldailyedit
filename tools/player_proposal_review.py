@@ -7,6 +7,8 @@ from collections.abc import Mapping
 from editor.player_ovr import (
     OVR_MODEL,
     calculate_ovr_tenths,
+    ovr_weak_foot_accuracy,
+    position_rating_for,
     relevant_ovr_positions,
 )
 
@@ -16,6 +18,9 @@ _UPDATE_ROW_KEYS = frozenset(
     {"position", "base_tenths", "proposal_tenths", "delta_tenths"}
 )
 _MODES = {"create": "new_player", "update": "comparison"}
+_MIN_OVR_TENTHS = 400
+_MAX_OVR_TENTHS = 1200
+_MAX_OVR_DELTA_TENTHS = _MAX_OVR_TENTHS - _MIN_OVR_TENTHS
 
 
 def _operation_mode(operation: str) -> str:
@@ -24,11 +29,15 @@ def _operation_mode(operation: str) -> str:
     except (KeyError, TypeError):
         raise ValueError(f"unsupported proposal operation: {operation!r}") from None
 
-
 def _ovr_tenths(value: object, context: str) -> int:
-    if type(value) is not int or not 400 <= value <= 990:
-        raise ValueError(f"{context} must be an integer from 400 to 990")
+    if type(value) is not int or not _MIN_OVR_TENTHS <= value <= _MAX_OVR_TENTHS:
+        raise ValueError(
+            f"{context} must be an integer from {_MIN_OVR_TENTHS} to "
+            f"{_MAX_OVR_TENTHS}"
+        )
     return value
+
+
 
 
 def validate_ovr_review_shape(
@@ -72,9 +81,15 @@ def validate_ovr_review_shape(
         if operation == "update":
             base_tenths = _ovr_tenths(row["base_tenths"], "base OVR tenths")
             delta_tenths = row["delta_tenths"]
-            if type(delta_tenths) is not int or not -590 <= delta_tenths <= 590:
+            if (
+                type(delta_tenths) is not int
+                or not -_MAX_OVR_DELTA_TENTHS
+                <= delta_tenths
+                <= _MAX_OVR_DELTA_TENTHS
+            ):
                 raise ValueError(
-                    "OVR delta tenths must be an integer from -590 to 590"
+                    "OVR delta tenths must be an integer from "
+                    f"{-_MAX_OVR_DELTA_TENTHS} to {_MAX_OVR_DELTA_TENTHS}"
                 )
             if delta_tenths != proposal_tenths - base_tenths:
                 raise ValueError("OVR delta tenths does not match proposal minus base")
@@ -87,6 +102,8 @@ def build_ovr_review(
     registered_position: str,
     position_proficiency: Mapping[str, int],
     base_abilities: Mapping[str, int] | None = None,
+    proposal_weak_foot_accuracy: int = 0,
+    base_weak_foot_accuracy: int | None = None,
 ) -> dict[str, object]:
     """Build one validated OVR review in player-codec position order."""
 
@@ -94,9 +111,26 @@ def build_ovr_review(
     positions = relevant_ovr_positions(
         registered_position, position_proficiency
     )
+    proposal_weak_foot_accuracy = ovr_weak_foot_accuracy(
+        proposal_weak_foot_accuracy
+    )
+    base_weak_foot_accuracy = ovr_weak_foot_accuracy(
+        proposal_weak_foot_accuracy - 1
+        if base_weak_foot_accuracy is None
+        else base_weak_foot_accuracy
+    )
     rows: list[dict[str, object]] = []
     for position in positions:
-        proposal_tenths = calculate_ovr_tenths(proposal_abilities, position)
+        rating = position_rating_for(
+            position, registered_position, position_proficiency
+        )
+        proposal_tenths = calculate_ovr_tenths(
+            proposal_abilities,
+            position,
+            registered_position=registered_position,
+            position_rating=rating,
+            weak_foot_accuracy=proposal_weak_foot_accuracy,
+        )
         if operation == "create":
             rows.append(
                 {"position": position, "proposal_tenths": proposal_tenths}
@@ -104,7 +138,13 @@ def build_ovr_review(
             continue
         if base_abilities is None:
             raise ValueError("update OVR review requires base abilities")
-        base_tenths = calculate_ovr_tenths(base_abilities, position)
+        base_tenths = calculate_ovr_tenths(
+            base_abilities,
+            position,
+            registered_position=registered_position,
+            position_rating=rating,
+            weak_foot_accuracy=base_weak_foot_accuracy,
+        )
         rows.append(
             {
                 "position": position,

@@ -14,6 +14,7 @@ class PlayerInfo:
     position: str = ""  # e.g. 'GK', 'CB', 'LB', 'RB', 'DMF', 'CMF', 'AMF', 'LWF', 'RWF', 'SS', 'CF'
     nationality: str = ""  # country or nationality code
     age: int = 0  # player age
+    position_proficiency: dict[str, int] | None = None
 
     @property
     def is_goalkeeper(self) -> bool:

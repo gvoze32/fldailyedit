@@ -6,12 +6,15 @@ from editor.player_codec import ABILITY_FIELDS, POSITION_NAMES
 from tools import ovr_calc
 
 
-def test_print_ovr_table_renders_integer_tenths(capsys):
+def test_print_ovr_table_renders_verified_integer_tenths(capsys):
     abilities = {field: 60 for field in ABILITY_FIELDS}
 
     ovr_calc._print_ovr_table(abilities)
 
-    assert capsys.readouterr().out.count("60.0") == len(POSITION_NAMES)
+    output = capsys.readouterr().out
+    assert "GK           50.0" in output
+    assert "RB           55.0" in output
+    assert output.count(".0") == len(POSITION_NAMES)
 
 
 def test_cli_adapter_does_not_own_the_ovr_formula():
@@ -43,6 +46,16 @@ def test_partial_spec_ability_map_fails_closed(
     assert "OVR abilities must exactly match ABILITY_FIELDS" in output
     assert len(output.splitlines()) == 1
     assert "40.0" not in output
+
+
+def test_update_spec_weak_foot_patch_uses_target_value(tmp_path):
+    spec_path = tmp_path / "marco-palestra.json"
+    spec_path.write_text(
+        json.dumps({"pes": {"weak_foot_accuracy": {"from": 1, "to": 3}}}),
+        encoding="utf-8",
+    )
+
+    assert ovr_calc._load_spec_weak_foot_accuracy(spec_path, 2) == 4
 
 
 @pytest.mark.parametrize("target", [60.9, "60"])

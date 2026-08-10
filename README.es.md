@@ -190,8 +190,9 @@ un `create` completado devuelve `create_temporarily_unavailable` sin modificar e
 Los grupos de actualización compatibles son habilidades, dominio de posiciones, estilo de juego,
 habilidades del jugador, estilos COM, nacionalidad, configuración física/básica y
 posición registrada.
-- Los valores de revisión de OVR generados son estimaciones de la comunidad. La calculadora actual
-  de RB solo incluye los pesos principales publicados; no es la fórmula completa de Konami.
+- Los valores de revisión de OVR generados son cálculos deterministas basados en la
+  fórmula publicada de PES 2021. Son una ayuda de paridad, no una garantía independiente
+  de la ejecución del juego; los valores de habilidad propuestos aún requieren revisión.
 - Los borradores de jugadores generados con el identificador de modelo OVR anterior deben
   regenerarse antes de la validación; no hay migración implícita de v1 a v2.
 

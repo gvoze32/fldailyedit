@@ -9,6 +9,7 @@ from enum import Enum
 from pathlib import Path
 
 
+
 FL_RELATIVE = Path(
     "Documents/KONAMI/eFootball PES 2021 SEASON UPDATE/2026/save"
 )
@@ -16,6 +17,14 @@ PES_PARENT_RELATIVE = Path(
     "Documents/KONAMI/eFootball PES 2021 SEASON UPDATE"
 )
 
+_GAME_ROOT_ENVIRONMENT = (
+    "FL_GAME_ROOT",
+    "FOOTBALL_LIFE_ROOT",
+    "PES_GAME_ROOT",
+)
+_GAME_ROOT_PARENT_ENVIRONMENT = ("PROGRAMFILES(X86)", "PROGRAMFILES", "LOCALAPPDATA")
+_GAME_ROOT_NAMES = ("SP Football Life 2026", "Football Life 2026", "PES 2021")
+_DATABASE_ARCHIVE_NAMES = ("data_s2526.cpk", "data_extra.cpk")
 _ENVIRONMENT_ROOTS = ("USERPROFILE", "OneDrive", "OneDriveConsumer")
 _GAME_NAMES = {
     "fl26-u2.2-national-squads": "Football Life 2026",
@@ -87,6 +96,81 @@ def _is_directory(path: Path) -> bool:
 def _deduplication_key(path: Path) -> str:
     return str(path).casefold()
 
+def _looks_like_game_root(path: Path) -> bool:
+    """Return whether ``path`` contains the game's ``download`` directory."""
+    try:
+        return (path.resolve(strict=False) / "download").is_dir()
+    except OSError:
+        return False
+
+
+def reject_game_root_save(path: Path) -> None:
+    """Reject a save path accidentally placed below a game installation."""
+    candidate = Path(path).resolve(strict=False)
+    if candidate.name.casefold() == "save":
+        save_directory = candidate
+    elif candidate.parent.name.casefold() == "save":
+        save_directory = candidate.parent
+    else:
+        return
+    if not _looks_like_game_root(save_directory.parent):
+        return
+    raise DestinationError(
+        "game_root_save",
+        "save files must be stored in the user's Documents save directory, "
+        f"not inside the game installation: {save_directory}",
+    )
+
+
+def find_game_cpk(
+    game_root: Path,
+    *,
+    archive_names: tuple[str, ...] = _DATABASE_ARCHIVE_NAMES,
+) -> Path | None:
+    """Find the preferred database CPK below one game installation root."""
+    root = Path(game_root).expanduser()
+    download = root if root.name.casefold() == "download" else root / "download"
+    for archive_name in archive_names:
+        candidate = download / archive_name
+        try:
+            if candidate.is_file():
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
+def discover_game_cpk(
+    game_root: Path | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> Path | None:
+    """Discover a Football Life/PES database CPK without scanning arbitrary files."""
+    source = os.environ if environment is None else environment
+    roots: list[Path] = []
+    if game_root is not None:
+        roots.append(Path(game_root))
+    for variable in _GAME_ROOT_ENVIRONMENT:
+        value = source.get(variable)
+        if value:
+            roots.append(Path(value))
+    for variable in _GAME_ROOT_PARENT_ENVIRONMENT:
+        value = source.get(variable)
+        if not value:
+            continue
+        parent = Path(value)
+        roots.extend(parent / name for name in _GAME_ROOT_NAMES)
+
+    seen: set[str] = set()
+    for root in roots:
+        key = _deduplication_key(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        cpk = find_game_cpk(root)
+        if cpk is not None:
+            return cpk
+    return None
+
 
 def discover_save_locations(
     environment: Mapping[str, str] | None = None,
@@ -140,6 +224,7 @@ def discover_save_locations(
 
 
 def validate_destination(path: Path, target: GameTarget) -> Path:
+    reject_game_root_save(path)
     _reject_reparse_point(path, "destination")
     try:
         path_status = path.lstat()

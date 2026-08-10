@@ -10,7 +10,9 @@ from installer.paths import (
     DestinationError,
     GameTarget,
     SaveLocation,
+    discover_game_cpk,
     discover_save_locations,
+    reject_game_root_save,
     validate_destination,
 )
 
@@ -113,6 +115,33 @@ def test_empty_or_missing_roots_produce_no_locations(tmp_path: Path) -> None:
             "OneDrive": str(tmp_path / "missing"),
         }
     ) == ()
+
+
+def test_discovers_database_cpk_from_explicit_game_root(tmp_path: Path) -> None:
+    game_root = tmp_path / "Football Life 2026"
+    archive = game_root / "download" / "data_s2526.cpk"
+    archive.parent.mkdir(parents=True)
+    archive.write_bytes(b"cpk")
+
+    assert discover_game_cpk(game_root) == archive
+    assert discover_game_cpk(
+        environment={"FL_GAME_ROOT": str(game_root)}
+    ) == archive
+
+
+def test_rejects_save_inside_game_root(tmp_path: Path) -> None:
+    game_root = tmp_path / "Football Life 2026"
+    (game_root / "download").mkdir(parents=True)
+    (game_root / "download" / "data_s2526.cpk").write_bytes(b"cpk")
+    save_directory = _make_directory(game_root / "save")
+
+    with pytest.raises(DestinationError) as caught:
+        reject_game_root_save(save_directory / "EDIT00000000")
+    assert caught.value.code == "game_root_save"
+
+    with pytest.raises(DestinationError) as caught:
+        validate_destination(save_directory, GameTarget.FL26)
+    assert caught.value.code == "game_root_save"
 
 
 def test_save_location_exposes_the_edit_file_path(tmp_path: Path) -> None:

@@ -158,7 +158,7 @@ python run.py run --help
 Jedes geprüfte Player Update ist eine vollständige JSON-Datei der Schema-Version 2 pro Spieler unter `players/`. Es erfasst eine `operation` (`create` oder `update`), einen Lebenszyklus (`active`, `upstreamed` oder `retired`), die genauen Basis-Revisionen in `applies_to`, die stabile Spieler-Identität und Pes-Retro-Stats-UUID/Profilherkunft, Belege und überprüfte PES-Daten. Erstellungs-Updates enthalten einen vollständigen Spielerdatensatz und Zielkader-Daten. Updates bestehender Spieler enthalten nur abweichende Werte von der geprüften Basis mit wörtlichen `from`- und `to`-Werten.
 `create`-Einträge werden weiterhin vom Schema für Prüfzwecke und künftige Reaktivierung unterstützt. Derzeit modifizieren nur `update`-Einträge bestehender Spieler Speicherdateien; das Anwenden eines fertigen `create` gibt `create_temporarily_unavailable` zurück, ohne den Speicherstand zu ändern.
 Unterstützte Update-Gruppen sind Fähigkeiten, Positionsbeherrschung, Spielstil, Spielerfähigkeiten, COM-Stile, Nationalität, physische/grundlegende Einstellungen und die registrierte Position.
-- Die generierten OVR-Prüfwerte sind Community-Schätzungen. Der aktuelle RB-Rechner enthält nur die veröffentlichten Hauptgewichtungen; er ist nicht Konamis vollständige Formel.
+- Die generierten OVR-Prüfwerte sind deterministische Berechnungen basierend auf der veröffentlichten PES 2021-Formel. Sie dienen als Paritätshilfe und stellen keine unabhängige Garantie für die Laufzeit des Spiels dar; vorgeschlagene Fähigkeitswerte müssen weiterhin überprüft werden.
 - Spielerentwürfe, die mit der früheren OVR-Modellkennung generiert wurden, müssen vor der Validierung neu generiert werden; es gibt keine implizite Migration von v1 auf v2.
 
 ### Einfacher Issue-Ablauf

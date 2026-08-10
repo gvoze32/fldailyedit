@@ -318,6 +318,21 @@ def test_players_help_uses_player_update_language(monkeypatch, capsys):
     assert "Apply reviewed Player Updates to an EDIT file" in output
 
 
+def test_players_apply_help_exposes_create_overflow_release(monkeypatch, capsys):
+    import run
+
+    monkeypatch.setattr(
+        run.sys,
+        "argv",
+        ["run.py", "players", "apply", "--help"],
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        run.main()
+
+    assert exc_info.value.code == 0
+    assert "--allow-overflow-release" in capsys.readouterr().out
+
+
 def test_cmd_run_dry_run_resolves_stale_loan_chain(monkeypatch, tmp_path, capsys):
     import run
 
@@ -977,13 +992,14 @@ def test_players_parser_dispatches_nested_apply(monkeypatch):
     assert dispatched[0].in_place is False
 
 
-def test_players_parser_rejects_overflow_release_option(monkeypatch):
+def test_players_parser_dispatches_overflow_release_option(monkeypatch):
     import run
 
+    dispatched = []
     monkeypatch.setattr(
         run,
         "cmd_players_apply",
-        lambda _args: pytest.fail("obsolete overflow option must fail in argparse"),
+        lambda args: dispatched.append(args),
     )
     monkeypatch.setattr(
         run.sys,
@@ -996,14 +1012,18 @@ def test_players_parser_rejects_overflow_release_option(monkeypatch):
             "revision-1",
             "--edit-file",
             "source",
+            "--allow-create",
             "--allow-overflow-release",
             "--output",
             "destination",
         ],
     )
 
-    with pytest.raises(SystemExit):
-        run.main()
+    run.main()
+
+    assert len(dispatched) == 1
+    assert dispatched[0].allow_create is True
+    assert dispatched[0].allow_overflow_release is True
 
 def test_players_parser_dispatches_approve_with_spec(monkeypatch):
     import run
@@ -1188,6 +1208,80 @@ def test_players_apply_no_change_writes_nothing(monkeypatch, tmp_path, capsys):
     assert source.read_bytes() == b"encrypted"
     assert "needs_review" in capsys.readouterr().out
 
+
+
+def test_players_apply_allow_create_attaches_appearance_source(
+    monkeypatch, tmp_path, capsys
+):
+    import run
+    from editor.player_spec import BaseManifest, SpecResult
+
+    source = tmp_path / "EDIT00000000"
+    source.write_bytes(b"encrypted")
+    decrypted = tmp_path / "decrypted"
+    decrypted.mkdir()
+    (decrypted / "data.dat").write_bytes(b"decrypted")
+    appearance_file = tmp_path / "PlayerAppearance.bin"
+    appearance_file.write_bytes(b"appearance")
+    attached = []
+    loader_args = []
+
+    class FakeEditFile:
+        def load(self, _path):
+            return None
+
+        def attach_player_appearance(self, data):
+            attached.append(data)
+
+        def get_all_players(self, include_base_db=True):
+            return {}
+
+        def validate_integrity(self):
+            return {"valid": True, "errors": [], "warnings": [], "metrics": {}}
+
+    def load_appearance(path, game_root):
+        loader_args.append((path, game_root))
+        return b"raw appearance", "fixture::PlayerAppearance.bin"
+
+    def apply_specs(*args, **kwargs):
+        assert kwargs == {"allow_create": True}
+        return (
+            SpecResult(
+                DASTAN_ID,
+                "Dastan Satpaev",
+                "rejected",
+                "appearance_template_unavailable",
+            ),
+        )
+
+    monkeypatch.setattr(run, "EditFile", FakeEditFile)
+    monkeypatch.setattr(
+        run,
+        "load_base_manifest",
+        lambda: BaseManifest("expected-revision", "0" * 64),
+    )
+    monkeypatch.setattr(run, "load_player_specs", lambda: ())
+    monkeypatch.setattr(run, "validate_spec_set", lambda _specs: None)
+    monkeypatch.setattr(run, "apply_player_specs", apply_specs)
+    monkeypatch.setattr(run, "_load_player_appearance_data", load_appearance)
+    monkeypatch.setattr(run.crypto, "decrypt", lambda _path: decrypted)
+    monkeypatch.setattr(run.crypto, "cleanup_temp", lambda _path: None)
+
+    run.cmd_players_apply(
+        Namespace(
+            edit_file=str(source),
+            output=str(tmp_path / "updated"),
+            in_place=False,
+            base_revision="expected-revision",
+            allow_create=True,
+            appearance_file=appearance_file,
+            game_root=tmp_path / "game",
+        )
+    )
+
+    assert loader_args == [(appearance_file, tmp_path / "game")]
+    assert attached == [b"raw appearance"]
+    assert "appearance_template_unavailable" in capsys.readouterr().out
 
 def _prepare_players_apply_results(
     monkeypatch,
@@ -1618,3 +1712,84 @@ def test_players_apply_aborts_when_existing_output_changes_during_backup(
     monkeypatch, tmp_path
 ):
     _assert_players_apply_aborts_for_backup_race(monkeypatch, tmp_path, "output")
+
+
+def test_local_runtime_baselines_native_integrity_diagnostics_before_verify(
+    monkeypatch, tmp_path
+):
+    import run
+    from local_update import CancellationToken, LocalUpdateRequest, LocalUpdateError
+
+    edit_path = tmp_path / "EDIT00000000"
+    edit_path.write_bytes(b"encrypted")
+    data_dat = tmp_path / "data.dat"
+    data_dat.write_bytes(b"original")
+    semantic_error = (
+        "Team 128 game-plan preset 0x4 assigns GK player 142128 position code 10"
+    )
+    errors = [semantic_error]
+
+    class FakeEditFile:
+        def __init__(self):
+            self._data = bytearray(b"original")
+
+        def validate_integrity(self):
+            return {
+                "valid": not errors,
+                "errors": list(errors),
+                "warnings": [],
+                "metrics": {},
+            }
+
+    edit_file = FakeEditFile()
+    prepared = run._RunPrepared(
+        temp_dir=tmp_path,
+        data_dat=data_dat,
+        edit_file=edit_file,
+        edit_path=edit_path,
+        output_path=edit_path,
+        input_digest=run._sha256_file(edit_path),
+        same_input_output=True,
+        output_existed=True,
+        output_digest=run._sha256_file(edit_path),
+    )
+    monkeypatch.setattr(
+        run,
+        "_load_match_database",
+        lambda _edit_file: (None, [], {}, set()),
+    )
+    monkeypatch.setattr(
+        run,
+        "_match_and_plan_transfers",
+        lambda *args, **kwargs: ([], [], "scope"),
+    )
+
+    runtime = run._RunLocalUpdateRuntime()
+    runtime.match_and_plan(
+        LocalUpdateRequest(edit_path),
+        prepared,
+        [],
+        CancellationToken(),
+    )
+    assert prepared.pre_mutation_integrity_errors == (semantic_error,)
+
+    edit_file._data = bytearray(b"changed")
+    runtime.verify(
+        LocalUpdateRequest(edit_path),
+        prepared,
+        object(),
+        CancellationToken(),
+    )
+    assert bytes(edit_file._data) == b"changed"
+
+    errors.append("bad common layout")
+    with pytest.raises(LocalUpdateError) as caught:
+        runtime.verify(
+            LocalUpdateRequest(edit_path),
+            prepared,
+            object(),
+            CancellationToken(),
+        )
+
+    assert caught.value.code == "post_validation_failed"
+    assert bytes(edit_file._data) == b"original"

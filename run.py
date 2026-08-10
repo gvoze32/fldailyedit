@@ -6,6 +6,8 @@ Usage:
     python run.py run --dry-run                       # Preview all changes; write nothing
     python run.py run --edit-file /path/to/EDIT00000000
     python run.py inspect --edit-file /path/to/EDIT00000000
+    python run.py audit --edit-file /path/to/EDIT00000000 --json
+    python run.py compare --left-cpk /path/to/data_s2526.cpk --right-cpk /path/to/data_extra.cpk --json
     python run.py validate --edit-file /path/to/EDIT00000000
     python run.py log                                 # Show recent transfer log
 
@@ -26,7 +28,7 @@ import sys
 import time
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import config
@@ -52,8 +54,18 @@ from editor.player_spec import (
     validate_spec_set,
     verify_base_file,
 )
-from editor.locking import EditFileLock, EditLockError
 from editor.player_catalog import PlayerCatalogError, load_id_name_text
+from editor.metadata_audit import audit_metadata, format_metadata_audit
+from editor.metadata_diff import (
+    compare_metadata_variants,
+    format_metadata_variant_diff,
+)
+from editor.player_assignment import PlayerAssignmentDatabase
+from editor.playerbin import PlayerBinDatabase
+from editor.teambin import TeamBinDatabase
+from editor.locking import EditFileLock, EditLockError
+from installer.paths import DestinationError, discover_game_cpk, reject_game_root_save
+from tools.cpk_extract import read_file as read_cpk_file
 from scraper.fotmob import (
     IncompleteScrapeError,
     fetch_fotmob_transfers,
@@ -136,7 +148,18 @@ def _resolve_run_paths(args) -> tuple[Path, Path]:
     else:
         edit_path = config.EDIT_FILE_PATH
 
+    reject_game_root_save(edit_path)
+    reject_game_root_save(output_path)
     return edit_path, output_path
+def _ensure_safe_edit_paths(*paths: Path) -> None:
+    """Fail closed before any command reads or writes a game-root save."""
+    try:
+        for path in paths:
+            reject_game_root_save(path)
+    except DestinationError as error:
+        print(f"Unsafe save path: {error}")
+        raise SystemExit(2) from error
+
 
 
 def _sha256_file(path: Path) -> str:
@@ -787,6 +810,7 @@ def setup_logging(verbose: bool = False):
 def cmd_inspect(args):
     """Inspect an edit file — show structure, counts, offsets."""
     edit_path = Path(args.edit_file)
+    _ensure_safe_edit_paths(edit_path)
 
     print(f"Decrypting {edit_path}...")
     try:
@@ -855,9 +879,136 @@ def cmd_inspect(args):
 
 
 
+def cmd_metadata_audit(args):
+    """Audit one save against the selected native game metadata variant."""
+    edit_path = Path(args.edit_file)
+    _ensure_safe_edit_paths(edit_path)
+    json_output = bool(getattr(args, "json", False))
+    if not json_output:
+        print(f"Decrypting {edit_path}...")
+    try:
+        temp_dir = crypto.decrypt(edit_path)
+    except Exception as exc:
+        print(f"Decryption failed: {exc}")
+        print("Make sure pesXdecrypter is installed. See MEMORY.md §4.")
+        sys.exit(1)
+
+    try:
+        data_dat = temp_dir / "data.dat"
+        if not data_dat.exists():
+            dat_files = list(temp_dir.glob("*.dat"))
+            if dat_files:
+                data_dat = max(dat_files, key=lambda path: path.stat().st_size)
+            else:
+                print(f"No .dat files found in {temp_dir}")
+                sys.exit(1)
+
+        edit_file = EditFile()
+        edit_file.load(data_dat)
+        game_root = getattr(args, "game_root", None)
+        playerbin_db, playerbin_source = _load_playerbin_database(
+            getattr(args, "player_bin", None),
+            game_root=game_root,
+        )
+        teambin_db, teambin_source = _load_teambin_database(
+            getattr(args, "team_bin", None),
+            game_root=game_root,
+        )
+        assignment_db, assignment_source = _load_player_assignment_database(
+            getattr(args, "player_assignment", None),
+            game_root=game_root,
+        )
+        as_of = date.fromisoformat(
+            getattr(args, "as_of", None) or date.today().isoformat()
+        )
+        report = audit_metadata(
+            edit_file,
+            playerbin_db,
+            teambin_db,
+            assignment_db,
+            as_of=as_of,
+        )
+        sources = {
+            "Player.bin": playerbin_source,
+            "Team.bin": teambin_source,
+            "PlayerAssignment.bin": assignment_source,
+        }
+        if json_output:
+            payload = report.to_dict()
+            payload["sources"] = sources
+            print(json.dumps(payload, sort_keys=True))
+        else:
+            print(format_metadata_audit(report))
+            print("\nSources:")
+            for label, source in sources.items():
+                print(f"  {label}: {source or 'unavailable'}")
+    finally:
+        crypto.cleanup_temp(temp_dir)
+def _resolve_comparison_cpk(
+    explicit_path: Path | str | None,
+    game_root: Path | str | None,
+    label: str,
+) -> Path:
+    if explicit_path is not None:
+        path = Path(explicit_path)
+        if not path.is_file():
+            raise FileNotFoundError(f"{label} CPK not found: {path}")
+        return path
+    path = discover_game_cpk(None if game_root is None else Path(game_root))
+    if path is None:
+        raise FileNotFoundError(
+            f"{label} CPK not found below {game_root or 'configured game roots'}"
+        )
+    return path
+
+
+def _load_metadata_variant_from_cpk(path: Path):
+    def load(database_type, member: str):
+        return database_type.from_bytes(read_cpk_file(path, member))
+
+    return (
+        load(PlayerBinDatabase, _PLAYER_BIN_CPK_MEMBER),
+        load(TeamBinDatabase, _TEAM_BIN_CPK_MEMBER),
+        load(PlayerAssignmentDatabase, _PLAYER_ASSIGNMENT_CPK_MEMBER),
+    )
+
+
+def cmd_compare_metadata(args):
+    """Compare supported native metadata between two CPK variants."""
+    try:
+        left_path = _resolve_comparison_cpk(
+            getattr(args, "left_cpk", None),
+            getattr(args, "left_game_root", None),
+            "Left",
+        )
+        right_path = _resolve_comparison_cpk(
+            getattr(args, "right_cpk", None),
+            getattr(args, "right_game_root", None),
+            "Right",
+        )
+        left_databases = _load_metadata_variant_from_cpk(left_path)
+        right_databases = _load_metadata_variant_from_cpk(right_path)
+        report = compare_metadata_variants(
+            str(left_path),
+            *left_databases,
+            str(right_path),
+            *right_databases,
+        )
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        raise SystemExit(f"Metadata comparison failed: {exc}") from exc
+
+    if getattr(args, "json", False):
+        print(json.dumps(report.to_dict(), sort_keys=True))
+    else:
+        print(format_metadata_variant_diff(report))
+
+
+
+
 def cmd_validate(args):
     """Validate an encrypted edit file with a supported PES edit-file layout."""
     edit_path = Path(args.edit_file)
+    _ensure_safe_edit_paths(edit_path)
     print(f"Validating {edit_path}...")
     temp_dir = crypto.decrypt(edit_path)
     try:
@@ -886,6 +1037,7 @@ def cmd_repair(args):
     edit_path = Path(args.edit_file)
     output_path = Path(args.output) if args.output else config.OUTPUT_FILE_PATH
     reference_paths = [Path(path) for path in args.reference]
+    _ensure_safe_edit_paths(edit_path, output_path, *reference_paths)
 
     base_temp = crypto.decrypt(edit_path)
     reference_temps: list[Path] = []
@@ -1119,11 +1271,187 @@ def _scrape_run_transfers(args):
     if len(transfers) > 5:
         print(f"  ... and {len(transfers) - 5} more")
     return transfers
+def _game_database_archives(
+    game_root: Path | str | None = None,
+) -> tuple[Path, ...]:
+    """Return the one selected game database archive."""
+    selected_root = (
+        game_root if game_root is not None else getattr(config, "GAME_ROOT", None)
+    )
+    primary = discover_game_cpk(selected_root)
+    return (primary,) if primary is not None else ()
+
+
+_PLAYER_BIN_CPK_MEMBER = "common/etc/pesdb/Player.bin"
+_TEAM_BIN_CPK_MEMBER = "common/etc/pesdb/Team.bin"
+_PLAYER_ASSIGNMENT_CPK_MEMBER = "common/etc/pesdb/PlayerAssignment.bin"
+
+
+def _load_binary_database(
+    configured_path: Path | str | None,
+    database_type,
+    cpk_member: str,
+    label: str,
+    *,
+    game_root: Path | str | None = None,
+):
+    """Load one binary database from an extracted file or game CPK."""
+    if configured_path is not None:
+        candidate = Path(configured_path)
+        if candidate.is_file():
+            try:
+                return database_type.load(candidate), str(candidate)
+            except (OSError, ValueError) as exc:
+                logger.warning(
+                    "Ignoring invalid %s metadata %s: %s", label, candidate, exc
+                )
+
+    for cpk_path in _game_database_archives(game_root):
+        try:
+            payload = read_cpk_file(cpk_path, cpk_member)
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError) as exc:
+            logger.warning(
+                "Ignoring unreadable %s metadata in %s: %s", label, cpk_path, exc
+            )
+            continue
+        try:
+            return database_type.from_bytes(payload), f"{cpk_path}::{label}"
+        except (OSError, ValueError) as exc:
+            logger.warning(
+                "Ignoring invalid %s metadata in %s: %s", label, cpk_path, exc
+            )
+    return None, None
+
+
+def _load_playerbin_database(
+    player_bin_path: Path | str | None = None,
+    *,
+    game_root: Path | str | None = None,
+) -> tuple[PlayerBinDatabase | None, str | None]:
+    """Load Player.bin from an explicit path or selected game database CPK."""
+    configured_path = (
+        getattr(config, "PLAYER_BIN_FILE", None)
+        if player_bin_path is None
+        else player_bin_path
+    )
+    return _load_binary_database(
+        configured_path,
+        PlayerBinDatabase,
+        _PLAYER_BIN_CPK_MEMBER,
+        "Player.bin",
+        game_root=game_root,
+    )
+
+
+def _load_teambin_database(
+    team_bin_path: Path | str | None = None,
+    *,
+    game_root: Path | str | None = None,
+) -> tuple[TeamBinDatabase | None, str | None]:
+    """Load Team.bin from an explicit path or selected game database CPK."""
+    configured_path = (
+        getattr(config, "TEAM_BIN_FILE", None)
+        if team_bin_path is None
+        else team_bin_path
+    )
+    return _load_binary_database(
+        configured_path,
+        TeamBinDatabase,
+        _TEAM_BIN_CPK_MEMBER,
+        "Team.bin",
+        game_root=game_root,
+    )
+
+
+def _load_player_assignment_database(
+    assignment_path: Path | str | None = None,
+    *,
+    game_root: Path | str | None = None,
+) -> tuple[PlayerAssignmentDatabase | None, str | None]:
+    """Load PlayerAssignment.bin from an explicit path or selected CPK."""
+    configured_path = (
+        getattr(config, "PLAYER_ASSIGNMENT_FILE", None)
+        if assignment_path is None
+        else assignment_path
+    )
+    return _load_binary_database(
+        configured_path,
+        PlayerAssignmentDatabase,
+        _PLAYER_ASSIGNMENT_CPK_MEMBER,
+        "PlayerAssignment.bin",
+        game_root=game_root,
+    )
+
+_PLAYER_APPEARANCE_CPK_MEMBER = (
+    "common/character0/model/character/appearance/PlayerAppearance.bin"
+)
+
+
+def _load_player_appearance_data(
+    appearance_path: Path | None = None,
+    game_root: Path | None = None,
+) -> tuple[bytes | None, str | None]:
+    """Load raw PlayerAppearance.bin from an explicit file or game CPK."""
+    configured_path = (
+        Path(appearance_path)
+        if appearance_path is not None
+        else getattr(config, "PLAYER_APPEARANCE_FILE", None)
+    )
+    if configured_path is not None:
+        candidate = Path(configured_path)
+        if candidate.is_file():
+            try:
+                return candidate.read_bytes(), str(candidate)
+            except OSError as exc:
+                logger.warning(
+                    "Ignoring unreadable PlayerAppearance.bin %s: %s",
+                    candidate,
+                    exc,
+                )
+
+    cpk_path = discover_game_cpk(
+        game_root
+        if game_root is not None
+        else getattr(config, "GAME_ROOT", None)
+    )
+    if cpk_path is None:
+        return None, None
+    try:
+        payload = read_cpk_file(cpk_path, _PLAYER_APPEARANCE_CPK_MEMBER)
+        return payload, f"{cpk_path}::PlayerAppearance.bin"
+    except (OSError, ValueError) as exc:
+        logger.warning(
+            "Ignoring invalid game PlayerAppearance.bin metadata %s: %s",
+            cpk_path,
+            exc,
+        )
+        return None, None
+
 
 
 def _load_match_database(edit_file: EditFile):
     """Build roster-aware player and club indexes from one validated save."""
     print("\n📋 Reading selected save database...")
+    playerbin_database, playerbin_source = _load_playerbin_database()
+    edit_file.playerbin_source = playerbin_source
+    if playerbin_database is not None:
+        edit_file.attach_playerbin(playerbin_database)
+        print(f"  Loaded Player.bin metadata from {playerbin_source}")
+    teambin_database, teambin_source = _load_teambin_database()
+    edit_file.teambin_source = teambin_source
+    if teambin_database is not None:
+        edit_file.attach_teambin(teambin_database)
+        print(f"  Loaded Team.bin metadata from {teambin_source}")
+    assignment_database, assignment_source = _load_player_assignment_database()
+    edit_file.player_assignment_source = assignment_source
+    if assignment_database is not None:
+        edit_file.attach_player_assignment(assignment_database)
+        print(
+            "  Loaded PlayerAssignment.bin metadata "
+            f"from {assignment_source}"
+        )
     players = edit_file.get_all_players()
     edit_file._player_cache = players
     teams_info = edit_file.get_all_team_info()
@@ -1135,6 +1463,13 @@ def _load_match_database(edit_file: EditFile):
         if catalog_report is not None
         else None
     )
+    ovr_count = getattr(catalog_report, "overall_ratings", None)
+    roster_count = getattr(catalog_report, "roster_entries", None)
+    if ovr_count is not None and roster_count is not None:
+        print(
+            "  OVR metadata: "
+            f"{ovr_count}/{roster_count} roster players have verified save OVR"
+        )
     # The team reference is tied to the current player reference. If that
     # SPFL catalog is unavailable, ignore any bundled team file as well: it
     # may describe a different base than a ULM/vanilla save.
@@ -1362,6 +1697,58 @@ def _find_shirt_number_conflict(
             return other_player_id
     return None
 
+def _native_transfer_metadata(edit_file: EditFile, player_id: int) -> dict[str, object]:
+    """Capture read-only native metadata for one transfer report row."""
+    metadata: dict[str, object] = {}
+    playerbin_db = getattr(edit_file, "playerbin_db", None)
+    playerbin_source = getattr(edit_file, "playerbin_source", None)
+    if playerbin_db is not None:
+        record = playerbin_db.get(player_id)
+        player_payload: dict[str, object] = {
+            "source": playerbin_source,
+            "found": record is not None,
+        }
+        if record is not None:
+            player_payload.update(
+                {
+                    "player_id": record.player_id,
+                    "name": record.name,
+                    "print_name": record.print_name,
+                    "age": record.age,
+                    "registered_position": record.registered_position,
+                    "market_value_eur": record.market_value_eur,
+                    "contract_until": record.contract_until,
+                    "loan_until": record.loan_until,
+                    "is_on_loan": record.is_on_loan,
+                    "owner_team_key": record.owner_team_key,
+                    "youth_team_id": record.youth_team_id,
+                    "caps": record.caps,
+                }
+            )
+        metadata["player_bin"] = player_payload
+
+    assignment_db = getattr(edit_file, "player_assignment_db", None)
+    if assignment_db is not None:
+        team_keys = assignment_db.team_keys_for(player_id)
+        assignment_payload: dict[str, object] = {
+            "source": getattr(edit_file, "player_assignment_source", None),
+            "team_keys": list(team_keys),
+        }
+        teambin_db = getattr(edit_file, "teambin_db", None)
+        if teambin_db is not None:
+            assignment_payload["teams"] = [
+                {
+                    "team_key": team.team_key,
+                    "name": team.name,
+                    "abbreviation": team.abbreviation,
+                }
+                for team_key in team_keys
+                if (team := teambin_db.get(team_key)) is not None
+            ]
+        metadata["player_assignment"] = assignment_payload
+    return metadata
+
+
 
 class _RunPrepared:
     def __init__(
@@ -1393,6 +1780,10 @@ class _RunPrepared:
         self.original_data = bytes(
             getattr(edit_file, "_data", data_dat.read_bytes())
         )
+        # Native Player.bin metadata can expose semantic issues already present
+        # in the selected save.  Keep those diagnostics as a baseline so a
+        # transfer is rejected only when it introduces a new integrity error.
+        self.pre_mutation_integrity_errors: tuple[str, ...] = ()
         self.pending_logs = []
         self.run_records = []
 
@@ -1559,6 +1950,10 @@ class _RunLocalUpdateRuntime:
             matcher, all_rosters, team_player_map, club_ids = _load_match_database(
                 prepared.edit_file
             )
+            baseline_integrity = prepared.edit_file.validate_integrity()
+            prepared.pre_mutation_integrity_errors = tuple(
+                str(error) for error in baseline_integrity.get("errors", [])
+            )
             roster_plan, fully_matched, save_scope = _match_and_plan_transfers(
                 transfers,
                 matcher,
@@ -1653,6 +2048,10 @@ class _RunLocalUpdateRuntime:
             if action == "noop":
                 unchanged += 1
                 continue
+            native_metadata = _native_transfer_metadata(
+                prepared.edit_file,
+                player_id,
+            )
 
             ok = False
             preferred_shirt = transfer.shirt_number
@@ -1742,6 +2141,7 @@ class _RunLocalUpdateRuntime:
                     "sources": list(transfer.sources),
                     "source_urls": list(transfer.source_urls),
                     "proof_urls": list(transfer.proof_urls),
+                    "native_metadata": native_metadata,
                 }
             )
 
@@ -1765,16 +2165,36 @@ class _RunLocalUpdateRuntime:
         _token: CancellationToken,
     ) -> None:
         post_integrity = prepared.edit_file.validate_integrity()
-        if not post_integrity["valid"]:
+        post_errors = tuple(
+            str(error) for error in post_integrity.get("errors", [])
+        )
+        baseline_errors = set(prepared.pre_mutation_integrity_errors)
+        new_errors = tuple(
+            error for error in post_errors if error not in baseline_errors
+        )
+        if new_errors:
             prepared.edit_file._data = bytearray(prepared.original_data)
             details = [
                 "Modified save failed integrity validation; changes were rolled back."
             ]
-            details.extend(f"  - {error}" for error in post_integrity["errors"][:20])
+            details.extend(f"  - {error}" for error in new_errors[:20])
+            remaining = len(new_errors) - 20
+            if remaining > 0:
+                details.append(f"  ... and {remaining} more errors")
+            preserved = len(post_errors) - len(new_errors)
+            if preserved > 0:
+                details.append(
+                    f"  Preserved {preserved} pre-existing integrity diagnostics."
+                )
             raise LocalUpdateError(
                 "post_validation_failed",
                 "\n".join(details),
                 stage=LocalUpdateStage.VERIFYING,
+            )
+        if post_errors:
+            print(
+                f"\n  Preserved {len(post_errors)} pre-existing "
+                "integrity diagnostics."
             )
 
         if _sha256_file(prepared.edit_path) != prepared.input_digest:
@@ -1823,7 +2243,11 @@ class _RunLocalUpdateRuntime:
 
         diagnostic: str | None = None
         try:
-            for match, previous_shirt, action in prepared.pending_logs:
+            for (match, previous_shirt, action), run_record in zip(
+                prepared.pending_logs,
+                prepared.run_records,
+                strict=True,
+            ):
                 transfer = match.transfer
                 transfer_logger.log_transfer(
                     player_name=match.matched_player_name or transfer.player_name,
@@ -1856,6 +2280,7 @@ class _RunLocalUpdateRuntime:
                     sources=transfer.sources,
                     source_urls=transfer.source_urls,
                     proof_urls=transfer.proof_urls,
+                    native_metadata=run_record.get("native_metadata"),
                 )
             transfer_logger.save_reports(prepared.run_records)
         except Exception as error:
@@ -1916,7 +2341,14 @@ def build_local_update_service() -> LocalUpdateService:
 def cmd_run(args):
     """CLI adapter for the shared verified-transfer service."""
     dry_run = bool(getattr(args, "dry_run", False))
-    edit_path, output_path = _resolve_run_paths(args)
+    try:
+        edit_path, output_path = _resolve_run_paths(args)
+    except DestinationError as error:
+        print(f"Unsafe save path: {error}")
+        raise SystemExit(2) from error
+    game_root = getattr(args, "game_root", None)
+    if game_root is not None:
+        config.GAME_ROOT = Path(game_root)
 
     if not dry_run and not edit_path.exists():
         print(f"Edit file not found: {edit_path}")
@@ -2337,6 +2769,7 @@ def cmd_players_apply(args) -> None:
 
     edit_path = Path(args.edit_file)
     output_path = edit_path if args.in_place else Path(args.output)
+    _ensure_safe_edit_paths(edit_path, output_path)
     if not edit_path.exists():
         print(f"Edit file not found: {edit_path}")
         raise SystemExit(2)
@@ -2370,12 +2803,41 @@ def cmd_players_apply(args) -> None:
         data_file = _decrypted_data_file(decrypted)
         edit_file.load(data_file)
         _require_valid_edit(edit_file, "Input save")
+        allow_create = bool(getattr(args, "allow_create", False))
+        allow_overflow_release = bool(
+            getattr(args, "allow_overflow_release", False)
+        )
+        if allow_overflow_release and not allow_create:
+            print(
+                "--allow-overflow-release requires --allow-create "
+                "for Player Update create specs"
+            )
+            raise SystemExit(2)
+        if allow_create:
+            appearance_data, appearance_source = _load_player_appearance_data(
+                getattr(args, "appearance_file", None),
+                getattr(args, "game_root", None),
+            )
+            if appearance_data is not None:
+                edit_file.attach_player_appearance(appearance_data)
+                print(f"  Loaded PlayerAppearance.bin metadata from {appearance_source}")
+            else:
+                print(
+                    "  PlayerAppearance.bin metadata unavailable; "
+                    "create specs will be rejected safely"
+                )
 
+        apply_kwargs = {}
+        if allow_create:
+            apply_kwargs["allow_create"] = True
+        if allow_overflow_release:
+            apply_kwargs["allow_overflow_release"] = True
         results = apply_player_specs(
             edit_file,
             specs,
             manifest.revision,
             edit_file.get_all_players(),
+            **apply_kwargs,
         )
         _print_player_spec_results(specs, results)
         changed_results = tuple(
@@ -2514,6 +2976,11 @@ def main():
     run_target = p_run.add_mutually_exclusive_group()
     run_target.add_argument("-o", "--output", type=str, help="Path to output updated edit00000000 (default: output/EDIT00000000)")
     run_target.add_argument("--in-place", action="store_true", help="Overwrite input edit file in-place instead of writing to output/")
+    p_run.add_argument(
+        "--game-root",
+        type=Path,
+        help="Game installation root; auto-load Player.bin from download/",
+    )
     p_run.add_argument("--club", type=str, help="Comma-separated club names to focus scrape (e.g. 'Chelsea,Arsenal')")
     p_run.add_argument("--deep", action="store_true", help="Deep fetch across all locally indexed FotMob clubs")
     p_run.add_argument("--window", type=str, choices=["auto", "summer", "winter", "all"], default="auto", help="Transfer window (default: auto)")
@@ -2576,6 +3043,29 @@ def main():
     p_players_apply.add_argument(
         "--edit-file", required=True, help="Path to input EDIT00000000"
     )
+    p_players_apply.add_argument(
+        "--allow-create",
+        action="store_true",
+        help="Opt in to reviewed create specs using a validated appearance donor",
+    )
+    p_players_apply.add_argument(
+        "--allow-overflow-release",
+        action="store_true",
+        help=(
+            "Allow a reviewed create to release a safe low-OVR reserve "
+            "when the destination roster is full"
+        ),
+    )
+    p_players_apply.add_argument(
+        "--appearance-file",
+        type=Path,
+        help="Raw or WESYS PlayerAppearance.bin used by --allow-create",
+    )
+    p_players_apply.add_argument(
+        "--game-root",
+        type=Path,
+        help="Game installation root used to discover PlayerAppearance.bin in download/",
+    )
     player_target = p_players_apply.add_mutually_exclusive_group(required=True)
     player_target.add_argument(
         "-o", "--output", help="Path to output updated EDIT00000000"
@@ -2595,6 +3085,11 @@ def main():
         "--from-base",
         action="store_true",
         help="Rebuild from base/EDIT00000000 on every scheduled run",
+    )
+    p_sched.add_argument(
+        "--game-root",
+        type=Path,
+        help="Game installation root; auto-load Player.bin from download/",
     )
     schedule_target = p_sched.add_mutually_exclusive_group()
     schedule_target.add_argument("-o", "--output", type=str, help="Path to output updated edit00000000 (default: output/EDIT00000000)")
@@ -2628,6 +3123,84 @@ def main():
     p_inspect.set_defaults(func=cmd_inspect)
 
 
+    # metadata audit
+    p_audit = sub.add_parser(
+        "audit",
+        help="Audit a save against native Player/Team metadata",
+    )
+    p_audit.add_argument(
+        "--edit-file",
+        type=str,
+        required=True,
+        help="Path to input EDIT00000000",
+    )
+    p_audit.add_argument(
+        "--game-root",
+        type=Path,
+        help="Game installation root containing download/*.cpk",
+    )
+    p_audit.add_argument(
+        "--player-bin",
+        type=Path,
+        help="Explicit Player.bin path",
+    )
+    p_audit.add_argument(
+        "--team-bin",
+        type=Path,
+        help="Explicit Team.bin path",
+    )
+    p_audit.add_argument(
+        "--player-assignment",
+        type=Path,
+        help="Explicit PlayerAssignment.bin path",
+    )
+    p_audit.add_argument(
+        "--as-of",
+        type=_iso_date_arg,
+        default=date.today().isoformat(),
+        help="Contract report date (YYYY-MM-DD)",
+    )
+    p_audit.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit only the bounded audit report as JSON",
+    )
+    p_audit.set_defaults(func=cmd_metadata_audit)
+    # native metadata variant comparison
+    p_compare = sub.add_parser(
+        "compare",
+        help="Compare native metadata between two CPK variants",
+    )
+    left_source = p_compare.add_mutually_exclusive_group(required=True)
+    left_source.add_argument(
+        "--left-cpk",
+        type=Path,
+        help="Left data_s2526.cpk or data_extra.cpk path",
+    )
+    left_source.add_argument(
+        "--left-game-root",
+        type=Path,
+        help="Left game installation root containing download/*.cpk",
+    )
+    right_source = p_compare.add_mutually_exclusive_group(required=True)
+    right_source.add_argument(
+        "--right-cpk",
+        type=Path,
+        help="Right data_s2526.cpk or data_extra.cpk path",
+    )
+    right_source.add_argument(
+        "--right-game-root",
+        type=Path,
+        help="Right game installation root containing download/*.cpk",
+    )
+    p_compare.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the bounded comparison as JSON",
+    )
+    p_compare.set_defaults(func=cmd_compare_metadata)
+
+
     # validate
     p_validate = sub.add_parser(
         "validate", help="Validate an encrypted edit file with a supported PES edit-file layout"
@@ -2656,10 +3229,9 @@ def main():
     p_log.add_argument("--last", type=int, default=20, help="Number of recent entries (default: 20)")
     p_log.set_defaults(func=cmd_log)
 
-    # Pre-parse argv: if first arg is a flag or omitted, default to 'run'
     subcommands = {
-        "run", "players", "schedule", "cron", "inspect", "validate", "repair", "log",
-        "-h", "--help",
+        "run", "players", "schedule", "cron", "inspect", "audit", "compare",
+        "validate", "repair", "log", "-h", "--help",
     }
     if len(sys.argv) > 1 and sys.argv[1] not in subcommands:
         sys.argv.insert(1, "run")

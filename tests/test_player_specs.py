@@ -2,6 +2,7 @@ import json
 import struct
 from copy import deepcopy
 from dataclasses import FrozenInstanceError
+from pathlib import Path
 from typing import Callable
 
 import pytest
@@ -123,6 +124,7 @@ def valid_dastan_payload():
             "com_styles": [],
             "skin_color": 2,
             "iris_color": 1,
+            "appearance_template_player_id": 91,
         },
     }
 
@@ -1496,6 +1498,136 @@ def test_create_is_disabled_even_when_roster_has_space(tmp_path):
     assert bytes(edit_file._data) == before
 
 
+@pytest.mark.skipif(
+    not Path("reference/PlayerAppearance.bin").exists(),
+    reason="appearance fixture is not available",
+)
+def test_opt_in_create_uses_validated_appearance_donor(tmp_path):
+
+    from editor.editfile import PLAYER_ENTRY_SIZE, PLAYER_TOTAL_SIZE
+    from editor.player_codec import load_appearance_template
+    from editor.player_spec import apply_player_spec
+
+    edit_file = make_player_spec_edit_file(roster_size=39)
+    spec = dastan_spec(tmp_path)
+    assert spec.create is not None
+    source = Path("reference/PlayerAppearance.bin")
+    donor = load_appearance_template(source, donor_player_id=91)
+    baseline_errors = tuple(edit_file.validate_integrity()["errors"])
+    original_count = edit_file.player_count
+    edit_file.attach_player_appearance(source.read_bytes())
+
+    result = apply_player_spec(
+        edit_file,
+        spec,
+        REVISION,
+        {},
+        allow_create=True,
+    )
+
+    assert (result.status, result.reason) == ("created", "created_and_registered")
+    assert edit_file.player_count == original_count + 1
+    assert edit_file.get_team_roster(102).has_player(DASTAN_ID)
+    assert edit_file.get_all_players(include_base_db=False)[DASTAN_ID].name == (
+        "Dastan Satpaev"
+    )
+    appearance_offset = (
+        edit_file.player_start
+        + original_count * PLAYER_TOTAL_SIZE
+        + PLAYER_ENTRY_SIZE
+    )
+    appearance = bytes(
+        edit_file._data[appearance_offset : appearance_offset + len(donor)]
+    )
+    assert int.from_bytes(appearance[0:4], "little") == DASTAN_ID
+    assert int.from_bytes(appearance[8:12], "little") == DASTAN_ID
+    assert appearance[45] == spec.create.skin_color
+    assert appearance[64] & 0x0F == spec.create.iris_color & 0x0F
+    for offset, value in enumerate(appearance):
+        if offset in set(range(4)) | set(range(8, 12)) | {45, 64}:
+            continue
+        assert value == donor[offset]
+    assert appearance[64] & 0xF0 == donor[64] & 0xF0
+    assert tuple(edit_file.validate_integrity()["errors"]) == baseline_errors
+
+
+@pytest.mark.skipif(
+    not Path("reference/PlayerAppearance.bin").exists(),
+    reason="appearance fixture is not available",
+)
+def test_opt_in_create_can_release_safe_overflow_candidate(tmp_path):
+    from editor.models import PlayerInfo
+    from editor.player_spec import apply_player_spec, assess_create
+
+    edit_file = make_player_spec_edit_file(roster_size=40)
+    baseline_errors = tuple(edit_file.validate_integrity()["errors"])
+    spec = dastan_spec(tmp_path)
+    appearance_path = Path("reference/PlayerAppearance.bin")
+    edit_file.attach_player_appearance(appearance_path.read_bytes())
+    all_players = {
+        player_id: PlayerInfo(
+            player_id=player_id,
+            name=f"Player {player_id}",
+            overall_rating=80,
+            position="CF",
+        )
+        for player_id in range(100001, 100041)
+    }
+    all_players[100040].overall_rating = 50
+
+    waiting = assess_create(edit_file, spec, all_players)
+    assert (waiting.status, waiting.reason) == (
+        "waiting",
+        "destination_roster_full",
+    )
+    ready = assess_create(
+        edit_file,
+        spec,
+        all_players,
+        allow_overflow_release=True,
+        protected_player_ids={100040},
+    )
+    assert (ready.status, ready.reason) == ("ready", "eligible")
+
+    result = apply_player_spec(
+        edit_file,
+        spec,
+        REVISION,
+        all_players,
+        allow_create=True,
+        allow_overflow_release=True,
+        protected_player_ids={100040},
+    )
+
+    assert (result.status, result.reason) == ("created", "created_and_registered")
+    roster = edit_file.get_team_roster(102)
+    assert roster is not None
+    assert roster.roster_size == 40
+    assert roster.has_player(DASTAN_ID)
+    assert roster.has_player(100040)
+    assert not roster.has_player(100039)
+    assert tuple(edit_file.validate_integrity()["errors"]) == baseline_errors
+
+def test_opt_in_create_rejects_without_appearance_source(tmp_path):
+    from editor.player_spec import apply_player_spec
+
+    edit_file = make_player_spec_edit_file(roster_size=39)
+    before = bytes(edit_file._data)
+    result = apply_player_spec(
+        edit_file,
+        dastan_spec(tmp_path),
+        REVISION,
+        {},
+        allow_create=True,
+    )
+
+    assert (result.status, result.reason) == (
+        "rejected",
+        "appearance_template_unavailable",
+    )
+    assert bytes(edit_file._data) == before
+
+
 
 
 
@@ -1915,6 +2047,32 @@ def test_disabled_create_never_mutates_for_create(tmp_path):
     assert not roster.has_player(DASTAN_ID)
     assert roster.has_player(100040)
     assert DASTAN_ID not in edit_file.get_all_players(include_base_db=False)
+
+def test_kennet_eichhorn_spec_loads_but_create_remains_disabled():
+    from pathlib import Path
+
+    from editor.player_spec import apply_player_spec, load_player_specs
+
+    spec = next(
+        spec
+        for spec in load_player_specs(Path("players"))
+        if spec.identity.name == "Kennet Eichhorn"
+    )
+    assert spec.operation == "create"
+    assert spec.identity.pes_id == 1_138_363
+    assert spec.create is not None
+    assert spec.create.team_id == 128
+
+    edit_file = make_player_spec_edit_file(roster_size=39)
+    before = bytes(edit_file._data)
+    result = apply_player_spec(edit_file, spec, REVISION, {})
+
+    assert (result.status, result.reason) == (
+        "rejected",
+        "create_temporarily_unavailable",
+    )
+    assert bytes(edit_file._data) == before
+
 
 def test_update_before_disabled_create_keeps_cache_mapping_safe(tmp_path):
     from dataclasses import replace

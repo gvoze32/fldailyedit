@@ -80,6 +80,7 @@
     "player_skills": [],
     "com_styles": [],
     "skin_color": 2,
-    "iris_color": 1
+    "iris_color": 1,
+    "appearance_template_player_id": 91
   }
 }

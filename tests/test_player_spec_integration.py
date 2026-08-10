@@ -357,6 +357,7 @@ def test_bundled_base_batch_survives_encryption_roundtrip(tmp_path):
         )
         assert {result.name: (result.status, result.reason) for result in results} == {
             "Dastan Satpaev": ("rejected", "create_temporarily_unavailable"),
+            "Kennet Eichhorn": ("rejected", "create_temporarily_unavailable"),
             "Marco Palestra": ("updated", "patched"),
         }
         assert edit_file.validate_integrity()["valid"] is True

@@ -33,6 +33,36 @@ def _entries():
             "dry_run": False,
         },
     ]
+def test_reports_and_json_logs_include_native_metadata(monkeypatch, tmp_path):
+    import config
+
+    entry = _entries()[0]
+    entry["native_metadata"] = {
+        "player_bin": {
+            "found": True,
+            "name": "Native Player",
+            "registered_position": "RB",
+        },
+        "player_assignment": {
+            "teams": [{"abbreviation": "NAT"}],
+        },
+    }
+    assert "Native Player (RB)" in generate_markdown_report([entry])
+    assert "Native Player (RB)" in generate_html_report([entry])
+
+    monkeypatch.setattr(config, "TRANSFER_LOG_FILE", tmp_path / "transfers.jsonl")
+    log_transfer(
+        player_name="Native Player",
+        player_id=162196,
+        from_team="Old Club",
+        from_team_id=1,
+        to_team="New Club",
+        to_team_id=2,
+        native_metadata=entry["native_metadata"],
+    )
+    assert read_log()[0]["native_metadata"]["player_bin"]["name"] == "Native Player"
+
+
 
 
 def _player_spec_create_entry():

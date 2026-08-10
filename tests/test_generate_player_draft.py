@@ -11,7 +11,13 @@ import pytest
 
 from editor.models import PlayerInfo, TeamData, TeamInfo
 from editor.player_codec import PlayerAbilityProfile
-from editor.player_ovr import calculate_ovr_tenths, relevant_ovr_positions
+from editor.player_ovr import (
+    OVR_MODEL,
+    calculate_ovr_tenths,
+    ovr_weak_foot_accuracy,
+    position_rating_for,
+    relevant_ovr_positions,
+)
 from scraper.pes21_proposal import Pes21Proposal, map_pes21_proposal
 from scraper.pes_retro_snapshot import profile_to_snapshot
 from scraper.pes_retro_stats import PesRetroStatsProfile
@@ -396,20 +402,43 @@ def expected_ovr_review(
     if operation == "create":
         registered_position = proposal.registered_position
         position_proficiency = proposal.position_proficiency
+        base_weak_foot_accuracy = proposal.weak_foot_accuracy
     else:
         base_profile = current_profile(proposal)
         registered_position = base_profile.registered_position
         position_proficiency = base_profile.position_proficiency
+        base_weak_foot_accuracy = base_profile.weak_foot_accuracy
     assert registered_position is not None
+    proposal_weak_foot_accuracy = ovr_weak_foot_accuracy(
+        proposal.weak_foot_accuracy
+    )
+    base_weak_foot_accuracy = ovr_weak_foot_accuracy(
+        base_weak_foot_accuracy
+    )
     positions = relevant_ovr_positions(registered_position, position_proficiency)
     rows: list[dict[str, object]] = []
     for position in positions:
-        proposal_tenths = calculate_ovr_tenths(proposal.abilities, position)
+        rating = position_rating_for(
+            position, registered_position, position_proficiency
+        )
+        proposal_tenths = calculate_ovr_tenths(
+            proposal.abilities,
+            position,
+            registered_position=registered_position,
+            position_rating=rating,
+            weak_foot_accuracy=proposal_weak_foot_accuracy,
+        )
         if operation == "create":
             rows.append({"position": position, "proposal_tenths": proposal_tenths})
         else:
             assert base_abilities is not None
-            base_tenths = calculate_ovr_tenths(base_abilities, position)
+            base_tenths = calculate_ovr_tenths(
+                base_abilities,
+                position,
+                registered_position=registered_position,
+                position_rating=rating,
+                weak_foot_accuracy=base_weak_foot_accuracy,
+            )
             rows.append(
                 {
                     "position": position,
@@ -419,7 +448,7 @@ def expected_ovr_review(
                 }
             )
     return {
-        "model": "pes2021-community-estimate-v2",
+        "model": OVR_MODEL,
         "mode": "new_player" if operation == "create" else "comparison",
         "positions": rows,
     }

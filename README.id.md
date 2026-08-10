@@ -191,9 +191,9 @@ mengubah save; penerapan `create` selesai dengan
 Kelompok pembaruan yang didukung adalah kemampuan, kecakapan posisi, gaya bermain,
 keahlian pemain, gaya COM, kewarganegaraan, pengaturan fisik/dasar, dan posisi
 terdaftar.
-- Nilai tinjauan OVR yang dihasilkan adalah perkiraan komunitas. Kalkulator RB saat
-  ini hanya mencakup bobot utama yang dipublikasikan; ini bukan formula lengkap
-  Konami.
+- Nilai tinjauan OVR yang dihasilkan adalah kalkulasi deterministik berdasarkan
+  formula PES 2021 yang dipublikasikan. Nilai ini membantu parity, bukan jaminan
+  independen bahwa runtime game memakai hasil yang sama; ability tetap perlu ditinjau.
 - Draf pemain yang dibuat dengan pengidentifikasi model OVR sebelumnya harus
   dibuat ulang sebelum validasi; tidak ada migrasi v1-ke-v2 implisit.
 

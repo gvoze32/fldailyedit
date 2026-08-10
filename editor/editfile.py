@@ -14,14 +14,31 @@ and field positions within the supported PES edit-file layout.
 """
 import logging
 import struct
+from dataclasses import replace
 from pathlib import Path
 
 import config
 from editor.models import ManagerInfo, PlayerInfo, TeamData, TeamInfo
 from editor.player_codec import PlayerAbilityProfile, decode_player_entry
+from editor.player_ovr import (
+    PlayerOvrError,
+    calculate_ovr_tenths,
+    ovr_weak_foot_accuracy,
+)
+from editor.player_assignment import PlayerAssignmentDatabase
 from editor.player_catalog import PlayerCatalogReport, build_player_catalog
-
+from editor.playerbin import PlayerBinDatabase
+from editor.teambin import TeamBinDatabase, TeamBinRecord
 logger = logging.getLogger(__name__)
+
+def _profile_overall_rating(profile: PlayerAbilityProfile) -> int:
+    """Calculate the registered-position OVR from one decoded save profile."""
+    return calculate_ovr_tenths(
+        profile.abilities,
+        profile.registered_position,
+        registered_position=profile.registered_position,
+        weak_foot_accuracy=ovr_weak_foot_accuracy(profile.weak_foot_accuracy),
+    ) // 10
 
 # ──────────────────────────────────────────────────────────────
 # Entry sizes (bytes) — same across PES20/21/FL26
@@ -112,6 +129,11 @@ GP_SINGLE_PLAYER_ROLES = (
     GP_PK,
     GP_CAPTAIN,
 )
+
+# Each game-plan preset stores 40 four-byte position codes before GP_LINEUP.
+# The codes use the same order as Player.bin's registered positions.
+GP_POSITION_PRESETS = (0x004, 0x0A4, 0x144)
+GP_POSITION_ENTRY_SIZE = 4
 
 
 def assign_smart_shirt_number(
@@ -204,9 +226,101 @@ class EditFile:
         self.competition_entry_start: int = 0
         self.game_plan_start: int = 0
         self.player_catalog_report: PlayerCatalogReport | None = None
+        self.playerbin_db: PlayerBinDatabase | None = None
+        self.playerbin_source: str | None = None
+        self.teambin_db: TeamBinDatabase | None = None
+        self.teambin_source: str | None = None
+        self.player_assignment_db: PlayerAssignmentDatabase | None = None
+        self.player_assignment_source: str | None = None
+        self.player_appearance_data: bytes | None = None
 
         # Track players transferred in the current session to protect them from overflow auto-release
         self.transferred_player_ids: set[int] = set()
+
+    def attach_playerbin(self, database: PlayerBinDatabase | None) -> None:
+        """Attach the master Player.bin metadata used by roster fallbacks."""
+        if database is not None and not isinstance(database, PlayerBinDatabase):
+            raise TypeError("database must be a PlayerBinDatabase or None")
+        self.playerbin_db = database
+        self.player_catalog_report = None
+
+    def attach_teambin(self, database: TeamBinDatabase | None) -> None:
+        """Attach Team.bin names and stable team keys when available."""
+        if database is not None and not isinstance(database, TeamBinDatabase):
+            raise TypeError("database must be a TeamBinDatabase or None")
+        self.teambin_db = database
+
+    def attach_player_assignment(
+        self, database: PlayerAssignmentDatabase | None
+    ) -> None:
+        """Attach PlayerAssignment.bin roster ownership when available."""
+        if database is not None and not isinstance(
+            database, PlayerAssignmentDatabase
+        ):
+            raise TypeError(
+                "database must be a PlayerAssignmentDatabase or None"
+            )
+        self.player_assignment_db = database
+
+    def get_master_team(self, team_key: int) -> TeamBinRecord | None:
+        """Return Team.bin metadata for a stable team key."""
+        database = getattr(self, "teambin_db", None)
+        return database.get(team_key) if database is not None else None
+
+    def get_player_assignment_teams(self, player_id: int) -> tuple[int, ...]:
+        """Return Team.bin keys associated with a player assignment."""
+        database = getattr(self, "player_assignment_db", None)
+        return database.team_keys_for(player_id) if database is not None else ()
+
+    def attach_player_appearance(
+        self, data: bytes | bytearray | memoryview | None
+    ) -> None:
+        """Attach raw PlayerAppearance.bin data for opt-in player creation."""
+        if data is not None and not isinstance(data, (bytes, bytearray, memoryview)):
+            raise TypeError("appearance data must be bytes-like or None")
+        self.player_appearance_data = None if data is None else bytes(data)
+
+    def get_player_position(self, player_id: int) -> str | None:
+        """Return an edited or Player.bin registered position when available."""
+        player_cache = getattr(self, "_player_cache", {})
+        player_info = player_cache.get(player_id)
+        if player_info is not None and player_info.position:
+            return player_info.position
+        database = getattr(self, "playerbin_db", None)
+        if database is not None:
+            record = database.get(player_id)
+            if record is not None:
+                return record.registered_position
+        return player_info.position if player_info is not None and player_info.position else None
+
+    def _player_metadata(self, player_id: int) -> PlayerInfo | None:
+        """Return save metadata enriched with Player.bin when necessary."""
+        player_cache = getattr(self, "_player_cache", {})
+        player_info = player_cache.get(player_id)
+        database = getattr(self, "playerbin_db", None)
+        record = database.get(player_id) if database is not None else None
+        if player_info is not None:
+            if record is None or (player_info.position and player_info.age):
+                return player_info
+            return PlayerInfo(
+                player_id=player_info.player_id,
+                name=player_info.name or record.name,
+                print_name=player_info.print_name or record.print_name or record.name,
+                overall_rating=player_info.overall_rating,
+                position=player_info.position or record.registered_position,
+                nationality=player_info.nationality,
+                age=player_info.age or record.age,
+                position_proficiency=player_info.position_proficiency,
+            )
+        if record is None:
+            return None
+        return PlayerInfo(
+            player_id=record.player_id,
+            name=record.name,
+            print_name=record.print_name or record.name,
+            position=record.registered_position,
+            age=record.age,
+        )
 
     def load(self, path: str | Path | None = None):
         """Load and parse data.dat from disk."""
@@ -383,11 +497,37 @@ class EditFile:
 
             name = self._read_string(entry_offset + PE_PLAYER_NAME, 61)
             print_name = self._read_string(entry_offset + PE_PRINT_NAME, 61)
+            profile: PlayerAbilityProfile | None = None
+            try:
+                profile = decode_player_entry(
+                    self._data[entry_offset : entry_offset + PLAYER_ENTRY_SIZE]
+                )
+                overall_rating = _profile_overall_rating(profile)
+            except (PlayerOvrError, ValueError) as exc:
+                logger.debug(
+                    "Could not calculate OVR for edited player %s: %s",
+                    player_id,
+                    exc,
+                )
+                overall_rating = 0
 
+            position = (
+                profile.registered_position
+                if profile is not None
+                and not profile.registered_position.startswith("UNKNOWN(")
+                else ""
+            )
+            age = profile.age if profile is not None else 0
             edited_players[player_id] = PlayerInfo(
                 player_id=player_id,
                 name=name,
                 print_name=print_name,
+                overall_rating=overall_rating,
+                position=position,
+                age=age,
+                position_proficiency=(
+                    dict(profile.position_proficiency) if profile is not None else None
+                ),
             )
             edited_count += 1
 
@@ -405,6 +545,13 @@ class EditFile:
             if config.CURRENT_PLAYERS_FILE.is_file()
             else None
         )
+        database = getattr(self, "playerbin_db", None)
+        playerbin_roster_ids = {
+            player_id
+            for player_id in roster_ids
+            if database is not None and database.get(player_id) is not None
+        }
+        catalog_roster_ids = roster_ids - playerbin_roster_ids
         legacy_path = csv_path or (
             config.PLAYERS_CSV_FILE if current_path is not None else None
         )
@@ -412,8 +559,52 @@ class EditFile:
             current_path=current_path,
             legacy_csv_path=legacy_path,
             edited_players=edited_players,
-            roster_ids=roster_ids,
+            roster_ids=catalog_roster_ids,
         )
+
+        if database is not None:
+            for player_id in sorted(playerbin_roster_ids):
+                record = database.get(player_id)
+                if record is None:
+                    continue
+                existing = players.get(player_id)
+                if existing is None:
+                    players[player_id] = PlayerInfo(
+                        player_id=record.player_id,
+                        name=record.name,
+                        print_name=record.print_name or record.name,
+                        position=record.registered_position,
+                        age=record.age,
+                    )
+                else:
+                    players[player_id] = PlayerInfo(
+                        player_id=existing.player_id,
+                        name=existing.name or record.name,
+                        print_name=existing.print_name or record.print_name or record.name,
+                        overall_rating=existing.overall_rating,
+                        position=existing.position or record.registered_position,
+                        nationality=existing.nationality,
+                        age=existing.age or record.age,
+                        position_proficiency=existing.position_proficiency,
+                    )
+            report = replace(
+                report,
+                roster_entries=len(roster_ids),
+                positions=sum(
+                    bool(players.get(player_id) and players[player_id].position)
+                    for player_id in roster_ids
+                ),
+                ages=sum(
+                    bool(players.get(player_id) and players[player_id].age)
+                    for player_id in roster_ids
+                ),
+                overall_ratings=sum(
+                    bool(players.get(player_id) and players[player_id].overall_rating)
+                    for player_id in roster_ids
+                ),
+            )
+
+        self._player_cache = players
         self.player_catalog_report = report
         logger.info(
             "Loaded %s current players, %s roster-only legacy fallbacks, and %s edited players",
@@ -664,22 +855,35 @@ class EditFile:
         if not active_slots:
             return 39, 0
 
-        if not hasattr(self, "_player_cache") or not self._player_cache:
+        if not getattr(self, "_player_cache", None) and getattr(self, "playerbin_db", None) is None:
             # Overflow release is unsafe without caller-supplied metadata.
             return 39, 0
 
+        metadata = {
+            pid: self._player_metadata(pid) for _, pid in active_slots
+        }
+        if any(
+            player is None or player.overall_rating <= 0
+            for player in metadata.values()
+        ):
+            logger.warning(
+                "Refusing overflow release for team %s: incomplete player OVR metadata",
+                team_id,
+            )
+            return 39, 0
+
         # Count total goalkeepers in active roster to protect minimum GK requirement
-        total_gks = 0
-        for slot, pid in active_slots:
-            pinfo = self._player_cache.get(pid)
-            if (pinfo and pinfo.is_goalkeeper) or slot == 0:
-                total_gks += 1
+        total_gks = sum(
+            bool(player.is_goalkeeper) or slot == 0
+            for slot, pid in active_slots
+            for player in (metadata[pid],)
+        )
 
         def candidate_sort_key(item: tuple[int, int]):
             slot, pid = item
-            pinfo = self._player_cache.get(pid)
-            ovr = pinfo.overall_rating if pinfo and pinfo.overall_rating > 0 else 999
-            is_gk = (pinfo.is_goalkeeper if pinfo else False) or (slot == 0)
+            pinfo = metadata[pid]
+            ovr = pinfo.overall_rating
+            is_gk = pinfo.is_goalkeeper or slot == 0
 
             # Role & Positional Tier:
             # Tier 3: Starters (slots 0-10) -> Strictly protected
@@ -1009,6 +1213,7 @@ class EditFile:
         preferred_shirt_number: int | None = None,
         position: str = "",
         allow_overflow_release: bool = False,
+        protected_player_ids: set[int] | None = None,
     ) -> bool:
         """
         Sign a player from Free Agent into a team.
@@ -1016,9 +1221,8 @@ class EditFile:
         Args:
             player_id: Player ID to add.
             to_team_id: Destination team ID.
-            shirt_number: Optional preferred kit number.
-            preferred_shirt_number: Optional alias for shirt_number.
             position: Player position label.
+            protected_player_ids: Player IDs that must not be auto-released.
 
         Returns:
             True if added successfully, False otherwise.
@@ -1050,7 +1254,11 @@ class EditFile:
                     "overflow release was not authorized"
                 )
                 return False
-            slot_to_rel, pid_to_rel = self.find_overflow_release_candidate(to_team_id, exclude_player_id=player_id)
+            slot_to_rel, pid_to_rel = self.find_overflow_release_candidate(
+                to_team_id,
+                exclude_player_id=player_id,
+                protected_player_ids=protected_player_ids,
+            )
             if pid_to_rel == 0:
                 logger.error(f"No safe overflow release candidate for team {to_team_id}")
                 return False
@@ -1138,13 +1346,17 @@ class EditFile:
             return
 
         last_idx = old_size - 1
-        new_active_order = [
-            removed_idx if slot == last_idx else slot
-            for slot in active_order
-            if slot != removed_idx
-        ]
-        if len(new_active_order) != old_size - 1 or set(new_active_order) != set(range(old_size - 1)):
-            logger.warning(f"Could not safely compact game plan for team {team_id}; preserving it")
+        # The player at last_idx is copied into removed_idx in Team-Player.
+        # Keep the ordinal that belonged to the removed player and drop the
+        # stale last-slot ordinal from the active prefix.
+        new_active_order = [slot for slot in active_order if slot != last_idx]
+        if (
+            len(new_active_order) != old_size - 1
+            or set(new_active_order) != set(range(old_size - 1))
+        ):
+            logger.warning(
+                f"Could not safely compact game plan for team {team_id}; preserving it"
+            )
             return
 
         lineup[: old_size - 1] = new_active_order
@@ -1287,6 +1499,45 @@ class EditFile:
 
         logger.info(f"Saved {len(self._data):,} bytes to {save_path}")
 
+    def _validate_game_plan_semantics(
+        self,
+        offset: int,
+        team_id: int,
+        roster: TeamData,
+        lineup: list[int],
+        errors: list[str],
+    ) -> int:
+        """Validate goalkeeper starter position codes when Player.bin is attached."""
+        if getattr(self, "playerbin_db", None) is None:
+            return 0
+        starter_slots = lineup[: min(11, roster.roster_size)]
+        checks = 0
+        for slot in starter_slots:
+            player_id = roster.player_ids[slot] if 0 <= slot < TP_MAX_PLAYERS else 0
+            if not player_id:
+                continue
+            registered_position = (self.get_player_position(player_id) or "").upper()
+            if registered_position != "GK":
+                continue
+            for preset_offset in GP_POSITION_PRESETS:
+                position_address = (
+                    offset
+                    + preset_offset
+                    + slot * GP_POSITION_ENTRY_SIZE
+                )
+                if position_address + GP_POSITION_ENTRY_SIZE > len(self._data):
+                    continue
+                position_code = struct.unpack_from(
+                    "<I", self._data, position_address
+                )[0] & 0xFF
+                checks += 1
+                if position_code != 0:
+                    errors.append(
+                        f"Team {team_id} game-plan preset 0x{preset_offset:X} "
+                        f"assigns GK player {player_id} position code {position_code}"
+                    )
+        return checks
+
     # ──────────────────────────────────────────────────────────
     # Diagnostics
     # ──────────────────────────────────────────────────────────
@@ -1408,6 +1659,7 @@ class EditFile:
             errors.append(f"Player {pid} is registered to multiple clubs: {tids}")
 
         checked_game_plans = 0
+        semantic_position_checks = 0
         seen_game_plan_team_ids: set[int] = set()
         for i in range(min(self.game_plan_count, MAX_GAME_PLANS)):
             offset = self.game_plan_start + i * GAME_PLAN_ENTRY_SIZE
@@ -1435,8 +1687,17 @@ class EditFile:
                 )
 
             starters = lineup[: min(11, len(active_slots))]
-            if len(starters) != len(set(starters)) or any(slot not in active_slots for slot in starters):
+            if len(starters) != len(set(starters)) or any(
+                slot not in active_slots for slot in starters
+            ):
                 errors.append(f"Team {tid} game plan has duplicate or empty starting slots")
+            semantic_position_checks += self._validate_game_plan_semantics(
+                offset,
+                tid,
+                roster,
+                lineup,
+                errors,
+            )
 
             role_offsets = list(GP_SINGLE_PLAYER_ROLES)
             role_offsets.extend(GP_ATTACK_PLAYERS + index for index in range(3))
@@ -1460,6 +1721,7 @@ class EditFile:
             "duplicate_club_players": len(duplicate_club_players),
             "undersized_clubs": len(undersized_clubs),
             "checked_game_plans": checked_game_plans,
+            "semantic_position_checks": semantic_position_checks,
         }
         return {
             "valid": not errors,

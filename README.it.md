@@ -187,8 +187,9 @@ i record `update` dei giocatori esistenti modificano i salvataggi; l'applicazion
 restituisce `create_temporarily_unavailable` senza modificare il salvataggio.
 I gruppi di aggiornamento supportati sono abilità, competenza nei ruoli, stile di gioco, abilità giocatore,
 stili COM, nazionalità, impostazioni fisiche/base e ruolo registrato.
-- I valori di revisione dell'OVR generati sono stime della community. L'attuale calcolatore per RB include
-  solo i pesi principali pubblicati; non è la formula completa di Konami.
+- I valori di revisione dell'OVR generati sono calcoli deterministici basati sulla formula
+  pubblicata di PES 2021. Sono un ausilio per la parità, non una garanzia indipendente della
+  runtime del gioco; i valori di abilità proposti richiedono comunque una revisione.
 - Le bozze dei giocatori generate con il precedente identificatore del modello OVR devono essere rigenerate
   prima della convalida; non vi è alcuna migrazione implicita da v1 a v2.
 

@@ -25,6 +25,7 @@ from editor.player_codec import (
     PLAYER_SKILL_FIELDS,
     POSITION_NAMES,
     decode_player_entry,
+    load_appearance_template_bytes,
     patch_player_entry,
     serialize_created_player,
 )
@@ -32,8 +33,8 @@ from scraper.pes_retro_snapshot import profile_from_snapshot
 from scraper.pes21_proposal import map_pes21_proposal
 from tools.player_proposal_review import validate_ovr_review_shape
 
-# Create specs remain loadable and reviewable, but their save mutations stay
-# disabled until the game-side appearance format is proven safe end to end.
+# Direct API calls remain disabled by default. The explicit allow_create
+# transaction flag enables only specs with a validated appearance donor.
 PLAYER_CREATE_MUTATIONS_ENABLED = False
 PLAYER_CREATE_DISABLED_REASON = "create_temporarily_unavailable"
 
@@ -168,6 +169,7 @@ class CreatePlayerData:
     com_styles: tuple[str, ...]
     skin_color: int
     iris_color: int
+    appearance_template_player_id: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,9 +268,13 @@ _CREATE_FIELDS = frozenset(
         "com_styles",
         "skin_color",
         "iris_color",
+        "appearance_template_player_id",
     }
 )
-_CREATE_REQUIRED_FIELDS = _CREATE_FIELDS - {"preferred_shirt_number"}
+_CREATE_REQUIRED_FIELDS = _CREATE_FIELDS - {
+    "preferred_shirt_number",
+    "appearance_template_player_id",
+}
 _UPDATE_GROUP_FIELDS = frozenset(
     {"abilities", "position_proficiency", "player_skills", "com_styles"}
 )
@@ -648,11 +654,19 @@ def _load_create(value: object, identity: PlayerIdentity) -> CreatePlayerData:
         field: _integer(abilities_raw, field, 40, 99, "create PES abilities")
         for field in ABILITY_FIELDS
     }
-
     preferred_shirt_number = raw.get("preferred_shirt_number")
     if preferred_shirt_number is not None:
         preferred_shirt_number = _integer(
             raw, "preferred_shirt_number", 1, 99, "create PES data"
+        )
+    appearance_template_player_id = raw.get("appearance_template_player_id")
+    if appearance_template_player_id is not None:
+        appearance_template_player_id = _integer(
+            raw,
+            "appearance_template_player_id",
+            1,
+            0xFFFFFFFF,
+            "create PES data",
         )
 
     return CreatePlayerData(
@@ -689,6 +703,7 @@ def _load_create(value: object, identity: PlayerIdentity) -> CreatePlayerData:
         ),
         skin_color=_integer(raw, "skin_color", 0, 0xFF, "create PES data"),
         iris_color=_integer(raw, "iris_color", 0, 0xFF, "create PES data"),
+        appearance_template_player_id=appearance_template_player_id,
     )
 
 
@@ -1444,10 +1459,42 @@ def _matches_identity(player: "PlayerInfo", identity_keys: set[str]) -> bool:
     )
 
 
+def _find_create_overflow_candidate(
+    edit_file: "EditFile",
+    team_id: int,
+    player_id: int,
+    all_players: Mapping[int, "PlayerInfo"],
+    protected_player_ids: set[int] | None = None,
+) -> tuple[int, int]:
+    """Assess an authorized overflow release using the caller's save metadata."""
+    roster = edit_file.get_team_roster(team_id)
+    if roster is None:
+        return 39, 0
+
+    had_cache = hasattr(edit_file, "_player_cache")
+    original_cache = getattr(edit_file, "_player_cache", None)
+    edit_file._player_cache = dict(all_players)
+    try:
+        return edit_file.find_overflow_release_candidate(
+            team_id,
+            exclude_player_id=player_id,
+            roster_player_ids=list(roster.player_ids),
+            protected_player_ids=protected_player_ids,
+        )
+    finally:
+        if had_cache:
+            edit_file._player_cache = original_cache
+        else:
+            del edit_file._player_cache
+
+
 def assess_create(
     edit_file: "EditFile",
     spec: PlayerSpec,
     all_players: Mapping[int, "PlayerInfo"],
+    *,
+    allow_overflow_release: bool = False,
+    protected_player_ids: set[int] | None = None,
 ) -> SpecResult:
     """Assess create idempotency and destination safety without mutation."""
     if spec.lifecycle_status != "active":
@@ -1491,7 +1538,21 @@ def assess_create(
     if roster is None:
         return _result(spec, "rejected", "destination_roster_missing")
     if roster.is_full:
-        return _result(spec, "waiting", "destination_roster_full")
+        if not allow_overflow_release:
+            return _result(spec, "waiting", "destination_roster_full")
+        _, candidate_id = _find_create_overflow_candidate(
+            edit_file,
+            create.team_id,
+            identity.pes_id,
+            all_players,
+            protected_player_ids=protected_player_ids,
+        )
+        if candidate_id == 0:
+            return _result(
+                spec,
+                "waiting",
+                "destination_roster_full_no_safe_release_candidate",
+            )
     return _result(spec, "ready", "eligible")
 
 
@@ -1499,31 +1560,67 @@ def apply_create(
     edit_file: "EditFile",
     spec: PlayerSpec,
     all_players: Mapping[int, "PlayerInfo"],
+    *,
+    allow_create: bool = False,
+    allow_overflow_release: bool = False,
+    protected_player_ids: set[int] | None = None,
 ) -> SpecResult:
-    """Apply one reviewed create when create mutations are enabled."""
+    """Apply one reviewed create using an explicit appearance donor."""
     if spec.proposal is not None:
         return _result(spec, "rejected", "human_review_required")
     if spec.lifecycle_status != "active" or (
         spec.operation != "create" or spec.create is None
     ):
-        return assess_create(edit_file, spec, all_players)
-    if not PLAYER_CREATE_MUTATIONS_ENABLED:
+        return assess_create(
+            edit_file,
+            spec,
+            all_players,
+            allow_overflow_release=allow_overflow_release,
+        )
+    if not (allow_create or PLAYER_CREATE_MUTATIONS_ENABLED):
         return _result(spec, "rejected", PLAYER_CREATE_DISABLED_REASON)
-    assessment = assess_create(edit_file, spec, all_players)
+    assessment = assess_create(
+        edit_file,
+        spec,
+        all_players,
+        allow_overflow_release=allow_overflow_release,
+        protected_player_ids=protected_player_ids,
+    )
     if assessment.status != "ready":
         return assessment
 
     create = spec.create
     if create is None:
         raise AssertionError("ready create assessment requires create data")
+    donor_player_id = create.appearance_template_player_id
+    if donor_player_id is None:
+        return _result(spec, "rejected", "appearance_template_required")
+    appearance_data = getattr(edit_file, "player_appearance_data", None)
+    if appearance_data is None:
+        return _result(spec, "rejected", "appearance_template_unavailable")
+    try:
+        appearance_template = load_appearance_template_bytes(
+            appearance_data, donor_player_id=donor_player_id
+        )
+    except (TypeError, ValueError) as exc:
+        return _result(
+            spec,
+            "rejected",
+            "appearance_template_invalid",
+            diagnostic=f"{type(exc).__name__}: {exc}",
+        )
 
     original_data = bytes(edit_file._data)
     original_catalog_report = edit_file.player_catalog_report
     original_transferred_ids = set(edit_file.transferred_player_ids)
     had_player_cache = hasattr(edit_file, "_player_cache")
     original_player_cache = getattr(edit_file, "_player_cache", None)
+    if allow_overflow_release:
+        edit_file._player_cache = dict(all_players)
     try:
-        player_entry, appearance_entry = serialize_created_player(create)
+        player_entry, appearance_entry = serialize_created_player(
+            create, appearance_template=appearance_template
+        )
         edit_file.append_created_player(
             spec.identity.pes_id,
             player_entry,
@@ -1534,6 +1631,8 @@ def apply_create(
             create.team_id,
             preferred_shirt_number=create.preferred_shirt_number,
             position=create.registered_position,
+            allow_overflow_release=allow_overflow_release,
+            protected_player_ids=protected_player_ids,
         )
         if not added:
             raise PlayerSpecError(
@@ -1712,6 +1811,10 @@ def apply_player_spec(
     spec: PlayerSpec,
     base_revision: str,
     all_players: Mapping[int, "PlayerInfo"],
+    *,
+    allow_create: bool = False,
+    allow_overflow_release: bool = False,
+    protected_player_ids: set[int] | None = None,
 ) -> SpecResult:
     """Apply one lifecycle-compatible spec with mutation isolation."""
     if spec.proposal is not None:
@@ -1724,7 +1827,9 @@ def apply_player_spec(
         )
     if base_revision not in spec.applies_to:
         return _result(spec, "needs_review", "base_revision_not_reviewed")
-    if spec.operation == "create" and not PLAYER_CREATE_MUTATIONS_ENABLED:
+    if spec.operation == "create" and not (
+        allow_create or PLAYER_CREATE_MUTATIONS_ENABLED
+    ):
         return _result(spec, "rejected", PLAYER_CREATE_DISABLED_REASON)
 
     original_data = bytes(edit_file._data)
@@ -1739,6 +1844,9 @@ def apply_player_spec(
                 edit_file,
                 spec,
                 all_players,
+                allow_create=allow_create,
+                allow_overflow_release=allow_overflow_release,
+                protected_player_ids=protected_player_ids,
             )
         elif spec.operation == "update":
             result = apply_update(edit_file, spec, all_players)
@@ -1779,17 +1887,32 @@ def apply_player_specs(
     specs: tuple[PlayerSpec, ...],
     base_revision: str,
     all_players: Mapping[int, "PlayerInfo"],
+    *,
+    allow_create: bool = False,
+    allow_overflow_release: bool = False,
 ) -> tuple[SpecResult, ...]:
     """Apply independent specs in deterministic filename order."""
     ordered_specs = sorted(specs, key=lambda spec: spec.path.name)
     current_players = dict(all_players)
     results: list[SpecResult] = []
+    protected_player_ids = {
+        spec.identity.pes_id
+        for spec in specs
+        if (
+            spec.lifecycle_status == "active"
+            and base_revision in spec.applies_to
+            and spec.operation in {"create", "update"}
+        )
+    }
     for spec in ordered_specs:
         result = apply_player_spec(
             edit_file,
             spec,
             base_revision,
             current_players,
+            allow_create=allow_create,
+            allow_overflow_release=allow_overflow_release,
+            protected_player_ids=protected_player_ids,
         )
         results.append(result)
         if result.status == "created":

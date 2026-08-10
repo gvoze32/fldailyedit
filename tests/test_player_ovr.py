@@ -8,12 +8,26 @@ from editor.player_ovr import (
 )
 
 
-def test_equal_abilities_produce_the_same_ovr_for_every_position():
+def test_verified_formula_has_position_specific_registered_results():
     abilities = {field: 60 for field in ABILITY_FIELDS}
     assert {
         position: calculate_ovr_tenths(abilities, position)
         for position in POSITION_NAMES
-    } == {position: 600 for position in POSITION_NAMES}
+    } == {
+        "GK": 500,
+        "CB": 520,
+        "LB": 550,
+        "RB": 550,
+        "DMF": 550,
+        "CMF": 530,
+        "LMF": 520,
+        "RMF": 520,
+        "AMF": 530,
+        "LWF": 540,
+        "RWF": 540,
+        "SS": 530,
+        "CF": 530,
+    }
 
 
 def test_asymmetric_vector_has_exact_position_weighted_results():
@@ -24,28 +38,54 @@ def test_asymmetric_vector_has_exact_position_weighted_results():
         position: calculate_ovr_tenths(abilities, position)
         for position in POSITION_NAMES
     } == {
-        "GK": 720,
-        "CB": 623,
-        "LB": 604,
-        "RB": 612,
-        "DMF": 614,
-        "CMF": 578,
-        "LMF": 575,
-        "RMF": 575,
-        "AMF": 549,
-        "LWF": 553,
-        "RWF": 553,
-        "SS": 548,
-        "CF": 551,
+        "GK": 750,
+        "CB": 590,
+        "LB": 560,
+        "RB": 560,
+        "DMF": 510,
+        "CMF": 470,
+        "LMF": 480,
+        "RMF": 480,
+        "AMF": 450,
+        "LWF": 480,
+        "RWF": 480,
+        "SS": 480,
+        "CF": 450,
     }
-
-
-def test_exact_midpoint_rounds_half_up():
+def test_off_position_uses_proficiency_bonus_without_curve():
     abilities = {field: 60 for field in ABILITY_FIELDS}
-    abilities["speed"] = 63
-    abilities["finishing"] = 62
 
-    assert calculate_ovr_tenths(abilities, "LB") == 603
+    assert calculate_ovr_tenths(
+        abilities,
+        "RWF",
+        registered_position="RB",
+        position_rating="A",
+        weak_foot_accuracy=3,
+    ) == 500
+    assert calculate_ovr_tenths(
+        abilities,
+        "RWF",
+        registered_position="RB",
+        position_rating="B",
+        weak_foot_accuracy=3,
+    ) == 480
+    assert calculate_ovr_tenths(
+        abilities,
+        "RWF",
+        registered_position="RB",
+        position_rating="C",
+        weak_foot_accuracy=3,
+    ) == 460
+    with pytest.raises(PlayerOvrError, match="position_rating"):
+        calculate_ovr_tenths(
+            abilities, "RWF", registered_position="RB", weak_foot_accuracy=3
+        )
+
+
+def test_weak_foot_accuracy_uses_the_one_to_four_scale():
+    abilities = {field: 60 for field in ABILITY_FIELDS}
+    assert calculate_ovr_tenths(abilities, "RB", weak_foot_accuracy=1) == 550
+    assert calculate_ovr_tenths(abilities, "RB", weak_foot_accuracy=4) == 560
 
 
 def test_relevant_positions_are_unique_and_codec_ordered():
@@ -97,7 +137,9 @@ PALESTRA_RB_ABILITIES = {
 }
 
 
-def test_palestra_source_stats_display_as_81_at_rb():
-    ovr_tenths = calculate_ovr_tenths(PALESTRA_RB_ABILITIES, "RB")
-    assert ovr_tenths == 811
-    assert ovr_tenths // 10 == 81
+def test_palestra_source_stats_use_verified_formula_at_rb():
+    ovr_tenths = calculate_ovr_tenths(
+        PALESTRA_RB_ABILITIES, "RB", weak_foot_accuracy=3
+    )
+    assert ovr_tenths == 840
+    assert ovr_tenths // 10 == 84

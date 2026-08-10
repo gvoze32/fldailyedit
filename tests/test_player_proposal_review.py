@@ -5,7 +5,11 @@ from copy import deepcopy
 import pytest
 
 from editor.player_codec import ABILITY_FIELDS
-from editor.player_ovr import OVR_MODEL, calculate_ovr_tenths
+from editor.player_ovr import (
+    OVR_MODEL,
+    calculate_ovr_tenths,
+    position_rating_for,
+)
 from tools.player_proposal_review import build_ovr_review, validate_ovr_review_shape
 
 
@@ -26,33 +30,54 @@ def proposal_vector() -> dict[str, int]:
 def expected_update_review() -> dict[str, object]:
     base = ability_vector()
     proposal = proposal_vector()
-    return {
-        "model": "pes2021-community-estimate-v2",
-        "mode": "comparison",
-        "positions": [
+    rows: list[dict[str, object]] = []
+    for position in ("RB", "RWF"):
+        rating = position_rating_for(
+            position, REGISTERED_POSITION, POSITION_PROFICIENCY
+        )
+        base_tenths = calculate_ovr_tenths(
+            base,
+            position,
+            registered_position=REGISTERED_POSITION,
+            position_rating=rating,
+        )
+        proposal_tenths = calculate_ovr_tenths(
+            proposal,
+            position,
+            registered_position=REGISTERED_POSITION,
+            position_rating=rating,
+        )
+        rows.append(
             {
                 "position": position,
-                "base_tenths": calculate_ovr_tenths(base, position),
-                "proposal_tenths": calculate_ovr_tenths(proposal, position),
-                "delta_tenths": (
-                    calculate_ovr_tenths(proposal, position)
-                    - calculate_ovr_tenths(base, position)
-                ),
+                "base_tenths": base_tenths,
+                "proposal_tenths": proposal_tenths,
+                "delta_tenths": proposal_tenths - base_tenths,
             }
-            for position in ("RB", "RWF")
-        ],
+        )
+    return {
+        "model": OVR_MODEL,
+        "mode": "comparison",
+        "positions": rows,
     }
 
 
 def expected_create_review() -> dict[str, object]:
     proposal = proposal_vector()
     return {
-        "model": "pes2021-community-estimate-v2",
+        "model": OVR_MODEL,
         "mode": "new_player",
         "positions": [
             {
                 "position": position,
-                "proposal_tenths": calculate_ovr_tenths(proposal, position),
+                "proposal_tenths": calculate_ovr_tenths(
+                    proposal,
+                    position,
+                    registered_position=REGISTERED_POSITION,
+                    position_rating=position_rating_for(
+                        position, REGISTERED_POSITION, POSITION_PROFICIENCY
+                    ),
+                ),
             }
             for position in ("RB", "RWF")
         ],
@@ -80,7 +105,7 @@ def test_update_ovr_review_has_the_exact_comparison_shape() -> None:
         position_proficiency=POSITION_PROFICIENCY,
     )
 
-    assert OVR_MODEL == "pes2021-community-estimate-v2"
+    assert OVR_MODEL == "pes2021-verified-formula-v1"
     assert review == expected_update_review()
     assert validate(review, "update") is None
 
@@ -177,11 +202,11 @@ def test_update_review_rejects_wrong_model_and_mode(mutation, value) -> None:
         ("proposal_tenths", False),
         ("delta_tenths", True),
         ("base_tenths", 399),
-        ("base_tenths", 991),
+        ("base_tenths", 1201),
         ("proposal_tenths", 399),
-        ("proposal_tenths", 991),
-        ("delta_tenths", -591),
-        ("delta_tenths", 591),
+        ("proposal_tenths", 1201),
+        ("delta_tenths", -801),
+        ("delta_tenths", 801),
     ],
 )
 def test_update_review_rejects_bool_and_out_of_range_numeric_values(
@@ -229,7 +254,7 @@ def test_update_review_rejects_nonexact_positions_and_unknown_or_missing_keys(
         validate(review, "update")
 
 
-@pytest.mark.parametrize("value", [True, False, 399, 991])
+@pytest.mark.parametrize("value", [True, False, 399, 1201])
 def test_create_review_rejects_bool_and_out_of_range_proposal_values(value) -> None:
     review = expected_create_review()
     _set_row_value(review, 0, "proposal_tenths", value)

@@ -41,6 +41,7 @@ def log_transfer(
     source_urls: tuple[str, ...] = (),
     proof_urls: tuple[str, ...] = (),
     field_changes: tuple[dict, ...] | list[dict] = (),
+    native_metadata: dict[str, object] | None = None,
 ):
     """
     Append a transfer, shirt-number, or player-spec audit record.
@@ -77,6 +78,7 @@ def log_transfer(
         "source_urls": list(source_urls),
         "proof_urls": list(proof_urls),
         "field_changes": [dict(change) for change in field_changes],
+        "native_metadata": dict(native_metadata or {}),
     }
 
     log_file = config.TRANSFER_LOG_FILE
@@ -232,6 +234,33 @@ def _report_metrics(entries: list[dict]) -> dict[str, int]:
 
 def _markdown_cell(value) -> str:
     return str(value if value not in (None, "") else "-").replace("|", "\\|").replace("\n", " ")
+def _native_metadata_summary(entry: dict) -> str:
+    """Render compact native metadata without expanding the full JSON payload."""
+    native = entry.get("native_metadata") or {}
+    player = native.get("player_bin") or {}
+    parts: list[str] = []
+    if player:
+        if player.get("found"):
+            identity = player.get("name") or player.get("player_id") or "matched"
+            position = player.get("registered_position")
+            parts.append(
+                "Player.bin: "
+                + str(identity)
+                + (f" ({position})" if position else "")
+            )
+        else:
+            parts.append("Player.bin: not found")
+    assignment = native.get("player_assignment") or {}
+    teams = assignment.get("teams") or []
+    if teams:
+        parts.append(
+            "Assignment: "
+            + ", ".join(
+                str(team.get("abbreviation") or team.get("name") or team.get("team_key"))
+                for team in teams
+            )
+        )
+    return "; ".join(parts) or "-"
 
 
 def generate_markdown_report(
@@ -287,8 +316,8 @@ def generate_markdown_report(
         md.extend([
             f"### Club transfers ({len(transfers)})",
             "",
-            "| Status | Player | Pos | From | To | Deal | Match |",
-            "|:---:|---|:---:|---|---|---|---:|",
+            "| Status | Player | Pos | From | To | Deal | Native metadata | Match |",
+            "|:---:|---|:---:|---|---|---|---|---:|",
         ])
         for entry in transfers:
             status = "🧪 Dry-run" if entry.get("dry_run") else "✅ Applied"
@@ -298,6 +327,7 @@ def generate_markdown_report(
                 f"| {_markdown_cell(entry.get('from_team'))} "
                 f"| {_markdown_cell(entry.get('to_team'))} "
                 f"| {_markdown_cell(entry.get('fee') or entry.get('transfer_type', 'transfer'))} "
+                f"| {_markdown_cell(_native_metadata_summary(entry))} "
                 f"| {entry.get('confidence', 0):.0f}% |"
             )
         md.append("")
@@ -403,6 +433,7 @@ def generate_html_report(
         f"<td>{value(entry.get('from_team'))}</td>"
         f"<td>{value(entry.get('to_team'))}</td>"
         f"<td>{value(entry.get('fee') or entry.get('transfer_type'), 'Transfer')}</td>"
+        f"<td>{value(_native_metadata_summary(entry))}</td>"
         f"<td class='numeric'>{entry.get('confidence', 0):.0f}%</td>"
         "</tr>"
         for entry in transfers
@@ -446,7 +477,7 @@ def generate_html_report(
     transfer_section = (
         f"""<section class="report-section">
         <div class="section-heading"><div><h2>Club transfers</h2><p>Players moved, signed, or released.</p></div><span class="count">{len(transfers)}</span></div>
-        <div class="table-wrap" role="region" aria-label="Club transfer details" tabindex="0"><table><thead><tr><th>Status</th><th>Player</th><th>Pos</th><th>From</th><th>To</th><th>Deal</th><th>Match</th></tr></thead><tbody>{transfer_rows}</tbody></table></div>
+        <div class="table-wrap" role="region" aria-label="Club transfer details" tabindex="0"><table><thead><tr><th>Status</th><th>Player</th><th>Pos</th><th>From</th><th>To</th><th>Deal</th><th>Native metadata</th><th>Match</th></tr></thead><tbody>{transfer_rows}</tbody></table></div>
       </section>"""
         if transfers
         else ""

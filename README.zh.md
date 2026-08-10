@@ -150,7 +150,7 @@ python run.py run --help
 每个经审核的 Player Update 都是 `players/` 下每名球员一个的完整 schema-version-2 JSON 文件。文件记录 `operation`（`create` 或 `update`）、生命周期（`active`、`upstreamed` 或 `retired`）、精确的 `applies_to` 基础版本、稳定的球员身份信息和 Pes Retro Stats UUID/资料来源、带引用的证据，以及经审核的 PES 数据。创建更新包含拟定的完整球员记录和目标球队阵容数据。现有球员更新仅包含与已验证基础存档不同的受支持值；每项更改都会记录字面量 `from` 和 `to` 值。
 创建（`create`）记录在 schema 中仍受支持，以供审核和未来重新启用。目前只有现有球员的 `update` 记录会修改存档；应用已完成的 `create` 会返回 `create_temporarily_unavailable` 且不改变存档。
 受支持的更新分组包括能力值、位置熟练度、比赛风格、球员技能、COM 风格、国籍、身体/基本设置和注册位置。
-- 生成的 OVR 审核值为社区估算值。当前的右后卫（RB）计算器仅包含已公布的主要权重；并非 Konami 的完整公式。
+- 生成的 OVR 审核值是基于已公布 PES 2021 公式进行的确定性计算。它们是平性辅助工具，并非游戏运行时环境的独立保证；拟定的能力值仍需审核。
 - 使用旧版 OVR 模型标识符生成的球员草稿必须在验证前重新生成；不支持从 v1 到 v2 的隐式迁移。
 
 ### 简易 Issue 流程

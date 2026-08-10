@@ -455,6 +455,7 @@ def build_player_draft(
                 proposal_abilities=proposal.abilities,
                 registered_position=proposal.registered_position or "",
                 position_proficiency=proposal.position_proficiency,
+                proposal_weak_foot_accuracy=proposal.weak_foot_accuracy,
             )
         elif request.operation == "update":
             match = resolve_update_player(
@@ -476,6 +477,8 @@ def build_player_draft(
                     or match.profile.registered_position
                 ),
                 position_proficiency=proposal.position_proficiency,
+                proposal_weak_foot_accuracy=proposal.weak_foot_accuracy,
+                base_weak_foot_accuracy=match.profile.weak_foot_accuracy,
             )
         else:
             raise PlayerDraftError(f"unsupported operation: {request.operation!r}")

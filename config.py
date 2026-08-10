@@ -34,6 +34,11 @@ NAME_OVERRIDES_FILE = DATA_DIR / "name_overrides.json"
 PLAYERS_CSV_FILE = DATA_DIR / "players.csv"
 CURRENT_PLAYERS_FILE = DATA_DIR / "FL2622wc_players.txt"
 CURRENT_TEAMS_FILE = DATA_DIR / "FL262_teams.txt"
+PLAYER_BIN_FILE = DATA_DIR / "Player.bin"
+TEAM_BIN_FILE = DATA_DIR / "Team.bin"
+PLAYER_ASSIGNMENT_FILE = DATA_DIR / "PlayerAssignment.bin"
+PLAYER_APPEARANCE_FILE = DATA_DIR / "PlayerAppearance.bin"
+GAME_ROOT: Path | None = None
 
 BASE_MANIFEST_FILE = DATA_DIR / "base_manifest.json"
 PLAYER_SPECS_DIR = PROJECT_ROOT / "players"

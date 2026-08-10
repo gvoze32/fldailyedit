@@ -137,6 +137,35 @@ def test_editfile_finds_decoded_profile_without_mutating_data():
     assert edit_file.get_player_ability_profile(999999) is None
     assert bytes(edit_file._data) == before
 
+def test_editfile_populates_verified_ovr_for_edited_player():
+    from editor.editfile import EditFile, PLAYER_APPEARANCE_SIZE
+
+    edit_file = EditFile()
+    edit_file._data = bytearray(PALESTRA_ENTRY + bytes(PLAYER_APPEARANCE_SIZE))
+    edit_file.player_start = 0
+    edit_file.player_count = 1
+
+    player = edit_file.get_all_players(include_base_db=False)[162196]
+
+    assert player.overall_rating == 68
+    assert player.position == "RB"
+    assert player.age == 20
+    assert player.position_proficiency == {
+        "GK": 0,
+        "CB": 0,
+        "LB": 1,
+        "RB": 2,
+        "DMF": 0,
+        "CMF": 0,
+        "LMF": 1,
+        "RMF": 2,
+        "AMF": 0,
+        "RWF": 1,
+        "SS": 0,
+        "CF": 0,
+        "LWF": 0,
+    }
+
 
 def test_editfile_reads_and_replaces_exact_player_entry_without_appearance_bytes():
     from editor.editfile import (
