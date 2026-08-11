@@ -8,8 +8,9 @@
 FL Daily Edit updates SP Football Life 2026 and eFootball PES 2021 squads by
 applying real-world transfers to an `EDIT00000000` save file.
 
-> **Current limitation — new-player creation is temporarily disabled while we
-> repair and verify a save/appearance issue.**
+> **New-player creation is opt-in. Direct API calls remain disabled by
+> default; `players apply --allow-create` requires a validated
+> `PlayerAppearance.bin` donor.**
 >
 > Transfers for players already in the save and reviewed updates to existing
 > players remain supported. Missing players are skipped, and a full destination
@@ -105,9 +106,13 @@ These are separate workflows:
   the same run can still apply.
 - `players apply` applies reviewed attribute changes. Existing-player `update`
   specs are supported.
-- New-player `create` specs remain loadable and reviewable, but are temporarily
-  disabled after appearance/save safety testing. Applying one returns
-  `create_temporarily_unavailable` and leaves the save byte-for-byte unchanged.
+- New-player `create` specs remain loadable and reviewable. Applying one requires
+  `players apply --allow-create`, an explicit appearance template donor, and a
+  valid `PlayerAppearance.bin` source. Missing or invalid donor data rejects the
+  spec without changing save bytes.
+- A full destination roster also requires `--allow-overflow-release`; only a
+  reserve candidate with complete positive save OVR may be released. `Player.bin`
+  metadata is not an OVR fallback.
 
 ## Run locally
 
@@ -135,6 +140,18 @@ python run.py run --dry-run --edit-file base/EDIT00000000
 
 # Validate an existing save
 python run.py validate --edit-file base/EDIT00000000
+
+# Audit one save against native metadata without writing it
+python run.py audit \
+  --edit-file /path/to/EDIT00000000 \
+  --game-root "/path/to/Football Life 2026" \
+  --json
+
+# Compare two native CPK variants without merging them
+python run.py compare \
+  --left-cpk /path/to/data_s2526.cpk \
+  --right-cpk /path/to/data_extra.cpk \
+  --json
 
 # Validate one-file-per-player updates against the pristine base revision
 python run.py players validate
@@ -167,6 +184,8 @@ python run.py run --help
 | `inspect` | Inspect teams, player counts, and save offsets |
 | `validate` | Check roster registrations and game-plan mappings |
 | `repair` | Repair a legacy base using reference saves |
+| `audit` | Read-only audit of save and native Player/Team metadata |
+| `compare` | Read-only comparison of two native CPK metadata variants |
 
 
 `run` handles transfers only: it never loads or applies Player Updates. To combine
@@ -183,10 +202,11 @@ cited evidence, and reviewed PES data. Create updates contain a proposed
 complete player record and destination roster data. Existing-player updates
 contain only supported values that differ from the verified base; every change
 records literal `from` and `to` values.
-Create records remain schema-supported for review and future re-enablement.
-Only existing-player `update` records currently mutate saves; applying a
-completed `create` returns `create_temporarily_unavailable` without changing
-the save.
+Create records remain schema-supported for review. CLI create mutation requires
+`players apply --allow-create` and valid appearance data; direct API calls remain
+disabled by default. If the destination roster is full, add
+`--allow-overflow-release`; missing or invalid safety metadata leaves the save
+unchanged.
 Supported update groups are abilities, position proficiency, playing style,
 player skills, COM styles, nationality, physical/basic settings, and
 registered position.

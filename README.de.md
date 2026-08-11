@@ -7,8 +7,9 @@
 
 FL Daily Edit aktualisiert Kader in SP Football Life 2026 und eFootball PES 2021, indem reale Transfers auf eine `EDIT00000000`-Speicherdatei angewendet werden.
 
-> **Aktuelle Einschränkung — Die Erstellung neuer Spieler ist vorübergehend deaktiviert, während
-> wir ein Problem bei Speicherstand/Aussehen beheben und verifizieren.**
+> **Die Erstellung neuer Spieler ist opt-in. Direkte API-Aufrufe bleiben
+> standardmäßig deaktiviert; `players apply --allow-create` erfordert einen
+> validierten `PlayerAppearance.bin`-Donor.**
 >
 > Transfers für Spieler, die sich bereits im Speicherstand befinden, sowie geprüfte Aktualisierungen
 > für bestehende Spieler werden weiterhin unterstützt. Fehlende Spieler werden übersprungen und ein
@@ -91,7 +92,13 @@ Dies sind getrennte Arbeitsabläufe:
 
 - `run` verarbeitet Transfers für Spieler, die sich bereits im Speicherstand befinden. Ist ein Zielverein voll, wird dieser Transfer übersprungen; andere sichere Transfers im selben Durchlauf können weiterhin angewendet werden.
 - `players apply` wendet geprüfte Attributänderungen an. `update`-Spezifikationen für bestehende Spieler werden unterstützt.
-- `create`-Spezifikationen für neue Spieler bleiben ladbar und überprüfbar, sind jedoch nach Sicherheitsprüfungen zu Speicherstand/Aussehen vorübergehend deaktiviert. Das Anwenden einer solchen Spezifikation gibt `create_temporarily_unavailable` zurück und belässt den Speicherstand Byte für Byte unverändert.
+- `create`-Spezifikationen für neue Spieler bleiben ladbar und überprüfbar. Ihre Anwendung
+  erfordert `players apply --allow-create`, einen expliziten Aussehens-Donor und eine gültige
+  `PlayerAppearance.bin`-Quelle. Ein fehlender oder ungültiger Donor lehnt die Spezifikation
+  ab, ohne die Bytes des Speicherstands zu ändern.
+- Ein voller Zielkader erfordert ebenfalls `--allow-overflow-release`; nur ein Reserve-Spieler
+  mit vollständigem positivem OVR aus dem Speicherstand darf freigestellt werden. `Player.bin`-
+  Metadaten ersetzen den OVR nicht.
 
 ## Lokale Ausführung
 
@@ -150,13 +157,18 @@ python run.py run --help
 | `inspect` | Teams, Spieleranzahlen und Speicher-Offsets inspizieren |
 | `validate` | Kaderregistrierungen und Spielplan-Zuweisungen prüfen |
 | `repair` | Eine Legacy-Basis mithilfe von Referenzdateien reparieren |
+| `audit` | Speicherstand und native Metadaten schreibgeschützt prüfen |
+| `compare` | Zwei native CPK-Metadatenvarianten schreibgeschützt vergleichen |
 
 `run` verarbeitet ausschließlich Transfers: es lädt oder wendet niemals Player Updates an. Um beide Workflows zu kombinieren, führen Sie zuerst den Transferbefehl auf eine Ausgabedatei aus und danach `players apply --in-place` auf dieselbe Datei.
 
 ## Player Updates
 
 Jedes geprüfte Player Update ist eine vollständige JSON-Datei der Schema-Version 2 pro Spieler unter `players/`. Es erfasst eine `operation` (`create` oder `update`), einen Lebenszyklus (`active`, `upstreamed` oder `retired`), die genauen Basis-Revisionen in `applies_to`, die stabile Spieler-Identität und Pes-Retro-Stats-UUID/Profilherkunft, Belege und überprüfte PES-Daten. Erstellungs-Updates enthalten einen vollständigen Spielerdatensatz und Zielkader-Daten. Updates bestehender Spieler enthalten nur abweichende Werte von der geprüften Basis mit wörtlichen `from`- und `to`-Werten.
-`create`-Einträge werden weiterhin vom Schema für Prüfzwecke und künftige Reaktivierung unterstützt. Derzeit modifizieren nur `update`-Einträge bestehender Spieler Speicherdateien; das Anwenden eines fertigen `create` gibt `create_temporarily_unavailable` zurück, ohne den Speicherstand zu ändern.
+`create`-Einträge bleiben zur Prüfung schemaunterstützt. Eine Mutation über die CLI erfordert
+`players apply --allow-create` und gültige Aussehensdaten; direkte API-Aufrufe bleiben
+standardmäßig deaktiviert. Bei vollem Zielkader ist zusätzlich `--allow-overflow-release`
+erforderlich; fehlende oder ungültige Sicherheitsmetadaten lassen den Speicherstand unverändert.
 Unterstützte Update-Gruppen sind Fähigkeiten, Positionsbeherrschung, Spielstil, Spielerfähigkeiten, COM-Stile, Nationalität, physische/grundlegende Einstellungen und die registrierte Position.
 - Die generierten OVR-Prüfwerte sind deterministische Berechnungen basierend auf der veröffentlichten PES 2021-Formel. Sie dienen als Paritätshilfe und stellen keine unabhängige Garantie für die Laufzeit des Spiels dar; vorgeschlagene Fähigkeitswerte müssen weiterhin überprüft werden.
 - Spielerentwürfe, die mit der früheren OVR-Modellkennung generiert wurden, müssen vor der Validierung neu generiert werden; es gibt keine implizite Migration von v1 auf v2.

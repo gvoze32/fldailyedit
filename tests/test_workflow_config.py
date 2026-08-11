@@ -354,6 +354,22 @@ def test_localized_readmes_are_installer_first_and_keep_public_manual_fallbacks(
         assert "installer" not in roadmap.casefold(), path
 
 
+def test_readmes_document_opt_in_create_and_native_metadata_tools():
+    for path, *_ in README_INSTALLER_CONTRACTS:
+        text = path.read_text(encoding="utf-8")
+        assert "create_temporarily_unavailable" not in text, path
+        assert "--allow-create" in text, path
+        assert "PlayerAppearance.bin" in text, path
+        assert "--allow-overflow-release" in text, path
+        assert "| `audit` |" in text, path
+        assert "| `compare` |" in text, path
+
+    for path in (Path("README.md"), Path("README.id.md")):
+        text = path.read_text(encoding="utf-8")
+        assert "python run.py audit" in text, path
+        assert "python run.py compare" in text, path
+
+
 def test_localized_readmes_document_smart_app_control_bypass():
     for path, *_ in README_INSTALLER_CONTRACTS:
         text = path.read_text(encoding="utf-8")

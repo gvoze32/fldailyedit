@@ -8,8 +8,8 @@
 FL Daily Edit met à jour les effectifs de SP Football Life 2026 et d'eFootball PES 2021
 en appliquant les transferts réels à un fichier de sauvegarde `EDIT00000000`.
 
-> **Restriction actuelle — la création de nouveaux joueurs est temporairement désactivée le temps
-> de corriger et de vérifier une anomalie liée aux sauvegardes et à l'apparence.**
+> **La création de nouveaux joueurs est opt-in. Les appels API directs restent désactivés
+> par défaut ; `players apply --allow-create` exige un donneur validé de `PlayerAppearance.bin`.**
 >
 > Les transferts pour les joueurs déjà présents dans la sauvegarde et les mises à jour révisées
 > pour les joueurs existants restent pleinement pris en charge. Les joueurs absents sont ignorés
@@ -99,7 +99,13 @@ Il s'agit de flux de travail distincts :
 
 - `run` traite les transferts pour les joueurs déjà présents dans la sauvegarde. Si un club de destination est complet, ce transfert est ignoré ; les autres transferts sûrs de la même exécution peuvent toujours être appliqués.
 - `players apply` applique les modifications d'attributs révisées. Les spécifications `update` pour les joueurs existants sont prises en charge.
-- Les spécifications `create` pour les nouveaux joueurs restent chargeables et révisables, mais sont temporairement désactivées suite aux tests de sécurité sur les sauvegardes et l'apparence. L'application de l'une d'elles renvoie `create_temporarily_unavailable` et laisse la sauvegarde strictement inchangée octet par octet.
+- Les spécifications `create` pour les nouveaux joueurs restent chargeables et révisables.
+  Leur application exige `players apply --allow-create`, un donneur d'apparence explicite
+  et une source valide de `PlayerAppearance.bin`. Un donneur absent ou invalide rejette
+  la spécification sans modifier les octets de la sauvegarde.
+- Un effectif de destination complet exige aussi `--allow-overflow-release` ; seul un
+  remplaçant avec un OVR positif complet de la sauvegarde peut être libéré. Les métadonnées
+  de `Player.bin` ne remplacent pas l'OVR.
 
 ## Exécution locale
 
@@ -159,6 +165,8 @@ python run.py run --help
 | `inspect` | Inspecter les équipes, le nombre de joueurs et les décalages du fichier de sauvegarde |
 | `validate` | Vérifier les inscriptions dans les effectifs et les plans de jeu |
 | `repair` | Réparer une base héritée à l'aide de sauvegardes de référence |
+| `audit` | Auditer en lecture seule la sauvegarde et les métadonnées natives |
+| `compare` | Comparer en lecture seule deux variantes CPK natives |
 
 `run` gère uniquement les transferts : il ne charge ni n'applique jamais les Player Updates.
 Pour combiner les deux flux de travail, exécutez d'abord la commande de transferts sur une
@@ -167,7 +175,11 @@ sauvegarde de sortie, puis lancez `players apply --in-place` sur cette même sau
 ## Player Updates
 
 Chaque Player Update validée est un fichier JSON conforme au schéma v2 par joueur sous `players/`. Elle enregistre une `operation` (`create` ou `update`), un cycle de vie (`active`, `upstreamed` ou `retired`), les révisions de base exactes dans `applies_to`, l'identité stable du joueur et la provenance UUID/profil Pes Retro Stats, les preuves citées et les données PES révisées. Les créations contiennent une proposition de profil complet du joueur et les données d'effectif cible. Les mises à jour de joueurs existants contiennent uniquement les valeurs compatibles différentes de la base vérifiée ; chaque modification consigne les valeurs littérales `from` et `to`.
-Les enregistrements `create` restent pris en charge par le schéma à des fins de révision et de réactivation future. Actuellement, seuls les enregistrements `update` de joueurs existants modifient les sauvegardes ; l'application d'un `create` terminé renvoie `create_temporarily_unavailable` sans modifier la sauvegarde.
+Les enregistrements `create` restent pris en charge par le schéma pour révision. La mutation
+via la CLI exige `players apply --allow-create` et des données d'apparence valides ; les appels
+API directs restent désactivés par défaut. Si l'effectif est complet, ajoutez
+`--allow-overflow-release` ; des métadonnées de sécurité absentes ou invalides laissent la
+sauvegarde inchangée.
 Les groupes pris en charge sont les compétences, la maîtrise des postes, le style de jeu, les aptitudes de joueur, les styles COM, la nationalité, les paramètres physiques/de base et le poste enregistré.
 - Les valeurs de révision d'OVR générées sont des calculs déterministes basés sur la formule publiée de PES 2021. Elles constituent une aide à la parité et non une garantie indépendante du comportement du jeu en exécution ; les valeurs de capacité proposées nécessitent toujours une révision.
 - Les brouillons de joueurs générés avec l'ancien identifiant de modèle OVR doivent être régénérés avant toute validation ; il n'y a pas de migration implicite de v1 vers v2.

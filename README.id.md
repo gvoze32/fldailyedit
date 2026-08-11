@@ -8,8 +8,9 @@
 FL Daily Edit memperbarui skuad SP Football Life 2026 dan eFootball PES 2021
 dengan menerapkan transfer dunia nyata ke file save `EDIT00000000`.
 
-> **Batasan saat ini — pembuatan pemain baru sementara dinonaktifkan karena
-> kami sedang memperbaiki dan memverifikasi masalah save/appearance.**
+> **Pembuatan pemain baru bersifat opt-in. API langsung tetap dinonaktifkan
+> secara default; `players apply --allow-create` memerlukan donor
+> `PlayerAppearance.bin` yang tervalidasi.**
 >
 > Transfer pemain yang sudah ada di save dan pembaruan pemain yang sudah ditinjau
 > tetap didukung. Pemain yang belum ada akan dilewati, dan roster tujuan yang
@@ -106,9 +107,13 @@ Semua item roadmap saat ini telah selesai. Kami menunggu ide berguna berikutnya.
   dapat diterapkan.
 - `players apply` menerapkan perubahan atribut yang sudah ditinjau. Spec
   `update` untuk pemain yang sudah ada tetap didukung.
-- Spec `create` pemain baru tetap dapat dimuat dan ditinjau, tetapi sementara
-  dinonaktifkan setelah pengujian keamanan appearance/save. Penerapannya
-  menghasilkan `create_temporarily_unavailable` dan save tidak berubah sedikit pun.
+- Spec `create` pemain baru tetap dapat dimuat dan ditinjau. Penerapannya
+  memerlukan `players apply --allow-create`, donor appearance eksplisit, dan
+  sumber `PlayerAppearance.bin` yang valid. Donor yang hilang atau rusak menolak
+  spec tanpa mengubah byte save.
+- Roster tujuan yang penuh juga memerlukan `--allow-overflow-release`; hanya
+  kandidat reserve dengan OVR save positif yang lengkap boleh dilepas. Metadata
+  `Player.bin` bukan fallback OVR.
 
 ## Jalankan secara lokal
 
@@ -136,6 +141,18 @@ python run.py run --dry-run --edit-file base/EDIT00000000
 
 # Validate an existing save
 python run.py validate --edit-file base/EDIT00000000
+
+# Audit one save against native metadata without writing it
+python run.py audit \
+  --edit-file /path/to/EDIT00000000 \
+  --game-root "/path/to/Football Life 2026" \
+  --json
+
+# Compare two native CPK variants without merging them
+python run.py compare \
+  --left-cpk /path/to/data_s2526.cpk \
+  --right-cpk /path/to/data_extra.cpk \
+  --json
 
 # Validate one-file-per-player updates against the pristine base revision
 python run.py players validate
@@ -168,6 +185,8 @@ python run.py run --help
 | `inspect` | Memeriksa tim, jumlah pemain, dan offset save |
 | `validate` | Memeriksa pendaftaran roster dan pemetaan game plan |
 | `repair` | Memperbaiki base lama menggunakan save referensi |
+| `audit` | Audit read-only save dan metadata native Player/Team |
+| `compare` | Perbandingan read-only dua varian metadata CPK native |
 
 `run` hanya menangani transfer: perintah ini tidak pernah memuat atau menerapkan
 Pembaruan Pemain. Untuk menggabungkan kedua alur kerja, pertama-tama jalankan
@@ -184,10 +203,11 @@ UUID/profil Pes Retro Stats, bukti yang dikutip, dan data PES yang telah ditinja
 Pembaruan create berisi usulan record pemain lengkap dan data roster tujuan.
 Pembaruan untuk pemain yang sudah ada hanya berisi nilai yang didukung dan berbeda
 dari base terverifikasi; setiap perubahan mencatat nilai literal `from` dan `to`.
-Record `create` tetap didukung oleh schema untuk peninjauan dan pengaktifan
-kembali di masa depan. Saat ini hanya record `update` pemain yang sudah ada yang
-mengubah save; penerapan `create` selesai dengan
-`create_temporarily_unavailable` tanpa mengubah save.
+Record `create` tetap didukung oleh schema untuk peninjauan. Mutasi melalui CLI
+memerlukan `players apply --allow-create` dan data appearance yang valid; API
+langsung tetap dinonaktifkan secara default. Jika roster penuh, tambahkan
+`--allow-overflow-release`; metadata keselamatan yang hilang atau rusak membuat
+save tidak berubah.
 Kelompok pembaruan yang didukung adalah kemampuan, kecakapan posisi, gaya bermain,
 keahlian pemain, gaya COM, kewarganegaraan, pengaturan fisik/dasar, dan posisi
 terdaftar.

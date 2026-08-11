@@ -52,12 +52,20 @@ _COMMON_FENCE_FIXTURES = (
         "850b60dfe34ad48f1ba45746854267b56e3972b725453257078f7461b95b4446",
     ),
 )
+_README_COMMAND_FENCE_FIXTURES = (
+    _COMMON_FENCE_FIXTURES[0],
+    (
+        "bash",
+        "2b1343112915bb958f2617a2beb87209f60625ef2577e008f81e0cbb326f6142",
+    ),
+    _COMMON_FENCE_FIXTURES[2],
+)
 
 README_STRUCTURE_FIXTURES = {
     Path("README.md"): {
         "heading_counts": (9, 11, 3, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
-        "fenced_code_blocks": _COMMON_FENCE_FIXTURES,
+        "fenced_code_blocks": _README_COMMAND_FENCE_FIXTURES,
         "relative_links": (
             "base/EDIT00000000",
             ".github/ISSUE_TEMPLATE/player-update.yml",
@@ -67,7 +75,7 @@ README_STRUCTURE_FIXTURES = {
     Path("README.id.md"): {
         "heading_counts": (9, 11, 3, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
-        "fenced_code_blocks": _COMMON_FENCE_FIXTURES,
+        "fenced_code_blocks": _README_COMMAND_FENCE_FIXTURES,
         "relative_links": (
             "base/EDIT00000000",
             ".github/ISSUE_TEMPLATE/player-update.yml",

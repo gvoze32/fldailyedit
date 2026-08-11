@@ -7,8 +7,9 @@
 
 FL Daily Edit, gerçek dünyadaki transferleri bir `EDIT00000000` kayıt dosyasına uygulayarak SP Football Life 2026 ve eFootball PES 2021 kadrolarını günceller.
 
-> **Mevcut Sınırlama — Kayıt/görünüm ile ilgili bir sorunu giderip doğrularken,
-> yeni oyuncu oluşturma geçici olarak devre dışı bırakılmıştır.**
+> **Yeni oyuncu oluşturma açıkça opt-in gerektirir. Doğrudan API çağrıları varsayılan
+> olarak devre dışıdır; `players apply --allow-create`, doğrulanmış bir
+> `PlayerAppearance.bin` bağışlayıcısı gerektirir.**
 >
 > Kayıt dosyasında zaten bulunan oyuncular için transferler ve mevcut oyuncular için incelenmiş
 > güncellemeler desteklenmeye devam etmektedir. Eksik oyuncular atlanır ve dolu bir hedef kadro,
@@ -90,7 +91,13 @@ Bunlar ayrı iş akışlarıdır:
 
 - `run`, kayıt dosyasında zaten bulunan oyuncular için transferleri işler. Bir hedef kulüp doluysa, o transfer atlanır; aynı çalıştırmadaki diğer güvenli transferler yine de uygulanabilir.
 - `players apply`, incelenen özellik değişikliklerini uygular. Mevcut oyuncular için `update` tanımları desteklenir.
-- Yeni oyuncular için `create` tanımları yüklenebilir ve incelenebilir durumda kalır, ancak görünüm/kayıt güvenlik testlerinin ardından geçici olarak devre dışı bırakılmıştır. Bunlardan birini uygulamak `create_temporarily_unavailable` döndürür ve kayıt dosyasını bayt bayt değişmeden bırakır.
+- Yeni oyuncular için `create` tanımları yüklenebilir ve incelenebilir. Uygulamak için
+  `players apply --allow-create`, açık bir görünüm bağışlayıcısı ve geçerli bir
+  `PlayerAppearance.bin` kaynağı gerekir. Bağışlayıcı eksik veya geçersizse tanım,
+  kayıt dosyasının baytlarını değiştirmeden reddedilir.
+- Dolu hedef kadro ayrıca `--allow-overflow-release` gerektirir; yalnızca kayıt
+  dosyasından tam ve pozitif OVR değerine sahip bir yedek oyuncu serbest bırakılabilir.
+  `Player.bin` meta verisi OVR yerine kullanılamaz.
 
 ## Yerel Kurulum
 
@@ -149,13 +156,18 @@ python run.py run --help
 | `inspect` | Takımları, oyuncu sayılarını ve kayıt dosyası ofsetlerini incele |
 | `validate` | Kadro kayıtlarını ve oyun planı eşlemelerini kontrol et |
 | `repair` | Referans kayıtları kullanarak eski bir temeli onar |
+| `audit` | Kayıt ve yerel Player/Team meta verilerini salt okunur denetle |
+| `compare` | İki yerel CPK meta veri varyantını salt okunur karşılaştır |
 
 `run` yalnızca transferleri işler: Player Update'leri asla yüklemez veya uygulamaz. Her iki iş akışını birleştirmek için önce bir çıktı kaydında transfer komutunu çalıştırın, ardından aynı dosyada `players apply --in-place` komutunu çalıştırın.
 
 ## Player Updates
 
 İncelenen her Player Update, `players/` altında oyuncu başına şema-v2 formatında eksiksiz bir JSON dosyasıdır. Bir işlemi (`operation`: `create` veya `update`), bir yaşam döngüsünü (`active`, `upstreamed` veya `retired`), `applies_to` içindeki kesin temel sürümleri, kararlı oyuncu kimliğini ve Pes Retro Stats UUID/profil kaynağını, kaynak gösterilen kanıtları ve incelenen PES verilerini kaydeder. Oluşturma güncellemeleri, önerilen eksiksiz bir oyuncu kaydı ve hedef kadro verilerini içerir. Mevcut oyuncu güncellemeleri, yalnızca doğrulanmış temelden farklı olan desteklenen değerleri içerir; her değişiklik birebir `from` ve `to` değerlerini kaydeder.
-`create` kayıtları, inceleme ve gelecekte yeniden etkinleştirme amacıyla şema tarafından desteklenmeye devam eder. Şu anda yalnızca mevcut oyuncu `update` kayıtları kayıt dosyalarını değiştirir; tamamlanmış bir `create` uygulamak, kaydı değiştirmeden `create_temporarily_unavailable` döndürür.
+`create` kayıtları incelenmek üzere şema tarafından desteklenir. CLI mutasyonu
+`players apply --allow-create` ve geçerli görünüm verileri gerektirir; doğrudan API
+çağrıları varsayılan olarak devre dışıdır. Kadro doluysa `--allow-overflow-release`
+eklenmelidir; eksik veya geçersiz güvenlik meta verisi kayıt dosyasını değiştirmez.
 Desteklenen güncelleme grupları yetenekler, mevki yetkinliği, oyun tarzı, oyuncu becerileri, COM tarzları, uyruk, fiziksel/temel ayarlar ve kayıtlı mevkidir.
 - Oluşturulan GEN (OVR) inceleme değerleri, yayınlanan PES 2021 formülüne dayanan deterministik hesaplamalardır. Oyun çalışma zamanının bağımsız bir garantisi değil, bir eşitlik yardımcısıdır; önerilen yetenek değerleri yine de inceleme gerektirir.
 - Önceki OVR model tanımlayıcısıyla oluşturulan oyuncu taslakları, doğrulamadan önce yeniden oluşturulmalıdır; v1'den v2'ye örtük bir geçiş yoktur.

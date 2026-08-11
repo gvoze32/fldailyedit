@@ -7,12 +7,14 @@
 
 O FL Daily Edit atualiza os elencos do SP Football Life 2026 e do eFootball PES 2021 aplicando transferências do mundo real a um arquivo de edição `EDIT00000000`.
 
-> **Limitação atual — a criação de novos jogadores está temporariamente desativada enquanto
-> corrigimos e verificamos um problema de salvamento/aparência.**
+> **A criação de novos jogadores é opt-in. A API direta permanece desativada
+> por padrão; `players apply --allow-create` exige um doador validado de
+> `PlayerAppearance.bin`.**
 >
-> As transferências de jogadores que já estão no arquivo de edição e as atualizações revisadas
-> de jogadores existentes continuam suportadas. Jogadores ausentes são ignorados, e um elenco
-> de destino cheio é ignorado por padrão em vez de dispensar um jogador existente.
+> As transferências de jogadores que já estão no arquivo de edição e as atualizações
+> revisadas de jogadores existentes continuam suportadas. Jogadores ausentes são
+> ignorados, e um elenco de destino cheio é ignorado por padrão em vez de dispensar
+> um jogador existente.
 
 ## Compatibilidade
 
@@ -90,7 +92,13 @@ Estes são fluxos de trabalho distintos:
 
 - `run` processa transferências para jogadores que já existem no arquivo de edição. Se o clube de destino estiver cheio, a transferência é ignorada; outras transferências seguras na mesma execução ainda podem ser aplicadas.
 - `players apply` aplica alterações de atributos revisadas. Especificações `update` de jogadores existentes são suportadas.
-- Especificações `create` de novos jogadores continuam carregáveis e revisáveis, mas estão temporariamente desativadas após testes de segurança de aparência/salvamento. A aplicação de uma delas retorna `create_temporarily_unavailable` e mantém o arquivo de edição byte a byte inalterado.
+- Especificações `create` de novos jogadores continuam carregáveis e revisáveis.
+  Aplicá-las exige `players apply --allow-create`, um doador de aparência explícito
+  e uma fonte válida de `PlayerAppearance.bin`. Um doador ausente ou inválido
+  rejeita a especificação sem alterar os bytes do arquivo de edição.
+- Um elenco de destino cheio também exige `--allow-overflow-release`; somente um
+  reserva com OVR positivo completo do save pode ser dispensado. Os metadados do
+  `Player.bin` não substituem o OVR.
 
 ## Execução local
 
@@ -149,13 +157,19 @@ python run.py run --help
 | `inspect` | Inspeciona equipes, contagem de jogadores e deslocamentos do arquivo |
 | `validate` | Verifica os registros nos elencos e os mapeamentos dos planos de jogo |
 | `repair` | Repara uma base legada usando arquivos de referência |
+| `audit` | Auditar o arquivo de edição e os metadados nativos em modo somente leitura |
+| `compare` | Comparar duas variantes CPK nativas em modo somente leitura |
 
 `run` lida apenas com transferências: ele nunca carrega nem aplica Player Updates. Para combinar ambos os fluxos de trabalho, execute primeiro o comando de transferências em um arquivo de edição de saída e, em seguida, execute `players apply --in-place` nesse mesmo arquivo.
 
 ## Atualizações de jogadores
 
 Cada Player Update revisada é um arquivo JSON completo no schema versão 2 por jogador em `players/`. Ela registra uma operação (`operation`: `create` ou `update`), um ciclo de vida (`active`, `upstreamed` ou `retired`), revisões de base exatas em `applies_to`, identidade estável do jogador e procedência do perfil/UUID no Pes Retro Stats, evidências citadas e dados do PES revisados. As atualizações de criação contêm uma proposta de registro completo de jogador e dados de elenco de destino. As atualizações de jogadores existentes contêm apenas valores suportados que diferem da base verificada; cada alteração registra valores literais `from` e `to`.
-Registros `create` continuam suportados pelo schema para revisão e futura reativação. Atualmente, apenas registros `update` de jogadores existentes alteram os arquivos de edição; a aplicação de um `create` concluído retorna `create_temporarily_unavailable` sem alterar o arquivo.
+Os registros `create` continuam suportados pelo schema para revisão. A mutação
+pela CLI exige `players apply --allow-create` e dados de aparência válidos; a API
+direta permanece desativada por padrão. Se o elenco estiver cheio, adicione
+`--allow-overflow-release`; metadados de segurança ausentes ou inválidos deixam o
+arquivo inalterado.
 Os grupos de atualização suportados são habilidades, proficiência de posição, estilo de jogo, habilidades de jogador, estilos COM, nacionalidade, configurações físicas/básicas e posição registrada.
 - Os valores de revisão de OVR gerados são cálculos determinísticos baseados na fórmula publicada do PES 2021. Eles são uma ajuda de paridade, não uma garantia independente da execução do jogo; os valores de habilidade propostos ainda exigem revisão.
 - Rascunhos de jogadores gerados com o identificador de modelo OVR anterior devem ser gerados novamente antes da validação; nenhuma migração de v1 para v2 é implícita.

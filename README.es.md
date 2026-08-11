@@ -8,12 +8,14 @@
 FL Daily Edit actualiza las plantillas de SP Football Life 2026 y eFootball PES 2021 mediante
 la aplicación de transferencias reales a un archivo guardado `EDIT00000000`.
 
-> **Limitación actual: la creación de nuevos jugadores está temporalmente desactivada mientras
-> reparamos y verificamos un problema de apariencia/guardado.**
+> **La creación de jugadores nuevos es opt-in. La API directa permanece
+> desactivada por defecto; `players apply --allow-create` requiere un donante
+> válido de `PlayerAppearance.bin`.**
 >
-> Las transferencias de jugadores que ya están en el guardado y las actualizaciones revisadas
-> de jugadores existentes siguen siendo compatibles. Los jugadores faltantes se omiten, y una
-> plantilla de destino llena se omite de forma predeterminada en lugar de liberar a un jugador existente.
+> Las transferencias de jugadores que ya están en el guardado y las actualizaciones
+> revisadas de jugadores existentes siguen siendo compatibles. Los jugadores
+> faltantes se omiten, y una plantilla de destino llena se omite por defecto en
+> lugar de liberar a un jugador existente.
 
 ## Compatibilidad
 
@@ -107,9 +109,13 @@ Son flujos de trabajo separados:
   ejecución aún pueden aplicarse.
 - `players apply` aplica cambios de atributos revisados. Se admiten especificaciones `update`
   de jugadores existentes.
-- Las especificaciones `create` de nuevos jugadores siguen siendo cargables y revisables, pero
-  están temporalmente desactivadas tras las pruebas de seguridad de apariencia/guardado. Aplicar
-  una devuelve `create_temporarily_unavailable` y deja el archivo guardado byte por byte sin cambios.
+- Las especificaciones `create` de nuevos jugadores siguen siendo cargables y
+  revisables. Aplicarlas requiere `players apply --allow-create`, un donante de
+  apariencia explícito y una fuente válida de `PlayerAppearance.bin`. Un donante
+  ausente o inválido rechaza la especificación sin cambiar los bytes del guardado.
+- Una plantilla de destino llena también requiere `--allow-overflow-release`; solo
+  se puede liberar un reserva con OVR positivo completo del guardado. Los metadatos
+  de `Player.bin` no sustituyen al OVR.
 
 ## Ejecución local
 
@@ -169,6 +175,8 @@ python run.py run --help
 | `inspect` | Inspeccionar equipos, cantidades de jugadores y desplazamientos del archivo guardado |
 | `validate` | Verificar las inscripciones en las plantillas y las asignaciones de los planes de juego |
 | `repair` | Reparar una base heredada mediante archivos guardados de referencia |
+| `audit` | Auditar en modo solo lectura el guardado y los metadatos nativos |
+| `compare` | Comparar en modo solo lectura dos variantes CPK nativas |
 
 `run` solo gestiona transferencias: nunca carga ni aplica Player Updates. Para combinar
 ambos flujos de trabajo, primero se debe ejecutar el comando de transferencias sobre un archivo guardado de salida y luego ejecutar
@@ -184,9 +192,11 @@ evidencia citada y datos de PES revisados. Las actualizaciones de creación cont
 registro completo del jugador y datos de la plantilla de destino. Las actualizaciones de jugadores existentes
 contienen únicamente valores compatibles que difieren de la base verificada; cada cambio
 registra valores literales `from` y `to`.
-Los registros `create` siguen siendo compatibles con el esquema para su revisión y futura reactivación.
-Actualmente, solo los registros `update` de jugadores existentes modifican los archivos guardados; aplicar
-un `create` completado devuelve `create_temporarily_unavailable` sin modificar el archivo guardado.
+Los registros `create` siguen siendo compatibles con el esquema para su revisión.
+La mutación desde la CLI requiere `players apply --allow-create` y datos de
+apariencia válidos; la API directa permanece desactivada por defecto. Si la
+plantilla está llena, añada `--allow-overflow-release`; los metadatos de seguridad
+ausentes o inválidos dejan el guardado sin cambios.
 Los grupos de actualización compatibles son habilidades, dominio de posiciones, estilo de juego,
 habilidades del jugador, estilos COM, nacionalidad, configuración física/básica y
 posición registrada.

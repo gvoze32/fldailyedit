@@ -7,7 +7,8 @@
 
 FL Daily Edit 通过将现实世界中的转会应用到 `EDIT00000000` 存档文件，更新 SP Football Life 2026 和 eFootball PES 2021 的阵容。
 
-> **当前限制 — 在我们修复并验证存档/外观问题期间，暂时禁用新球员创建功能。**
+> **新球员创建采用显式 opt-in。直接 API 调用默认保持禁用；
+> `players apply --allow-create` 必须使用经过验证的 `PlayerAppearance.bin` donor。**
 >
 > 仍支持存档中已有球员的转会以及现有球员的已审核更新。缺失的球员将被跳过；若目标球队阵容已满，默认会跳过该操作，而不是解约现有球员。
 
@@ -83,7 +84,11 @@ Windows 安装程序是面向新手的推荐方式。安装程序界面目前仅
 
 - `run` 仅处理存档中已有球员的转会。若目标俱乐部已满，则跳过该转会；同一运行中的其他安全转会仍可正常应用。
 - `players apply` 应用经审核的属性变更。支持现有球员的 `update` 规范。
-- 新球员的 `create` 规范仍可加载和审核，但在进行外观/存档安全性测试后已被暂时禁用。应用此类规范会返回 `create_temporarily_unavailable`，并保持存档逐字节不变。
+- 新球员的 `create` 规范仍可加载和审核。应用它需要
+  `players apply --allow-create`、明确的外观 donor 和有效的
+  `PlayerAppearance.bin` 来源。donor 缺失或无效时拒绝该规范且不改变存档字节。
+- 目标球队阵容已满时还必须使用 `--allow-overflow-release`；只有存档中
+  OVR 完整且为正的 reserve 才能被释放。`Player.bin` 元数据不能替代 OVR。
 
 ## 本地运行
 
@@ -142,13 +147,18 @@ python run.py run --help
 | `inspect` | 检查球队、球员人数和存档偏移量 |
 | `validate` | 检查阵容注册和比赛计划映射 |
 | `repair` | 使用参考存档修复旧版基础存档 |
+| `audit` | 以只读方式审计存档与原生 Player/Team 元数据 |
+| `compare` | 以只读方式比较两个原生 CPK 元数据变体 |
 
 `run` 仅处理转会：它绝不会加载或应用 Player Update。要结合使用这两个工作流，请先对输出存档运行转会命令，然后对同一存档运行 `players apply --in-place`。
 
 ## 球员更新
 
 每个经审核的 Player Update 都是 `players/` 下每名球员一个的完整 schema-version-2 JSON 文件。文件记录 `operation`（`create` 或 `update`）、生命周期（`active`、`upstreamed` 或 `retired`）、精确的 `applies_to` 基础版本、稳定的球员身份信息和 Pes Retro Stats UUID/资料来源、带引用的证据，以及经审核的 PES 数据。创建更新包含拟定的完整球员记录和目标球队阵容数据。现有球员更新仅包含与已验证基础存档不同的受支持值；每项更改都会记录字面量 `from` 和 `to` 值。
-创建（`create`）记录在 schema 中仍受支持，以供审核和未来重新启用。目前只有现有球员的 `update` 记录会修改存档；应用已完成的 `create` 会返回 `create_temporarily_unavailable` 且不改变存档。
+`create` 记录继续受 schema 支持以供审核。CLI 变更必须使用
+`players apply --allow-create` 和有效外观数据；直接 API 调用默认保持禁用。
+若目标阵容已满，请同时使用 `--allow-overflow-release`；缺失或无效的安全
+元数据会保持存档不变。
 受支持的更新分组包括能力值、位置熟练度、比赛风格、球员技能、COM 风格、国籍、身体/基本设置和注册位置。
 - 生成的 OVR 审核值是基于已公布 PES 2021 公式进行的确定性计算。它们是平性辅助工具，并非游戏运行时环境的独立保证；拟定的能力值仍需审核。
 - 使用旧版 OVR 模型标识符生成的球员草稿必须在验证前重新生成；不支持从 v1 到 v2 的隐式迁移。

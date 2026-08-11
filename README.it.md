@@ -8,12 +8,14 @@
 FL Daily Edit aggiorna le rose di SP Football Life 2026 ed eFootball PES 2021
 applicando i trasferimenti del mondo reale a un file di salvataggio `EDIT00000000`.
 
-> **Limitazione attuale — la creazione di nuovi giocatori è temporaneamente disabilitata mentre
-> ripariamo e verifichiamo un problema relativo ai salvataggi/all'aspetto.**
+> **La creazione di nuovi giocatori è opt-in. Le chiamate API dirette restano
+> disabilitate per impostazione predefinita; `players apply --allow-create`
+> richiede un donor verificato di `PlayerAppearance.bin`.**
 >
-> I trasferimenti per i giocatori già presenti nel salvataggio e gli aggiornamenti revisionati
-> per i giocatori esistenti rimangono supportati. I giocatori mancanti vengono ignorati e una
-> rosa di destinazione al completo viene ignorata per impostazione predefinita invece di svincolare un giocatore esistente.
+> I trasferimenti per i giocatori già presenti nel salvataggio e gli aggiornamenti
+> revisionati per i giocatori esistenti rimangono supportati. I giocatori mancanti
+> vengono ignorati e una rosa di destinazione completa viene ignorata per
+> impostazione predefinita invece di svincolare un giocatore esistente.
 
 ## Compatibilità
 
@@ -106,9 +108,13 @@ Si tratta di flussi di lavoro separati:
   stessa esecuzione possono comunque essere applicati.
 - `players apply` applica le modifiche agli attributi revisionate. Le specifiche `update` per i
   giocatori esistenti sono supportate.
-- Le specifiche `create` per nuovi giocatori rimangono caricabili e revisionabili, ma sono
-  temporaneamente disabilitate a seguito di test di sicurezza su salvataggio/aspetto. L'applicazione
-  di una di esse restituisce `create_temporarily_unavailable` e lascia il salvataggio invariato byte per byte.
+- Le specifiche `create` per nuovi giocatori rimangono caricabili e revisionabili.
+  L'applicazione richiede `players apply --allow-create`, un donor d'aspetto
+  esplicito e una fonte valida di `PlayerAppearance.bin`. Un donor assente o non
+  valido rifiuta la specifica senza modificare i byte del salvataggio.
+- Una rosa di destinazione completa richiede anche `--allow-overflow-release`;
+  si può svincolare solo una riserva con OVR positivo completo dal salvataggio.
+  I metadati di `Player.bin` non sostituiscono l'OVR.
 
 ## Esecuzione locale
 
@@ -168,6 +174,8 @@ python run.py run --help
 | `inspect` | Ispeziona squadre, conteggio giocatori e offset del salvataggio |
 | `validate` | Controlla le registrazioni nelle rose e le mappature dei piani di gioco |
 | `repair` | Ripara una base legacy utilizzando salvataggi di riferimento |
+| `audit` | Verifica in sola lettura del salvataggio e dei metadati nativi |
+| `compare` | Confronto in sola lettura di due varianti CPK native |
 
 `run` gestisce esclusivamente i trasferimenti: non carica né applica mai i Player Update.
 Per combinare entrambi i flussi di lavoro, eseguire prima il comando di trasferimento su un
@@ -182,9 +190,11 @@ del giocatore e la provenienza del profilo/UUID da Pes Retro Stats, le prove cit
 revisionati. Gli aggiornamenti di creazione contengono una proposta di scheda giocatore completa e i dati
 della rosa di destinazione. Gli aggiornamenti dei giocatori esistenti contengono solo i valori supportati
 che differiscono dalla base verificata; ogni modifica registra i valori letterali `from` e `to`.
-I record `create` rimangono supportati dallo schema per revisione e riattivazione futura. Attualmente, solo
-i record `update` dei giocatori esistenti modificano i salvataggi; l'applicazione di un `create` completato
-restituisce `create_temporarily_unavailable` senza modificare il salvataggio.
+I record `create` restano supportati dallo schema per la revisione. La mutazione
+tramite CLI richiede `players apply --allow-create` e dati d'aspetto validi; le
+chiamate API dirette restano disabilitate per impostazione predefinita. Se la rosa
+è completa, aggiungere `--allow-overflow-release`; metadati di sicurezza assenti o
+non validi lasciano il salvataggio invariato.
 I gruppi di aggiornamento supportati sono abilità, competenza nei ruoli, stile di gioco, abilità giocatore,
 stili COM, nazionalità, impostazioni fisiche/base e ruolo registrato.
 - I valori di revisione dell'OVR generati sono calcoli deterministici basati sulla formula
