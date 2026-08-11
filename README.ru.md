@@ -29,7 +29,7 @@ FL Daily Edit обновляет составы команд в SP Football Life
 
 Установщик Windows — рекомендуемый вариант для начинающих. Интерфейс установщика пока доступен только на английском языке. Текущие проверенные загрузки предназначены **исключительно для Football Life 2026 Update 2.2 + SmokePatch's National Squads Update**. Обнаружение vanilla eFootball PES 2021 поддерживается, но установка остаётся отключённой до публикации подходящей проверенной базы.
 
-1. Скачайте [FLDailyEditInstaller.exe](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.exe).
+1. Скачайте и распакуйте [FLDailyEditInstaller.zip](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.zip).
 2. Закройте игру.
 3. Выберите **Fast** или **Deep**. Это раздельные варианты охвата обновлений, для каждого из которых отображается время генерации.
 4. Подтвердите обнаруженную папку Football Life 2026 или используйте **Browse** при необходимости.
@@ -49,7 +49,7 @@ FL Daily Edit обновляет составы команд в SP Football Life
 работать и без них.
 
 > [!WARNING]
-> Первоначальный исполняемый файл не подписан, поэтому Windows SmartScreen может показать предупреждение. Перед продолжением сравните загруженный файл с контрольной суммой `FLDailyEditInstaller.exe.sha256`, опубликованной в [последнем релизе](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
+> Исполняемый файл установщика не подписан, поэтому при запуске Windows SmartScreen может показать предупреждение. Перед продолжением сравните загруженный `FLDailyEditInstaller.zip` с контрольной суммой `FLDailyEditInstaller.zip.sha256`, опубликованной в [последнем релизе](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
 > Если Windows блокирует установщик через Smart App Control, откройте **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control settings** и переключите в положение **Off**. Либо щелкните правой кнопкой мыши по загруженному файлу, откройте **Properties** и установите флажок **Unblock**, если он доступен.
 
 Для ручной установки без установщика загрузите общедоступный [ZIP-архив версии Fast](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) или [ZIP-архив версии Deep](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip). Распакуйте `EDIT00000000`, сделайте резервную копию текущего сохранения и скопируйте извлеченный файл в папку:

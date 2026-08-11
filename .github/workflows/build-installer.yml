@@ -90,18 +90,36 @@ jobs:
           if ($process.ExitCode -ne 0) {
             throw "Installer self-test exited $($process.ExitCode)"
           }
-      - name: Generate SHA-256 checksum
+      - name: Package installer ZIP
         shell: pwsh
         run: |
-          $hash = (Get-FileHash -Path "dist\FLDailyEditInstaller.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  FLDailyEditInstaller.exe" | Set-Content -Path "dist\FLDailyEditInstaller.exe.sha256" -Encoding ascii
+          $zip = "dist\FLDailyEditInstaller.zip"
+          Compress-Archive `
+            -Path "dist\FLDailyEditInstaller.exe" `
+            -DestinationPath $zip `
+            -CompressionLevel Optimal
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $entries = @($archive.Entries | ForEach-Object { $_.FullName })
+            if ($entries.Count -ne 1 -or $entries[0] -ne "FLDailyEditInstaller.exe") {
+              throw "Installer ZIP must contain exactly FLDailyEditInstaller.exe"
+            }
+          } finally {
+            $archive.Dispose()
+          }
+      - name: Generate ZIP SHA-256 checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash -Path "dist\FLDailyEditInstaller.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  FLDailyEditInstaller.zip" | Set-Content -Path "dist\FLDailyEditInstaller.zip.sha256" -Encoding ascii
       - name: Upload internal build artifact
         uses: actions/upload-artifact@v7
         with:
           name: installer-${{ github.run_id }}
           path: |
-            dist/FLDailyEditInstaller.exe
-            dist/FLDailyEditInstaller.exe.sha256
+            dist/FLDailyEditInstaller.zip
+            dist/FLDailyEditInstaller.zip.sha256
           if-no-files-found: error
           retention-days: 1
 
@@ -129,5 +147,18 @@ jobs:
           python tools/publish_release_assets.py \
             --repo "$GH_REPO" \
             --tag latest \
-            release-payload/FLDailyEditInstaller.exe \
-            release-payload/FLDailyEditInstaller.exe.sha256
+            release-payload/FLDailyEditInstaller.zip \
+            release-payload/FLDailyEditInstaller.zip.sha256
+      - name: Remove legacy standalone installer assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          assets="$(gh release view latest --repo "$GH_REPO" --json assets --jq '.assets[].name')"
+          for legacy in FLDailyEditInstaller.exe FLDailyEditInstaller.exe.sha256; do
+            case $'\n'"$assets"$'\n' in
+              *$'\n'"$legacy"$'\n'*)
+                gh release delete-asset latest "$legacy" --repo "$GH_REPO" --yes
+                ;;
+            esac
+          done

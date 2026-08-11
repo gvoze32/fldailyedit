@@ -37,7 +37,7 @@ menambahkan klub promosi dari divisi ketiga.
 
 Installer Windows adalah pilihan yang disarankan untuk pemula. Antarmuka installer saat ini hanya tersedia dalam bahasa Inggris. Unduhan tervalidasi saat ini hanya mendukung **Football Life 2026 Update 2.2 + SmokePatch's National Squads Update**. Deteksi untuk vanilla eFootball PES 2021 sudah tersedia, tetapi pemasangan tetap dinonaktifkan hingga base tervalidasi yang sesuai diterbitkan.
 
-1. Unduh [FLDailyEditInstaller.exe](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.exe).
+1. Unduh dan ekstrak [FLDailyEditInstaller.zip](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.zip).
 2. Tutup gim.
 3. Pilih **Fast** atau **Deep**. Keduanya adalah pilihan cakupan pembaruan yang terpisah, dan masing-masing menampilkan waktu pembuatannya.
 4. Konfirmasikan folder Football Life 2026 yang terdeteksi, atau gunakan **Browse** bila perlu.
@@ -57,7 +57,7 @@ pembaruan lokal dalam paket dapat berjalan tanpa katalog tersebut.
 
 
 > [!WARNING]
-> Executable awal belum ditandatangani, sehingga Windows SmartScreen mungkin menampilkan peringatan. Sebelum melanjutkan, bandingkan file unduhan dengan `FLDailyEditInstaller.exe.sha256` yang diterbitkan pada [rilis terbaru](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
+> Executable installer belum ditandatangani, sehingga Windows SmartScreen mungkin menampilkan peringatan saat Anda menjalankannya. Sebelum melanjutkan, verifikasi `FLDailyEditInstaller.zip` yang diunduh dengan `FLDailyEditInstaller.zip.sha256` yang diterbitkan pada [rilis terbaru](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
 > Jika Windows memblokir installer melalui Smart App Control, buka **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control settings**, lalu ubah ke **Off**. Alternatifnya, klik kanan file yang diunduh, buka **Properties**, lalu centang **Unblock** jika tersedia.
 
 Untuk pemasangan manual tanpa installer, unduh [ZIP rilis Fast](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) atau [ZIP rilis Deep](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip) yang bersifat publik. Ekstrak `EDIT00000000`, cadangkan save Anda saat ini, lalu salin file tersebut ke:

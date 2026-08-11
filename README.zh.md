@@ -26,7 +26,7 @@ FL Daily Edit 通过将现实世界中的转会应用到 `EDIT00000000` 存档�
 
 Windows 安装程序是面向新手的推荐方式。安装程序界面目前仅提供英语版本。当前经过验证的下载内容**仅适用于 Football Life 2026 Update 2.2 + SmokePatch's National Squads Update**。程序可以检测原版 eFootball PES 2021，但在发布匹配且经过验证的基础存档前，安装功能将保持禁用。
 
-1. 下载 [FLDailyEditInstaller.exe](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.exe)。
+1. 下载并解压 [FLDailyEditInstaller.zip](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.zip)。
 2. 关闭游戏。
 3. 选择 **Fast** 或 **Deep**。二者是独立的更新范围选项，并分别显示生成时间。
 4. 确认检测到的 Football Life 2026 文件夹；如有需要，请使用 **Browse**。
@@ -41,7 +41,7 @@ Windows 安装程序是面向新手的推荐方式。安装程序界面目前仅
 存档中内置的球员和球队名称，因此打包的本地更新路径无需这些目录即可运行。
 
 > [!WARNING]
-> 初始可执行文件尚未签名，因此 Windows SmartScreen 可能会显示警告。继续前，请将下载的文件与[最新版本](https://github.com/gvoze32/fldailyedit/releases/tag/latest)中发布的 `FLDailyEditInstaller.exe.sha256` 进行比较。
+> 初始安装程序可执行文件尚未签名，因此运行时 Windows SmartScreen 可能会显示警告。继续前，请将下载的 `FLDailyEditInstaller.zip` 与[最新版本](https://github.com/gvoze32/fldailyedit/releases/tag/latest)中发布的 `FLDailyEditInstaller.zip.sha256` 进行比较。
 > 如果 Windows 通过 Smart App Control 阻止安装程序，请打开 **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control settings**，然后切换为 **Off**。或者右键单击下载的文件，打开 **Properties**，如果有 **Unblock** 选项请勾选。
 
 如需不使用安装程序手动安装，请下载公开的 [Fast 发布 ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) 或 [Deep 发布 ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip)。解压 `EDIT00000000`，备份当前存档，然后将解压出的文件复制到：

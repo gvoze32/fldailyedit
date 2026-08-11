@@ -29,7 +29,7 @@ Die [mitgelieferte Basis](base/EDIT00000000) ist [Gondowan's Mid-Summer EDIT](ht
 
 Das Windows-Installationsprogramm ist die empfohlene Option für Einsteiger. Die Benutzeroberfläche des Installationsprogramms ist derzeit nur auf Englisch verfügbar. Die aktuellen validierten Downloads gelten **ausschließlich für Football Life 2026 Update 2.2 + SmokePatch's National Squads Update**. Vanilla eFootball PES 2021 wird erkannt, die Installation bleibt jedoch deaktiviert, bis eine passende validierte Basis veröffentlicht wird.
 
-1. Laden Sie [FLDailyEditInstaller.exe](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.exe) herunter.
+1. Laden Sie die [FLDailyEditInstaller.zip](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.zip) herunter und entpacken Sie sie.
 2. Schließen Sie das Spiel.
 3. Wählen Sie **Fast** oder **Deep**. Dies sind getrennte Optionen für den Aktualisierungsumfang; jede zeigt den Generierungszeitpunkt an.
 4. Bestätigen Sie den erkannten Ordner von Football Life 2026 oder nutzen Sie bei Bedarf **Browse**.
@@ -49,7 +49,7 @@ Spieler- und Teamnamen zurück, sodass der gebündelte lokale Aktualisierungspfa
 auch ohne sie funktioniert.
 
 > [!WARNING]
-> Die erste ausführbare Datei ist nicht signiert, daher kann Windows SmartScreen eine Warnung anzeigen. Vergleichen Sie die heruntergeladene Datei vor dem Fortfahren mit der im [neuesten Release](https://github.com/gvoze32/fldailyedit/releases/tag/latest) veröffentlichten `FLDailyEditInstaller.exe.sha256`.
+> Die ausführbare Installationsdatei ist nicht signiert, daher kann Windows SmartScreen beim Starten eine Warnung anzeigen. Vergleichen Sie vor dem Fortfahren die heruntergeladene `FLDailyEditInstaller.zip` mit der im [neuesten Release](https://github.com/gvoze32/fldailyedit/releases/tag/latest) veröffentlichten `FLDailyEditInstaller.zip.sha256`.
 > Falls Windows das Installationsprogramm über die Smart-App-Control blockiert, öffnen Sie **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control settings** und schalten Sie auf **Off**. Alternativ klicken Sie mit der rechten Maustaste auf die heruntergeladene Datei, öffnen Sie die **Properties** und aktivieren Sie **Unblock**, falls verfügbar.
 
 Für eine manuelle Installation ohne Installer laden Sie die öffentliche [Fast-Release-ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) oder [Deep-Release-ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip) herunter. Entpacken Sie `EDIT00000000`, sichern Sie Ihren aktuellen Speicherstand und kopieren Sie die Datei nach:

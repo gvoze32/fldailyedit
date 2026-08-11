@@ -29,7 +29,7 @@ UML, daha eski FL26 sürümleri veya milli takım güncellemesi olmayan kuruluml
 
 Windows yükleyicisi, yeni başlayanlar için önerilen seçenektir. Yükleyici arayüzü şu anda yalnızca İngilizce olarak sunulmaktadır. Geçerli doğrulanmış indirmeler **yalnızca Football Life 2026 Update 2.2 + SmokePatch's National Squads Update içindir**. Vanilla eFootball PES 2021 algılanabilir, ancak eşleşen doğrulanmış bir temel yayımlanana kadar kurulum devre dışı kalır.
 
-1. [FLDailyEditInstaller.exe](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.exe) dosyasını indirin.
+1. [FLDailyEditInstaller.zip](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.zip) dosyasını indirin ve ayıklayın.
 2. Oyunu kapatın.
 3. **Fast** veya **Deep** seçeneğini belirleyin. Bunlar ayrı güncelleme kapsamı seçenekleridir ve her biri oluşturulma zamanını görüntüler.
 4. Algılanan Football Life 2026 klasörünü onaylayın veya gerekirse **Browse** düğmesini kullanın.
@@ -48,7 +48,7 @@ seçilen kayda gömülü oyuncu ve takım adlarını kullanır ve paketlenmiş y
 güncelleme yolunun bunlar olmadan da çalışmasını sağlar.
 
 > [!WARNING]
-> İlk yürütülebilir dosya imzasızdır; bu nedenle Windows SmartScreen bir uyarı gösterebilir. Devam etmeden önce indirilen dosyayı [en son sürümde](https://github.com/gvoze32/fldailyedit/releases/tag/latest) yayımlanan `FLDailyEditInstaller.exe.sha256` ile karşılaştırın.
+> Yükleyici yürütülebilir dosyası imzasızdır; bu nedenle çalıştırdığınızda Windows SmartScreen bir uyarı gösterebilir. Devam etmeden önce indirilen `FLDailyEditInstaller.zip` dosyasını [en son sürümde](https://github.com/gvoze32/fldailyedit/releases/tag/latest) yayımlanan `FLDailyEditInstaller.zip.sha256` ile karşılaştırın.
 > Windows yükleyiciyi Smart App Control aracılığıyla engellerse, **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control settings** bölümünü açın ve **Off** konumuna getirin. Alternatif olarak, indirilen dosyaya sağ tıklayın, **Properties** menüsünü açın ve varsa **Unblock** onay kutusunu işaretleyin.
 
 Yükleyici olmadan manuel kurulum için genel [Hızlı sürüm ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) veya [Kapsamlı sürüm ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip) dosyasını indirin. `EDIT00000000` dosyasını çıkartın, mevcut dosyanızı yedekleyin ve çıkartılan dosyayı şuraya kopyalayın:

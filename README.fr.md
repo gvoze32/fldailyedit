@@ -36,7 +36,7 @@ ainsi que les montées et descentes. Elle ne crée pas de joueurs et n'ajoute pa
 
 Le programme d'installation Windows est l'option recommandée pour les débutants. L’interface du programme d’installation est actuellement disponible uniquement en anglais. Les téléchargements validés actuels sont **exclusivement destinés à Football Life 2026 Update 2.2 + SmokePatch's National Squads Update**. La détection d’eFootball PES 2021 vanilla est disponible, mais l’installation reste désactivée jusqu’à la publication d’une base validée correspondante.
 
-1. Téléchargez [FLDailyEditInstaller.exe](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.exe).
+1. Téléchargez et extrayez [FLDailyEditInstaller.zip](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.zip).
 2. Fermez le jeu.
 3. Choisissez **Fast** ou **Deep**. Ce sont des options distinctes d'étendue de mise à jour, affichant chacune la date et l'heure de génération.
 4. Confirmez le dossier détecté de Football Life 2026, ou utilisez **Browse** si nécessaire.
@@ -56,7 +56,7 @@ les noms de joueurs et d'équipes intégrés dans la sauvegarde sélectionnée, 
 au processus de mise à jour locale de fonctionner sans eux.
 
 > [!WARNING]
-> L’exécutable initial n’est pas signé, Windows SmartScreen peut donc afficher un avertissement. Avant de continuer, comparez le fichier téléchargé avec le fichier `FLDailyEditInstaller.exe.sha256` publié sur la [dernière version](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
+> L’exécutable de l’installateur n’est pas signé ; Windows SmartScreen peut donc afficher un avertissement lors de son lancement. Avant de continuer, comparez le `FLDailyEditInstaller.zip` téléchargé avec le `FLDailyEditInstaller.zip.sha256` publié dans la [dernière version](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
 > Si Windows bloque l'installateur via Smart App Control, ouvrez **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control settings** et passez sur **Off**. Vous pouvez également faire un clic droit sur le fichier téléchargé, ouvrir **Properties** et cocher **Unblock** si l'option est présente.
 
 Pour une installation manuelle sans installateur, téléchargez le [ZIP public de la version Fast](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) ou le [ZIP public de la version Deep](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip). Extrayez `EDIT00000000`, sauvegardez votre fichier actuel et copiez le fichier extrait dans :

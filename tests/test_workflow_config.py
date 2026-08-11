@@ -24,7 +24,7 @@ README_PATH = Path("README.md")
 
 INSTALLER_URL = (
     "https://github.com/gvoze32/fldailyedit/releases/download/latest/"
-    "FLDailyEditInstaller.exe"
+    "FLDailyEditInstaller.zip"
 )
 FAST_ZIP_URL = (
     "https://github.com/gvoze32/fldailyedit/releases/download/latest/"
@@ -40,7 +40,7 @@ README_INSTALLER_CONTRACTS = (
         "## Windows installer",
         "## Roadmap / Complete for now",
         "The installer interface is currently available in English only.",
-        "The initial executable is unsigned, so Windows SmartScreen may display a warning.",
+        "The installer executable is unsigned, so Windows SmartScreen may display a warning when you run it. Before continuing, verify the downloaded `FLDailyEditInstaller.zip` against the published `FLDailyEditInstaller.zip.sha256` on the [latest release]",
         "Detection for vanilla eFootball PES 2021 is present, but installation remains disabled until a matching validated base is published.",
     ),
     (
@@ -48,7 +48,7 @@ README_INSTALLER_CONTRACTS = (
         "## Installer Windows",
         "## Roadmap / Selesai untuk saat ini",
         "Antarmuka installer saat ini hanya tersedia dalam bahasa Inggris.",
-        "Executable awal belum ditandatangani, sehingga Windows SmartScreen mungkin menampilkan peringatan.",
+        "Executable installer belum ditandatangani, sehingga Windows SmartScreen mungkin menampilkan peringatan saat Anda menjalankannya. Sebelum melanjutkan, verifikasi `FLDailyEditInstaller.zip` yang diunduh dengan `FLDailyEditInstaller.zip.sha256` yang diterbitkan pada [rilis terbaru]",
         "Deteksi untuk vanilla eFootball PES 2021 sudah tersedia, tetapi pemasangan tetap dinonaktifkan hingga base tervalidasi yang sesuai diterbitkan.",
     ),
     (
@@ -56,7 +56,7 @@ README_INSTALLER_CONTRACTS = (
         "## Windows 安装程序",
         "## 路线图 / 当前已完成",
         "安装程序界面目前仅提供英语版本。",
-        "初始可执行文件尚未签名，因此 Windows SmartScreen 可能会显示警告。",
+        "初始安装程序可执行文件尚未签名，因此运行时 Windows SmartScreen 可能会显示警告。继续前，请将下载的 `FLDailyEditInstaller.zip` 与[最新版本]",
         "程序可以检测原版 eFootball PES 2021，但在发布匹配且经过验证的基础存档前，安装功能将保持禁用。",
     ),
     (
@@ -64,7 +64,7 @@ README_INSTALLER_CONTRACTS = (
         "## مُثبِّت Windows",
         "## خارطة الطريق / مكتملة حاليًا",
         "تتوفر واجهة المُثبِّت حاليًا باللغة الإنجليزية فقط.",
-        "الملف التنفيذي الأولي غير موقّع، لذلك قد يعرض Windows SmartScreen تحذيرًا.",
+        "الملف التنفيذي للمُثبِّت غير موقّع، لذلك قد يعرض Windows SmartScreen تحذيرًا عند تشغيله. قبل المتابعة، قارن ملف `FLDailyEditInstaller.zip` المنزّل بملف `FLDailyEditInstaller.zip.sha256` المنشور في [أحدث إصدار]",
         "يتوفر اكتشاف vanilla eFootball PES 2021، لكن يظل التثبيت معطّلًا حتى نشر قاعدة أساسية متحقّق منها ومطابقة.",
     ),
     (
@@ -72,7 +72,7 @@ README_INSTALLER_CONTRACTS = (
         "## Установщик Windows",
         "## План развития / Пока завершён",
         "Интерфейс установщика пока доступен только на английском языке.",
-        "Первоначальный исполняемый файл не подписан, поэтому Windows SmartScreen может показать предупреждение.",
+        "Исполняемый файл установщика не подписан, поэтому при запуске Windows SmartScreen может показать предупреждение. Перед продолжением сравните загруженный `FLDailyEditInstaller.zip` с контрольной суммой `FLDailyEditInstaller.zip.sha256`, опубликованной в [последнем релизе]",
         "Обнаружение vanilla eFootball PES 2021 поддерживается, но установка остаётся отключённой до публикации подходящей проверенной базы.",
     ),
     (
@@ -80,7 +80,7 @@ README_INSTALLER_CONTRACTS = (
         "## Programma di installazione per Windows",
         "## Roadmap / Completa per ora",
         "L'interfaccia del programma di installazione è attualmente disponibile solo in inglese.",
-        "L'eseguibile iniziale non è firmato, quindi Windows SmartScreen potrebbe mostrare un avviso.",
+        "L'eseguibile dell'installer non è firmato, quindi Windows SmartScreen potrebbe all'avvio mostrare un avviso. Prima di proseguire, confrontare il file `FLDailyEditInstaller.zip` scaricato con il file `FLDailyEditInstaller.zip.sha256` pubblicato nella [versione più recente]",
         "Il rilevamento di eFootball PES 2021 vanilla è disponibile, ma l'installazione rimane disabilitata finché non viene pubblicata una base convalidata corrispondente.",
     ),
     (
@@ -88,7 +88,7 @@ README_INSTALLER_CONTRACTS = (
         "## Instalador para Windows",
         "## Roteiro / Concluído por enquanto",
         "A interface do instalador está disponível somente em inglês no momento.",
-        "O executável inicial não é assinado, portanto o Windows SmartScreen pode exibir um aviso.",
+        "O executável do instalador não é assinado, portanto o Windows SmartScreen pode exibir um aviso ao executá-lo. Antes de continuar, verifique o `FLDailyEditInstaller.zip` baixado com o `FLDailyEditInstaller.zip.sha256` publicado na [versão mais recente]",
         "A detecção do eFootball PES 2021 vanilla está presente, mas a instalação permanece desativada até que uma base validada correspondente seja publicada.",
     ),
     (
@@ -96,7 +96,7 @@ README_INSTALLER_CONTRACTS = (
         "## Instalador para Windows",
         "## Hoja de ruta / Completada por ahora",
         "La interfaz del instalador actualmente solo está disponible en inglés.",
-        "El ejecutable inicial no está firmado, por lo que Windows SmartScreen puede mostrar una advertencia.",
+        "El ejecutable del instalador no está firmado, por lo que Windows SmartScreen puede mostrar una advertencia al ejecutarlo. Antes de continuar, verificar el `FLDailyEditInstaller.zip` descargado con el `FLDailyEditInstaller.zip.sha256` publicado en la [versión más reciente]",
         "La detección de eFootball PES 2021 vanilla está disponible, pero la instalación permanece desactivada hasta que se publique una base validada correspondiente.",
     ),
     (
@@ -104,7 +104,7 @@ README_INSTALLER_CONTRACTS = (
         "## Windows yükleyici",
         "## Yol Haritası / Şimdilik tamamlandı",
         "Yükleyici arayüzü şu anda yalnızca İngilizce olarak sunulmaktadır.",
-        "İlk yürütülebilir dosya imzasızdır; bu nedenle Windows SmartScreen bir uyarı gösterebilir.",
+        "Yükleyici yürütülebilir dosyası imzasızdır; bu nedenle çalıştırdığınızda Windows SmartScreen bir uyarı gösterebilir. Devam etmeden önce indirilen `FLDailyEditInstaller.zip` dosyasını [en son sürümde]",
         "Vanilla eFootball PES 2021 algılanabilir, ancak eşleşen doğrulanmış bir temel yayımlanana kadar kurulum devre dışı kalır.",
     ),
     (
@@ -112,7 +112,7 @@ README_INSTALLER_CONTRACTS = (
         "## Windows-Installationsprogramm",
         "## Roadmap / Vorerst abgeschlossen",
         "Die Benutzeroberfläche des Installationsprogramms ist derzeit nur auf Englisch verfügbar.",
-        "Die erste ausführbare Datei ist nicht signiert, daher kann Windows SmartScreen eine Warnung anzeigen.",
+        "Die ausführbare Installationsdatei ist nicht signiert, daher kann Windows SmartScreen beim Starten eine Warnung anzeigen. Vergleichen Sie vor dem Fortfahren die heruntergeladene `FLDailyEditInstaller.zip` mit der im [neuesten Release]",
         "Vanilla eFootball PES 2021 wird erkannt, die Installation bleibt jedoch deaktiviert, bis eine passende validierte Basis veröffentlicht wird.",
     ),
     (
@@ -120,7 +120,7 @@ README_INSTALLER_CONTRACTS = (
         "## Programme d’installation Windows",
         "## Feuille de route / Terminée pour l’instant",
         "L’interface du programme d’installation est actuellement disponible uniquement en anglais.",
-        "L’exécutable initial n’est pas signé, Windows SmartScreen peut donc afficher un avertissement.",
+        "L’exécutable de l’installateur n’est pas signé ; Windows SmartScreen peut donc afficher un avertissement lors de son lancement. Avant de continuer, comparez le `FLDailyEditInstaller.zip` téléchargé avec le `FLDailyEditInstaller.zip.sha256` publié dans la [dernière version]",
         "La détection d’eFootball PES 2021 vanilla est disponible, mais l’installation reste désactivée jusqu’à la publication d’une base validée correspondante.",
     ),
 )
@@ -1231,9 +1231,15 @@ def test_installer_workflow_builds_tests_and_smoke_tests_on_windows():
     assert "if ($process.ExitCode -ne 0)" in build
     assert 'throw "Installer self-test exited $($process.ExitCode)"' in build
     assert (
-        'Get-FileHash -Path "dist\\FLDailyEditInstaller.exe" -Algorithm SHA256'
+        'Get-FileHash -Path "dist\\FLDailyEditInstaller.zip" -Algorithm SHA256'
         in build
     )
+    assert "Compress-Archive" in build
+    assert 'DestinationPath $zip' in build
+    assert "ZipFile]::OpenRead($zip)" in build
+    assert "dist/FLDailyEditInstaller.zip" in build
+    assert "dist/FLDailyEditInstaller.zip.sha256" in build
+    assert "dist/FLDailyEditInstaller.exe.sha256" not in build
     assert "uses: actions/upload-artifact@v7" in build
     assert "retention-days: 1" in build
 
@@ -1259,9 +1265,15 @@ def test_installer_publish_job_is_serialized_and_uploads_exact_release_assets():
         "python tools/publish_release_assets.py \\\n"
         '            --repo "$GH_REPO" \\\n'
         "            --tag latest \\\n"
-        "            release-payload/FLDailyEditInstaller.exe \\\n"
-        "            release-payload/FLDailyEditInstaller.exe.sha256"
+        "            release-payload/FLDailyEditInstaller.zip \\\n"
+        "            release-payload/FLDailyEditInstaller.zip.sha256"
     ) in publish
+    assert "Remove legacy standalone installer assets" in publish
+    assert (
+        'gh release delete-asset latest "$legacy" --repo "$GH_REPO" --yes'
+        in publish
+    )
+    assert "release-payload/FLDailyEditInstaller.exe" not in publish
     assert "gh release upload" not in publish
     for line in publish.splitlines():
         if "gh release " in line:

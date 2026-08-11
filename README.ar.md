@@ -35,7 +35,7 @@
 
 مُثبِّت Windows هو الخيار الموصى به للمبتدئين. تتوفر واجهة المُثبِّت حاليًا باللغة الإنجليزية فقط. تستهدف التنزيلات المتحقّق منها حاليًا **Football Life 2026 Update 2.2 + SmokePatch's National Squads Update فقط**. يتوفر اكتشاف vanilla eFootball PES 2021، لكن يظل التثبيت معطّلًا حتى نشر قاعدة أساسية متحقّق منها ومطابقة.
 
-1. نزّل [FLDailyEditInstaller.exe](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.exe).
+1. نزّل واستخرج [FLDailyEditInstaller.zip](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.zip).
 2. أغلق اللعبة.
 3. اختر **Fast** أو **Deep**. وهما خياران منفصلان لنطاق التحديث، ويعرض كل منهما وقت الإنشاء.
 4. أكّد مجلد Football Life 2026 المكتشف، أو استخدم **Browse** عند الحاجة.
@@ -53,7 +53,7 @@ SPFL/PES/UML، ولا ينزّل هذا المسار إصدارًا بعيدًا
 المضمّن دون الحاجة إليها.
 
 > [!WARNING]
-> الملف التنفيذي الأولي غير موقّع، لذلك قد يعرض Windows SmartScreen تحذيرًا. قبل المتابعة، قارن الملف المنزّل بملف `FLDailyEditInstaller.exe.sha256` المنشور في [أحدث إصدار](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
+> الملف التنفيذي للمُثبِّت غير موقّع، لذلك قد يعرض Windows SmartScreen تحذيرًا عند تشغيله. قبل المتابعة، قارن ملف `FLDailyEditInstaller.zip` المنزّل بملف `FLDailyEditInstaller.zip.sha256` المنشور في [أحدث إصدار](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
 > إذا حظر Windows المُثبّت عبر Smart App Control، فافتح **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control settings** وبدّله إلى **Off**. وبدلًا من ذلك، انقر بزر الماوس الأيمن على الملف المنزّل، وافتح **Properties** وحدد **Unblock** إن كان متاحًا.
 
 للتثبيت اليدوي من دون المُثبِّت، نزّل [ملف ZIP لإصدار Fast](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) أو [ملف ZIP لإصدار Deep](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip) العام. استخرج `EDIT00000000`, وأنشئ نسخة احتياطية من ملف الحفظ الحالي، ثم انسخ الملف المستخرج إلى:

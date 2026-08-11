@@ -37,7 +37,7 @@ divisions.
 
 The Windows installer is the recommended option for beginners. The installer interface is currently available in English only. Current validated downloads support **Football Life 2026 Update 2.2 + SmokePatch's National Squads Update only**. Detection for vanilla eFootball PES 2021 is present, but installation remains disabled until a matching validated base is published.
 
-1. Download [FLDailyEditInstaller.exe](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.exe).
+1. Download and extract [FLDailyEditInstaller.zip](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.zip).
 2. Close the game.
 3. Choose **Fast** or **Deep**. They are separate update-coverage choices, and each displays its generation timestamp.
 4. Confirm the detected Football Life 2026 folder, or use **Browse** if needed.
@@ -55,7 +55,7 @@ falls back to player and team names embedded in the selected save, so the
 packaged local-update path can run without them.
 
 > [!WARNING]
-> The initial executable is unsigned, so Windows SmartScreen may display a warning. Before continuing, compare the downloaded file against the published `FLDailyEditInstaller.exe.sha256` on the [latest release](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
+> The installer executable is unsigned, so Windows SmartScreen may display a warning when you run it. Before continuing, verify the downloaded `FLDailyEditInstaller.zip` against the published `FLDailyEditInstaller.zip.sha256` on the [latest release](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
 > If Windows blocks the installer through Smart App Control, open **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control settings** and switch it to **Off**. Alternatively, right-click the downloaded file, open **Properties**, and check **Unblock** if available.
 
 For a manual installation without the installer, download the public [Fast release ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) or [Deep release ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip). Extract `EDIT00000000`, back up your current save, then copy the extracted file to:
