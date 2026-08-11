@@ -63,7 +63,7 @@ _README_COMMAND_FENCE_FIXTURES = (
 
 README_STRUCTURE_FIXTURES = {
     Path("README.md"): {
-        "heading_counts": (9, 11, 3, 0, 0, 0),
+        "heading_counts": (11, 11, 3, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": _README_COMMAND_FENCE_FIXTURES,
         "relative_links": (
@@ -73,7 +73,7 @@ README_STRUCTURE_FIXTURES = {
         ),
     },
     Path("README.id.md"): {
-        "heading_counts": (9, 11, 3, 0, 0, 0),
+        "heading_counts": (11, 11, 3, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": _README_COMMAND_FENCE_FIXTURES,
         "relative_links": (
