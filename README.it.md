@@ -17,6 +17,9 @@ applicando i trasferimenti del mondo reale a un file di salvataggio `EDIT0000000
 > vengono ignorati e una rosa di destinazione completa viene ignorata per
 > impostazione predefinita invece di svincolare un giocatore esistente.
 
+> [!WARNING]
+> **Avviso beta:** FL Daily Edit, i dati del repository e le versioni generate sono ancora in fase di test. Potrebbero non funzionare con ogni configurazione di gioco/salvataggio; alcune condizioni non sono ancora supportate.
+
 ## Compatibilità
 
 La base inclusa è destinata a **SP Football Life 2026**. Richiede:

@@ -16,6 +16,9 @@ O FL Daily Edit atualiza os elencos do SP Football Life 2026 e do eFootball PES 
 > ignorados, e um elenco de destino cheio é ignorado por padrão em vez de dispensar
 > um jogador existente.
 
+> [!WARNING]
+> **Aviso de beta:** o FL Daily Edit, os dados do repositório e as versões geradas ainda estão em testes. Eles podem não funcionar em todas as configurações do jogo/arquivo de edição; algumas condições ainda não são compatíveis.
+
 ## Compatibilidade
 
 A base incluída é voltada para o **SP Football Life 2026**. Requisitos:

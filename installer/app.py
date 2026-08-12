@@ -918,7 +918,9 @@ UI_COPY = {
         "Checks every locally indexed FotMob club for maximum coverage."
     ),
     "coverage_note": (
-        "Fast and Deep describe update coverage, not download speed."
+        "Beta: FL Daily Edit, its repository data, and generated releases are "
+        "still being tested and may not work with every game/save setup. Fast "
+        "and Deep describe update coverage, not download speed."
     ),
     "install": "Download and install",
     "local_mode": "Update my local save",

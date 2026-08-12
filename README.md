@@ -16,6 +16,9 @@ applying real-world transfers to an `EDIT00000000` save file.
 > players remain supported. Missing players are skipped, and a full destination
 > roster is skipped by default instead of releasing an existing player.
 
+> [!WARNING]
+> **Beta notice:** FL Daily Edit, its repository data, and generated releases are still being tested. They may not work with every game/save setup; some conditions are not supported yet.
+
 ## Compatibility
 
 The bundled base targets **SP Football Life 2026**. It requires:

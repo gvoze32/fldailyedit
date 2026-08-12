@@ -17,6 +17,9 @@ la aplicación de transferencias reales a un archivo guardado `EDIT00000000`.
 > faltantes se omiten, y una plantilla de destino llena se omite por defecto en
 > lugar de liberar a un jugador existente.
 
+> [!WARNING]
+> **Aviso de beta:** FL Daily Edit, sus datos del repositorio y las versiones generadas todavía están en pruebas. Puede que no funcionen con todas las configuraciones del juego/guardado; algunas condiciones aún no son compatibles.
+
 ## Compatibilidad
 
 La base incluida está destinada a **SP Football Life 2026**. Requiere:

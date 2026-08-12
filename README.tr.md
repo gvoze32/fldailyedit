@@ -15,6 +15,9 @@ FL Daily Edit, gerçek dünyadaki transferleri bir `EDIT00000000` kayıt dosyas�
 > güncellemeler desteklenmeye devam etmektedir. Eksik oyuncular atlanır ve dolu bir hedef kadro,
 > mevcut bir oyuncuyu serbest bırakmak yerine varsayılan olarak atlanır.
 
+> [!WARNING]
+> **Beta bildirimi:** FL Daily Edit, depo verileri ve oluşturulan sürümler hâlâ test ediliyor. Her oyun/kayıt dosyası yapılandırmasında çalışmayabilir; bazı koşullar henüz desteklenmiyor.
+
 ## Uyumluluk
 
 Dahil edilen temel sürüm **SP Football Life 2026** için hedeflenmiştir. Gereksinimler:

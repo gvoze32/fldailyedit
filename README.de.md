@@ -15,6 +15,9 @@ FL Daily Edit aktualisiert Kader in SP Football Life 2026 und eFootball PES 2021
 > für bestehende Spieler werden weiterhin unterstützt. Fehlende Spieler werden übersprungen und ein
 > voller Zielkader wird standardmäßig übersprungen, anstatt einen vorhandenen Spieler freizustellen.
 
+> [!WARNING]
+> **Beta-Hinweis:** FL Daily Edit, seine Repository-Daten und die erzeugten Releases werden noch getestet. Sie funktionieren möglicherweise noch nicht mit jeder Spiel-/Speicherstand-Konfiguration; einige Bedingungen werden noch nicht unterstützt.
+
 ## Kompatibilität
 
 Die mitgelieferte Basis ist für **SP Football Life 2026** ausgelegt. Voraussetzungen:

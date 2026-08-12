@@ -16,6 +16,9 @@ dengan menerapkan transfer dunia nyata ke file save `EDIT00000000`.
 > tetap didukung. Pemain yang belum ada akan dilewati, dan roster tujuan yang
 > penuh secara default dilewati tanpa melepas pemain lama.
 
+> [!WARNING]
+> **Pemberitahuan beta:** FL Daily Edit, data repositorinya, dan rilis yang dihasilkan masih dalam tahap pengujian. Fitur ini mungkin belum berfungsi pada semua konfigurasi gim/save; beberapa kondisi belum didukung.
+
 ## Kompatibilitas
 
 Base yang disertakan ditujukan untuk **SP Football Life 2026**. Base ini memerlukan:

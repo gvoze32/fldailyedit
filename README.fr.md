@@ -15,6 +15,9 @@ en appliquant les transferts réels à un fichier de sauvegarde `EDIT00000000`.
 > pour les joueurs existants restent pleinement pris en charge. Les joueurs absents sont ignorés
 > et un effectif de destination complet est ignoré par défaut plutôt que de libérer un joueur existant.
 
+> [!WARNING]
+> **Avis beta :** FL Daily Edit, les données de son dépôt et les versions générées sont encore en cours de test. Ils peuvent ne pas fonctionner avec toutes les configurations du jeu/de la sauvegarde ; certaines conditions ne sont pas encore prises en charge.
+
 ## Compatibilité
 
 La base fournie est destinée à **SP Football Life 2026**. Elle requiert :
