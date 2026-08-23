@@ -1,9 +1,9 @@
-[![English](https://img.shields.io/badge/%F0%9F%87%AC%F0%9F%87%A7_English-012169?style=flat-square)](README.md) [![Indonesian](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%A9_Indonesian-ce1126?style=flat-square)](README.id.md) [![Español](https://img.shields.io/badge/%F0%9F%87%AA%F0%9F%87%B8_Espa%C3%B1ol-aa151b?style=flat-square)](README.es.md) [![Français](https://img.shields.io/badge/%F0%9F%87%AB%F0%9F%87%B7_Fran%C3%A7ais-002395?style=flat-square)](README.fr.md) [![Português](https://img.shields.io/badge/%F0%9F%87%B5%F0%9F%87%B9_Portugu%C3%AAs-006600?style=flat-square)](README.pt.md) [![Deutsch](https://img.shields.io/badge/%F0%9F%87%A9%F0%9F%87%AA_Deutsch-000000?style=flat-square)](README.de.md) [![Italiano](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%B9_Italiano-009246?style=flat-square)](README.it.md) [![Русский](https://img.shields.io/badge/%F0%9F%87%B7%F0%9F%87%BA_%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-d52b1e?style=flat-square)](README.ru.md) [![Türkçe](https://img.shields.io/badge/%F0%9F%87%B9%F0%9F%87%B7_T%C3%BCrk%C3%A7e-e30a17?style=flat-square)](README.tr.md) [![العربية](https://img.shields.io/badge/%F0%9F%87%B8%F0%9F%87%A6_%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A%D8%A9-006c35?style=flat-square)](README.ar.md) [![中文](https://img.shields.io/badge/%F0%9F%87%A8%F0%9F%87%B3_%E4%B8%AD%E6%96%87-de2910?style=flat-square)](README.zh.md)
+[![English](https://img.shields.io/badge/English-012169)](../../README.md) [![Indonesian](https://img.shields.io/badge/Indonesian-ce1126)](README.id.md) [![Español](https://img.shields.io/badge/Espa%C3%B1ol-aa151b)](README.es.md) [![Français](https://img.shields.io/badge/Français-002395)](README.fr.md) [![Português](https://img.shields.io/badge/Português-006600)](README.pt.md) [![Deutsch](https://img.shields.io/badge/Deutsch-000000)](README.de.md) [![Italiano](https://img.shields.io/badge/Italiano-009246)](README.it.md) [![Russian](https://img.shields.io/badge/Russian-0039a6)](README.ru.md) [![Türkçe](https://img.shields.io/badge/Turkish-e30a17)](README.tr.md) [![العربية](https://img.shields.io/badge/Arabic-008000)](README.ar.md) [![中文](https://img.shields.io/badge/Chinese-de2910)](README.zh.md)
 
 # FL Daily Edit
 
 [![Versione Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Licenza: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Licenza: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../../LICENSE)
 
 FL Daily Edit aggiorna le rose di SP Football Life 2026 ed eFootball PES 2021
 applicando i trasferimenti del mondo reale a un file di salvataggio `EDIT00000000`.
@@ -33,7 +33,7 @@ Non è compatibile con UML, versioni precedenti di FL26 o installazioni prive
 dell'aggiornamento per le nazionali. Avviare una nuova carriera Campionato Master o Diventa un Mito
 dopo aver installato il file di salvataggio.
 
-La [base inclusa](base/EDIT00000000) è il file
+La [base inclusa](../../base/EDIT00000000) è il file
 [Gondowan's EDIT del 22 agosto 2026](https://www.reddit.com/r/SPFootballLife/comments/1vvh129/release_gondowans_edit_file_22082026_latest/).
 Include i trasferimenti dell'ultimo minuto del 22/08/2026 per tutti i campionati,
 variazioni dei valori per oltre 600 giocatori, promozioni e retrocessioni tra
@@ -216,7 +216,7 @@ stili COM, nazionalità, impostazioni fisiche/base e ruolo registrato.
 
 ### Percorso semplificato tramite issue
 
-1. Aprire il [modulo issue per l'aggiornamento dei giocatori](.github/ISSUE_TEMPLATE/player-update.yml).
+1. Aprire il [modulo issue per l'aggiornamento dei giocatori](../../.github/ISSUE_TEMPLATE/player-update.yml).
    Inserire il `Player name` esattamente come appare in un singolo `Pes Retro Stats profile` canonico,
    fornire gli URL delle prove e attendere che un manutentore applichi l'etichetta precisa `generate-player-draft`.
 2. Il workflow del generatore configurato recupera tale profilo e apre una bozza di PR contenente una proposta
@@ -311,4 +311,4 @@ storico dei prestiti, corrispondenza dei giocatori, limiti delle rose, reportist
 
 ## Licenza
 
-FL Daily Edit è distribuito sotto [Licenza MIT](LICENSE).
+FL Daily Edit è distribuito sotto [Licenza MIT](../../LICENSE).

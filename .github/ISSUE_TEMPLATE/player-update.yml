@@ -41,6 +41,20 @@ body:
       required: true
 
   - type: input
+    id: loan_parent_team
+    attributes:
+      label: Loan parent team
+      description: Optional for a create request when the player is registered at a club on loan. Leave blank for a permanent registration.
+      placeholder: Chelsea FC
+
+  - type: input
+    id: loan_end_date
+    attributes:
+      label: Loan end date
+      description: Optional for a create request with a loan parent. Use YYYY-MM-DD.
+      placeholder: "2027-06-30"
+
+  - type: input
     id: effective_date
     attributes:
       label: Effective date

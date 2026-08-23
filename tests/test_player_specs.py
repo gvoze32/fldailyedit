@@ -133,6 +133,28 @@ def write_payload(directory, filename, payload):
     (directory / filename).write_text(json.dumps(payload), encoding="utf-8")
 
 
+def test_pr_player_validation_accepts_create_loan_metadata(tmp_path):
+    from editor.player_spec import load_player_specs
+
+    payload = valid_dastan_payload()
+    payload["loan"] = {
+        "parent_team_id": 378,
+        "parent_team_name": "Burnley FC",
+        "start_date": "2026-08-04",
+        "end_date": "2027-06-30",
+    }
+    write_payload(tmp_path, "dastan-satpaev.json", payload)
+
+    spec = load_player_specs(tmp_path)[0]
+
+    assert spec.loan is not None
+    assert (
+        spec.loan.parent_team_id,
+        spec.loan.parent_team_name,
+        spec.loan.start_date.isoformat(),
+        spec.loan.end_date.isoformat(),
+    ) == (378, "Burnley FC", "2026-08-04", "2027-06-30")
+
 def complete_generated_proposal(operation: str = "create") -> dict[str, object]:
     from tests.test_generate_player_draft import (
         FakeEditFile,

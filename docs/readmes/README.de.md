@@ -1,9 +1,9 @@
-[![English](https://img.shields.io/badge/%F0%9F%87%AC%F0%9F%87%A7_English-012169?style=flat-square)](README.md) [![Indonesian](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%A9_Indonesian-ce1126?style=flat-square)](README.id.md) [![Español](https://img.shields.io/badge/%F0%9F%87%AA%F0%9F%87%B8_Espa%C3%B1ol-aa151b?style=flat-square)](README.es.md) [![Français](https://img.shields.io/badge/%F0%9F%87%AB%F0%9F%87%B7_Fran%C3%A7ais-002395?style=flat-square)](README.fr.md) [![Português](https://img.shields.io/badge/%F0%9F%87%B5%F0%9F%87%B9_Portugu%C3%AAs-006600?style=flat-square)](README.pt.md) [![Deutsch](https://img.shields.io/badge/%F0%9F%87%A9%F0%9F%87%AA_Deutsch-000000?style=flat-square)](README.de.md) [![Italiano](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%B9_Italiano-009246?style=flat-square)](README.it.md) [![Русский](https://img.shields.io/badge/%F0%9F%87%B7%F0%9F%87%BA_%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-d52b1e?style=flat-square)](README.ru.md) [![Türkçe](https://img.shields.io/badge/%F0%9F%87%B9%F0%9F%87%B7_T%C3%BCrk%C3%A7e-e30a17?style=flat-square)](README.tr.md) [![العربية](https://img.shields.io/badge/%F0%9F%87%B8%F0%9F%87%A6_%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A%D8%A9-006c35?style=flat-square)](README.ar.md) [![中文](https://img.shields.io/badge/%F0%9F%87%A8%F0%9F%87%B3_%E4%B8%AD%E6%96%87-de2910?style=flat-square)](README.zh.md)
+[![English](https://img.shields.io/badge/English-012169)](../../README.md) [![Indonesian](https://img.shields.io/badge/Indonesian-ce1126)](README.id.md) [![Español](https://img.shields.io/badge/Espa%C3%B1ol-aa151b)](README.es.md) [![Français](https://img.shields.io/badge/Français-002395)](README.fr.md) [![Português](https://img.shields.io/badge/Português-006600)](README.pt.md) [![Deutsch](https://img.shields.io/badge/Deutsch-000000)](README.de.md) [![Italiano](https://img.shields.io/badge/Italiano-009246)](README.it.md) [![Russian](https://img.shields.io/badge/Russian-0039a6)](README.ru.md) [![Türkçe](https://img.shields.io/badge/Turkish-e30a17)](README.tr.md) [![العربية](https://img.shields.io/badge/Arabic-008000)](README.ar.md) [![中文](https://img.shields.io/badge/Chinese-de2910)](README.zh.md)
 
 # FL Daily Edit
 
 [![Python-Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Lizenz: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Lizenz: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../../LICENSE)
 
 FL Daily Edit aktualisiert Kader in SP Football Life 2026 und eFootball PES 2021, indem reale Transfers auf eine `EDIT00000000`-Speicherdatei angewendet werden.
 
@@ -29,7 +29,7 @@ Die mitgelieferte Basis ist für **SP Football Life 2026** ausgelegt. Voraussetz
 
 Nicht kompatibel mit UML, älteren FL26-Versionen oder Installationen ohne das Nationalmannschafts-Update. Starten Sie nach der Installation des Speicherstands eine neue Meister-Liga- oder Werd-zur-Legende-Karriere.
 
-Die [mitgelieferte Basis](base/EDIT00000000) ist [Gondowan's EDIT vom 22. August 2026](https://www.reddit.com/r/SPFootballLife/comments/1vvh129/release_gondowans_edit_file_22082026_latest/). Sie enthält Last-Minute-Transfers zum 22.08.2026 für alle Ligen, Bewertungsänderungen für mehr als 600 Spieler, Auf- und Absteiger zwischen erster und zweiter Liga, Korrekturen an Größe und Position, Namens- und Trikotnummern-Updates, Änderungen verfügbarer Trainer sowie automatische, nach den besten Spielern sortierte Aufstellungen. Sie erstellt keine neuen Spieler und fügt keine Drittliga-Aufsteiger hinzu.
+Die [mitgelieferte Basis](../../base/EDIT00000000) ist [Gondowan's EDIT vom 22. August 2026](https://www.reddit.com/r/SPFootballLife/comments/1vvh129/release_gondowans_edit_file_22082026_latest/). Sie enthält Last-Minute-Transfers zum 22.08.2026 für alle Ligen, Bewertungsänderungen für mehr als 600 Spieler, Auf- und Absteiger zwischen erster und zweiter Liga, Korrekturen an Größe und Position, Namens- und Trikotnummern-Updates, Änderungen verfügbarer Trainer sowie automatische, nach den besten Spielern sortierte Aufstellungen. Sie erstellt keine neuen Spieler und fügt keine Drittliga-Aufsteiger hinzu.
 
 ## Windows-Installationsprogramm
 
@@ -189,7 +189,7 @@ Unterstützte Update-Gruppen sind Fähigkeiten, Positionsbeherrschung, Spielstil
 
 ### Einfacher Issue-Ablauf
 
-1. Öffnen Sie das [Issue-Formular für Spieler-Updates](.github/ISSUE_TEMPLATE/player-update.yml). Geben Sie den `Player name` exakt so ein, wie er auf einem kanonischen `Pes Retro Stats profile` erscheint, fügen Sie Beleg-URLs bei und warten Sie auf das Label `generate-player-draft`.
+1. Öffnen Sie das [Issue-Formular für Spieler-Updates](../../.github/ISSUE_TEMPLATE/player-update.yml). Geben Sie den `Player name` exakt so ein, wie er auf einem kanonischen `Pes Retro Stats profile` erscheint, fügen Sie Beleg-URLs bei und warten Sie auf das Label `generate-player-draft`.
 2. Der konfigurierte Generator-Workflow ruft das Profil ab und öffnet einen Entwurfs-PR mit einem `players/<player-slug>.json`-Vorschlag nach Schema-Version 2. Er leitet den Quell-Snapshot, Identität, physische Einstellungen, Positionsdaten, Fähigkeiten, Spielstil, Spielerfähigkeiten und COM-Stile aus dem Profil ab.
 3. Bei einer Erstellung bleiben nur spielinterne, in der Quelle nicht vorhandene Werte in `draft.missing` aufgeführt: PES-IDs und Drucknamen für Identität und Spieler, Team-ID und Name, Nationalitäts-ID, Hautfarbe und Irisfarbe. Ein Mitwirkender oder Maintainer muss diese bereitstellen. Bei einer Aktualisierung lokalisiert der Generator den Spieler in der verifizierten Basis und gibt nur tatsächliche `from`/`to`-Unterschiede aus. Eine von PES 2021 nicht unterstützte Quellposition wie `RWB` wird ausgelassen statt neu zugeordnet, einschließlich bei Änderungen der registrierten Position.
 4. Ein Mitwirkender und ein Maintainer prüfen jeden generierten Wert als unbestätigten Vorschlag. CI akzeptiert ein Player Update nur, wenn der PR genau einen kanonischen Spieler-JSON-Pfad hinzufügt oder ändert und der gemeinsame semantische Validator erfolgreich durchläuft.
@@ -246,4 +246,4 @@ Die Suite deckt Speichervalidierung, Transferabgleich, Kaderplanung, Leihhistori
 
 ## Lizenz
 
-FL Daily Edit steht unter der [MIT-Lizenz](LICENSE) zur Verfügung.
+FL Daily Edit steht unter der [MIT-Lizenz](../../LICENSE) zur Verfügung.

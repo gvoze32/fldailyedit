@@ -43,6 +43,8 @@ HEADINGS = (
     "Player name",
     "Pes Retro Stats profile",
     "Current team",
+    "Loan parent team",
+    "Loan end date",
     "Effective date",
     "Proof URLs",
     "Contributor notes",
@@ -152,6 +154,8 @@ def issue_body(**overrides: str) -> str:
         "Player name": "Dastan Satpaev",
         "Pes Retro Stats profile": PROFILE_URL,
         "Current team": "Chelsea FC",
+        "Loan parent team": "",
+        "Loan end date": "",
         "Effective date": "2026-08-04",
         "Proof URLs": "https://example.com/official-proof",
         "Contributor notes": "Missing from the reviewed FL26 base.",
@@ -176,6 +180,12 @@ https://pesretrostats.com/player/f77d9c27-dastan-satpaev
 ### Current team
 
 Chelsea FC
+
+### Loan parent team
+
+
+### Loan end date
+
 
 ### Effective date
 
@@ -309,7 +319,10 @@ def current_profile(proposal: Pes21Proposal, *, speed: int | None = None) -> Pla
 class FakeEditFile:
     def __init__(self, proposal: Pes21Proposal, *, changed: bool = True) -> None:
         self.players = {162196: PlayerInfo(162196, "Marco Palestra", "M. Palestra")}
-        self.teams = {101: TeamInfo(101, "Chelsea FC")}
+        self.teams = {
+            101: TeamInfo(101, "Chelsea FC"),
+            102: TeamInfo(102, "Burnley FC"),
+        }
         self.rosters = {101: TeamData(101, [162196] + [0] * 39)}
         target_speed = proposal.abilities["speed"]
         self.profiles = {
@@ -465,7 +478,6 @@ def update_request() -> PlayerDraftRequest:
         )
     )
 
-
 def test_player_draft_request_has_the_published_interface():
     assert tuple(field.name for field in fields(PlayerDraftRequest)) == (
         "operation",
@@ -476,7 +488,11 @@ def test_player_draft_request_has_the_published_interface():
         "proof_urls",
         "issue_number",
         "issue_url",
+        "loan_parent_team",
+        "loan_end_date",
     )
+
+
 
 
 def test_exact_rendered_issue_event_parses_to_request():
@@ -492,7 +508,62 @@ def test_exact_rendered_issue_event_parses_to_request():
         proof_urls=("https://example.com/official-proof",),
         issue_number=42,
         issue_url="https://github.com/gvoze32/fldailyedit/issues/42",
+        loan_parent_team=None,
+        loan_end_date=None,
     )
+
+
+def test_loan_fields_parse_and_generate_parent_metadata():
+    event = issue_event(
+        **{
+            "Loan parent team": "Burnley FC",
+            "Loan end date": "2027-06-30",
+        }
+    )
+    request = parse_player_issue_event(event)
+    assert request.loan_parent_team == "Burnley FC"
+    assert request.loan_end_date == "2027-06-30"
+
+    source = make_source()
+    proposal = proposal_for(source)
+    payload = build_player_draft(
+        request,
+        source,
+        proposal,
+        **build_create_kwargs(proposal),
+    )
+    assert payload["loan"] == {
+        "parent_team_id": 102,
+        "parent_team_name": "Burnley FC",
+        "start_date": "2026-08-04",
+        "end_date": "2027-06-30",
+    }
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"Loan parent team": "Burnley FC"}, "supplied together"),
+        ({"Loan end date": "2027-06-30"}, "supplied together"),
+        (
+            {"Loan parent team": "Burnley FC", "Loan end date": "2026-08-03"},
+            "must not precede",
+        ),
+        (
+            {
+                "Operation": "update",
+                "Loan parent team": "Burnley FC",
+                "Loan end date": "2027-06-30",
+            },
+            "only valid for create",
+        ),
+    ],
+)
+def test_invalid_loan_form_values_are_rejected(
+    overrides: dict[str, str], message: str
+):
+    with pytest.raises(PlayerDraftError, match=message):
+        parse_player_issue_event(issue_event(**overrides))
 
 
 @pytest.mark.parametrize(

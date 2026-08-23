@@ -36,10 +36,11 @@ reference/
 
 # Agent work artifacts
 .superpowers/
-docs/
 MEMORY.md
 .worktrees/
 .codegraph
+docs/plans
+docs/superpowers
 
 # Native build products
 vendor/pesXdecrypter/decrypter21

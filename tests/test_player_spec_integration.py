@@ -36,13 +36,13 @@ def _assert_decoded_profile_matches_proposal(
         assert profile.registered_position == proposal.registered_position
 
 
-def _assert_complete_generated_payload(payload):
+def _assert_complete_generated_payload(payload, *, has_loan: bool = False):
     from tests.test_generate_player_draft import (
         assert_no_missing_keys,
         assert_no_nulls,
     )
 
-    assert set(payload) == {
+    expected_keys = {
         "schema_version",
         "operation",
         "lifecycle",
@@ -53,11 +53,13 @@ def _assert_complete_generated_payload(payload):
         "pes",
         "draft",
     }
+    if has_loan:
+        expected_keys.add("loan")
+    assert set(payload) == expected_keys
     assert_no_missing_keys(payload)
     for key, value in payload.items():
         if key != "source":
             assert_no_nulls(value)
-
 
 def _assert_completed_payload_has_no_proposal_metadata(payload):
     assert "source" not in payload
@@ -231,7 +233,14 @@ def test_approved_create_proposal_is_valid_but_apply_is_disabled(
         source_profile = make_source()
         proposal = proposal_for(source_profile)
         request = replace(
-            parse_player_issue_event(issue_event()),
+            parse_player_issue_event(
+                issue_event(
+                    **{
+                        "Loan parent team": "Burnley FC",
+                        "Loan end date": "2027-06-30",
+                    }
+                )
+            ),
             issue_number=123,
             issue_url="https://github.com/gvoze32/fldailyedit/issues/123",
         )
@@ -255,7 +264,13 @@ def test_approved_create_proposal_is_valid_but_apply_is_disabled(
         from scraper.pes_retro_snapshot import profile_from_snapshot
 
         assert profile_from_snapshot(payload["source"]) == source_profile
-        _assert_complete_generated_payload(payload)
+        _assert_complete_generated_payload(payload, has_loan=True)
+        assert payload["loan"] == {
+            "parent_team_id": 378,
+            "parent_team_name": "Burnley FC",
+            "start_date": "2026-08-04",
+            "end_date": "2027-06-30",
+        }
         assert validate_generated_proposal(proposal_path, edit_file) == payload
 
         unapproved = load_player_specs(

@@ -1,9 +1,9 @@
-[![English](https://img.shields.io/badge/%F0%9F%87%AC%F0%9F%87%A7_English-012169?style=flat-square)](README.md) [![Indonesian](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%A9_Indonesian-ce1126?style=flat-square)](README.id.md) [![Español](https://img.shields.io/badge/%F0%9F%87%AA%F0%9F%87%B8_Espa%C3%B1ol-aa151b?style=flat-square)](README.es.md) [![Français](https://img.shields.io/badge/%F0%9F%87%AB%F0%9F%87%B7_Fran%C3%A7ais-002395?style=flat-square)](README.fr.md) [![Português](https://img.shields.io/badge/%F0%9F%87%B5%F0%9F%87%B9_Portugu%C3%AAs-006600?style=flat-square)](README.pt.md) [![Deutsch](https://img.shields.io/badge/%F0%9F%87%A9%F0%9F%87%AA_Deutsch-000000?style=flat-square)](README.de.md) [![Italiano](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%B9_Italiano-009246?style=flat-square)](README.it.md) [![Русский](https://img.shields.io/badge/%F0%9F%87%B7%F0%9F%87%BA_%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-d52b1e?style=flat-square)](README.ru.md) [![Türkçe](https://img.shields.io/badge/%F0%9F%87%B9%F0%9F%87%B7_T%C3%BCrk%C3%A7e-e30a17?style=flat-square)](README.tr.md) [![العربية](https://img.shields.io/badge/%F0%9F%87%B8%F0%9F%87%A6_%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A%D8%A9-006c35?style=flat-square)](README.ar.md) [![中文](https://img.shields.io/badge/%F0%9F%87%A8%F0%9F%87%B3_%E4%B8%AD%E6%96%87-de2910?style=flat-square)](README.zh.md)
+[![English](https://img.shields.io/badge/English-012169)](../../README.md) [![Indonesian](https://img.shields.io/badge/Indonesian-ce1126)](README.id.md) [![Español](https://img.shields.io/badge/Espa%C3%B1ol-aa151b)](README.es.md) [![Français](https://img.shields.io/badge/Français-002395)](README.fr.md) [![Português](https://img.shields.io/badge/Português-006600)](README.pt.md) [![Deutsch](https://img.shields.io/badge/Deutsch-000000)](README.de.md) [![Italiano](https://img.shields.io/badge/Italiano-009246)](README.it.md) [![Russian](https://img.shields.io/badge/Russian-0039a6)](README.ru.md) [![Türkçe](https://img.shields.io/badge/Turkish-e30a17)](README.tr.md) [![العربية](https://img.shields.io/badge/Arabic-008000)](README.ar.md) [![中文](https://img.shields.io/badge/Chinese-de2910)](README.zh.md)
 
 # FL Daily Edit
 
 [![Version Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Licence: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Licence: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../../LICENSE)
 
 FL Daily Edit met à jour les effectifs de SP Football Life 2026 et d'eFootball PES 2021
 en appliquant les transferts réels à un fichier de sauvegarde `EDIT00000000`.
@@ -32,7 +32,7 @@ Elle n'est pas compatible avec UML, les versions antérieures de FL26 ou les ins
 sans mise à jour des équipes nationales. Démarrez une nouvelle carrière en Ligue des Masters
 ou Vers une Légende après avoir installé le fichier de sauvegarde.
 
-La [base incluse](base/EDIT00000000) correspond au fichier
+La [base incluse](../../base/EDIT00000000) correspond au fichier
 [Gondowan's EDIT du 22 août 2026](https://www.reddit.com/r/SPFootballLife/comments/1vvh129/release_gondowans_edit_file_22082026_latest/).
 Elle intègre les transferts de dernière minute au 22/08/2026 pour tous les
 championnats, les changements de note de plus de 600 joueurs, les montées et
@@ -203,7 +203,7 @@ Les groupes pris en charge sont les compétences, la maîtrise des postes, le st
 
 ### Méthode simple via une Issue
 
-1. Ouvrez le [formulaire d'issue de mise à jour de joueur](.github/ISSUE_TEMPLATE/player-update.yml). Entrez le `Player name` exactement tel qu'il apparaît sur un profil canonique `Pes Retro Stats profile`, fournissez les URL de preuve et attendez qu'un mainteneur applique le label exact `generate-player-draft`.
+1. Ouvrez le [formulaire d'issue de mise à jour de joueur](../../.github/ISSUE_TEMPLATE/player-update.yml). Entrez le `Player name` exactement tel qu'il apparaît sur un profil canonique `Pes Retro Stats profile`, fournissez les URL de preuve et attendez qu'un mainteneur applique le label exact `generate-player-draft`.
 2. Le workflow configuré récupère ce profil et ouvre une PR en brouillon contenant une proposition `players/<player-slug>.json` au format schéma v2. Il extrait du profil l'instantané source, l'identité, les paramètres physiques, les données de poste, les compétences, le style de jeu, les aptitudes et les styles COM.
 3. Pour une création, seules les valeurs propres au jeu non disponibles à la source restent listées dans `draft.missing` : les ID PES et noms d'affichage, l'ID et le nom de l'équipe, l'ID de nationalité, la couleur de peau et la couleur des yeux. Un contributeur ou un mainteneur doit les renseigner. Pour une mise à jour, le générateur retrouve le joueur dans la base vérifiée et ne produit que les différences réelles `from`/`to`. Un poste source non pris en charge par PES 2021, tel que `RWB`, est omis plutôt que réassigné, y compris pour le changement de poste enregistré.
 4. Un contributeur et un mainteneur vérifient chaque valeur générée comme une proposition non approuvée. L'intégration continue n'accepte une Player Update que si la PR ajoute ou modifie exactement un chemin JSON canonique de joueur et que le validateur sémantique partagé réussit.
@@ -260,4 +260,4 @@ La suite couvre l'analyse et la validation des sauvegardes, la réconciliation d
 
 ## Licence
 
-FL Daily Edit est distribué sous [Licence MIT](LICENSE).
+FL Daily Edit est distribué sous [Licence MIT](../../LICENSE).

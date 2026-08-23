@@ -43,6 +43,7 @@ from tools.player_proposal_resolution import (
     NationalityCatalog,
     load_nationality_catalog,
     resolve_create_fields,
+    resolve_team_name,
 )
 from tools.player_proposal_review import build_ovr_review
 
@@ -58,6 +59,8 @@ _HEADINGS = (
     "Player name",
     "Pes Retro Stats profile",
     "Current team",
+    "Loan parent team",
+    "Loan end date",
     "Effective date",
     "Proof URLs",
     "Contributor notes",
@@ -87,7 +90,8 @@ class PlayerDraftRequest:
     proof_urls: tuple[str, ...]
     issue_number: int
     issue_url: str
-
+    loan_parent_team: str | None = None
+    loan_end_date: str | None = None
 
 def _mapping(value: object, context: str) -> Mapping[str, object]:
     if not isinstance(value, Mapping):
@@ -259,6 +263,8 @@ def parse_player_issue_event(event: Mapping[str, object]) -> PlayerDraftRequest:
         )
     profile_url = _profile_url(raw_profile_url)
     current_team = _text(sections["Current team"], "current team", 100)
+    loan_parent_raw = sections["Loan parent team"].strip()
+    loan_end_raw = sections["Loan end date"].strip()
 
     effective_date = _text(sections["Effective date"], "effective date", 10)
     try:
@@ -267,6 +273,38 @@ def parse_player_issue_event(event: Mapping[str, object]) -> PlayerDraftRequest:
         raise PlayerDraftError("effective date must be a valid ISO date") from None
     if parsed_date.isoformat() != effective_date:
         raise PlayerDraftError("effective date must use YYYY-MM-DD")
+
+    loan_parent_team: str | None = None
+    loan_end_date: str | None = None
+    if loan_parent_raw or loan_end_raw:
+        if operation != "create":
+            raise PlayerDraftError(
+                "loan fields are only valid for create requests"
+            )
+        if not loan_parent_raw or not loan_end_raw:
+            raise PlayerDraftError(
+                "loan parent team and loan end date must be supplied together"
+            )
+        loan_parent_team = _text(loan_parent_raw, "loan parent team", 100)
+        if len(loan_parent_team.splitlines()) != 1:
+            raise PlayerDraftError("loan parent team must contain one team name")
+        if " ".join(loan_parent_team.split()) != loan_parent_team:
+            raise PlayerDraftError(
+                "loan parent team must use canonical whitespace"
+            )
+        loan_end_date = _text(loan_end_raw, "loan end date", 10)
+        try:
+            parsed_loan_end = date.fromisoformat(loan_end_date)
+        except ValueError:
+            raise PlayerDraftError(
+                "loan end date must be a valid ISO date"
+            ) from None
+        if parsed_loan_end.isoformat() != loan_end_date:
+            raise PlayerDraftError("loan end date must use YYYY-MM-DD")
+        if parsed_loan_end < parsed_date:
+            raise PlayerDraftError(
+                "loan end date must not precede the effective date"
+            )
 
     proof_lines = tuple(
         line.strip() for line in sections["Proof URLs"].splitlines() if line.strip()
@@ -304,6 +342,8 @@ def parse_player_issue_event(event: Mapping[str, object]) -> PlayerDraftRequest:
         proof_urls=tuple(proof_urls),
         issue_number=issue_number,
         issue_url=issue_url,
+        loan_parent_team=loan_parent_team,
+        loan_end_date=loan_end_date,
     )
 
 
@@ -399,6 +439,57 @@ def _create_pes(
         result["preferred_shirt_number"] = shirt_number
     return result
 
+def _loan_payload(
+    request: PlayerDraftRequest,
+    edit_file: EditFile,
+    *,
+    active_team_id: int,
+    team_aliases: Mapping[str, str] | None,
+) -> dict[str, object] | None:
+    parent_name = request.loan_parent_team
+    end_date = request.loan_end_date
+    if parent_name is None and end_date is None:
+        return None
+    if request.operation != "create":
+        raise PlayerDraftError("loan metadata is only valid for create requests")
+    if parent_name is None or end_date is None:
+        raise PlayerDraftError(
+            "loan parent team and loan end date must be supplied together"
+        )
+    try:
+        parent_name = _text(parent_name, "loan parent team", 100)
+        if len(parent_name.splitlines()) != 1:
+            raise PlayerDraftError("loan parent team must contain one team name")
+        if " ".join(parent_name.split()) != parent_name:
+            raise PlayerDraftError(
+                "loan parent team must use canonical whitespace"
+            )
+        end_date = _text(end_date, "loan end date", 10)
+        parsed_start = date.fromisoformat(request.effective_date)
+        parsed_end = date.fromisoformat(end_date)
+    except ValueError:
+        raise PlayerDraftError("loan metadata dates must be valid ISO dates") from None
+    if parsed_start.isoformat() != request.effective_date:
+        raise PlayerDraftError("effective date must use YYYY-MM-DD")
+    if parsed_end.isoformat() != end_date:
+        raise PlayerDraftError("loan end date must use YYYY-MM-DD")
+    if parsed_end < parsed_start:
+        raise PlayerDraftError("loan end date must not precede the effective date")
+    try:
+        parent = resolve_team_name(edit_file, parent_name, team_aliases)
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise PlayerDraftError(f"cannot resolve loan parent team: {exc}") from None
+    if parent.team_id == active_team_id:
+        raise PlayerDraftError(
+            "loan parent team must differ from the player's current team"
+        )
+    return {
+        "parent_team_id": parent.team_id,
+        "parent_team_name": parent.name,
+        "start_date": request.effective_date,
+        "end_date": end_date,
+    }
+
 
 def build_player_draft(
     request: PlayerDraftRequest,
@@ -424,6 +515,7 @@ def build_player_draft(
         "pes_id": None,
         "pes_retro_stats_id": source.player_id,
     }
+    loan: dict[str, object] | None = None
     try:
         if request.operation == "create":
             resolution = resolve_create_fields(
@@ -448,6 +540,12 @@ def build_player_draft(
                 iris_color=resolution.iris_color,
                 shirt_number=source.shirt_number,
             )
+            loan = _loan_payload(
+                request,
+                edit_file,
+                active_team_id=resolution.team_id,
+                team_aliases=team_aliases,
+            )
             identity["print_name"] = resolution.print_name
             identity["pes_id"] = resolution.player_id
             ovr_review = build_ovr_review(
@@ -458,6 +556,13 @@ def build_player_draft(
                 proposal_weak_foot_accuracy=proposal.weak_foot_accuracy,
             )
         elif request.operation == "update":
+            if (
+                request.loan_parent_team is not None
+                or request.loan_end_date is not None
+            ):
+                raise PlayerDraftError(
+                    "loan metadata is only valid for create requests"
+                )
             match = resolve_update_player(
                 edit_file,
                 canonical_name=request.player_name,
@@ -494,7 +599,7 @@ def build_player_draft(
     except (TypeError, ValueError, KeyError, AttributeError) as exc:
         raise PlayerDraftError(f"cannot snapshot source profile: {exc}") from None
 
-    return {
+    payload: dict[str, object] = {
         "schema_version": 2,
         "operation": request.operation,
         "lifecycle": {"status": "active"},
@@ -509,6 +614,9 @@ def build_player_draft(
             "ovr_review": ovr_review,
         },
     }
+    if loan is not None:
+        payload["loan"] = loan
+    return payload
 
 
 _MAX_PROPOSAL_BYTES = 2 * 1024 * 1024
@@ -590,6 +698,33 @@ def _first_proposal_difference(
         return path or "$"
     return None
 
+def _loan_request_fields(
+    value: object,
+    effective_date: str,
+) -> tuple[str | None, str | None]:
+    if value is None:
+        return None, None
+    loan = _mapping(value, "proposal loan")
+    parent = loan.get("parent_team_name")
+    start = loan.get("start_date")
+    end = loan.get("end_date")
+    if not isinstance(start, str) or not isinstance(end, str):
+        raise PlayerDraftError("proposal loan dates must be text")
+    if start != effective_date:
+        raise PlayerDraftError(
+            "proposal loan start_date must match evidence effective_date"
+        )
+    try:
+        parsed_start = date.fromisoformat(start)
+        parsed_end = date.fromisoformat(end)
+    except ValueError:
+        raise PlayerDraftError("proposal loan dates must be valid ISO dates") from None
+    if parsed_start.isoformat() != start or parsed_end.isoformat() != end:
+        raise PlayerDraftError("proposal loan dates must use YYYY-MM-DD")
+    if not isinstance(parent, str):
+        raise PlayerDraftError("proposal loan parent_team_name must be text")
+    return _text(parent, "proposal loan parent_team_name", 100), end
+
 
 def validate_generated_proposal(
     path: Path, edit_file: EditFile
@@ -627,6 +762,9 @@ def validate_generated_proposal(
             or not isinstance(issue_url, str)
         ):
             raise PlayerDraftError("proposal evidence is incomplete")
+        loan_parent_team, loan_end_date = _loan_request_fields(
+            actual.get("loan"), effective_date
+        )
         try:
             source = profile_from_snapshot(source_snapshot)
         except ValueError as exc:
@@ -660,6 +798,8 @@ def validate_generated_proposal(
             proof_urls=tuple(proof_urls),
             issue_number=issue_number,
             issue_url=issue_url,
+            loan_parent_team=loan_parent_team,
+            loan_end_date=loan_end_date,
         )
         proposal = map_pes21_proposal(
             source, effective_date=date.fromisoformat(effective_date)

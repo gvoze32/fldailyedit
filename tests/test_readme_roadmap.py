@@ -9,30 +9,30 @@ import pytest
 
 README_PATHS = (
     Path("README.md"),
-    Path("README.id.md"),
-    Path("README.es.md"),
-    Path("README.pt.md"),
-    Path("README.ar.md"),
-    Path("README.zh.md"),
-    Path("README.it.md"),
-    Path("README.ru.md"),
-    Path("README.de.md"),
-    Path("README.fr.md"),
-    Path("README.tr.md"),
+    Path("docs/readmes/README.id.md"),
+    Path("docs/readmes/README.es.md"),
+    Path("docs/readmes/README.pt.md"),
+    Path("docs/readmes/README.ar.md"),
+    Path("docs/readmes/README.zh.md"),
+    Path("docs/readmes/README.it.md"),
+    Path("docs/readmes/README.ru.md"),
+    Path("docs/readmes/README.de.md"),
+    Path("docs/readmes/README.fr.md"),
+    Path("docs/readmes/README.tr.md"),
 )
 
 _LANGUAGE_BADGE_TARGETS = (
     "README.md",
-    "README.id.md",
-    "README.es.md",
-    "README.fr.md",
-    "README.pt.md",
-    "README.de.md",
-    "README.it.md",
-    "README.ru.md",
-    "README.tr.md",
-    "README.ar.md",
-    "README.zh.md",
+    "docs/readmes/README.id.md",
+    "docs/readmes/README.es.md",
+    "docs/readmes/README.fr.md",
+    "docs/readmes/README.pt.md",
+    "docs/readmes/README.de.md",
+    "docs/readmes/README.it.md",
+    "docs/readmes/README.ru.md",
+    "docs/readmes/README.tr.md",
+    "docs/readmes/README.ar.md",
+    "docs/readmes/README.zh.md",
 )
 _BADGE_TARGETS = _LANGUAGE_BADGE_TARGETS + (
     "https://www.python.org/",
@@ -72,7 +72,7 @@ README_STRUCTURE_FIXTURES = {
             "LICENSE",
         ),
     },
-    Path("README.id.md"): {
+    Path("docs/readmes/README.id.md"): {
         "heading_counts": (11, 11, 3, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": _README_COMMAND_FENCE_FIXTURES,
@@ -82,7 +82,7 @@ README_STRUCTURE_FIXTURES = {
             "LICENSE",
         ),
     },
-    Path("README.es.md"): {
+    Path("docs/readmes/README.es.md"): {
         "heading_counts": (9, 11, 3, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": _COMMON_FENCE_FIXTURES,
@@ -92,7 +92,7 @@ README_STRUCTURE_FIXTURES = {
             "LICENSE",
         ),
     },
-    Path("README.pt.md"): {
+    Path("docs/readmes/README.pt.md"): {
         "heading_counts": (9, 11, 3, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": _COMMON_FENCE_FIXTURES,
@@ -102,7 +102,7 @@ README_STRUCTURE_FIXTURES = {
             "LICENSE",
         ),
     },
-    Path("README.ar.md"): {
+    Path("docs/readmes/README.ar.md"): {
         "heading_counts": (9, 11, 3, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": _COMMON_FENCE_FIXTURES,
@@ -112,7 +112,7 @@ README_STRUCTURE_FIXTURES = {
             "LICENSE",
         ),
     },
-    Path("README.zh.md"): {
+    Path("docs/readmes/README.zh.md"): {
         "heading_counts": (9, 11, 3, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": _COMMON_FENCE_FIXTURES,
@@ -122,7 +122,7 @@ README_STRUCTURE_FIXTURES = {
             "LICENSE",
         ),
     },
-    Path("README.it.md"): {
+    Path("docs/readmes/README.it.md"): {
         "heading_counts": (9, 11, 3, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": _COMMON_FENCE_FIXTURES,
@@ -132,7 +132,7 @@ README_STRUCTURE_FIXTURES = {
             "LICENSE",
         ),
     },
-    Path("README.ru.md"): {
+    Path("docs/readmes/README.ru.md"): {
         "heading_counts": (9, 11, 3, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": _COMMON_FENCE_FIXTURES,
@@ -142,7 +142,7 @@ README_STRUCTURE_FIXTURES = {
             "LICENSE",
         ),
     },
-    Path("README.de.md"): {
+    Path("docs/readmes/README.de.md"): {
         "heading_counts": (9, 11, 3, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": (
@@ -159,7 +159,7 @@ README_STRUCTURE_FIXTURES = {
             "LICENSE",
         ),
     },
-    Path("README.fr.md"): {
+    Path("docs/readmes/README.fr.md"): {
         "heading_counts": (9, 11, 3, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": (
@@ -176,7 +176,7 @@ README_STRUCTURE_FIXTURES = {
             "LICENSE",
         ),
     },
-    Path("README.tr.md"): {
+    Path("docs/readmes/README.tr.md"): {
         "heading_counts": (9, 11, 3, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": (
@@ -200,43 +200,43 @@ ROADMAP_FIXTURES = {
         "## Roadmap / Complete for now",
         "All current roadmap items are complete. We are waiting for the next useful idea.",
     ),
-    Path("README.id.md"): (
+    Path("docs/readmes/README.id.md"): (
         "## Roadmap / Selesai untuk saat ini",
         "Semua item roadmap saat ini telah selesai. Kami menunggu ide berguna berikutnya.",
     ),
-    Path("README.es.md"): (
+    Path("docs/readmes/README.es.md"): (
         "## Hoja de ruta / Completada por ahora",
         "Todos los elementos actuales de la hoja de ruta están terminados. Esperamos la próxima idea útil.",
     ),
-    Path("README.pt.md"): (
+    Path("docs/readmes/README.pt.md"): (
         "## Roteiro / Concluído por enquanto",
         "Todos os itens atuais do roteiro foram concluídos. Estamos aguardando a próxima ideia útil.",
     ),
-    Path("README.ar.md"): (
+    Path("docs/readmes/README.ar.md"): (
         "## خارطة الطريق / مكتملة حاليًا",
         "اكتملت جميع عناصر خارطة الطريق الحالية. ننتظر الفكرة المفيدة التالية.",
     ),
-    Path("README.zh.md"): (
+    Path("docs/readmes/README.zh.md"): (
         "## 路线图 / 当前已完成",
         "当前路线图中的所有项目都已完成。我们正在等待下一个有价值的想法。",
     ),
-    Path("README.it.md"): (
+    Path("docs/readmes/README.it.md"): (
         "## Roadmap / Completa per ora",
         "Tutte le attività attuali della roadmap sono completate. Attendiamo la prossima idea utile.",
     ),
-    Path("README.ru.md"): (
+    Path("docs/readmes/README.ru.md"): (
         "## План развития / Пока завершён",
         "Все текущие задачи плана развития завершены. Ждём следующую полезную идею.",
     ),
-    Path("README.de.md"): (
+    Path("docs/readmes/README.de.md"): (
         "## Roadmap / Vorerst abgeschlossen",
         "Alle aktuellen Roadmap-Aufgaben sind abgeschlossen. Wir warten auf die nächste sinnvolle Idee.",
     ),
-    Path("README.fr.md"): (
+    Path("docs/readmes/README.fr.md"): (
         "## Feuille de route / Terminée pour l’instant",
         "Tous les éléments actuels de la feuille de route sont terminés. Nous attendons la prochaine idée utile.",
     ),
-    Path("README.tr.md"): (
+    Path("docs/readmes/README.tr.md"): (
         "## Yol Haritası / Şimdilik tamamlandı",
         "Mevcut yol haritasındaki tüm maddeler tamamlandı. Sıradaki faydalı fikri bekliyoruz.",
     ),
@@ -259,11 +259,19 @@ def _heading_counts(text: str) -> tuple[int, ...]:
     )
 
 
-def _badge_targets(text: str) -> tuple[str, ...]:
-    return tuple(_BADGE_RE.findall(text))
+def _normalize_relative_target(path: Path, target: str) -> str:
+    if re.match(r"(?i)^[a-z][a-z0-9+.-]*:", target):
+        return target
+    return (path.parent / target).resolve().relative_to(Path.cwd()).as_posix()
+
+def _badge_targets(text: str, path: Path) -> tuple[str, ...]:
+    return tuple(
+        _normalize_relative_target(path, target)
+        for target in _BADGE_RE.findall(text)
+    )
 
 
-def _relative_links(text: str) -> tuple[str, ...]:
+def _relative_links(path: Path, text: str) -> tuple[str, ...]:
     links: list[str] = []
     for target in _LINK_RE.findall(text):
         target = target.split(maxsplit=1)[0]
@@ -271,7 +279,7 @@ def _relative_links(text: str) -> tuple[str, ...]:
             continue
         if target.startswith(("#", "/")):
             continue
-        links.append(target)
+        links.append(_normalize_relative_target(path, target))
     return tuple(links)
 
 
@@ -306,9 +314,9 @@ def test_readmes_preserve_immutable_structure_and_clean_roadmap(path: Path) -> N
     roadmap_heading, completion_marker = ROADMAP_FIXTURES[path]
 
     assert _heading_counts(text) == structure["heading_counts"]
-    assert _badge_targets(text) == structure["badge_targets"]
+    assert _badge_targets(text, path) == structure["badge_targets"]
     assert _fenced_code_blocks(text) == structure["fenced_code_blocks"]
-    assert _relative_links(text) == structure["relative_links"]
+    assert _relative_links(path, text) == structure["relative_links"]
 
     roadmap = _roadmap_section(text, roadmap_heading)
     normalized_roadmap = " ".join(roadmap.split())

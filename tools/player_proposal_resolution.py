@@ -321,6 +321,18 @@ def _resolve_team_name(
         raise ValueError(f"ambiguous team name {name!r}")
     return next(iter(unique.values()))
 
+def resolve_team_name(
+    edit_file: EditFile,
+    submitted_team: str,
+    team_aliases: Mapping[str, str] | None = None,
+) -> TeamInfo:
+    """Resolve one submitted team name to a canonical EditFile team."""
+    return _resolve_team_name(
+        submitted_team,
+        _team_index(edit_file),
+        _alias_index(team_aliases if team_aliases is not None else {}),
+    )
+
 
 def resolve_create_team(
     edit_file: EditFile,

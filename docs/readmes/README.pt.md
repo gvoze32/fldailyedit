@@ -1,9 +1,9 @@
-[![English](https://img.shields.io/badge/%F0%9F%87%AC%F0%9F%87%A7_English-012169?style=flat-square)](README.md) [![Indonesian](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%A9_Indonesian-ce1126?style=flat-square)](README.id.md) [![Español](https://img.shields.io/badge/%F0%9F%87%AA%F0%9F%87%B8_Espa%C3%B1ol-aa151b?style=flat-square)](README.es.md) [![Français](https://img.shields.io/badge/%F0%9F%87%AB%F0%9F%87%B7_Fran%C3%A7ais-002395?style=flat-square)](README.fr.md) [![Português](https://img.shields.io/badge/%F0%9F%87%B5%F0%9F%87%B9_Portugu%C3%AAs-006600?style=flat-square)](README.pt.md) [![Deutsch](https://img.shields.io/badge/%F0%9F%87%A9%F0%9F%87%AA_Deutsch-000000?style=flat-square)](README.de.md) [![Italiano](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%B9_Italiano-009246?style=flat-square)](README.it.md) [![Русский](https://img.shields.io/badge/%F0%9F%87%B7%F0%9F%87%BA_%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-d52b1e?style=flat-square)](README.ru.md) [![Türkçe](https://img.shields.io/badge/%F0%9F%87%B9%F0%9F%87%B7_T%C3%BCrk%C3%A7e-e30a17?style=flat-square)](README.tr.md) [![العربية](https://img.shields.io/badge/%F0%9F%87%B8%F0%9F%87%A6_%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A%D8%A9-006c35?style=flat-square)](README.ar.md) [![中文](https://img.shields.io/badge/%F0%9F%87%A8%F0%9F%87%B3_%E4%B8%AD%E6%96%87-de2910?style=flat-square)](README.zh.md)
+[![English](https://img.shields.io/badge/English-012169)](../../README.md) [![Indonesian](https://img.shields.io/badge/Indonesian-ce1126)](README.id.md) [![Español](https://img.shields.io/badge/Espa%C3%B1ol-aa151b)](README.es.md) [![Français](https://img.shields.io/badge/Français-002395)](README.fr.md) [![Português](https://img.shields.io/badge/Português-006600)](README.pt.md) [![Deutsch](https://img.shields.io/badge/Deutsch-000000)](README.de.md) [![Italiano](https://img.shields.io/badge/Italiano-009246)](README.it.md) [![Russian](https://img.shields.io/badge/Russian-0039a6)](README.ru.md) [![Türkçe](https://img.shields.io/badge/Turkish-e30a17)](README.tr.md) [![العربية](https://img.shields.io/badge/Arabic-008000)](README.ar.md) [![中文](https://img.shields.io/badge/Chinese-de2910)](README.zh.md)
 
 # FL Daily Edit
 
 [![Versão do Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Licença: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Licença: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../../LICENSE)
 
 O FL Daily Edit atualiza os elencos do SP Football Life 2026 e do eFootball PES 2021 aplicando transferências do mundo real a um arquivo de edição `EDIT00000000`.
 
@@ -29,7 +29,7 @@ A base incluída é voltada para o **SP Football Life 2026**. Requisitos:
 
 Não é compatível com UML, versões anteriores do FL26 ou instalações sem a atualização de seleções nacionais. Inicie uma nova carreira na Master League ou Rumo ao Estrelato após instalar o arquivo de edição.
 
-A [base incluída](base/EDIT00000000) é o [Gondowan's EDIT de 22 de agosto de 2026](https://www.reddit.com/r/SPFootballLife/comments/1vvh129/release_gondowans_edit_file_22082026_latest/). Ela inclui transferências de última hora de 22/08/2026 para todas as ligas, alterações de avaliação para mais de 600 jogadores, mudanças de acesso e rebaixamento entre a primeira e a segunda divisão, correções de altura e posição, mudanças de nomes e números, alterações de treinadores disponíveis e escalações automáticas ordenadas pelos melhores jogadores. Ela não cria novos jogadores nem adiciona clubes promovidos de terceiras divisões.
+A [base incluída](../../base/EDIT00000000) é o [Gondowan's EDIT de 22 de agosto de 2026](https://www.reddit.com/r/SPFootballLife/comments/1vvh129/release_gondowans_edit_file_22082026_latest/). Ela inclui transferências de última hora de 22/08/2026 para todas as ligas, alterações de avaliação para mais de 600 jogadores, mudanças de acesso e rebaixamento entre a primeira e a segunda divisão, correções de altura e posição, mudanças de nomes e números, alterações de treinadores disponíveis e escalações automáticas ordenadas pelos melhores jogadores. Ela não cria novos jogadores nem adiciona clubes promovidos de terceiras divisões.
 
 ## Instalador para Windows
 
@@ -189,7 +189,7 @@ Os grupos de atualização suportados são habilidades, proficiência de posiç�
 
 ### Fluxo simples por issue
 
-1. Abra o [formulário de issue para atualização de jogadores](.github/ISSUE_TEMPLATE/player-update.yml). Insira o `Player name` exatamente como ele aparece em um `Pes Retro Stats profile` canônico, forneça as URLs de comprovação e aguarde até que um mantenedor aplique o rótulo exato `generate-player-draft`.
+1. Abra o [formulário de issue para atualização de jogadores](../../.github/ISSUE_TEMPLATE/player-update.yml).
 2. O fluxo de trabalho configurado do gerador obtém esse perfil e abre um PR de rascunho contendo uma proposta `players/<player-slug>.json` no schema versão 2. Ele extrai o instantâneo de origem, identidade, configurações físicas, dados de posição, habilidades, estilo de jogo, habilidades de jogador e estilos COM do perfil.
 3. Para uma criação, apenas os valores locais do jogo indisponíveis na fonte continuam listados em `draft.missing`: IDs do PES e nomes de exibição para a identidade e o jogador, ID e nome da equipe, ID de nacionalidade, cor da pele e cor da íris. Um colaborador ou mantenedor deve fornecê-los. Para uma atualização, o gerador localiza o jogador na base verificada e gera apenas as diferenças reais `from`/`to`. Uma posição de origem não suportada pelo PES 2021, como `RWB`, é omitida em vez de remapeada, inclusive na alteração da posição registrada.
 4. Um colaborador e um mantenedor revisam cada valor gerado como uma proposta não aprovada. O CI aceita uma Player Update apenas quando o PR adiciona ou modifica exatamente um caminho JSON canônico de jogador e o validador semântico compartilhado é aprovado com sucesso.
@@ -246,4 +246,4 @@ A suíte abrange análise e validação de arquivos de edição, reconciliação
 
 ## Licença
 
-O FL Daily Edit é disponibilizado sob a [Licença MIT](LICENSE).
+O FL Daily Edit é disponibilizado sob a [Licença MIT](../../LICENSE).

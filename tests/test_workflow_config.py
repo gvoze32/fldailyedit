@@ -44,7 +44,7 @@ README_INSTALLER_CONTRACTS = (
         "Detection for vanilla eFootball PES 2021 is present, but installation remains disabled until a matching validated base is published.",
     ),
     (
-        Path("README.id.md"),
+        Path("docs/readmes/README.id.md"),
         "## Installer Windows",
         "## Roadmap / Selesai untuk saat ini",
         "Antarmuka installer saat ini hanya tersedia dalam bahasa Inggris.",
@@ -52,7 +52,7 @@ README_INSTALLER_CONTRACTS = (
         "Deteksi untuk vanilla eFootball PES 2021 sudah tersedia, tetapi pemasangan tetap dinonaktifkan hingga base tervalidasi yang sesuai diterbitkan.",
     ),
     (
-        Path("README.zh.md"),
+        Path("docs/readmes/README.zh.md"),
         "## Windows 安装程序",
         "## 路线图 / 当前已完成",
         "安装程序界面目前仅提供英语版本。",
@@ -60,7 +60,7 @@ README_INSTALLER_CONTRACTS = (
         "程序可以检测原版 eFootball PES 2021，但在发布匹配且经过验证的基础存档前，安装功能将保持禁用。",
     ),
     (
-        Path("README.ar.md"),
+        Path("docs/readmes/README.ar.md"),
         "## مُثبِّت Windows",
         "## خارطة الطريق / مكتملة حاليًا",
         "تتوفر واجهة المُثبِّت حاليًا باللغة الإنجليزية فقط.",
@@ -68,7 +68,7 @@ README_INSTALLER_CONTRACTS = (
         "يتوفر اكتشاف vanilla eFootball PES 2021، لكن يظل التثبيت معطّلًا حتى نشر قاعدة أساسية متحقّق منها ومطابقة.",
     ),
     (
-        Path("README.ru.md"),
+        Path("docs/readmes/README.ru.md"),
         "## Установщик Windows",
         "## План развития / Пока завершён",
         "Интерфейс установщика пока доступен только на английском языке.",
@@ -76,7 +76,7 @@ README_INSTALLER_CONTRACTS = (
         "Обнаружение vanilla eFootball PES 2021 поддерживается, но установка остаётся отключённой до публикации подходящей проверенной базы.",
     ),
     (
-        Path("README.it.md"),
+        Path("docs/readmes/README.it.md"),
         "## Programma di installazione per Windows",
         "## Roadmap / Completa per ora",
         "L'interfaccia del programma di installazione è attualmente disponibile solo in inglese.",
@@ -84,7 +84,7 @@ README_INSTALLER_CONTRACTS = (
         "Il rilevamento di eFootball PES 2021 vanilla è disponibile, ma l'installazione rimane disabilitata finché non viene pubblicata una base convalidata corrispondente.",
     ),
     (
-        Path("README.pt.md"),
+        Path("docs/readmes/README.pt.md"),
         "## Instalador para Windows",
         "## Roteiro / Concluído por enquanto",
         "A interface do instalador está disponível somente em inglês no momento.",
@@ -92,7 +92,7 @@ README_INSTALLER_CONTRACTS = (
         "A detecção do eFootball PES 2021 vanilla está presente, mas a instalação permanece desativada até que uma base validada correspondente seja publicada.",
     ),
     (
-        Path("README.es.md"),
+        Path("docs/readmes/README.es.md"),
         "## Instalador para Windows",
         "## Hoja de ruta / Completada por ahora",
         "La interfaz del instalador actualmente solo está disponible en inglés.",
@@ -100,7 +100,7 @@ README_INSTALLER_CONTRACTS = (
         "La detección de eFootball PES 2021 vanilla está disponible, pero la instalación permanece desactivada hasta que se publique una base validada correspondiente.",
     ),
     (
-        Path("README.tr.md"),
+        Path("docs/readmes/README.tr.md"),
         "## Windows yükleyici",
         "## Yol Haritası / Şimdilik tamamlandı",
         "Yükleyici arayüzü şu anda yalnızca İngilizce olarak sunulmaktadır.",
@@ -108,7 +108,7 @@ README_INSTALLER_CONTRACTS = (
         "Vanilla eFootball PES 2021 algılanabilir, ancak eşleşen doğrulanmış bir temel yayımlanana kadar kurulum devre dışı kalır.",
     ),
     (
-        Path("README.de.md"),
+        Path("docs/readmes/README.de.md"),
         "## Windows-Installationsprogramm",
         "## Roadmap / Vorerst abgeschlossen",
         "Die Benutzeroberfläche des Installationsprogramms ist derzeit nur auf Englisch verfügbar.",
@@ -116,7 +116,7 @@ README_INSTALLER_CONTRACTS = (
         "Vanilla eFootball PES 2021 wird erkannt, die Installation bleibt jedoch deaktiviert, bis eine passende validierte Basis veröffentlicht wird.",
     ),
     (
-        Path("README.fr.md"),
+        Path("docs/readmes/README.fr.md"),
         "## Programme d’installation Windows",
         "## Feuille de route / Terminée pour l’instant",
         "L’interface du programme d’installation est actuellement disponible uniquement en anglais.",
@@ -133,6 +133,8 @@ EXPECTED_FIELDS = (
     ("input", "player_name", "Player name"),
     ("input", "pes_retro_stats_profile", "Pes Retro Stats profile"),
     ("input", "current_team", "Current team"),
+    ("input", "loan_parent_team", "Loan parent team"),
+    ("input", "loan_end_date", "Loan end date"),
     ("input", "effective_date", "Effective date"),
     ("textarea", "proof_urls", "Proof URLs"),
     ("textarea", "contributor_notes", "Contributor notes"),
@@ -364,7 +366,7 @@ def test_readmes_document_opt_in_create_and_native_metadata_tools():
         assert "| `audit` |" in text, path
         assert "| `compare` |" in text, path
 
-    for path in (Path("README.md"), Path("README.id.md")):
+    for path in (Path("README.md"), Path("docs/readmes/README.id.md")):
         text = path.read_text(encoding="utf-8")
         assert "python run.py audit" in text, path
         assert "python run.py compare" in text, path
@@ -459,6 +461,8 @@ def test_issue_form_requires_inputs_and_exact_rendered_confirmations():
         assert re.search(
             r"(?m)^    validations:\n      required: true$", blocks[field_id]
         )
+    for field_id in ("loan_parent_team", "loan_end_date"):
+        assert "validations:" not in blocks[field_id]
     assert "validations:" not in blocks["contributor_notes"]
     assert re.findall(r"(?m)^        - (create|update)$", blocks["operation"]) == [
         "create",

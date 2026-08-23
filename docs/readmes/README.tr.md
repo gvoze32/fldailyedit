@@ -1,9 +1,9 @@
-[![English](https://img.shields.io/badge/%F0%9F%87%AC%F0%9F%87%A7_English-012169?style=flat-square)](README.md) [![Indonesian](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%A9_Indonesian-ce1126?style=flat-square)](README.id.md) [![Español](https://img.shields.io/badge/%F0%9F%87%AA%F0%9F%87%B8_Espa%C3%B1ol-aa151b?style=flat-square)](README.es.md) [![Français](https://img.shields.io/badge/%F0%9F%87%AB%F0%9F%87%B7_Fran%C3%A7ais-002395?style=flat-square)](README.fr.md) [![Português](https://img.shields.io/badge/%F0%9F%87%B5%F0%9F%87%B9_Portugu%C3%AAs-006600?style=flat-square)](README.pt.md) [![Deutsch](https://img.shields.io/badge/%F0%9F%87%A9%F0%9F%87%AA_Deutsch-000000?style=flat-square)](README.de.md) [![Italiano](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%B9_Italiano-009246?style=flat-square)](README.it.md) [![Русский](https://img.shields.io/badge/%F0%9F%87%B7%F0%9F%87%BA_%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-d52b1e?style=flat-square)](README.ru.md) [![Türkçe](https://img.shields.io/badge/%F0%9F%87%B9%F0%9F%87%B7_T%C3%BCrk%C3%A7e-e30a17?style=flat-square)](README.tr.md) [![العربية](https://img.shields.io/badge/%F0%9F%87%B8%F0%9F%87%A6_%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A%D8%A9-006c35?style=flat-square)](README.ar.md) [![中文](https://img.shields.io/badge/%F0%9F%87%A8%F0%9F%87%B3_%E4%B8%AD%E6%96%87-de2910?style=flat-square)](README.zh.md)
+[![English](https://img.shields.io/badge/English-012169)](../../README.md) [![Indonesian](https://img.shields.io/badge/Indonesian-ce1126)](README.id.md) [![Español](https://img.shields.io/badge/Espa%C3%B1ol-aa151b)](README.es.md) [![Français](https://img.shields.io/badge/Français-002395)](README.fr.md) [![Português](https://img.shields.io/badge/Português-006600)](README.pt.md) [![Deutsch](https://img.shields.io/badge/Deutsch-000000)](README.de.md) [![Italiano](https://img.shields.io/badge/Italiano-009246)](README.it.md) [![Russian](https://img.shields.io/badge/Russian-0039a6)](README.ru.md) [![Türkçe](https://img.shields.io/badge/Turkish-e30a17)](README.tr.md) [![العربية](https://img.shields.io/badge/Arabic-008000)](README.ar.md) [![中文](https://img.shields.io/badge/Chinese-de2910)](README.zh.md)
 
 # FL Daily Edit
 
 [![Python Sürümü](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Lisans: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Lisans: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../../LICENSE)
 
 FL Daily Edit, gerçek dünyadaki transferleri bir `EDIT00000000` kayıt dosyasına uygulayarak SP Football Life 2026 ve eFootball PES 2021 kadrolarını günceller.
 
@@ -28,7 +28,7 @@ Dahil edilen temel sürüm **SP Football Life 2026** için hedeflenmiştir. Gere
 
 UML, daha eski FL26 sürümleri veya milli takım güncellemesi olmayan kurulumlarla uyumlu değildir. Kayıt dosyasını yükledikten sonra yeni bir Ana Lig veya Efsane Olun kariyeri başlatın.
 
-[Dahil edilen temel](base/EDIT00000000), 22 Ağustos 2026 tarihli
+[Dahil edilen temel](../../base/EDIT00000000), 22 Ağustos 2026 tarihli
 [Gondowan's EDIT](https://www.reddit.com/r/SPFootballLife/comments/1vvh129/release_gondowans_edit_file_22082026_latest/) dosyasıdır.
 Tüm ligler için 22/08/2026 son dakika transferlerini, 600'den fazla oyuncunun
 puan değişikliklerini, birinci/ikinci lig yükselme ve düşme değişikliklerini,
@@ -191,7 +191,7 @@ Desteklenen güncelleme grupları yetenekler, mevki yetkinliği, oyun tarzı, oy
 
 ### Kolay Issue Yolu
 
-1. [Oyuncu güncelleme issue formunu](.github/ISSUE_TEMPLATE/player-update.yml) açın. `Player name` kısmını `Pes Retro Stats profile` ile birebir aynı girin, kanıt URL'lerini ekleyin ve `generate-player-draft` etiketini bekleyin.
+1. [Oyuncu güncelleme issue formunu](../../.github/ISSUE_TEMPLATE/player-update.yml) açın. `Player name` kısmını `Pes Retro Stats profile` ile birebir aynı girin, kanıt URL'lerini ekleyin ve `generate-player-draft` etiketini bekleyin.
 2. Yapılandırılan iş akışı profili çeker ve şema-v2 `players/<player-slug>.json` önerisini içeren bir taslak PR açar. Profil verilerinden kaynak anlık görüntüsünü, kimliği, fiziksel ayarları, mevki verilerini, yetenekleri, oyun tarzını, oyuncu becerilerini ve COM tarzlarını türetir.
 3. Yeni oluşturma için yalnızca kaynakta bulunmayan oyun içi değerler `draft.missing` içinde listelenir: kimlik ve oyuncu için PES ID'leri ve forma baskı adları, takım ID'si ve adı, uyruk ID'si, ten rengi ve iris rengi. Bir katkıcı veya bakımcı bunları tamamlamalıdır. Güncelleme için ise oluşturucu, doğrulanmış temelde oyuncuyu bulur ve yalnızca gerçek `from`/`to` farklarını üretir. PES 2021 tarafından desteklenmeyen kaynak mevkiler (örneğin `RWB`), yeniden eşlenmek yerine doğrudan çıkarılır; buna kayıtlı mevki değişikliği de dahildir.
 4. Katkıcılar ve bakımcılar oluşturulan her değeri onaylanmamış bir öneri olarak inceler. CI testi yalnızca bir oyuncu JSON dosyası eklendiğinde veya değiştirildiğinde ve paylaşılan anlamsal doğrulayıcı başarılı olduğunda Player Update'i kabul eder.
@@ -248,4 +248,4 @@ Test paketi; kayıt ayrıştırma ve doğrulamayı, transfer uzlaştırmasını,
 
 ## Lisans
 
-FL Daily Edit, [MIT Lisansı](LICENSE) kapsamında sunulmaktadır.
+FL Daily Edit, [MIT Lisansı](../../LICENSE) kapsamında sunulmaktadır.

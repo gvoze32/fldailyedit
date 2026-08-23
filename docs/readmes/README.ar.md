@@ -1,11 +1,11 @@
-[![English](https://img.shields.io/badge/%F0%9F%87%AC%F0%9F%87%A7_English-012169?style=flat-square)](README.md) [![Indonesian](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%A9_Indonesian-ce1126?style=flat-square)](README.id.md) [![Español](https://img.shields.io/badge/%F0%9F%87%AA%F0%9F%87%B8_Espa%C3%B1ol-aa151b?style=flat-square)](README.es.md) [![Français](https://img.shields.io/badge/%F0%9F%87%AB%F0%9F%87%B7_Fran%C3%A7ais-002395?style=flat-square)](README.fr.md) [![Português](https://img.shields.io/badge/%F0%9F%87%B5%F0%9F%87%B9_Portugu%C3%AAs-006600?style=flat-square)](README.pt.md) [![Deutsch](https://img.shields.io/badge/%F0%9F%87%A9%F0%9F%87%AA_Deutsch-000000?style=flat-square)](README.de.md) [![Italiano](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%B9_Italiano-009246?style=flat-square)](README.it.md) [![Русский](https://img.shields.io/badge/%F0%9F%87%B7%F0%9F%87%BA_%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-d52b1e?style=flat-square)](README.ru.md) [![Türkçe](https://img.shields.io/badge/%F0%9F%87%B9%F0%9F%87%B7_T%C3%BCrk%C3%A7e-e30a17?style=flat-square)](README.tr.md) [![العربية](https://img.shields.io/badge/%F0%9F%87%B8%F0%9F%87%A6_%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A%D8%A9-006c35?style=flat-square)](README.ar.md) [![中文](https://img.shields.io/badge/%F0%9F%87%A8%F0%9F%87%B3_%E4%B8%AD%E6%96%87-de2910?style=flat-square)](README.zh.md)
+[![English](https://img.shields.io/badge/English-012169)](../../README.md) [![Indonesian](https://img.shields.io/badge/Indonesian-ce1126)](README.id.md) [![Español](https://img.shields.io/badge/Espa%C3%B1ol-aa151b)](README.es.md) [![Français](https://img.shields.io/badge/Français-002395)](README.fr.md) [![Português](https://img.shields.io/badge/Português-006600)](README.pt.md) [![Deutsch](https://img.shields.io/badge/Deutsch-000000)](README.de.md) [![Italiano](https://img.shields.io/badge/Italiano-009246)](README.it.md) [![Russian](https://img.shields.io/badge/Russian-0039a6)](README.ru.md) [![Türkçe](https://img.shields.io/badge/Turkish-e30a17)](README.tr.md) [![العربية](https://img.shields.io/badge/Arabic-008000)](README.ar.md) [![中文](https://img.shields.io/badge/Chinese-de2910)](README.zh.md)
 
 <div dir="rtl">
 
 # FL Daily Edit
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../../LICENSE)
 
 يحدّث FL Daily Edit قوائم الفرق في SP Football Life 2026 وeFootball PES 2021 من خلال
 تطبيق الانتقالات الواقعية على ملف حفظ `EDIT00000000`.
@@ -29,7 +29,7 @@
 تحديث المنتخبات الوطنية. ابدأ مسيرة جديدة في Master League أو Become a Legend
 بعد تثبيت ملف الحفظ.
 
-يمثل [الملف الأساسي المرفق](base/EDIT00000000)
+يمثل [الملف الأساسي المرفق](../../base/EDIT00000000)
 [Gondowan's EDIT بتاريخ 22 أغسطس 2026](https://www.reddit.com/r/SPFootballLife/comments/1vvh129/release_gondowans_edit_file_22082026_latest/).
 ويتضمن انتقالات اللحظة الأخيرة حتى 22/08/2026 لجميع الدوريات، وتغييرات تقييم
 أكثر من 600 لاعب، وتغييرات الصعود والهبوط بين الدرجتين الأولى والثانية، وإصلاحات
@@ -201,7 +201,7 @@ python run.py run --help
 
 ### المسار المبسط عبر البلاغ
 
-1. افتح [نموذج بلاغ تحديث اللاعب](.github/ISSUE_TEMPLATE/player-update.yml).
+1. افتح [نموذج بلاغ تحديث اللاعب](../../.github/ISSUE_TEMPLATE/player-update.yml).
    أدخل `Player name` تمامًا كما يظهر في `Pes Retro Stats profile` معتمد واحد،
    وقدّم عناوين URL التي تثبت ذلك، وانتظر حتى يطبق أحد المشرفين التصنيف الدقيق
    `generate-player-draft`.
@@ -304,6 +304,6 @@ pytest -v
 
 ## الترخيص
 
-يتوفر FL Daily Edit بموجب [ترخيص MIT](LICENSE).
+يتوفر FL Daily Edit بموجب [ترخيص MIT](../../LICENSE).
 
 </div>
