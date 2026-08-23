@@ -48,7 +48,18 @@ jobs:
           python run.py players apply \
             --base-revision "$BASE_REVISION" \
             --edit-file output/EDIT00000000 \
+            --appearance-file reference/PlayerAppearance.bin \
+            --preflight \
             --in-place
+          python run.py players apply \
+            --base-revision "$BASE_REVISION" \
+            --edit-file output/EDIT00000000 \
+            --appearance-file reference/PlayerAppearance.bin \
+            --in-place
+          python run.py base-audit \
+            --edit-file output/EDIT00000000 \
+            --strict \
+            --json > output/base_roster_audit.json
 
       - name: Validate final save
         run: python run.py validate --edit-file output/EDIT00000000
@@ -76,7 +87,7 @@ jobs:
         with:
           name: updated-fl-save-and-reports-${{ github.run_id }}-deep
           path: |
-            output/EDIT00000000
+            output/base_roster_audit.json
             output/transfer_summary.md
             output/transfer_summary.html
             data/transfer_log.jsonl
