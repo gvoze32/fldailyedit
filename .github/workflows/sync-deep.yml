@@ -48,13 +48,13 @@ jobs:
           python run.py players apply \
             --base-revision "$BASE_REVISION" \
             --edit-file output/EDIT00000000 \
-            --appearance-file reference/PlayerAppearance.bin \
+            --appearance-file data/PlayerAppearance.bin \
             --preflight \
             --in-place
           python run.py players apply \
             --base-revision "$BASE_REVISION" \
             --edit-file output/EDIT00000000 \
-            --appearance-file reference/PlayerAppearance.bin \
+            --appearance-file data/PlayerAppearance.bin \
             --in-place
           python run.py base-audit \
             --edit-file output/EDIT00000000 \

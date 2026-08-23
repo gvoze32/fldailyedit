@@ -34,7 +34,7 @@ from tools.cpk_extract import extract_file, extract_game_databases, list_files
 
 CPK_PATH = Path("reference/data_s2526.cpk")
 EXTRA_CPK_PATH = Path("reference/download/data_extra.cpk")
-APPEARANCE_PATH = Path("reference/PlayerAppearance.bin")
+APPEARANCE_PATH = Path("data/PlayerAppearance.bin")
 
 
 

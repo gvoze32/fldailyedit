@@ -1521,7 +1521,7 @@ def test_create_is_disabled_even_when_roster_has_space(tmp_path):
 
 
 @pytest.mark.skipif(
-    not Path("reference/PlayerAppearance.bin").exists(),
+    not Path("data/PlayerAppearance.bin").exists(),
     reason="appearance fixture is not available",
 )
 def test_opt_in_create_uses_validated_appearance_donor(tmp_path):
@@ -1533,7 +1533,7 @@ def test_opt_in_create_uses_validated_appearance_donor(tmp_path):
     edit_file = make_player_spec_edit_file(roster_size=39)
     spec = dastan_spec(tmp_path)
     assert spec.create is not None
-    source = Path("reference/PlayerAppearance.bin")
+    source = Path("data/PlayerAppearance.bin")
     donor = load_appearance_template(source, donor_player_id=91)
     baseline_errors = tuple(edit_file.validate_integrity()["errors"])
     original_count = edit_file.player_count
@@ -1574,7 +1574,7 @@ def test_opt_in_create_uses_validated_appearance_donor(tmp_path):
 
 
 @pytest.mark.skipif(
-    not Path("reference/PlayerAppearance.bin").exists(),
+    not Path("data/PlayerAppearance.bin").exists(),
     reason="appearance fixture is not available",
 )
 def test_opt_in_create_can_release_safe_overflow_candidate(tmp_path):
@@ -1584,7 +1584,7 @@ def test_opt_in_create_can_release_safe_overflow_candidate(tmp_path):
     edit_file = make_player_spec_edit_file(roster_size=40)
     baseline_errors = tuple(edit_file.validate_integrity()["errors"])
     spec = dastan_spec(tmp_path)
-    appearance_path = Path("reference/PlayerAppearance.bin")
+    appearance_path = Path("data/PlayerAppearance.bin")
     edit_file.attach_player_appearance(appearance_path.read_bytes())
     all_players = {
         player_id: PlayerInfo(
