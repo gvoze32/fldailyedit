@@ -1314,9 +1314,9 @@ def test_sync_workflows_apply_reviewed_player_specs_after_transfers() -> None:
         apply_index = sync.index("python run.py players apply")
         assert run_index < apply_index
         apply_block = sync[apply_index:]
-        assert "--allow-overflow-release" not in apply_block
-        assert "--appearance-file data/PlayerAppearance.bin" in apply_block
-        assert "--appearance-file reference/PlayerAppearance.bin" not in apply_block
+        assert apply_block.count("--no-allow-create") == 2
+        assert apply_block.count("--no-allow-overflow-release") == 2
+        assert "--appearance-file" not in apply_block
 def test_sync_workflows_do_not_upload_partial_save_artifacts() -> None:
     workflows = (
         (Path(".github/workflows/sync-fast.yml"), "fast"),

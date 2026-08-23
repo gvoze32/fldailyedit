@@ -121,6 +121,9 @@ These are separate workflows:
   player and valid `PlayerAppearance.bin` source are available. Use
   `--no-allow-create` to disable them; missing or invalid appearance-source data
   rejects the spec without changing save bytes.
+- Automated Fast and Deep sync workflows temporarily pass
+  `--no-allow-create` and `--no-allow-overflow-release`; local
+  `players apply` keeps its normal create behavior.
 - For `players apply`, a full destination roster uses automatic roster-space
   release based on player roles by default. The explicit positive flag is
   `--allow-overflow-release`; use `--no-allow-overflow-release` to keep it

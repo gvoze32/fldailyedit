@@ -120,6 +120,8 @@ Son flujos de trabajo separados:
   `players apply` las intenta por defecto con un donante de apariencia explícito y una fuente
   válida de `PlayerAppearance.bin`. Use `--no-allow-create` para desactivarlas; un donante
   ausente o inválido rechaza la especificación sin cambiar los bytes del guardado.
+
+- Los workflows de sincronización Fast y Deep usan temporalmente `--no-allow-create` y `--no-allow-overflow-release`; la sincronización automática no aplica especificaciones `create`. El comando local `players apply` mantiene su comportamiento normal.
 - Para `players apply`, una plantilla llena usa overflow basado en roles por defecto. La opción
   positiva es `--allow-overflow-release`; use `--no-allow-overflow-release` para omitirlo.
   No se exige un OVR positivo.

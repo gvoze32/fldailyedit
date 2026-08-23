@@ -119,6 +119,8 @@ Si tratta di flussi di lavoro separati:
   prova a eseguirle per impostazione predefinita quando sono disponibili un donor esplicito e
   una fonte valida di `PlayerAppearance.bin`. Usa `--no-allow-create` per disattivarle; un donor
   assente o non valido rifiuta la specifica senza modificare i byte del salvataggio.
+
+- I workflow di sincronizzazione Fast e Deep usano temporaneamente `--no-allow-create` e `--no-allow-overflow-release`; la sincronizzazione automatica non applica le specifiche `create`. Il comando locale `players apply` mantiene il comportamento normale.
 - Per `players apply`, una rosa completa usa l'overflow basato sui ruoli per impostazione
   predefinita. L'opzione positiva è `--allow-overflow-release`; usa
   `--no-allow-overflow-release` per ignorarlo. Non è richiesto un OVR positivo.

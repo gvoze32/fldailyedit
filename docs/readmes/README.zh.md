@@ -100,6 +100,8 @@ Windows 安装程序是面向新手的推荐方式。安装程序界面目前仅
 - 新球员的 `create` 规范仍可加载和审核。存在明确 donor 和有效
   `PlayerAppearance.bin` 来源时，`players apply` 默认尝试创建。使用
   `--no-allow-create` 可禁用；donor 缺失或无效时不会改变存档。
+
+- Fast 和 Deep 同步工作流暂时使用 `--no-allow-create` 和 `--no-allow-overflow-release`；自动同步不会应用 `create` 规范。本地 `players apply` 保持正常行为。
 - `players apply` 在目标阵容已满时默认使用基于角色的 overflow；正向选项是
   `--allow-overflow-release`，使用 `--no-allow-overflow-release` 可跳过。
 

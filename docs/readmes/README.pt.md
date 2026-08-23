@@ -105,6 +105,8 @@ Estes são fluxos de trabalho distintos:
   tenta essas especificações por padrão quando há doador explícito e fonte válida de
   `PlayerAppearance.bin`. Use `--no-allow-create` para desativá-las; dados ausentes ou inválidos
   rejeitam a especificação sem alterar os bytes do arquivo.
+
+- Os workflows de sincronização Fast e Deep usam temporariamente `--no-allow-create` e `--no-allow-overflow-release`; a sincronização automática não aplica especificações `create`. O comando local `players apply` mantém o comportamento normal.
 - Para `players apply`, um elenco cheio usa overflow baseado em funções por padrão. A opção
   positiva é `--allow-overflow-release`; use `--no-allow-overflow-release` para ignorá-lo.
   Não há exigência de OVR positivo.

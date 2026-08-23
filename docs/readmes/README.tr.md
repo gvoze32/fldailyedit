@@ -109,6 +109,8 @@ Bunlar ayrı iş akışlarıdır:
 - Yeni oyuncular için `create` tanımları yüklenebilir ve incelenebilir. Geçerli bir donor ve
   `PlayerAppearance.bin` kaynağı varsa `players apply` bunları varsayılan olarak dener.
   `--no-allow-create` ile kapatılabilir; eksik/geçersiz donor kaydı değiştirmez.
+
+- Fast ve Deep senkronizasyon iş akışları geçici olarak `--no-allow-create` ve `--no-allow-overflow-release` kullanır; otomatik senkronizasyon `create` tanımlarını uygulamaz. Yerel `players apply` normal davranışını korur.
 - `players apply` için dolu kadroda role dayalı overflow varsayılandır. Pozitif seçenek
   `--allow-overflow-release`, kapatmak için `--no-allow-overflow-release` kullanılır.
 

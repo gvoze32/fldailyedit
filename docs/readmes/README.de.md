@@ -107,6 +107,8 @@ Dies sind getrennte Arbeitsabläufe:
   versucht sie standardmäßig bei vorhandenem explizitem Donor und gültiger
   `PlayerAppearance.bin`-Quelle. Mit `--no-allow-create` werden sie deaktiviert; fehlende oder
   ungültige Donor-Daten lassen den Speicherstand unverändert.
+
+- Die Fast- und Deep-Synchronisierungs-Workflows verwenden vorübergehend `--no-allow-create` und `--no-allow-overflow-release`; die automatische Synchronisierung wendet keine `create`-Spezifikationen an. Der lokale Befehl `players apply` behält das normale Verhalten bei.
 - Für `players apply` nutzt ein voller Zielkader standardmäßig rollenbasiertes Overflow.
   Der positive Schalter ist `--allow-overflow-release`; `--no-allow-overflow-release` deaktiviert es.
 

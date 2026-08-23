@@ -120,6 +120,8 @@ Semua item roadmap saat ini telah selesai. Kami menunggu ide berguna berikutnya.
   eksplisit dan sumber `PlayerAppearance.bin` valid tersedia. Gunakan
   `--no-allow-create` untuk menonaktifkannya; donor yang hilang atau rusak
   menolak spec tanpa mengubah byte save.
+
+- Workflow sinkronisasi Fast dan Deep sementara memakai `--no-allow-create` dan `--no-allow-overflow-release`; sinkronisasi otomatis tidak menerapkan spec create. Perintah lokal `players apply` tetap memakai perilaku normal.
 - Untuk `players apply`, roster tujuan penuh menggunakan overflow berbasis role
   secara default. Flag positif eksplisitnya adalah `--allow-overflow-release`;
   gunakan `--no-allow-overflow-release` agar tetap unchanged. Selector melindungi

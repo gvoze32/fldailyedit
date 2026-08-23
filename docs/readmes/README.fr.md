@@ -117,6 +117,8 @@ Il s'agit de flux de travail distincts :
   `players apply` les tente par défaut lorsqu'un donneur explicite et une source valide de
   `PlayerAppearance.bin` sont disponibles. Utilisez `--no-allow-create` pour les désactiver ;
   un donneur absent ou invalide laisse la sauvegarde inchangée.
+
+- Les workflows de synchronisation Fast et Deep utilisent temporairement `--no-allow-create` et `--no-allow-overflow-release` ; la synchronisation automatique n'applique pas les spécifications `create`. La commande locale `players apply` conserve son comportement normal.
 - Pour `players apply`, un effectif complet utilise l'overflow basé sur les rôles par défaut.
   L'option positive est `--allow-overflow-release`; `--no-allow-overflow-release` le désactive.
 
