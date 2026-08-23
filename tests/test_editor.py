@@ -17,6 +17,7 @@ from editor.editfile import (
     HDR_STADIUM_COUNT, HDR_COMPETITION_COUNT, HDR_UNKNOWN_COUNT,
     HDR_TEAM_PLAYER_COUNT, HDR_GAME_PLAN_COUNT,
     TP_TEAM_ID, TP_PLAYER_IDS, TP_SHIRT_NUMBERS, TP_MAX_PLAYERS,
+    CREATED_PLAYER_ID_MIN,
     GP_TEAM_ID, GP_LINEUP, GP_CAPTAIN,
     PE_PLAYER_ID, PE_PLAYER_NAME,
     TE_TEAM_ID, TE_TEAM_NAME,
@@ -631,8 +632,8 @@ class TestReleaseAndAddPlayer:
         assert ef.get_team_roster(101).has_player(1001)
         assert not ef.get_team_roster(102).has_player(1001)
 
-    def test_overflow_releases_lowest_rated_player(self):
-        """When team is full (40/40), adding a 41st player auto-releases the lowest rated player."""
+    def test_overflow_releases_deepest_reserve_without_ability_ranking(self):
+        """A full roster releases its deepest reserve, regardless of OVR."""
         data = self._build_test_data()
         ef = EditFile()
         ef.load_bytes(data)
@@ -646,10 +647,14 @@ class TestReleaseAndAddPlayer:
         assert roster.is_full is True
         assert roster.roster_size == 40
 
-        # Inject fake player ratings into cache: make slot 30 (player 1030) have lowest rating
+        # Ability values are intentionally irrelevant to overflow ranking.
         from editor.models import PlayerInfo
         ef._player_cache = {
-            1000 + i: PlayerInfo(player_id=1000 + i, name=f"P{i}", overall_rating=85 if i != 30 else 55)
+            1000 + i: PlayerInfo(
+                player_id=1000 + i,
+                name=f"P{i}",
+                overall_rating=99 if i == 30 else 40,
+            )
             for i in range(40)
         }
 
@@ -660,45 +665,113 @@ class TestReleaseAndAddPlayer:
         new_roster = ef.get_team_roster(101)
         assert new_roster.roster_size == 40
         assert 9999 in new_roster.roster
-        # Player 1030 (lowest rating 55) should have been released
-        assert 1030 not in new_roster.roster
-
-    def test_overflow_protects_goalkeepers(self):
-        """Even if backup GK has lowest raw rating, they must NOT be released if squad has <= 2 GKs."""
+        # The deepest reserve (slot 39) is released, not the lowest OVR.
+        assert 1039 not in new_roster.roster
+    
+    def test_overflow_uses_game_plan_depth_over_roster_slot(self):
+        """The game-plan reserve order wins over raw roster-slot order."""
         data = self._build_test_data()
         ef = EditFile()
         ef.load_bytes(data)
 
-        # Fill team 101 to 40 players
         to_entry = ef._find_team_player_entry_offset(101)
         for slot in range(40):
             ef._write_player_slot(to_entry, slot, 1000 + slot, slot + 1)
 
-        # 2 GKs: slot 0 (starting GK, 80 OVR) and slot 25 (backup GK, 52 OVR)
-        # Outfield reserve: slot 35 (winger, 62 OVR)
+        lineup_start = ef._find_game_plan_offset(101) + GP_LINEUP
+        lineup = list(ef._data[lineup_start : lineup_start + TP_MAX_PLAYERS])
+        lineup[18], lineup[39] = lineup[39], lineup[18]
+        ef._data[lineup_start : lineup_start + TP_MAX_PLAYERS] = bytes(lineup)
+
+        slot, player_id = ef.find_overflow_release_candidate(101)
+
+        assert (slot, player_id) == (18, 1018)
+
+    def test_overflow_prefers_native_reserve_over_created_player(self):
+        """A created deep reserve is retained when a native reserve exists."""
+        data = self._build_test_data()
+        ef = EditFile()
+        ef.load_bytes(data)
+
+        to_entry = ef._find_team_player_entry_offset(101)
+        for slot in range(39):
+            ef._write_player_slot(to_entry, slot, 1000 + slot, slot + 1)
+        ef._write_player_slot(to_entry, 39, CREATED_PLAYER_ID_MIN, 40)
+
+        slot, player_id = ef.find_overflow_release_candidate(101)
+
+        assert (slot, player_id) == (38, 1038)
+
+    def test_overflow_respects_per_club_protected_players(self):
+        """A configured protected player is excluded from the candidate pool."""
+        from editor.release_policy import ReleasePolicy
+
+        data = self._build_test_data()
+        ef = EditFile()
+        ef.load_bytes(data)
+        to_entry = ef._find_team_player_entry_offset(101)
+        for slot in range(40):
+            ef._write_player_slot(to_entry, slot, 1000 + slot, slot + 1)
+        ef.attach_release_policy(ReleasePolicy({101: frozenset({1039})}, {}))
+
+        slot, player_id = ef.find_overflow_release_candidate(101)
+
+        assert (slot, player_id) == (38, 1038)
+
+    def test_overflow_prefers_low_usage_over_deeper_unknown_reserve(self):
+        """Known offline usage beats raw reserve depth within one tier."""
+        from editor.release_policy import PlayerUsage, ReleasePolicy
+
+        data = self._build_test_data()
+        ef = EditFile()
+        ef.load_bytes(data)
+        to_entry = ef._find_team_player_entry_offset(101)
+        for slot in range(40):
+            ef._write_player_slot(to_entry, slot, 1000 + slot, slot + 1)
+        ef.attach_release_policy(
+            ReleasePolicy(
+                {},
+                {
+                    1038: PlayerUsage(0, 0, 0),
+                    1039: PlayerUsage(900, 20, 30),
+                },
+            )
+        )
+
+        slot, player_id = ef.find_overflow_release_candidate(101)
+
+        assert (slot, player_id) == (38, 1038)
+
+
+    def test_overflow_protects_goalkeepers(self):
+        """Backup GK stays protected while two goalkeepers are registered."""
+        data = self._build_test_data()
+        ef = EditFile()
+        ef.load_bytes(data)
+
+        to_entry = ef._find_team_player_entry_offset(101)
+        for slot in range(40):
+            ef._write_player_slot(to_entry, slot, 1000 + slot, slot + 1)
+
         from editor.models import PlayerInfo
         ef._player_cache = {
             1000 + i: PlayerInfo(
                 player_id=1000 + i,
                 name=f"P{i}",
-                overall_rating=80 if i != 25 and i != 35 else (52 if i == 25 else 62),
                 position="GK" if i in (0, 25) else "CF",
             )
             for i in range(40)
         }
 
-        # Add 41st player
         ok = ef.add_player(9999, to_team_id=101, allow_overflow_release=True)
         assert ok is True
 
         new_roster = ef.get_team_roster(101)
-        # Backup GK (1025) must remain protected because team only has 2 GKs
         assert 1025 in new_roster.roster
-        # Outfield reserve (1035) should be released instead
-        assert 1035 not in new_roster.roster
+        assert 1039 not in new_roster.roster
 
-    def test_overflow_releases_excess_third_goalkeeper(self):
-        """If squad has 3+ GKs and 3rd GK is lowest, 3rd reserve GK can be released while preserving 2 GKs."""
+    def test_overflow_releases_deepest_reserve_with_excess_goalkeepers(self):
+        """An excess reserve GK is eligible once two GKs remain protected."""
         data = self._build_test_data()
         ef = EditFile()
         ef.load_bytes(data)
@@ -707,14 +780,12 @@ class TestReleaseAndAddPlayer:
         for slot in range(40):
             ef._write_player_slot(to_entry, slot, 1000 + slot, slot + 1)
 
-        # 3 GKs: slot 0 (85), slot 11 (75), slot 38 (3rd reserve GK, 45 OVR)
         from editor.models import PlayerInfo
         ef._player_cache = {
             1000 + i: PlayerInfo(
                 player_id=1000 + i,
                 name=f"P{i}",
-                overall_rating=80 if i != 38 else 45,
-                position="GK" if i in (0, 11, 38) else "CMF",
+                position="GK" if i in (0, 11, 39) else "CMF",
             )
             for i in range(40)
         }
@@ -723,9 +794,7 @@ class TestReleaseAndAddPlayer:
         assert ok is True
 
         new_roster = ef.get_team_roster(101)
-        # 3rd GK (1038) is released
-        assert 1038 not in new_roster.roster
-        # Starting and 2nd GKs (1000, 1011) remain
+        assert 1039 not in new_roster.roster
         assert 1000 in new_roster.roster
         assert 1011 in new_roster.roster
     def test_full_roster_rejects_unapproved_overflow_release(self):

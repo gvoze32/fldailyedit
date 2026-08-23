@@ -990,6 +990,8 @@ def test_players_parser_dispatches_nested_apply(monkeypatch):
     assert dispatched[0].edit_file == "source"
     assert dispatched[0].output == "destination"
     assert dispatched[0].in_place is False
+    assert dispatched[0].allow_create is True
+    assert dispatched[0].allow_overflow_release is True
 
 
 def test_players_parser_dispatches_overflow_release_option(monkeypatch):

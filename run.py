@@ -56,6 +56,13 @@ from editor.player_spec import (
 )
 from editor.player_catalog import PlayerCatalogError, load_id_name_text
 from editor.metadata_audit import audit_metadata, format_metadata_audit
+from editor.base_audit import audit_base_roster, format_base_roster_audit
+from editor.base_refresh import BaseRefreshError, refresh_base
+from editor.release_policy import (
+    ReleasePolicyError,
+    import_usage_csv,
+    load_release_policy,
+)
 from editor.metadata_diff import (
     compare_metadata_variants,
     format_metadata_variant_diff,
@@ -111,6 +118,7 @@ class PlannedRosterAction:
     current_team_id: int | None
     reason: str = ""
     overflow_player_id: int | None = None
+    overflow_details: dict[str, object] | None = None
 
 
 def _optional_positive_int(value) -> int | None:
@@ -705,6 +713,18 @@ def _plan_roster_actions(
                         item.reason = "no_safe_overflow_candidate"
                     else:
                         item.overflow_player_id = overflow_player_id
+                        describe = getattr(
+                            edit_file,
+                            "describe_overflow_release_candidate",
+                            None,
+                        )
+                        if callable(describe):
+                            item.overflow_details = describe(
+                                destination,
+                                overflow_player_id,
+                                roster_player_ids=rosters[destination],
+                                protected_player_ids=transferred_in_plan,
+                            )
                         remove_from_roster(destination, overflow_player_id)
 
         if item.action == "move":
@@ -944,6 +964,90 @@ def cmd_metadata_audit(args):
                 print(f"  {label}: {source or 'unavailable'}")
     finally:
         crypto.cleanup_temp(temp_dir)
+
+
+def cmd_base_roster_audit(args) -> None:
+    """Audit active Player Updates against one decrypted base roster."""
+    edit_path = Path(args.edit_file)
+    _ensure_safe_edit_paths(edit_path)
+    json_output = bool(getattr(args, "json", False))
+    strict = bool(getattr(args, "strict", False))
+    temp_dir = None
+    try:
+        temp_dir = crypto.decrypt(edit_path)
+        data_dat = temp_dir / "data.dat"
+        if not data_dat.exists():
+            dat_files = list(temp_dir.glob("*.dat"))
+            if not dat_files:
+                raise PlayerSpecError("decryption produced no data block")
+            data_dat = max(dat_files, key=lambda path: path.stat().st_size)
+        edit_file = EditFile()
+        edit_file.load(data_dat)
+        specs = load_player_specs(getattr(args, "spec_dir", None))
+        as_of = date.fromisoformat(
+            getattr(args, "as_of", None) or date.today().isoformat()
+        )
+        report = audit_base_roster(edit_file, specs, as_of=as_of)
+        if json_output:
+            print(json.dumps(report.to_dict(), sort_keys=True))
+        else:
+            print(format_base_roster_audit(report))
+        if strict and not report.valid:
+            raise SystemExit(2)
+    except Exception as exc:
+        print(f"Base roster audit failed: {exc}")
+        raise SystemExit(2) from exc
+    finally:
+        if temp_dir is not None:
+            crypto.cleanup_temp(temp_dir)
+
+
+def cmd_base_refresh(args) -> None:
+    """Verify and optionally promote one local or HTTPS EDIT base candidate."""
+    try:
+        report = refresh_base(
+            args.source,
+            revision=args.revision,
+            spec_dir=getattr(args, "spec_dir", None),
+            as_of=date.fromisoformat(
+                getattr(args, "as_of", None) or date.today().isoformat()
+            ),
+            promote=bool(getattr(args, "promote", False)),
+            strict_audit=bool(getattr(args, "strict_audit", False)),
+        )
+        if getattr(args, "json", False):
+            print(json.dumps(report.to_dict(), sort_keys=True))
+        else:
+            print(
+                f"Base candidate verified: {report.candidate}\n"
+                f"  SHA-256: {report.sha256}\n"
+                f"  Size: {report.size:,} bytes\n"
+                f"  Audit: {'PASS' if report.audit.valid else 'ATTENTION'} "
+                f"({report.audit.issue_count} issue(s))\n"
+                f"  Promoted: {report.promoted}"
+            )
+    except BaseRefreshError as exc:
+        print(f"Base refresh failed: {exc}")
+        raise SystemExit(2) from exc
+
+
+def cmd_usage_import(args) -> None:
+    """Merge CSV player usage counters into the offline release policy."""
+    try:
+        policy = import_usage_csv(
+            args.input,
+            getattr(args, "output", None),
+            source=getattr(args, "source", ""),
+            season=getattr(args, "season", ""),
+            as_of=getattr(args, "as_of", ""),
+        )
+        print(
+            f"Imported {len(policy.usage)} usage snapshots into "
+            f"{getattr(args, 'output', None) or config.RELEASE_POLICY_FILE}"
+        )
+    except ReleasePolicyError as exc:
+        print(f"Usage import failed: {exc}")
+        raise SystemExit(2) from exc
 def _resolve_comparison_cpk(
     explicit_path: Path | str | None,
     game_root: Path | str | None,
@@ -1158,6 +1262,28 @@ def _scrape_run_transfers(args):
         if since_date
         else f"window '{window}' ({start_date} to {end_date or 'latest'})"
     )
+    if bool(getattr(args, "numbers_only", False)):
+        print(
+            "\n🔢 Number Fix Mode: fetching current squad numbers "
+            f"({cutoff_info})..."
+        )
+        if club_filter:
+            clubs = [club.strip() for club in club_filter.split(",") if club.strip()]
+            observations = fetch_transfers_for_club_names(
+                clubs, since_date=since_date, window=window
+            )
+        else:
+            observations = fetch_major_clubs_transfers_safely(
+                since_date=since_date, window=window
+            )
+        transfers = [
+            transfer
+            for transfer in merge_transfers([observations])
+            if transfer.transfer_type == "shirt_number_update"
+        ]
+        transfers.sort(key=_transfer_sort_key)
+        print(f"  Squad-number observations: {len(transfers)}")
+        return transfers
     transfer_batches = []
     if club_filter:
         clubs = [club.strip() for club in club_filter.split(",") if club.strip()]
@@ -1430,8 +1556,10 @@ def _load_player_appearance_data(
         return None, None
 
 
-
-def _load_match_database(edit_file: EditFile):
+def _load_match_database(
+    edit_file: EditFile,
+    release_policy_file: str | Path | None = None,
+):
     """Build roster-aware player and club indexes from one validated save."""
     print("\n📋 Reading selected save database...")
     playerbin_database, playerbin_source = _load_playerbin_database()
@@ -1454,6 +1582,19 @@ def _load_match_database(edit_file: EditFile):
         )
     players = edit_file.get_all_players()
     edit_file._player_cache = players
+    try:
+        release_policy = load_release_policy(release_policy_file)
+    except ReleasePolicyError as exc:
+        raise PlayerCatalogError(str(exc)) from exc
+    attach_policy = getattr(edit_file, "attach_release_policy", None)
+    if callable(attach_policy):
+        attach_policy(release_policy)
+    if release_policy.protected_players or release_policy.usage:
+        print(
+            "  Release policy: "
+            f"{len(release_policy.protected_players)} protected clubs, "
+            f"{len(release_policy.usage)} usage snapshots"
+        )
     teams_info = edit_file.get_all_team_info()
     club_ids = edit_file.get_club_team_ids()
 
@@ -1540,15 +1681,6 @@ def _match_and_plan_transfers(
     allow_overflow_release,
 ):
     """Match scraped identities, classify them, and create safe roster actions."""
-    catalog_report = getattr(edit_file, "player_catalog_report", None)
-    if allow_overflow_release and (
-        catalog_report is None
-        or not catalog_report.has_complete_overflow_metadata
-    ):
-        raise PlayerCatalogError(
-            "--allow-overflow-release requires complete player position and OVR "
-            "metadata; the current FL26 name catalog does not provide it"
-        )
 
     print(
         "\n🔍 Matching transfers with roster-aware identity verification "
@@ -1663,9 +1795,25 @@ def _print_dry_run(
 
         would_apply += 1
         if planned_action.overflow_player_id is not None:
+            details = planned_action.overflow_details or {}
+            name = details.get("name") or "unknown player"
+            role_group = details.get("role_group", "unknown")
+            role = details.get("role", "?")
+            usage = details.get("usage")
+            if isinstance(usage, dict):
+                usage_text = (
+                    f"minutes={usage.get('minutes', '?')}, "
+                    f"starts={usage.get('starts', '?')}, "
+                    f"apps={usage.get('appearances', '?')}, "
+                    f"news={usage.get('news_mentions', '?')}"
+                )
+            else:
+                usage_text = "usage=unavailable"
             print(
-                "  WOULD AUTO-RELEASE: player "
-                f"{planned_action.overflow_player_id} from team {match.to_team_id}"
+                f"  WOULD AUTO-RELEASE: {name} "
+                f"(id={planned_action.overflow_player_id}, "
+                f"role={role_group}:{role}, {usage_text}) "
+                f"from team {match.to_team_id}"
             )
         print(f"  WOULD {action.upper()}: {match}")
     print(
@@ -1815,6 +1963,7 @@ class _RunLocalUpdateRuntime:
             club=request.club,
             deep=request.deep,
             fotmob_only=request.fotmob_only,
+            numbers_only=request.numbers_only,
             allow_overflow_release=request.allow_overflow_release,
         )
 
@@ -1947,9 +2096,17 @@ class _RunLocalUpdateRuntime:
         _token: CancellationToken,
     ):
         try:
-            matcher, all_rosters, team_player_map, club_ids = _load_match_database(
-                prepared.edit_file
-            )
+            if request.release_policy_file is None:
+                matcher, all_rosters, team_player_map, club_ids = (
+                    _load_match_database(prepared.edit_file)
+                )
+            else:
+                matcher, all_rosters, team_player_map, club_ids = (
+                    _load_match_database(
+                        prepared.edit_file,
+                        request.release_policy_file,
+                    )
+                )
             baseline_integrity = prepared.edit_file.validate_integrity()
             prepared.pre_mutation_integrity_errors = tuple(
                 str(error) for error in baseline_integrity.get("errors", [])
@@ -2376,9 +2533,11 @@ def cmd_run(args):
         threshold=getattr(args, "threshold", None) or config.MATCH_THRESHOLD_PLAYER,
         popular=bool(getattr(args, "popular", False)),
         fotmob_only=bool(getattr(args, "fotmob_only", False)),
+        numbers_only=bool(getattr(args, "numbers_only", False)),
         allow_overflow_release=bool(
-            getattr(args, "allow_overflow_release", False)
+            getattr(args, "allow_overflow_release", True)
         ),
+        release_policy_file=getattr(args, "release_policy_file", None),
         dry_run=dry_run,
     )
 
@@ -2756,6 +2915,39 @@ def _raise_for_player_spec_mutation_failures(
     )
     raise SystemExit(2)
 
+def _print_player_apply_preflight(
+    edit_file: EditFile,
+    specs: tuple[PlayerSpec, ...],
+    results: tuple[SpecResult, ...],
+    appearance_source: str | None,
+) -> None:
+    """Print create destinations and safety inputs without mutating a save."""
+    print("\nPlayer Apply Preflight:")
+    for spec, result in zip(specs, results, strict=True):
+        if spec.create is None:
+            continue
+        create = spec.create
+        roster = edit_file.get_team_roster(create.team_id)
+        roster_text = (
+            "missing"
+            if roster is None
+            else f"{roster.roster_size}/{len(roster.player_ids)}"
+        )
+        loan_text = "none"
+        if spec.loan is not None:
+            loan_text = (
+                f"{spec.loan.parent_team_name} "
+                f"({spec.loan.start_date.isoformat()}..{spec.loan.end_date.isoformat()})"
+            )
+        appearance_text = appearance_source or "unavailable"
+        print(
+            f"  {spec.identity.name}: {result.status} ({result.reason}); "
+            f"destination={create.team_name} ({create.team_id}); "
+            f"roster={roster_text}; loan_parent={loan_text}; "
+            f"appearance={appearance_text}"
+        )
+    print("  No files were written.")
+
 
 def cmd_players_apply(args) -> None:
     """Apply reviewed specs in an explicit locked save transaction."""
@@ -2807,6 +2999,7 @@ def cmd_players_apply(args) -> None:
         allow_overflow_release = bool(
             getattr(args, "allow_overflow_release", False)
         )
+        appearance_source = None
         if allow_overflow_release and not allow_create:
             print(
                 "--allow-overflow-release requires --allow-create "
@@ -2826,6 +3019,20 @@ def cmd_players_apply(args) -> None:
                     "  PlayerAppearance.bin metadata unavailable; "
                     "create specs will be rejected safely"
                 )
+        if bool(getattr(args, "preflight", False)):
+            results = _assess_player_specs(
+                edit_file,
+                specs,
+                manifest.revision,
+            )
+            _print_player_spec_results(specs, results)
+            _print_player_apply_preflight(
+                edit_file,
+                specs,
+                results,
+                appearance_source,
+            )
+            return
 
         apply_kwargs = {}
         if allow_create:
@@ -2993,9 +3200,23 @@ def main():
         help="Disable supplemental Wikipedia and Sortitoutsi sources",
     )
     p_run.add_argument(
-        "--allow-overflow-release",
+        "--numbers-only",
         action="store_true",
-        help="Allow releasing a displayed overflow candidate when a roster is full",
+        help="Fix current squad numbers only; implies deep squad scraping",
+    )
+    p_run.add_argument(
+        "--allow-overflow-release",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Allow role-based overflow release (default); use "
+            "--no-allow-overflow-release to keep full rosters unchanged"
+        ),
+    )
+    p_run.add_argument(
+        "--release-policy",
+        type=Path,
+        help="JSON protected-player and offline-usage snapshot (default: data/release_policy.json)",
     )
     p_run.set_defaults(func=cmd_run)
 
@@ -3045,15 +3266,20 @@ def main():
     )
     p_players_apply.add_argument(
         "--allow-create",
-        action="store_true",
-        help="Opt in to reviewed create specs using a validated appearance donor",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Allow reviewed create specs (default); use --no-allow-create "
+            "to keep create mutations disabled"
+        ),
     )
     p_players_apply.add_argument(
         "--allow-overflow-release",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help=(
-            "Allow a reviewed create to release a safe low-OVR reserve "
-            "when the destination roster is full"
+            "Allow a reviewed create to release a role-based reserve (default); "
+            "use --no-allow-overflow-release to keep full rosters unchanged"
         ),
     )
     p_players_apply.add_argument(
@@ -3065,6 +3291,11 @@ def main():
         "--game-root",
         type=Path,
         help="Game installation root used to discover PlayerAppearance.bin in download/",
+    )
+    p_players_apply.add_argument(
+        "--preflight",
+        action="store_true",
+        help="Print create destinations and safety inputs without writing",
     )
     player_target = p_players_apply.add_mutually_exclusive_group(required=True)
     player_target.add_argument(
@@ -3106,9 +3337,23 @@ def main():
         help="Disable supplemental Wikipedia and Sortitoutsi sources",
     )
     p_sched.add_argument(
-        "--allow-overflow-release",
+        "--numbers-only",
         action="store_true",
-        help="Allow releasing a displayed overflow candidate when a roster is full",
+        help="Fix current squad numbers only; implies deep squad scraping",
+    )
+    p_sched.add_argument(
+        "--allow-overflow-release",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Allow role-based overflow release (default); use "
+            "--no-allow-overflow-release to keep full rosters unchanged"
+        ),
+    )
+    p_sched.add_argument(
+        "--release-policy",
+        type=Path,
+        help="JSON protected-player and offline-usage snapshot (default: data/release_policy.json)",
     )
     p_sched.set_defaults(func=cmd_schedule)
 
@@ -3166,6 +3411,104 @@ def main():
         help="Emit only the bounded audit report as JSON",
     )
     p_audit.set_defaults(func=cmd_metadata_audit)
+
+    # reviewed-spec/base roster audit
+    p_base_audit = sub.add_parser(
+        "base-audit",
+        help="Check active Player Updates against one base roster",
+    )
+    p_base_audit.add_argument(
+        "--edit-file",
+        type=str,
+        required=True,
+        help="Path to input EDIT00000000",
+    )
+    p_base_audit.add_argument(
+        "--spec-dir",
+        type=Path,
+        help="Player spec directory (default: players)",
+    )
+    p_base_audit.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the bounded audit report as JSON",
+    )
+    p_base_audit.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit 2 when any active spec is missing or inconsistent",
+    )
+    p_base_audit.add_argument(
+        "--as-of",
+        type=_iso_date_arg,
+        default=date.today().isoformat(),
+        help="Loan review date (YYYY-MM-DD)",
+    )
+    p_base_audit.set_defaults(func=cmd_base_roster_audit)
+
+    # safe base refresh
+    p_base_refresh = sub.add_parser(
+        "base-refresh",
+        help="Verify and optionally promote a local or HTTPS EDIT base",
+    )
+    p_base_refresh.add_argument(
+        "--source",
+        required=True,
+        help="Local EDIT00000000 path or HTTPS download URL",
+    )
+    p_base_refresh.add_argument(
+        "--revision",
+        required=True,
+        help="Base revision to write when --promote is used",
+    )
+    p_base_refresh.add_argument(
+        "--spec-dir",
+        type=Path,
+        help="Player spec directory (default: players)",
+    )
+    p_base_refresh.add_argument(
+        "--as-of",
+        type=_iso_date_arg,
+        default=date.today().isoformat(),
+        help="Loan review date (YYYY-MM-DD)",
+    )
+    p_base_refresh.add_argument(
+        "--promote",
+        action="store_true",
+        help="Atomically replace base/EDIT00000000 and its manifest",
+    )
+    p_base_refresh.add_argument(
+        "--strict-audit",
+        action="store_true",
+        help="Reject promotion when active specs are missing or inconsistent",
+    )
+    p_base_refresh.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the verification report as JSON",
+    )
+    p_base_refresh.set_defaults(func=cmd_base_refresh)
+
+    # offline usage snapshot importer
+    p_usage_import = sub.add_parser(
+        "usage-import",
+        help="Merge CSV usage counters into the release policy",
+    )
+    p_usage_import.add_argument(
+        "--input",
+        type=Path,
+        required=True,
+        help="CSV with player_id, minutes, starts, appearances, news_mentions",
+    )
+    p_usage_import.add_argument(
+        "--output",
+        type=Path,
+        help="Output policy path (default: data/release_policy.json)",
+    )
+    p_usage_import.add_argument("--source", default="", help="Usage source label")
+    p_usage_import.add_argument("--season", default="", help="Season label")
+    p_usage_import.add_argument("--as-of", default="", help="Snapshot date label")
+    p_usage_import.set_defaults(func=cmd_usage_import)
     # native metadata variant comparison
     p_compare = sub.add_parser(
         "compare",
@@ -3213,7 +3556,12 @@ def main():
         "repair",
         help="Repair a legacy base without importing reference league memberships",
     )
-    p_repair.add_argument("--edit-file", type=str, required=True, help="Legacy base EDIT00000000")
+    p_repair.add_argument(
+        "--edit-file",
+        type=str,
+        required=True,
+        help="Legacy base EDIT00000000",
+    )
     p_repair.add_argument(
         "--reference",
         type=str,
@@ -3226,12 +3574,15 @@ def main():
 
     # log
     p_log = sub.add_parser("log", help="Show recent transfer log")
-    p_log.add_argument("--last", type=int, default=20, help="Number of recent entries (default: 20)")
+    p_log.add_argument(
+        "--last", type=int, default=20, help="Number of recent entries (default: 20)"
+    )
     p_log.set_defaults(func=cmd_log)
 
     subcommands = {
-        "run", "players", "schedule", "cron", "inspect", "audit", "compare",
-        "validate", "repair", "log", "-h", "--help",
+        "run", "players", "schedule", "cron", "inspect", "audit", "base-audit",
+        "base-refresh", "usage-import", "compare", "validate", "repair", "log",
+        "-h", "--help",
     }
     if len(sys.argv) > 1 and sys.argv[1] not in subcommands:
         sys.argv.insert(1, "run")

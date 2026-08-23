@@ -27,6 +27,14 @@ from scraper.models import MatchedTransfer, Transfer
 from editor.models import TeamData
 
 
+
+def test_local_update_enables_overflow_release_by_default(tmp_path):
+    from local_update import LocalUpdateRequest
+
+    request = LocalUpdateRequest(tmp_path / "EDIT00000000")
+
+    assert request.allow_overflow_release is True
+
 @pytest.mark.parametrize(
     ("current", "source", "destination", "transfer_type", "expected"),
     [
@@ -678,3 +686,35 @@ def test_runtime_club_identity_index_must_be_one_to_one(monkeypatch, tmp_path):
 
     with pytest.raises(IncompleteScrapeError, match="not one-to-one"):
         _load_represented_fotmob_club_ids()
+    
+def test_numbers_only_mode_filters_transfer_events(monkeypatch):
+    import run
+
+    shirt = Transfer(
+        "Player One",
+        "Club",
+        "Club",
+        transfer_type="shirt_number_update",
+        shirt_number=7,
+        player_id_fotmob=1,
+    )
+    transfer = Transfer("Player Two", "A", "B", transfer_type="transfer")
+    monkeypatch.setattr(
+        run,
+        "fetch_major_clubs_transfers_safely",
+        lambda **_kwargs: [shirt, transfer],
+    )
+
+    result = run._scrape_run_transfers(
+        argparse.Namespace(
+            numbers_only=True,
+            club=None,
+            deep=False,
+            fotmob_only=False,
+            popular=False,
+            window="auto",
+            since=None,
+        )
+    )
+
+    assert result == [shirt]

@@ -8,14 +8,16 @@
 FL Daily Edit aggiorna le rose di SP Football Life 2026 ed eFootball PES 2021
 applicando i trasferimenti del mondo reale a un file di salvataggio `EDIT00000000`.
 
-> **La creazione di nuovi giocatori è opt-in. Le chiamate API dirette restano
-> disabilitate per impostazione predefinita; `players apply --allow-create`
-> richiede un donor verificato di `PlayerAppearance.bin`.**
+> **La creazione di nuovi giocatori revisionati è attiva per impostazione
+> predefinita in `players apply` quando è disponibile un donor valido di
+> `PlayerAppearance.bin`. L'opzione positiva è `--allow-create`; usa
+> `--no-allow-create` per disattivare le creazioni CLI. Le chiamate API dirette
+> restano disattivate per impostazione predefinita.**
 >
 > I trasferimenti per i giocatori già presenti nel salvataggio e gli aggiornamenti
 > revisionati per i giocatori esistenti rimangono supportati. I giocatori mancanti
-> vengono ignorati e una rosa di destinazione completa viene ignorata per
-> impostazione predefinita invece di svincolare un giocatore esistente.
+> vengono ignorati. L'overflow basato sui ruoli è attivo per impostazione predefinita;
+> usa `--no-allow-overflow-release` per lasciare invariata una rosa completa.
 
 > [!WARNING]
 > **Avviso beta:** FL Daily Edit, i dati del repository e le versioni generate sono ancora in fase di test. Potrebbero non funzionare con ogni configurazione di gioco/salvataggio; alcune condizioni non sono ancora supportate.
@@ -32,10 +34,12 @@ dell'aggiornamento per le nazionali. Avviare una nuova carriera Campionato Maste
 dopo aver installato il file di salvataggio.
 
 La [base inclusa](base/EDIT00000000) è il file
-[Gondowan's Mid-Summer EDIT](https://www.reddit.com/r/SPFootballLife/comments/1v7z782/release_gondowans_midsummer_edit_file_more_than/)
-del 27 luglio 2026. Include oltre 500 trasferimenti, valutazioni generali aggiornate,
-ruoli, numeri di maglia, rientri dai prestiti, allenatori, formazioni e variazioni
-di promozioni e retrocessioni. Non crea nuovi giocatori né aggiunge squadre promosse dalla terza serie.
+[Gondowan's EDIT del 22 agosto 2026](https://www.reddit.com/r/SPFootballLife/comments/1vvh129/release_gondowans_edit_file_22082026_latest/).
+Include i trasferimenti dell'ultimo minuto del 22/08/2026 per tutti i campionati,
+variazioni dei valori per oltre 600 giocatori, promozioni e retrocessioni tra
+prima e seconda divisione, correzioni di altezza e ruolo, aggiornamenti di nomi e
+numeri, modifiche agli allenatori disponibili e formazioni automatiche ordinate
+per i giocatori migliori. Non crea nuovi giocatori né aggiunge squadre promosse dalla terza serie.
 
 ## Programma di installazione per Windows
 
@@ -94,11 +98,11 @@ Tutte le attività attuali della roadmap sono completate. Attendiamo la prossima
 - Un blocco di processo impedisce a due esecuzioni di scrivere contemporaneamente sullo stesso output.
 - Gli snapshot di FotMob incompleti interrompono l'esecuzione anziché generare un salvataggio parziale.
 - Le corrispondenze ambigue dei giocatori e le discrepanze sulla squadra di origine vengono ignorate.
-- Le rose di destinazione al completo vengono ignorate per impostazione predefinita; l'aggiornatore dei
-  trasferimenti non svincola mai automaticamente un giocatore esistente.
-- `--allow-overflow-release` è un'opzione separata ed esplicita per i soli trasferimenti. Richiede metadati
-  completi su ruoli e OVR e può svincolare un candidato sicuro per liberare spazio. Se tali metadati sono
-  incompleti, l'esecuzione si interrompe in sicurezza.
+- Le rose di destinazione complete usano l'overflow basato sui ruoli per impostazione
+  predefinita. Titolari e panchina della partita sono protetti; si preferisce la
+  riserva nativa più profonda e i giocatori creati sono protetti quando esiste un
+  candidato nativo. Ability/OVR non viene mai usato; usa
+  `--no-allow-overflow-release` per disattivarlo.
 - Wikipedia, Sortitoutsi e Transfermarkt sono fonti supplementari. Un'interruzione in una di queste
   fonti non invalida uno snapshot completo di FotMob.
 
@@ -107,17 +111,17 @@ Tutte le attività attuali della roadmap sono completate. Attendiamo la prossima
 Si tratta di flussi di lavoro separati:
 
 - `run` elabora i trasferimenti per i giocatori già presenti nel salvataggio. Se una squadra di
-  destinazione è al completo, quel trasferimento viene ignorato; altri trasferimenti sicuri nella
-  stessa esecuzione possono comunque essere applicati.
+  destinazione è completa, la riserva overflow basata sui ruoli viene svincolata per
+  impostazione predefinita; usa `--no-allow-overflow-release` per ignorare il trasferimento.
 - `players apply` applica le modifiche agli attributi revisionate. Le specifiche `update` per i
   giocatori esistenti sono supportate.
-- Le specifiche `create` per nuovi giocatori rimangono caricabili e revisionabili.
-  L'applicazione richiede `players apply --allow-create`, un donor d'aspetto
-  esplicito e una fonte valida di `PlayerAppearance.bin`. Un donor assente o non
-  valido rifiuta la specifica senza modificare i byte del salvataggio.
-- Una rosa di destinazione completa richiede anche `--allow-overflow-release`;
-  si può svincolare solo una riserva con OVR positivo completo dal salvataggio.
-  I metadati di `Player.bin` non sostituiscono l'OVR.
+- Le specifiche `create` per nuovi giocatori rimangono caricabili e revisionabili. `players apply`
+  prova a eseguirle per impostazione predefinita quando sono disponibili un donor esplicito e
+  una fonte valida di `PlayerAppearance.bin`. Usa `--no-allow-create` per disattivarle; un donor
+  assente o non valido rifiuta la specifica senza modificare i byte del salvataggio.
+- Per `players apply`, una rosa completa usa l'overflow basato sui ruoli per impostazione
+  predefinita. L'opzione positiva è `--allow-overflow-release`; usa
+  `--no-allow-overflow-release` per ignorarlo. Non è richiesto un OVR positivo.
 
 ## Esecuzione locale
 
@@ -173,6 +177,10 @@ python run.py run --help
 | `run` | Applica solo i trasferimenti verificati |
 | `players validate` | Convalida tutti i Player Update rispetto alla base originale |
 | `players apply` | Applica esplicitamente i Player Update revisionati a un salvataggio |
+| `base-audit` | Controlla Player Updates attivi, destinazioni e parent dei prestiti rispetto alla base |
+| `base-refresh` | Verifica e, opzionalmente, promuove una base locale o HTTPS |
+| `usage-import` | Unisce i dati CSV sull'utilizzo dei giocatori alla release policy |
+| `players apply --preflight` | Mostra destinazioni create revisionate e dati di sicurezza senza scrivere |
 | `log` | Mostra i trasferimenti applicati di recente |
 | `inspect` | Ispeziona squadre, conteggio giocatori e offset del salvataggio |
 | `validate` | Controlla le registrazioni nelle rose e le mappature dei piani di gioco |
@@ -270,6 +278,8 @@ Opzioni comuni di `run`:
 | `--dry-run` | Pianifica le modifiche senza scrivere un salvataggio |
 | `--from-base` | Inizia da `base/EDIT00000000` |
 | `--fotmob-only` | Esegue senza fonti di trasferimento supplementari |
+| `--release-policy PATH` | Carica giocatori protetti per club e contatori di utilizzo offline |
+| `--numbers-only` | Correggere i numeri attuali usando solo i dati rosa di FotMob |
 
 Senza `--from-base`, una normale esecuzione prosegue dall'ultimo output verificato. In questo modo si evita che i
 trasferimenti scompariranno quando una successiva esecuzione programmata rilegge lo storico accumulato.

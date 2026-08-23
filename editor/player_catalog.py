@@ -28,13 +28,6 @@ class PlayerCatalogReport:
     ages: int
     overall_ratings: int
 
-    @property
-    def has_complete_overflow_metadata(self) -> bool:
-        return (
-            self.roster_entries > 0
-            and self.positions >= self.roster_entries
-            and self.overall_ratings >= self.roster_entries
-        )
 
 
 def load_id_name_text(

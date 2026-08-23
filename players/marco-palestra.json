@@ -2,7 +2,8 @@
   "schema_version": 2,
   "operation": "update",
   "lifecycle": {
-    "status": "active"
+    "status": "retired",
+    "reason": "Superseded by Gondowan's 22 August 2026 EDIT base"
   },
   "applies_to": [
     "fl26-u2.2-national-squads"

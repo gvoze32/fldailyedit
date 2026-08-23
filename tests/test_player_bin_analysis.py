@@ -199,9 +199,9 @@ def test_playerbin_position_protects_unedited_goalkeeper_from_overflow_release()
     )
 
     slot, player_id = edit_file.find_overflow_release_candidate(101)
-    assert (slot, player_id) == (35, 1035)
+    assert (slot, player_id) == (39, 1039)
 
-def test_playerbin_only_metadata_refuses_unknown_ovr_overflow_release():
+def test_playerbin_only_metadata_still_allows_role_based_overflow_release():
     from tests.test_editor import _build_mock_data
 
     data = _build_mock_data(
@@ -215,7 +215,7 @@ def test_playerbin_only_metadata_refuses_unknown_ovr_overflow_release():
     edit_file.load_bytes(data)
     edit_file.attach_playerbin(PlayerBinDatabase({}))
 
-    assert edit_file.find_overflow_release_candidate(101) == (39, 0)
+    assert edit_file.find_overflow_release_candidate(101) == (39, 1039)
 
 
 def test_game_plan_compaction_keeps_replacement_at_removed_ordinal():

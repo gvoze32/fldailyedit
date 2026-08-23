@@ -7,13 +7,14 @@
 
 FL Daily Edit, gerçek dünyadaki transferleri bir `EDIT00000000` kayıt dosyasına uygulayarak SP Football Life 2026 ve eFootball PES 2021 kadrolarını günceller.
 
-> **Yeni oyuncu oluşturma açıkça opt-in gerektirir. Doğrudan API çağrıları varsayılan
-> olarak devre dışıdır; `players apply --allow-create`, doğrulanmış bir
-> `PlayerAppearance.bin` bağışlayıcısı gerektirir.**
+> **İncelenmiş yeni oyuncu oluşturma, geçerli bir `PlayerAppearance.bin` bağışlayıcısı
+> bulunduğunda `players apply` içinde varsayılan olarak etkindir. Pozitif seçenek
+> `--allow-create`'dir; CLI oluşturmayı kapatmak için `--no-allow-create` kullanın.
+> Doğrudan API çağrıları varsayılan olarak devre dışı kalır.**
 >
-> Kayıt dosyasında zaten bulunan oyuncular için transferler ve mevcut oyuncular için incelenmiş
-> güncellemeler desteklenmeye devam etmektedir. Eksik oyuncular atlanır ve dolu bir hedef kadro,
-> mevcut bir oyuncuyu serbest bırakmak yerine varsayılan olarak atlanır.
+> Kayıt dosyasında zaten bulunan oyuncular için transferler ve incelenmiş güncellemeler
+> desteklenir. Eksik oyuncular atlanır. Role dayalı overflow release varsayılan olarak
+> etkindir; dolu kadroyu değiştirmemek için `--no-allow-overflow-release` kullanın.
 
 > [!WARNING]
 > **Beta bildirimi:** FL Daily Edit, depo verileri ve oluşturulan sürümler hâlâ test ediliyor. Her oyun/kayıt dosyası yapılandırmasında çalışmayabilir; bazı koşullar henüz desteklenmiyor.
@@ -27,7 +28,13 @@ Dahil edilen temel sürüm **SP Football Life 2026** için hedeflenmiştir. Gere
 
 UML, daha eski FL26 sürümleri veya milli takım güncellemesi olmayan kurulumlarla uyumlu değildir. Kayıt dosyasını yükledikten sonra yeni bir Ana Lig veya Efsane Olun kariyeri başlatın.
 
-[Dahil edilen temel](base/EDIT00000000), 27 Temmuz 2026 tarihli [Gondowan's Mid-Summer EDIT](https://www.reddit.com/r/SPFootballLife/comments/1v7z782/release_gondowans_midsummer_edit_file_more_than/) dosyasıdır. 500'den fazla transfer, güncellenmiş genel dereceler (GEN/OVR), mevkiler, forma numaraları, kiralıktan dönenler, teknik direktörler, dizilişler ve küme düşme/yükselme değişikliklerini içerir. Yeni oyuncu oluşturmaz veya 3. ligden yükselen takımları eklemez.
+[Dahil edilen temel](base/EDIT00000000), 22 Ağustos 2026 tarihli
+[Gondowan's EDIT](https://www.reddit.com/r/SPFootballLife/comments/1vvh129/release_gondowans_edit_file_22082026_latest/) dosyasıdır.
+Tüm ligler için 22/08/2026 son dakika transferlerini, 600'den fazla oyuncunun
+puan değişikliklerini, birinci/ikinci lig yükselme ve düşme değişikliklerini,
+boy ve mevki düzeltmelerini, isim ve forma numarası güncellemelerini, mevcut
+teknik direktör değişikliklerini ve en iyi oyunculara göre sıralanmış otomatik
+kadro dizilişlerini içerir. Yeni oyuncu oluşturmaz veya 3. ligden yükselen takımları eklemez.
 
 ## Windows yükleyici
 
@@ -84,23 +91,26 @@ Mevcut yol haritasındaki tüm maddeler tamamlandı. Sıradaki faydalı fikri be
 - İşlem kilidi, iki örneğin aynı anda aynı çıktıya yazmasını engeller.
 - Eksik FotMob anlık görüntüleri, bozuk bir kayıt oluşturmak yerine çalışmayı durdurur.
 - Belirsiz oyuncu eşleşmeleri ve kaynak kulüp uyumsuzlukları atlanır.
-- Dolu hedef kadrolar varsayılan olarak atlanır; transfer güncelleyici mevcut bir oyuncuyu asla otomatik olarak serbest bırakmaz.
-- `--allow-overflow-release`, yalnızca transferlere özel ayrı ve açık bir seçenektir. Tam mevki ve OVR meta verisi gerektirir ve yer açmak için güvenli bir adayı serbest bırakabilir. Bu meta veriler eksikse, işlem güvenli bir şekilde başarısız olur.
+- Dolu hedef kadrolarda role dayalı overflow release varsayılan olarak etkindir.
+  İlk on bir ve maç kadrosu yedekleri korunur, en derindeki native reserve tercih edilir
+  ve native aday varken created oyuncular korunur. Ability/OVR kullanılmaz;
+  `--no-allow-overflow-release` ile kapatılabilir.
 - Wikipedia, Sortitoutsi ve Transfermarkt tamamlayıcı kaynaklardır. Bunlardan birindeki kesinti, tam bir FotMob anlık görüntüsünü geçersiz kılmaz.
 
 **Transfer Güncellemeleri ve Player Updates**
 
 Bunlar ayrı iş akışlarıdır:
 
-- `run`, kayıt dosyasında zaten bulunan oyuncular için transferleri işler. Bir hedef kulüp doluysa, o transfer atlanır; aynı çalıştırmadaki diğer güvenli transferler yine de uygulanabilir.
-- `players apply`, incelenen özellik değişikliklerini uygular. Mevcut oyuncular için `update` tanımları desteklenir.
-- Yeni oyuncular için `create` tanımları yüklenebilir ve incelenebilir. Uygulamak için
-  `players apply --allow-create`, açık bir görünüm bağışlayıcısı ve geçerli bir
-  `PlayerAppearance.bin` kaynağı gerekir. Bağışlayıcı eksik veya geçersizse tanım,
-  kayıt dosyasının baytlarını değiştirmeden reddedilir.
-- Dolu hedef kadro ayrıca `--allow-overflow-release` gerektirir; yalnızca kayıt
-  dosyasından tam ve pozitif OVR değerine sahip bir yedek oyuncu serbest bırakılabilir.
-  `Player.bin` meta verisi OVR yerine kullanılamaz.
+- `run`, kayıt dosyasında zaten bulunan oyuncular için transferleri işler. Bir hedef kulüp
+  doluysa, role dayalı overflow adayı varsayılan olarak serbest bırakılır;
+  `--no-allow-overflow-release` ile transfer atlanır.
+- `players apply`, incelenmiş özellik değişikliklerini uygular. Mevcut oyuncular için
+  `update` tanımları desteklenir.
+- Yeni oyuncular için `create` tanımları yüklenebilir ve incelenebilir. Geçerli bir donor ve
+  `PlayerAppearance.bin` kaynağı varsa `players apply` bunları varsayılan olarak dener.
+  `--no-allow-create` ile kapatılabilir; eksik/geçersiz donor kaydı değiştirmez.
+- `players apply` için dolu kadroda role dayalı overflow varsayılandır. Pozitif seçenek
+  `--allow-overflow-release`, kapatmak için `--no-allow-overflow-release` kullanılır.
 
 ## Yerel Kurulum
 
@@ -155,6 +165,10 @@ python run.py run --help
 | `run` | Yalnızca doğrulanmış transferleri uygula |
 | `players validate` | Tüm Player Update'leri orijinal temele karşı doğrula |
 | `players apply` | İncelenen Player Update'leri açıkça bir kayda uygula |
+| `base-audit` | Etkin Player Update'leri, hedefleri ve loan parent'ı base ile karşılaştırır |
+| `base-refresh` | Yerel veya HTTPS base adayını doğrular ve isteğe bağlı yayımlar |
+| `usage-import` | Çevrimdışı oyuncu kullanım CSV verisini release policy'ye ekler |
+| `players apply --preflight` | İncelenen create hedeflerini ve güvenlik girdilerini yazmadan gösterir |
 | `log` | Son uygulanan transferleri göster |
 | `inspect` | Takımları, oyuncu sayılarını ve kayıt dosyası ofsetlerini incele |
 | `validate` | Kadro kayıtlarını ve oyun planı eşlemelerini kontrol et |
@@ -209,6 +223,8 @@ Yaygın `run` seçenekleri:
 | `--dry-run` | Kayıt yazmadan değişiklikleri planlar |
 | `--from-base` | `base/EDIT00000000` dosyasından başlar |
 | `--fotmob-only` | Ek transfer kaynakları olmadan çalışır |
+| `--release-policy PATH` | Kulübe göre korunan oyuncuları ve çevrimdışı kullanım sayaçlarını yükler |
+| `--numbers-only` | Güncel forma numaralarını yalnızca FotMob kadro verileriyle düzeltir |
 
 `--from-base` olmadan, normal bir çalıştırma son doğrulanan çıktıdan devam eder. Bu, daha sonra zamanlanmış bir çalıştırma birikmiş geçmişi tekrar okuduğunda uygulanan transferlerin kaybolmasını önler.
 

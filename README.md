@@ -8,13 +8,15 @@
 FL Daily Edit updates SP Football Life 2026 and eFootball PES 2021 squads by
 applying real-world transfers to an `EDIT00000000` save file.
 
-> **New-player creation is opt-in. Direct API calls remain disabled by
-> default; `players apply --allow-create` requires a validated
-> `PlayerAppearance.bin` donor.**
+> **Reviewed new-player creation is enabled by default in `players apply` when
+> a valid `PlayerAppearance.bin` donor is available. The explicit positive flag
+> is `--allow-create`; use `--no-allow-create` to disable CLI create mutations.
+> Direct API calls remain disabled by default.**
 >
 > Transfers for players already in the save and reviewed updates to existing
-> players remain supported. Missing players are skipped, and a full destination
-> roster is skipped by default instead of releasing an existing player.
+> players remain supported. Missing players are skipped. Role-based overflow
+> release is enabled by default; use `--no-allow-overflow-release` to keep a
+> full destination roster unchanged.
 
 > [!WARNING]
 > **Beta notice:** FL Daily Edit, its repository data, and generated releases are still being tested. They may not work with every game/save setup; some conditions are not supported yet.
@@ -31,11 +33,12 @@ the national-squad update. Start a new Master League or Become a Legend career
 after installing the save.
 
 The [bundled base](base/EDIT00000000) is
-[Gondowan's Mid-Summer EDIT](https://www.reddit.com/r/SPFootballLife/comments/1v7z782/release_gondowans_midsummer_edit_file_more_than/),
-dated 27 July 2026. It includes more than 500 transfers, updated ratings,
-positions, squad numbers, loan returns, managers, lineups, and promotion or
-relegation changes. It does not create players or add promoted clubs from third
-divisions.
+[Gondowan's EDIT file from 22 August 2026](https://www.reddit.com/r/SPFootballLife/comments/1vvh129/release_gondowans_edit_file_22082026_latest/).
+It includes last-minute transfers for all leagues, rating changes for more than
+600 players, first/second-division promotion and relegation changes, height and
+position fixes, shirt/name and kit-number updates, available manager changes,
+and auto-lineups sorted by the best players. It does not create players or add
+promoted clubs from third divisions.
 
 ## Windows installer
 
@@ -92,11 +95,12 @@ All current roadmap items are complete. We are waiting for the next useful idea.
 - A process lock prevents two runs from writing the same output at once.
 - Incomplete FotMob snapshots abort the run instead of producing a partial save.
 - Ambiguous player matches and source-club mismatches are skipped.
-- Full destination squads are skipped by default; the transfer updater never
-  releases an existing player automatically.
-- `--allow-overflow-release` is a separate, explicit transfer-only option. It
-  requires complete position and OVR metadata and may release a safe candidate
-  to make room. If that metadata is incomplete, the run fails closed.
+- Full destination squads use role-based overflow release by default. Use
+  `--no-allow-overflow-release` to keep a full roster unchanged.
+- The selector protects first-team and matchday-bench roles, prefers the
+  deepest native reserve, and protects reserved-range created players when a
+  native candidate exists. Ability/OVR is never used; malformed game-plan
+  order falls back to persisted roster order.
 - Wikipedia, Sortitoutsi, and Transfermarkt are supplemental. An outage in one
   of these sources does not invalidate a complete FotMob snapshot.
 
@@ -105,17 +109,21 @@ All current roadmap items are complete. We are waiting for the next useful idea.
 These are separate workflows:
 
 - `run` processes transfers for players who already exist in the save. If a
-  destination club is full, that transfer is skipped; other safe transfers in
-  the same run can still apply.
+  destination club is full, the role-based overflow candidate is released by
+  default; use `--no-allow-overflow-release` to skip that transfer.
 - `players apply` applies reviewed attribute changes. Existing-player `update`
   specs are supported.
-- New-player `create` specs remain loadable and reviewable. Applying one requires
-  `players apply --allow-create`, an explicit appearance template donor, and a
-  valid `PlayerAppearance.bin` source. Missing or invalid donor data rejects the
-  spec without changing save bytes.
-- A full destination roster also requires `--allow-overflow-release`; only a
-  reserve candidate with complete positive save OVR may be released. `Player.bin`
-  metadata is not an OVR fallback.
+- New-player `create` specs remain loadable and reviewable. `players apply`
+  attempts reviewed create specs by default when an explicit appearance donor
+  and valid `PlayerAppearance.bin` source are available. Use `--no-allow-create`
+  to disable them; missing or invalid donor data rejects the spec without
+  changing save bytes.
+- For `players apply`, a full destination roster uses role-based overflow by
+  default. The explicit positive flag is `--allow-overflow-release`; use
+  `--no-allow-overflow-release` to keep it unchanged. The selector protects
+  first-team roles, the matchday bench, transferred/protected IDs, and
+  reserved-range created players when native candidates exist. The minimum
+  goalkeeper rule is honored when position metadata is available.
 
 ## Run locally
 
@@ -150,6 +158,8 @@ python run.py audit \
   --game-root "/path/to/Football Life 2026" \
   --json
 
+python run.py base-audit --edit-file base/EDIT00000000
+
 # Compare two native CPK variants without merging them
 python run.py compare \
   --left-cpk /path/to/data_s2526.cpk \
@@ -183,6 +193,10 @@ python run.py run --help
 | `run` | Apply verified transfers only |
 | `players validate` | Validate all Player Updates against the pristine base |
 | `players apply` | Apply reviewed Player Updates explicitly to one save |
+| `base-audit` | Check active Player Updates, destinations, and loan parents against a base roster |
+| `base-refresh` | Verify and optionally promote a local or HTTPS base candidate |
+| `usage-import` | Merge offline player usage CSV data into the release policy |
+| `players apply --preflight` | Show reviewed create destinations and safety inputs without writing |
 | `log` | Show recently applied transfers |
 | `inspect` | Inspect teams, player counts, and save offsets |
 | `validate` | Check roster registrations and game-plan mappings |
@@ -205,11 +219,12 @@ cited evidence, and reviewed PES data. Create updates contain a proposed
 complete player record and destination roster data. Existing-player updates
 contain only supported values that differ from the verified base; every change
 records literal `from` and `to` values.
-Create records remain schema-supported for review. CLI create mutation requires
-`players apply --allow-create` and valid appearance data; direct API calls remain
-disabled by default. If the destination roster is full, add
-`--allow-overflow-release`; missing or invalid safety metadata leaves the save
-unchanged.
+Create records remain schema-supported for review. CLI create mutation is
+enabled by default for reviewed specs when valid appearance data is available;
+use `--no-allow-create` to disable it. Direct API calls remain disabled by
+default. If the destination roster is full, use
+`--no-allow-overflow-release` to disable role-based overflow release; missing
+or invalid safety metadata leaves the save unchanged.
 Supported update groups are abilities, position proficiency, playing style,
 player skills, COM styles, nationality, physical/basic settings, and
 registered position.
@@ -295,6 +310,12 @@ Common `run` options:
 | `--dry-run` | Plan changes without writing a save |
 | `--from-base` | Start from `base/EDIT00000000` |
 | `--fotmob-only` | Run without supplemental transfer sources |
+| `--release-policy PATH` | Load per-club protected players and offline usage counters |
+| `--numbers-only` | Fix current squad numbers using FotMob squad data only |
+The optional `data/release_policy.json` file can protect a player per team
+and provide offline `minutes`, `starts`, `appearances`, and `news_mentions`
+counters. Missing usage data never blocks a run; it only removes that
+tie-breaker.
 
 Without `--from-base`, a normal run continues from the last verified output.
 This prevents transfers from disappearing when a later scheduled run reads the

@@ -8,13 +8,16 @@
 FL Daily Edit memperbarui skuad SP Football Life 2026 dan eFootball PES 2021
 dengan menerapkan transfer dunia nyata ke file save `EDIT00000000`.
 
-> **Pembuatan pemain baru bersifat opt-in. API langsung tetap dinonaktifkan
-> secara default; `players apply --allow-create` memerlukan donor
-> `PlayerAppearance.bin` yang tervalidasi.**
+> **Pembuatan pemain baru yang sudah ditinjau aktif secara default di
+> `players apply` jika donor `PlayerAppearance.bin` yang valid tersedia. Flag
+> positif eksplisitnya adalah `--allow-create`; gunakan `--no-allow-create`
+> untuk menonaktifkan mutasi create dari CLI. API langsung tetap dinonaktifkan
+> secara default.**
 >
 > Transfer pemain yang sudah ada di save dan pembaruan pemain yang sudah ditinjau
-> tetap didukung. Pemain yang belum ada akan dilewati, dan roster tujuan yang
-> penuh secara default dilewati tanpa melepas pemain lama.
+> tetap didukung. Pemain yang belum ada akan dilewati. Release overflow berbasis
+> role aktif secara default; gunakan `--no-allow-overflow-release` agar roster
+> tujuan yang penuh tetap tidak berubah.
 
 > [!WARNING]
 > **Pemberitahuan beta:** FL Daily Edit, data repositorinya, dan rilis yang dihasilkan masih dalam tahap pengujian. Fitur ini mungkin belum berfungsi pada semua konfigurasi gim/save; beberapa kondisi belum didukung.
@@ -31,10 +34,11 @@ tanpa pembaruan skuad nasional. Mulailah karier Master League atau Become a Lege
 baru setelah memasang save ini.
 
 [Base yang disertakan](base/EDIT00000000) adalah
-[Gondowan's Mid-Summer EDIT](https://www.reddit.com/r/SPFootballLife/comments/1v7z782/release_gondowans_midsummer_edit_file_more_than/),
-bertanggal 27 Juli 2026. Base ini mencakup lebih dari 500 transfer, pembaruan rating,
-posisi, nomor skuad, pemain yang kembali dari peminjaman, manajer, susunan pemain,
-serta perubahan promosi atau degradasi. Base ini tidak membuat pemain atau
+[Gondowan's EDIT tanggal 22 Agustus 2026](https://www.reddit.com/r/SPFootballLife/comments/1vvh129/release_gondowans_edit_file_22082026_latest/).
+Base ini mencakup transfer terbaru hingga 22/08/2026 untuk semua liga, perubahan
+rating lebih dari 600 pemain, promosi/degradasi divisi pertama-kedua, perbaikan
+tinggi dan posisi, pembaruan nama/nomor, perubahan manajer yang tersedia, serta
+auto-lineup berdasarkan pemain terbaik. Base ini tidak membuat pemain atau
 menambahkan klub promosi dari divisi ketiga.
 
 ## Installer Windows
@@ -94,29 +98,34 @@ Semua item roadmap saat ini telah selesai. Kami menunggu ide berguna berikutnya.
 - Process lock mencegah dua proses menulis output yang sama secara bersamaan.
 - Snapshot FotMob yang tidak lengkap membatalkan proses alih-alih menghasilkan save parsial.
 - Kecocokan pemain yang ambigu dan ketidakcocokan klub sumber akan dilewati.
-- Roster tujuan yang penuh secara default akan dilewati; updater transfer tidak
-  pernah melepas pemain lama secara otomatis.
-- `--allow-overflow-release` adalah opsi eksplisit khusus transfer. Opsi ini
-  membutuhkan metadata posisi dan OVR yang lengkap dan dapat melepas kandidat
-  yang aman untuk menyediakan slot. Jika metadata tidak lengkap, proses berhenti
-  secara fail-closed.
+- Roster tujuan yang penuh menggunakan release overflow berbasis role secara
+  default. Gunakan `--no-allow-overflow-release` untuk mempertahankan roster
+  penuh tanpa perubahan.
+- Selector melindungi role first team dan bench matchday, memilih reserve native
+  terdalam, serta melindungi pemain created-range jika masih ada kandidat native.
+  Ability/OVR tidak pernah dipakai; urutan game plan rusak akan fallback ke
+  urutan roster tersimpan.
 - Wikipedia, Sortitoutsi, dan Transfermarkt merupakan sumber tambahan. Gangguan
   pada salah satu sumber tersebut tidak membatalkan snapshot FotMob yang lengkap.
 
 **Transfer dan Player Updates adalah alur yang berbeda**
 
 - `run` memproses transfer pemain yang sudah ada di save. Jika klub tujuan penuh,
-  transfer tersebut dilewati; transfer aman lainnya dalam run yang sama tetap
-  dapat diterapkan.
+  kandidat overflow berbasis role dilepas secara default; gunakan
+  `--no-allow-overflow-release` untuk melewati transfer tersebut.
 - `players apply` menerapkan perubahan atribut yang sudah ditinjau. Spec
   `update` untuk pemain yang sudah ada tetap didukung.
-- Spec `create` pemain baru tetap dapat dimuat dan ditinjau. Penerapannya
-  memerlukan `players apply --allow-create`, donor appearance eksplisit, dan
-  sumber `PlayerAppearance.bin` yang valid. Donor yang hilang atau rusak menolak
-  spec tanpa mengubah byte save.
-- Roster tujuan yang penuh juga memerlukan `--allow-overflow-release`; hanya
-  kandidat reserve dengan OVR save positif yang lengkap boleh dilepas. Metadata
-  `Player.bin` bukan fallback OVR.
+- Spec `create` pemain baru tetap dapat dimuat dan ditinjau. `players apply`
+  mencoba spec create yang sudah ditinjau secara default jika donor appearance
+  eksplisit dan sumber `PlayerAppearance.bin` valid tersedia. Gunakan
+  `--no-allow-create` untuk menonaktifkannya; donor yang hilang atau rusak
+  menolak spec tanpa mengubah byte save.
+- Untuk `players apply`, roster tujuan penuh menggunakan overflow berbasis role
+  secara default. Flag positif eksplisitnya adalah `--allow-overflow-release`;
+  gunakan `--no-allow-overflow-release` agar tetap unchanged. Selector melindungi
+  role first team, bench matchday, ID yang ditransfer/dilindungi, dan pemain
+  created-range selama masih ada kandidat native. Aturan minimum goalkeeper
+  dipakai jika metadata posisi tersedia.
 
 ## Jalankan secara lokal
 
@@ -151,6 +160,8 @@ python run.py audit \
   --game-root "/path/to/Football Life 2026" \
   --json
 
+python run.py base-audit --edit-file base/EDIT00000000
+
 # Compare two native CPK variants without merging them
 python run.py compare \
   --left-cpk /path/to/data_s2526.cpk \
@@ -184,6 +195,10 @@ python run.py run --help
 | `run` | Hanya menerapkan transfer yang terverifikasi |
 | `players validate` | Memvalidasi semua Pembaruan Pemain terhadap base asli |
 | `players apply` | Menerapkan Pembaruan Pemain yang telah ditinjau secara eksplisit ke satu save |
+| `base-audit` | Memeriksa Player Updates aktif, tujuan, dan parent loan terhadap roster base |
+| `base-refresh` | Memverifikasi dan opsional mempromosikan kandidat base lokal atau HTTPS |
+| `usage-import` | Menggabungkan CSV usage pemain offline ke release policy |
+| `players apply --preflight` | Menampilkan tujuan create dan input keselamatan tanpa menulis save |
 | `log` | Menampilkan transfer yang baru diterapkan |
 | `inspect` | Memeriksa tim, jumlah pemain, dan offset save |
 | `validate` | Memeriksa pendaftaran roster dan pemetaan game plan |
@@ -206,11 +221,12 @@ UUID/profil Pes Retro Stats, bukti yang dikutip, dan data PES yang telah ditinja
 Pembaruan create berisi usulan record pemain lengkap dan data roster tujuan.
 Pembaruan untuk pemain yang sudah ada hanya berisi nilai yang didukung dan berbeda
 dari base terverifikasi; setiap perubahan mencatat nilai literal `from` dan `to`.
-Record `create` tetap didukung oleh schema untuk peninjauan. Mutasi melalui CLI
-memerlukan `players apply --allow-create` dan data appearance yang valid; API
-langsung tetap dinonaktifkan secara default. Jika roster penuh, tambahkan
-`--allow-overflow-release`; metadata keselamatan yang hilang atau rusak membuat
-save tidak berubah.
+Record `create` tetap didukung oleh schema untuk peninjauan. Mutasi create dari
+CLI aktif secara default untuk spec yang sudah ditinjau jika data appearance valid
+tersedia; gunakan `--no-allow-create` untuk menonaktifkannya. API langsung tetap
+dinonaktifkan secara default. Jika roster penuh, gunakan
+`--no-allow-overflow-release` untuk menonaktifkan overflow berbasis role; metadata
+keselamatan yang hilang atau rusak membuat save tidak berubah.
 Kelompok pembaruan yang didukung adalah kemampuan, kecakapan posisi, gaya bermain,
 keahlian pemain, gaya COM, kewarganegaraan, pengaturan fisik/dasar, dan posisi
 terdaftar.
@@ -297,7 +313,14 @@ Opsi `run` yang umum:
 | `--since YYYY-MM-DD` | Menetapkan batas bawah tanggal secara manual |
 | `--dry-run` | Merencanakan perubahan tanpa menulis save |
 | `--from-base` | Memulai dari `base/EDIT00000000` |
+| `--release-policy PATH` | Memuat daftar pemain protected per klub dan counter usage offline |
 | `--fotmob-only` | Berjalan tanpa sumber transfer tambahan |
+| `--numbers-only` | Memperbaiki nomor skuad saat ini hanya dari data skuad FotMob |
+
+File opsional `data/release_policy.json` dapat melindungi pemain per klub dan
+menyediakan counter offline `minutes`, `starts`, `appearances`, serta
+`news_mentions`. Usage yang hilang tidak menghentikan proses; hanya tie-breaker
+tersebut yang tidak digunakan.
 
 Tanpa `--from-base`, proses normal dilanjutkan dari output terverifikasi terakhir.
 Hal ini mencegah hilangnya transfer ketika proses terjadwal berikutnya membaca

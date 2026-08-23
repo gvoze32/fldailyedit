@@ -171,6 +171,15 @@ class CreatePlayerData:
     iris_color: int
     appearance_template_player_id: int | None
 
+@dataclass(frozen=True, slots=True)
+class LoanMetadata:
+    """Parent-club provenance for a player registered at a loan destination."""
+
+    parent_team_id: int
+    parent_team_name: str
+    start_date: date
+    end_date: date
+
 
 @dataclass(frozen=True, slots=True)
 class PlayerSpec:
@@ -186,6 +195,7 @@ class PlayerSpec:
     create: CreatePlayerData | None
     patches: Mapping[str, FieldPatch]
     proposal: ProposalMetadata | None = None
+    loan: LoanMetadata | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,12 +226,15 @@ _TOP_LEVEL_FIELDS = frozenset(
         "identity",
         "evidence",
         "pes",
+        "loan",
     }
 )
+_TOP_LEVEL_REQUIRED_FIELDS = _TOP_LEVEL_FIELDS - {"loan"}
 _PROPOSAL_DRAFT_FIELDS = frozenset(
     {"generator", "needs_human_review", "ovr_review"}
 )
 _DRAFT_TOP_LEVEL_FIELDS = _TOP_LEVEL_FIELDS | frozenset({"source", "draft"})
+_DRAFT_TOP_LEVEL_REQUIRED_FIELDS = _DRAFT_TOP_LEVEL_FIELDS - {"loan"}
 _DRAFT_EVIDENCE_FIELDS = frozenset(
     {
         "profile_url",
@@ -706,6 +719,38 @@ def _load_create(value: object, identity: PlayerIdentity) -> CreatePlayerData:
         appearance_template_player_id=appearance_template_player_id,
     )
 
+def _load_loan(
+    value: object,
+    create: CreatePlayerData | None,
+) -> LoanMetadata | None:
+    if value is None:
+        return None
+    if create is None:
+        raise PlayerSpecError("loan metadata is only valid for create specs")
+    raw = _object(value, "loan metadata")
+    fields = frozenset(
+        {"parent_team_id", "parent_team_name", "start_date", "end_date"}
+    )
+    _validate_keys(raw, fields, fields, "loan metadata")
+    parent_team_id = _integer(
+        raw, "parent_team_id", 1, 0xFFFFFFFF, "loan metadata"
+    )
+    if parent_team_id == create.team_id:
+        raise PlayerSpecError("loan parent_team_id must differ from active team_id")
+    parent_team_name = _text(raw, "parent_team_name", "loan metadata")
+    start_raw = _text(raw, "start_date", "loan metadata")
+    end_raw = _text(raw, "end_date", "loan metadata")
+    if not _ISO_DATE_RE.fullmatch(start_raw) or not _ISO_DATE_RE.fullmatch(end_raw):
+        raise PlayerSpecError("loan metadata dates must use YYYY-MM-DD")
+    try:
+        start_date = date.fromisoformat(start_raw)
+        end_date = date.fromisoformat(end_raw)
+    except ValueError as exc:
+        raise PlayerSpecError("loan metadata dates must be valid dates") from exc
+    if end_date < start_date:
+        raise PlayerSpecError("loan metadata end_date must not precede start_date")
+    return LoanMetadata(parent_team_id, parent_team_name, start_date, end_date)
+
 
 def _patch_pair(
     value: object,
@@ -870,7 +915,12 @@ def _reject_proposal_nulls(value: object, context: str) -> None:
 
 def _load_proposal_spec(path: Path, raw: Mapping[str, object]) -> PlayerSpec:
     context = f"player spec {path}"
-    _validate_keys(raw, _DRAFT_TOP_LEVEL_FIELDS, _DRAFT_TOP_LEVEL_FIELDS, context)
+    _validate_keys(
+        raw,
+        _DRAFT_TOP_LEVEL_FIELDS,
+        _DRAFT_TOP_LEVEL_REQUIRED_FIELDS,
+        context,
+    )
     for field in ("lifecycle", "applies_to", "identity", "evidence", "pes", "draft"):
         _reject_proposal_nulls(raw[field], f"{context}.{field}")
 
@@ -1062,7 +1112,7 @@ def _load_proposal_spec(path: Path, raw: Mapping[str, object]) -> PlayerSpec:
         patches = _load_update(raw.get("pes"))
         registered_position = mapped.registered_position
         position_proficiency = mapped.position_proficiency
-
+    loan = _load_loan(raw.get("loan"), create)
     draft_context = f"{context} draft"
     draft = _object(raw.get("draft"), draft_context)
     _validate_keys(
@@ -1152,6 +1202,7 @@ def _load_proposal_spec(path: Path, raw: Mapping[str, object]) -> PlayerSpec:
         create=create,
         patches=patches,
         proposal=proposal,
+        loan=loan,
     )
 
 def _load_one_spec(
@@ -1165,8 +1216,13 @@ def _load_one_spec(
             )
         return _load_proposal_spec(path, raw)
 
-    _validate_keys(raw, _TOP_LEVEL_FIELDS, _TOP_LEVEL_FIELDS, f"player spec {path}")
 
+    _validate_keys(
+        raw,
+        _TOP_LEVEL_FIELDS,
+        _TOP_LEVEL_REQUIRED_FIELDS,
+        f"player spec {path}",
+    )
     schema_version = _integer(raw, "schema_version", 2, 2, f"player spec {path}")
     operation = _text(raw, "operation", f"player spec {path}")
     if operation not in {"create", "update"}:
@@ -1209,10 +1265,11 @@ def _load_one_spec(
     if operation == "create":
         create = _load_create(raw.get("pes"), identity)
         patches: Mapping[str, FieldPatch] = MappingProxyType({})
+        loan = _load_loan(raw.get("loan"), create)
     else:
         create = None
+        loan = _load_loan(raw.get("loan"), create)
         patches = _load_update(raw.get("pes"))
-
     return PlayerSpec(
         path=path,
         schema_version=schema_version,
@@ -1226,6 +1283,7 @@ def _load_one_spec(
         create=create,
         patches=patches,
         proposal=None,
+        loan=loan,
     )
 
 

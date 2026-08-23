@@ -349,6 +349,7 @@ def test_bundled_base_batch_survives_encryption_roundtrip(tmp_path):
     try:
         edit_file = EditFile()
         edit_file.load(decrypted / "data.dat")
+        before_data = bytes(edit_file._data)
         results = apply_player_specs(
             edit_file,
             load_player_specs(),
@@ -358,8 +359,12 @@ def test_bundled_base_batch_survives_encryption_roundtrip(tmp_path):
         assert {result.name: (result.status, result.reason) for result in results} == {
             "Dastan Satpaev": ("rejected", "create_temporarily_unavailable"),
             "Kennet Eichhorn": ("rejected", "create_temporarily_unavailable"),
-            "Marco Palestra": ("updated", "patched"),
+            "Marco Palestra": (
+                "retired",
+                "Superseded by Gondowan's 22 August 2026 EDIT base",
+            ),
         }
+        assert bytes(edit_file._data) == before_data
         assert edit_file.validate_integrity()["valid"] is True
         edit_file.save(decrypted / "data.dat")
 
@@ -369,16 +374,7 @@ def test_bundled_base_batch_survives_encryption_roundtrip(tmp_path):
         verified = EditFile()
         verified.load(reopened / "data.dat")
         assert verified.validate_integrity()["valid"] is True
-        palestra = verified.get_player_ability_profile(162196)
-        assert palestra.abilities["speed"] == 90
-        assert palestra.abilities["acceleration"] == 85
-        assert palestra.abilities["defensive_awareness"] == 65
-        assert palestra.abilities["ball_winning"] == 69
-        assert palestra.abilities["dribbling"] == 86
-        assert palestra.abilities["stamina"] == 85
-        assert palestra.abilities["ball_control"] == 80
-        assert palestra.abilities["tight_possession"] == 81
-        assert palestra.abilities["lofted_pass"] == 83
+        assert bytes(verified._data) == before_data
         assert verified.get_all_players().get(DASTAN_ID) is None
     finally:
         crypto.cleanup_temp(decrypted)
@@ -420,7 +416,7 @@ def test_bundled_base_create_is_rejected_without_mutation(tmp_path):
         verified.load(reopened / "data.dat")
         assert verified.validate_integrity()["valid"] is True
         assert verified.get_all_players().get(DASTAN_ID) is None
-        assert verified.get_team_roster(102).player_index(DASTAN_ID) == -1
+        assert verified.get_team_roster(378).player_index(DASTAN_ID) == -1
     finally:
         crypto.cleanup_temp(decrypted)
         if reopened is not None:

@@ -7,10 +7,13 @@
 
 FL Daily Edit 通过将现实世界中的转会应用到 `EDIT00000000` 存档文件，更新 SP Football Life 2026 和 eFootball PES 2021 的阵容。
 
-> **新球员创建采用显式 opt-in。直接 API 调用默认保持禁用；
-> `players apply --allow-create` 必须使用经过验证的 `PlayerAppearance.bin` donor。**
+> **经审核的新球员创建在 `players apply` 中默认启用，但必须存在有效的
+> `PlayerAppearance.bin` donor。正向选项是 `--allow-create`；使用
+> `--no-allow-create` 可禁用 CLI 创建。直接 API 调用仍默认禁用。**
 >
-> 仍支持存档中已有球员的转会以及现有球员的已审核更新。缺失的球员将被跳过；若目标球队阵容已满，默认会跳过该操作，而不是解约现有球员。
+> 仍支持存档中已有球员的转会以及现有球员的已审核更新。缺失的球员将被跳过。
+> 基于角色的 overflow release 默认启用；使用 `--no-allow-overflow-release`
+> 可让已满阵容保持不变。
 
 > [!WARNING]
 > **Beta 提示：** FL Daily Edit、仓库数据和生成的发布版本仍在测试中。它们可能尚未适用于所有游戏/存档配置；某些情况目前还不受支持。
@@ -24,7 +27,12 @@ FL Daily Edit 通过将现实世界中的转会应用到 `EDIT00000000` 存档�
 
 本工具不兼容 UML、旧版 FL26，或未安装国家队更新的版本。安装存档后，请开始新的大师联赛或一球成名生涯。
 
-[随附的基础存档](base/EDIT00000000)为 2026 年 7 月 27 日发布的 [Gondowan's Mid-Summer EDIT](https://www.reddit.com/r/SPFootballLife/comments/1v7z782/release_gondowans_midsummer_edit_file_more_than/)。其中包含 500 多笔转会，以及更新后的评分、位置、球衣号码、租借回归、主教练、首发阵容和升降级变动。该存档不会创建球员，也不会添加从第三级别联赛升级的俱乐部。
+[随附的基础存档](base/EDIT00000000)为 2026 年 8 月 22 日发布的
+[Gondowan's EDIT](https://www.reddit.com/r/SPFootballLife/comments/1vvh129/release_gondowans_edit_file_22082026_latest/)。
+其中包含截至 8 月 22 日所有联赛的最后时刻转会、600 多名球员的评分变化、
+一二级联赛升降级变动、身高和位置修正、姓名与号码更新、可用主教练调整，
+以及按最佳球员排序的自动阵容。该存档不会创建球员，也不会添加从第三级别
+联赛升级的俱乐部。
 
 ## Windows 安装程序
 
@@ -77,21 +85,23 @@ Windows 安装程序是面向新手的推荐方式。安装程序界面目前仅
 - 进程锁可防止两个进程同时写入同一输出。
 - FotMob 快照不完整时，运行会中止，而不会生成残缺存档。
 - 球员匹配有歧义、来源俱乐部不符时，会跳过相应操作。
-- 目标球队阵容已满时默认跳过；转会更新程序绝不会自动解约现有球员。
-- `--allow-overflow-release` 是一个独立的、仅用于转会的显式选项。它需要完整的球员位置和 OVR 元数据，并可以解约安全的候选球员以腾出名额。若元数据不完整，运行将安全关闭（fail-closed）。
+- 目标球队阵容已满时默认使用基于角色的 overflow release。保护首发与比赛日替补，
+  优先释放最深层的 native reserve，并在有 native candidate 时保护 created player。
+  绝不使用能力值/OVR；使用 `--no-allow-overflow-release` 可禁用。
 - Wikipedia、Sortitoutsi 和 Transfermarkt 是补充来源。其中任一来源中断，都不会使完整的 FotMob 快照失效。
 
 **转会更新 vs. 球员更新 (Player Updates)**
 
 这是两个独立的工作流：
 
-- `run` 仅处理存档中已有球员的转会。若目标俱乐部已满，则跳过该转会；同一运行中的其他安全转会仍可正常应用。
+- `run` 仅处理存档中已有球员的转会。若目标俱乐部已满，默认释放基于角色的
+  overflow candidate；使用 `--no-allow-overflow-release` 可跳过该转会。
 - `players apply` 应用经审核的属性变更。支持现有球员的 `update` 规范。
-- 新球员的 `create` 规范仍可加载和审核。应用它需要
-  `players apply --allow-create`、明确的外观 donor 和有效的
-  `PlayerAppearance.bin` 来源。donor 缺失或无效时拒绝该规范且不改变存档字节。
-- 目标球队阵容已满时还必须使用 `--allow-overflow-release`；只有存档中
-  OVR 完整且为正的 reserve 才能被释放。`Player.bin` 元数据不能替代 OVR。
+- 新球员的 `create` 规范仍可加载和审核。存在明确 donor 和有效
+  `PlayerAppearance.bin` 来源时，`players apply` 默认尝试创建。使用
+  `--no-allow-create` 可禁用；donor 缺失或无效时不会改变存档。
+- `players apply` 在目标阵容已满时默认使用基于角色的 overflow；正向选项是
+  `--allow-overflow-release`，使用 `--no-allow-overflow-release` 可跳过。
 
 ## 本地运行
 
@@ -146,6 +156,10 @@ python run.py run --help
 | `run` | 仅应用已验证的转会 |
 | `players validate` | 对照原始基础存档验证所有 Player Update |
 | `players apply` | 将经审核的 Player Update 显式应用到一个存档 |
+| `base-audit` | 检查活动 Player Update、目标球队和 loan parent 与基础阵容的一致性 |
+| `base-refresh` | 验证并可选地提升本地或 HTTPS 基础存档候选文件 |
+| `usage-import` | 将离线球员 usage CSV 合并到 release policy |
+| `players apply --preflight` | 在不写入文件的情况下显示已审核创建目标和安全输入 |
 | `log` | 显示最近应用的转会 |
 | `inspect` | 检查球队、球员人数和存档偏移量 |
 | `validate` | 检查阵容注册和比赛计划映射 |
@@ -200,6 +214,8 @@ python run.py run --help
 | `--dry-run` | 规划更改，但不写入存档 |
 | `--from-base` | 从 `base/EDIT00000000` 开始 |
 | `--fotmob-only` | 不使用补充转会来源运行 |
+| `--release-policy PATH` | 加载按球队保护的球员和离线 usage counters |
+| `--numbers-only` | 仅使用 FotMob 阵容数据修正当前球衣号码 |
 
 不使用 `--from-base` 时，常规运行会从上次已验证的输出继续。这样可以避免后续定时运行再次读取累积历史时，已应用的转会消失。
 

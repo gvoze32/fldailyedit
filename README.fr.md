@@ -8,12 +8,15 @@
 FL Daily Edit met à jour les effectifs de SP Football Life 2026 et d'eFootball PES 2021
 en appliquant les transferts réels à un fichier de sauvegarde `EDIT00000000`.
 
-> **La création de nouveaux joueurs est opt-in. Les appels API directs restent désactivés
-> par défaut ; `players apply --allow-create` exige un donneur validé de `PlayerAppearance.bin`.**
+> **La création de nouveaux joueurs révisés est activée par défaut dans
+> `players apply` lorsqu'un donneur valide de `PlayerAppearance.bin` est disponible.
+> L'option positive est `--allow-create`; utilisez `--no-allow-create` pour
+> désactiver les créations CLI. Les appels API directs restent désactivés par défaut.**
 >
-> Les transferts pour les joueurs déjà présents dans la sauvegarde et les mises à jour révisées
-> pour les joueurs existants restent pleinement pris en charge. Les joueurs absents sont ignorés
-> et un effectif de destination complet est ignoré par défaut plutôt que de libérer un joueur existant.
+> Les transferts des joueurs déjà présents et les mises à jour révisées des joueurs existants
+> restent pris en charge. Les joueurs absents sont ignorés. La libération overflow basée sur
+> les rôles est activée par défaut ; utilisez `--no-allow-overflow-release` pour conserver un
+> effectif complet inchangé.
 
 > [!WARNING]
 > **Avis beta :** FL Daily Edit, les données de son dépôt et les versions générées sont encore en cours de test. Ils peuvent ne pas fonctionner avec toutes les configurations du jeu/de la sauvegarde ; certaines conditions ne sont pas encore prises en charge.
@@ -30,10 +33,13 @@ sans mise à jour des équipes nationales. Démarrez une nouvelle carrière en L
 ou Vers une Légende après avoir installé le fichier de sauvegarde.
 
 La [base incluse](base/EDIT00000000) correspond au fichier
-[Gondowan's Mid-Summer EDIT](https://www.reddit.com/r/SPFootballLife/comments/1v7z782/release_gondowans_midsummer_edit_file_more_than/)
-du 27 juillet 2026. Elle intègre plus de 500 transferts, des notes générales actualisées,
-les postes, les numéros de maillot, les retours de prêt, les entraîneurs, les compositions d'équipe
-ainsi que les montées et descentes. Elle ne crée pas de joueurs et n'ajoute pas les clubs promus de troisième division.
+[Gondowan's EDIT du 22 août 2026](https://www.reddit.com/r/SPFootballLife/comments/1vvh129/release_gondowans_edit_file_22082026_latest/).
+Elle intègre les transferts de dernière minute au 22/08/2026 pour tous les
+championnats, les changements de note de plus de 600 joueurs, les montées et
+descentes entre les première et deuxième divisions, des corrections de taille et
+de poste, les mises à jour de noms et de numéros, des changements d'entraîneurs
+disponibles et des compositions automatiques classées selon les meilleurs joueurs.
+Elle ne crée pas de joueurs et n'ajoute pas les clubs promus de troisième division.
 
 ## Programme d’installation Windows
 
@@ -92,23 +98,27 @@ Tous les éléments actuels de la feuille de route sont terminés. Nous attendon
 - Un verrouillage de processus empêche deux exécutions d'écrire simultanément dans la même sortie.
 - Les instantanés FotMob incomplets interrompent l'exécution plutôt que de générer une sauvegarde partielle.
 - Les correspondances ambiguës et les incohérences de club d'origine sont ignorées.
-- Les effectifs de destination complets sont ignorés par défaut ; l'outil de transfert ne libère jamais automatiquement un joueur existant.
-- `--allow-overflow-release` est une option distincte et explicite réservée aux transferts. Elle exige des métadonnées complètes sur les postes et l'OVR et peut libérer un candidat sans risque pour faire de la place. Si ces métadonnées sont incomplètes, l'exécution s'arrête en toute sécurité.
+- Les effectifs de destination complets utilisent par défaut la libération overflow basée sur
+  les rôles. Les titulaires et le banc de match sont protégés, la réserve native la plus
+  profonde est privilégiée et les joueurs créés sont protégés lorsqu'un candidat natif existe.
+  L'ability/OVR n'est jamais utilisé ; utilisez `--no-allow-overflow-release` pour désactiver.
 - Wikipedia, Sortitoutsi et Transfermarkt sont des sources complémentaires. Une indisponibilité de l'une d'elles n'invalide pas un instantané complet de FotMob.
 
 **Mises à jour des transferts vs Player Updates**
 
 Il s'agit de flux de travail distincts :
 
-- `run` traite les transferts pour les joueurs déjà présents dans la sauvegarde. Si un club de destination est complet, ce transfert est ignoré ; les autres transferts sûrs de la même exécution peuvent toujours être appliqués.
-- `players apply` applique les modifications d'attributs révisées. Les spécifications `update` pour les joueurs existants sont prises en charge.
+- `run` traite les transferts pour les joueurs déjà présents dans la sauvegarde. Si un club de
+  destination est complet, le candidat overflow basé sur le rôle est libéré par défaut ;
+  utilisez `--no-allow-overflow-release` pour ignorer ce transfert.
+- `players apply` applique les modifications d'attributs révisées. Les spécifications `update`
+  pour les joueurs existants sont prises en charge.
 - Les spécifications `create` pour les nouveaux joueurs restent chargeables et révisables.
-  Leur application exige `players apply --allow-create`, un donneur d'apparence explicite
-  et une source valide de `PlayerAppearance.bin`. Un donneur absent ou invalide rejette
-  la spécification sans modifier les octets de la sauvegarde.
-- Un effectif de destination complet exige aussi `--allow-overflow-release` ; seul un
-  remplaçant avec un OVR positif complet de la sauvegarde peut être libéré. Les métadonnées
-  de `Player.bin` ne remplacent pas l'OVR.
+  `players apply` les tente par défaut lorsqu'un donneur explicite et une source valide de
+  `PlayerAppearance.bin` sont disponibles. Utilisez `--no-allow-create` pour les désactiver ;
+  un donneur absent ou invalide laisse la sauvegarde inchangée.
+- Pour `players apply`, un effectif complet utilise l'overflow basé sur les rôles par défaut.
+  L'option positive est `--allow-overflow-release`; `--no-allow-overflow-release` le désactive.
 
 ## Exécution locale
 
@@ -164,6 +174,10 @@ python run.py run --help
 | `run` | Appliquer uniquement les transferts vérifiés |
 | `players validate` | Valider toutes les Player Updates par rapport à la base d'origine |
 | `players apply` | Appliquer explicitement les Player Updates revues à une sauvegarde |
+| `base-audit` | Vérifier les Player Updates actifs, leurs destinations et le parent de prêt par rapport à une base |
+| `base-refresh` | Vérifier et éventuellement promouvoir une base locale ou HTTPS |
+| `usage-import` | Fusionner les données CSV d'utilisation dans la release policy |
+| `players apply --preflight` | Afficher les destinations create révisées et les données de sécurité sans écrire |
 | `log` | Afficher les transferts récemment appliqués |
 | `inspect` | Inspecter les équipes, le nombre de joueurs et les décalages du fichier de sauvegarde |
 | `validate` | Vérifier les inscriptions dans les effectifs et les plans de jeu |
@@ -221,6 +235,8 @@ Options courantes de `run` :
 | `--dry-run` | Planifier les modifications sans écrire de sauvegarde |
 | `--from-base` | Partir de `base/EDIT00000000` |
 | `--fotmob-only` | Exécuter sans sources de transferts complémentaires |
+| `--release-policy PATH` | Charger les joueurs protégés par club et les compteurs d'utilisation hors ligne |
+| `--numbers-only` | Corriger les numéros actuels uniquement avec les données d'effectif FotMob |
 
 Sans `--from-base`, une exécution standard reprend depuis la dernière sortie vérifiée. Cela évite que les transferts disparaissent lorsqu'une exécution planifiée ultérieure relit l'historique cumulé.
 

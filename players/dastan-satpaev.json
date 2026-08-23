@@ -20,21 +20,27 @@
   "evidence": {
     "profile_url": "https://pesretrostats.com/player/f77d9c27-dastan-satpaev",
     "proof_urls": [
-      "https://qjl.kz/en/news/official-dastan-satpayev-signed-a-contract-with-chelsea",
-      "https://www.chelseafc.com/en/news/article/chelsea-squad-numbers-2026-pre-season-tour-confirmed"
+      "https://www.chelseafc.com/en/news/article/dastan-satpayev-completes-chelsea-transfer-and-seals-loan-switch",
+      "https://www.burnleyfootballclub.com/media-article/satpayev-makes-burnley-move"
     ],
-    "effective_date": "2026-08-04",
-    "reason": "Chelsea included Satpaev in its 2026 pre-season squad before his contractual transfer date."
+    "effective_date": "2026-08-14",
+    "reason": "Chelsea completed the transfer and Burnley announced a season-long loan for 2026/27."
+  },
+  "loan": {
+    "parent_team_id": 102,
+    "parent_team_name": "Chelsea FC",
+    "start_date": "2026-08-14",
+    "end_date": "2027-06-30"
   },
   "pes": {
     "player_id": 1073003,
     "name": "Dastan Satpaev",
     "print_name": "SATPAEV",
-    "team_id": 102,
-    "team_name": "Chelsea FC",
+    "team_id": 378,
+    "team_name": "Burnley FC",
     "preferred_shirt_number": 36,
     "nationality_id": 216,
-    "age": 17,
+    "age": 18,
     "height": 176,
     "weight": 73,
     "registered_position": "CF",

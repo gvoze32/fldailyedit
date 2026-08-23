@@ -28,6 +28,7 @@ from editor.player_ovr import (
 from editor.player_assignment import PlayerAssignmentDatabase
 from editor.player_catalog import PlayerCatalogReport, build_player_catalog
 from editor.playerbin import PlayerBinDatabase
+from editor.release_policy import PlayerUsage, ReleasePolicy
 from editor.teambin import TeamBinDatabase, TeamBinRecord
 logger = logging.getLogger(__name__)
 
@@ -113,6 +114,12 @@ TP_PLAYER_IDS = 0x04       # 40 × 4 bytes (160 bytes total)
 TP_SHIRT_NUMBERS = 0xA4    # 40 × 2 bytes (80 bytes total)
 TP_MAX_PLAYERS = 40
 MIN_CLUB_ROSTER_SIZE = 16
+FIRST_TEAM_SLOT_COUNT = 11
+MATCHDAY_SQUAD_SLOT_COUNT = 18
+MIN_GOALKEEPERS = 2
+# Keep the reserved range used by Player Update create IDs out of the
+# overflow pool when a native reserve is available.
+CREATED_PLAYER_ID_MIN = 0x100000
 
 # Game plan entry
 GP_TEAM_ID = 0x000         # 4 bytes uint32 LE
@@ -233,6 +240,8 @@ class EditFile:
         self.player_assignment_db: PlayerAssignmentDatabase | None = None
         self.player_assignment_source: str | None = None
         self.player_appearance_data: bytes | None = None
+        self.release_protected_player_ids: dict[int, frozenset[int]] = {}
+        self.release_usage: dict[int, PlayerUsage] = {}
 
         # Track players transferred in the current session to protect them from overflow auto-release
         self.transferred_player_ids: set[int] = set()
@@ -279,6 +288,15 @@ class EditFile:
         if data is not None and not isinstance(data, (bytes, bytearray, memoryview)):
             raise TypeError("appearance data must be bytes-like or None")
         self.player_appearance_data = None if data is None else bytes(data)
+
+    def attach_release_policy(self, policy: ReleasePolicy | None) -> None:
+        """Attach optional protected-player and offline-usage release policy."""
+        if policy is not None and not isinstance(policy, ReleasePolicy):
+            raise TypeError("policy must be a ReleasePolicy or None")
+        self.release_protected_player_ids = (
+            {} if policy is None else dict(policy.protected_players)
+        )
+        self.release_usage = {} if policy is None else dict(policy.usage)
 
     def get_player_position(self, player_id: int) -> str | None:
         """Return an edited or Player.bin registered position when available."""
@@ -809,6 +827,34 @@ class EditFile:
                     break
         return teams
 
+    def _overflow_role_slots(
+        self, team_id: int, player_ids: list[int]
+    ) -> dict[int, int]:
+        """Return game-plan role order keyed by persisted roster slot."""
+        role_slots = {
+            slot: slot for slot, player_id in enumerate(player_ids) if player_id != 0
+        }
+        game_plan_offset = self._find_game_plan_offset(team_id)
+        if game_plan_offset is None:
+            return role_slots
+        lineup_start = game_plan_offset + GP_LINEUP
+        lineup_end = lineup_start + TP_MAX_PLAYERS
+        if lineup_end > len(self._data):
+            return role_slots
+        lineup = list(self._data[lineup_start:lineup_end])
+        active_roster_slots = set(role_slots)
+        active_prefix = lineup[: len(active_roster_slots)]
+        if (
+            len(active_prefix) != len(active_roster_slots)
+            or len(set(active_prefix)) != len(active_prefix)
+            or set(active_prefix) != active_roster_slots
+        ):
+            return role_slots
+        return {
+            roster_slot: role
+            for role, roster_slot in enumerate(active_prefix)
+        }
+
     def find_overflow_release_candidate(
         self,
         team_id: int,
@@ -817,15 +863,25 @@ class EditFile:
         protected_player_ids: set[int] | None = None,
     ) -> tuple[int, int]:
         """
-        Find the best player to release to Free Agent when team roster is full (40/40).
+        Find the safest player to release when a roster is full.
 
-        Selection criteria:
-        1. Prioritizes players with the lowest overall ability (OVR).
-        2. Protects starters (slots 0-10) and primary substitutes (slots 11-17) if possible.
-        3. For players with equal or unknown ability, chooses the deepest reserve slot (closest to slot 39).
+        Release ranking is roster-role based, not ability based:
+
+        1. Keep the incoming player, players transferred in this run, and
+           explicitly protected players out of the candidate pool.
+        2. Protect the first-team game-plan roles and then the matchday bench.
+        3. Prefer the deepest native reserve role, which is the least likely to
+           play.
+        4. Keep at least two goalkeepers when position metadata identifies them.
+        5. Prefer a native reserve over a reserved-range created player when
+           both are otherwise equivalent.
+
+        The game-plan order is used when it is a valid permutation of the
+        roster slots; otherwise the persisted roster order is the fallback.
+        Player ability/OVR is deliberately never read or compared here.
 
         Returns:
-            (slot_index, player_id)
+            (roster_slot_index, player_id)
         """
         if roster_player_ids is None:
             to_entry = self._find_team_player_entry_offset(team_id)
@@ -834,10 +890,13 @@ class EditFile:
             player_ids = self._read_team_player_entry(to_entry).player_ids
         else:
             player_ids = roster_player_ids
-        # Protect both the current incoming player and any player transferred in this run
+
         protected_ids = (
             {exclude_player_id}
             | getattr(self, "transferred_player_ids", set())
+            | getattr(self, "release_protected_player_ids", {}).get(
+                team_id, frozenset()
+            )
             | (protected_player_ids or set())
         )
         active_slots = [
@@ -845,7 +904,8 @@ class EditFile:
             for slot, pid in enumerate(player_ids)
             if pid != 0 and pid not in protected_ids
         ]
-        # If all players in squad were transferred in this run, fallback to all except current
+        # If all players in the squad were transferred in this run, fall back
+        # to every player except the incoming one.
         if not active_slots:
             active_slots = [
                 (slot, pid)
@@ -855,59 +915,108 @@ class EditFile:
         if not active_slots:
             return 39, 0
 
-        if not getattr(self, "_player_cache", None) and getattr(self, "playerbin_db", None) is None:
-            # Overflow release is unsafe without caller-supplied metadata.
-            return 39, 0
+        # A valid game-plan prefix is the best local proxy for first-team,
+        # matchday-squad, and reserve usage.  Keep returning roster slots so
+        # release_player() can mutate the correct persisted entry.
+        role_slots = self._overflow_role_slots(team_id, player_ids)
 
         metadata = {
             pid: self._player_metadata(pid) for _, pid in active_slots
         }
-        if any(
-            player is None or player.overall_rating <= 0
-            for player in metadata.values()
-        ):
-            logger.warning(
-                "Refusing overflow release for team %s: incomplete player OVR metadata",
-                team_id,
-            )
-            return 39, 0
 
-        # Count total goalkeepers in active roster to protect minimum GK requirement
+        def is_goalkeeper(slot: int, player: PlayerInfo | None) -> bool:
+            # Slot zero is the historical PES fallback for the starting GK.
+            return slot == 0 or bool(player and player.is_goalkeeper)
+
         total_gks = sum(
-            bool(player.is_goalkeeper) or slot == 0
-            for slot, pid in active_slots
-            for player in (metadata[pid],)
+            is_goalkeeper(slot, metadata[pid]) for slot, pid in active_slots
         )
 
-        def candidate_sort_key(item: tuple[int, int]):
-            slot, pid = item
-            pinfo = metadata[pid]
-            ovr = pinfo.overall_rating
-            is_gk = pinfo.is_goalkeeper or slot == 0
+        def candidate_sort_key(item: tuple[int, int]) -> tuple[int, ...]:
+            roster_slot, pid = item
+            role = role_slots.get(roster_slot, roster_slot)
+            player = metadata[pid]
+            goalkeeper = is_goalkeeper(roster_slot, player)
+            is_created_player = pid >= CREATED_PLAYER_ID_MIN
+            usage = getattr(self, "release_usage", {}).get(pid)
 
-            # Role & Positional Tier:
-            # Tier 3: Starters (slots 0-10) -> Strictly protected
-            # Tier 2: Substitutes (slots 11-17) or Protected GK (min 2 GKs rule)
-            # Tier 0: Deep Reserves (slots 18-39) -> Normal candidate pool
-            if slot < 11:
+            if role < FIRST_TEAM_SLOT_COUNT:
                 tier = 3
-            elif slot < 18:
+            elif role < MATCHDAY_SQUAD_SLOT_COUNT:
                 tier = 2
-            elif is_gk and total_gks <= 2:
-                tier = 2  # Protect minimum 2 GKs rule
+            elif goalkeeper and total_gks <= MIN_GOALKEEPERS:
+                tier = 2
+            elif is_created_player:
+                # Created players are preserved over native deep reserves,
+                # but remain releasable if no native candidate exists.
+                tier = 1
             else:
                 tier = 0
 
-            # Position-adjusted effective rating:
-            # Goalkeepers have different stat scaling and specialist value.
-            # Give reserve GKs +10 effective rating bonus so outfield surplus reserves
-            # are preferred for release over specialist goalkeepers.
-            effective_ovr = ovr + (10 if is_gk else 0)
+            if usage is None:
+                usage_key = (1, 0, 0, 0, 0)
+            else:
+                usage_key = (
+                    0,
+                    usage.minutes,
+                    usage.starts,
+                    usage.appearances,
+                    usage.news_mentions,
+                )
 
-            return (tier, effective_ovr, -slot)
+            # Known low usage wins before depth; depth remains the fallback.
+            return (tier, *usage_key, -role, -roster_slot)
 
         best_slot, best_pid = min(active_slots, key=candidate_sort_key)
         return best_slot, best_pid
+
+    def describe_overflow_release_candidate(
+        self,
+        team_id: int,
+        player_id: int,
+        roster_player_ids: list[int] | None = None,
+        protected_player_ids: set[int] | None = None,
+    ) -> dict[str, object] | None:
+        """Return explainable ranking details for one selected candidate."""
+        if roster_player_ids is None:
+            entry = self._find_team_player_entry_offset(team_id)
+            if entry is None:
+                return None
+            player_ids = self._read_team_player_entry(entry).player_ids
+        else:
+            player_ids = roster_player_ids
+        slot, selected_id = self.find_overflow_release_candidate(
+            team_id,
+            roster_player_ids=player_ids,
+            protected_player_ids=protected_player_ids,
+        )
+        if selected_id != player_id:
+            return None
+        role = self._overflow_role_slots(team_id, player_ids).get(slot, slot)
+        player = self._player_metadata(player_id)
+        usage = getattr(self, "release_usage", {}).get(player_id)
+        if role < FIRST_TEAM_SLOT_COUNT:
+            role_group = "first_team"
+        elif role < MATCHDAY_SQUAD_SLOT_COUNT:
+            role_group = "matchday_bench"
+        else:
+            role_group = "reserve"
+        return {
+            "team_id": team_id,
+            "slot": slot,
+            "role": role,
+            "role_group": role_group,
+            "player_id": player_id,
+            "name": player.name if player is not None else "",
+            "is_created": player_id >= CREATED_PLAYER_ID_MIN,
+            "is_goalkeeper": bool(player and player.is_goalkeeper) or slot == 0,
+            "usage": None if usage is None else usage.to_dict(),
+            "selection_basis": (
+                "lowest_known_usage_then_deepest_role"
+                if usage is not None
+                else "deepest_role"
+            ),
+        }
 
     def append_created_player(
         self,
@@ -1007,7 +1116,7 @@ class EditFile:
         Steps:
         1. Find player in source team's roster
         2. Remove from source (compact slots by shifting last non-zero entry)
-        3. Add to destination (first empty slot or auto-release lowest ability player if full)
+        3. Add to destination (first empty slot or auto-release a deep reserve if full)
         4. Assign a smart, conflict-free shirt number based on position & preference
         5. Update game plan index IDs and repair captaincy / set-piece roles if needed
 
@@ -1087,7 +1196,7 @@ class EditFile:
 
             logger.warning(
                 f"Destination team {to_team_id} is full (40/40). "
-                f"Auto-releasing lowest ability player {overflow_pid} to Free Agent."
+                f"Auto-releasing deepest reserve player {overflow_pid} to Free Agent."
             )
             if not self.release_player(overflow_pid, to_team_id):
                 logger.error(f"Could not release overflow player {overflow_pid} from team {to_team_id}")
@@ -1264,7 +1373,8 @@ class EditFile:
                 return False
             logger.warning(
                 f"Team {to_team_id} roster is full (40/40). "
-                f"Auto-releasing lowest ability player {pid_to_rel} (slot {slot_to_rel}) to Free Agent."
+                f"Auto-releasing deepest reserve player {pid_to_rel} (slot {slot_to_rel}) "
+                "to Free Agent."
             )
             if not self.release_player(pid_to_rel, to_team_id):
                 logger.error(f"Could not release overflow player {pid_to_rel} from team {to_team_id}")

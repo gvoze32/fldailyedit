@@ -922,6 +922,7 @@ UI_COPY = {
         "still being tested and may not work with every game/save setup. Fast "
         "and Deep describe update coverage, not download speed."
     ),
+    "coverage_semantics": "Fast and Deep describe update coverage, not download speed.",
     "install": "Download and install",
     "local_mode": "Update my local save",
     "release_mode": "Install a prebuilt release",
