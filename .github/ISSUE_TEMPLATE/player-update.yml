@@ -36,7 +36,7 @@ body:
     id: current_team
     attributes:
       label: Current team
-      description: Enter the player's current team as supported by the evidence.
+      description: Enter the player's current registered club in the save. For a loan, use the destination club, not the parent club.
     validations:
       required: true
 
@@ -44,14 +44,14 @@ body:
     id: loan_parent_team
     attributes:
       label: Loan parent team
-      description: Optional for a create request when the player is registered at a club on loan. Leave blank for a permanent registration.
+      description: Optional for a create request when the player is on loan. Enter the parent club that owns the registration; leave blank for a permanent registration.
       placeholder: Chelsea FC
 
   - type: input
     id: loan_end_date
     attributes:
       label: Loan end date
-      description: Optional for a create request with a loan parent. Use YYYY-MM-DD.
+      description: Optional when a loan parent is supplied. Enter the expected loan end date in YYYY-MM-DD.
       placeholder: "2027-06-30"
 
   - type: input

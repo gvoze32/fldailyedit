@@ -1,4 +1,4 @@
-[![English](https://img.shields.io/badge/English-012169)](../../README.md) [![Indonesian](https://img.shields.io/badge/Indonesian-ce1126)](README.id.md) [![Español](https://img.shields.io/badge/Espa%C3%B1ol-aa151b)](README.es.md) [![Français](https://img.shields.io/badge/Français-002395)](README.fr.md) [![Português](https://img.shields.io/badge/Português-006600)](README.pt.md) [![Deutsch](https://img.shields.io/badge/Deutsch-000000)](README.de.md) [![Italiano](https://img.shields.io/badge/Italiano-009246)](README.it.md) [![Russian](https://img.shields.io/badge/Russian-0039a6)](README.ru.md) [![Türkçe](https://img.shields.io/badge/Turkish-e30a17)](README.tr.md) [![العربية](https://img.shields.io/badge/Arabic-008000)](README.ar.md) [![中文](https://img.shields.io/badge/Chinese-de2910)](README.zh.md)
+[![English](https://img.shields.io/badge/%F0%9F%87%AC%F0%9F%87%A7_English-012169?style=flat-square)](../../README.md) [![Indonesian](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%A9_Indonesian-ce1126?style=flat-square)](README.id.md) [![Español](https://img.shields.io/badge/%F0%9F%87%AA%F0%9F%87%B8_Espa%C3%B1ol-aa151b?style=flat-square)](README.es.md) [![Français](https://img.shields.io/badge/%F0%9F%87%AB%F0%9F%87%B7_Fran%C3%A7ais-002395?style=flat-square)](README.fr.md) [![Português](https://img.shields.io/badge/%F0%9F%87%B5%F0%9F%87%B9_Portugu%C3%AAs-006600?style=flat-square)](README.pt.md) [![Deutsch](https://img.shields.io/badge/%F0%9F%87%A9%F0%9F%87%AA_Deutsch-000000?style=flat-square)](README.de.md) [![Italiano](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%B9_Italiano-009246?style=flat-square)](README.it.md) [![Русский](https://img.shields.io/badge/%F0%9F%87%B7%F0%9F%87%BA_%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-d52b1e?style=flat-square)](README.ru.md) [![Türkçe](https://img.shields.io/badge/%F0%9F%87%B9%F0%9F%87%B7_T%C3%BCrk%C3%A7e-e30a17?style=flat-square)](README.tr.md) [![العربية](https://img.shields.io/badge/%F0%9F%87%B8%F0%9F%87%A6_%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A%D8%A9-006c35?style=flat-square)](README.ar.md) [![中文](https://img.shields.io/badge/%F0%9F%87%A8%F0%9F%87%B3_%E4%B8%AD%E6%96%87-de2910?style=flat-square)](README.zh.md)
 
 # FL Daily Edit
 
@@ -197,12 +197,14 @@ ambos flujos de trabajo, primero se debe ejecutar el comando de transferencias s
 
 Cada Player Update revisada es un archivo JSON completo con la versión 2 del esquema por
 jugador en `players/`. Registra una `operation` (`create` o `update`), un
-ciclo de vida (`active`, `upstreamed` o `retired`), las revisiones base exactas en `applies_to`,
+ciclo de vida (`active`, `integrated` o `superseded`), las revisiones base exactas en `applies_to`,
 la identidad estable del jugador y la procedencia del UUID/perfil de Pes Retro Stats,
 evidencia citada y datos de PES revisados. Las actualizaciones de creación contienen una propuesta de
 registro completo del jugador y datos de la plantilla de destino. Las actualizaciones de jugadores existentes
 contienen únicamente valores compatibles que difieren de la base verificada; cada cambio
 registra valores literales `from` y `to`.
+
+> **Nota del ciclo de vida:** `superseded` es un estado del Player Update, no de la carrera del jugador. Significa que la actualización ya no se aplica a la revisión base seleccionada.
 Los registros `create` siguen siendo compatibles con el esquema para su revisión.
 La mutación desde la CLI requiere `players apply --allow-create` y datos de
 apariencia válidos; la API directa permanece desactivada por defecto. Si la
@@ -276,8 +278,8 @@ Cuando cambia la base oficial, se deben actualizar juntos `base/EDIT00000000` y
 `players/`; no se deben eliminar solo porque cambió la revisión. Una Player Update activa
 cuya lista `applies_to` no contiene la nueva revisión queda inactiva: la validación informa
 `needs_review` y la aplicación la omite. Después de revisarla, se debe agregar la nueva revisión únicamente cuando la
-Player Update todavía corresponda, marcarla como `upstreamed` cuando la base oficial incluya su cambio
-o marcarla como `retired` cuando ya no corresponda.
+Player Update todavía corresponda, marcarla como `integrated` cuando la base oficial incluya su cambio
+o marcarla como `superseded` cuando ya no corresponda.
 
 Opciones comunes de `run`:
 

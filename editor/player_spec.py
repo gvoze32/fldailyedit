@@ -1236,7 +1236,7 @@ def _load_one_spec(
         f"player spec {path} lifecycle",
     )
     lifecycle_status = _text(lifecycle, "status", f"player spec {path} lifecycle")
-    if lifecycle_status not in {"active", "upstreamed", "retired"}:
+    if lifecycle_status not in {"active", "integrated", "superseded"}:
         raise PlayerSpecError(
             f"player spec {path} has unsupported lifecycle status {lifecycle_status!r}"
         )

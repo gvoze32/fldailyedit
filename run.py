@@ -2644,7 +2644,7 @@ def _print_player_spec_results(
     print(
         "Player Updates: "
         f"active={counts['active']}, needs-review={result_counts['needs_review']}, "
-        f"upstreamed={counts['upstreamed']}, retired={counts['retired']}, "
+        f"integrated={counts['integrated']}, superseded={counts['superseded']}, "
         f"create={operations['create']}, update={operations['update']}"
     )
 
@@ -2656,7 +2656,7 @@ def _invalid_player_spec_validation_results(
 ) -> tuple[SpecResult, ...]:
     invalid: list[SpecResult] = []
     for spec, result in zip(specs, results, strict=True):
-        if spec.lifecycle_status in {"upstreamed", "retired"}:
+        if spec.lifecycle_status in {"integrated", "superseded"}:
             valid = result.status == spec.lifecycle_status
         elif base_revision not in spec.applies_to:
             valid = result.status == "needs_review"

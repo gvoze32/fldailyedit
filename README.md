@@ -1,4 +1,4 @@
-[![English](https://img.shields.io/badge/English-012169)](README.md) [![Indonesian](https://img.shields.io/badge/Indonesian-ce1126)](docs/readmes/README.id.md) [![Español](https://img.shields.io/badge/Espa%C3%B1ol-aa151b)](docs/readmes/README.es.md) [![Français](https://img.shields.io/badge/Français-002395)](docs/readmes/README.fr.md) [![Português](https://img.shields.io/badge/Português-006600)](docs/readmes/README.pt.md) [![Deutsch](https://img.shields.io/badge/Deutsch-000000)](docs/readmes/README.de.md) [![Italiano](https://img.shields.io/badge/Italiano-009246)](docs/readmes/README.it.md) [![Russian](https://img.shields.io/badge/Russian-0039a6)](docs/readmes/README.ru.md) [![Türkçe](https://img.shields.io/badge/Turkish-e30a17)](docs/readmes/README.tr.md) [![العربية](https://img.shields.io/badge/Arabic-008000)](docs/readmes/README.ar.md) [![中文](https://img.shields.io/badge/Chinese-de2910)](docs/readmes/README.zh.md)
+[![English](https://img.shields.io/badge/%F0%9F%87%AC%F0%9F%87%A7_English-012169?style=flat-square)](README.md) [![Indonesian](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%A9_Indonesian-ce1126?style=flat-square)](docs/readmes/README.id.md) [![Español](https://img.shields.io/badge/%F0%9F%87%AA%F0%9F%87%B8_Espa%C3%B1ol-aa151b?style=flat-square)](docs/readmes/README.es.md) [![Français](https://img.shields.io/badge/%F0%9F%87%AB%F0%9F%87%B7_Fran%C3%A7ais-002395?style=flat-square)](docs/readmes/README.fr.md) [![Português](https://img.shields.io/badge/%F0%9F%87%B5%F0%9F%87%B9_Portugu%C3%AAs-006600?style=flat-square)](docs/readmes/README.pt.md) [![Deutsch](https://img.shields.io/badge/%F0%9F%87%A9%F0%9F%87%AA_Deutsch-000000?style=flat-square)](docs/readmes/README.de.md) [![Italiano](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%B9_Italiano-009246?style=flat-square)](docs/readmes/README.it.md) [![Русский](https://img.shields.io/badge/%F0%9F%87%B7%F0%9F%87%BA_%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-d52b1e?style=flat-square)](docs/readmes/README.ru.md) [![Türkçe](https://img.shields.io/badge/%F0%9F%87%B9%F0%9F%87%B7_T%C3%BCrk%C3%A7e-e30a17?style=flat-square)](docs/readmes/README.tr.md) [![العربية](https://img.shields.io/badge/%F0%9F%87%B8%F0%9F%87%A6_%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A%D8%A9-006c35?style=flat-square)](docs/readmes/README.ar.md) [![中文](https://img.shields.io/badge/%F0%9F%87%A8%F0%9F%87%B3_%E4%B8%AD%E6%96%87-de2910?style=flat-square)](docs/readmes/README.zh.md)
 
 # FL Daily Edit
 
@@ -9,14 +9,14 @@ FL Daily Edit updates SP Football Life 2026 and eFootball PES 2021 squads by
 applying real-world transfers to an `EDIT00000000` save file.
 
 > **Reviewed new-player creation is enabled by default in `players apply` when
-> a valid `PlayerAppearance.bin` donor is available. The explicit positive flag
+> a valid appearance source from `PlayerAppearance.bin` is available. The explicit positive flag
 > is `--allow-create`; use `--no-allow-create` to disable CLI create mutations.
 > Direct API calls remain disabled by default.**
 >
 > Transfers for players already in the save and reviewed updates to existing
-> players remain supported. Missing players are skipped. Role-based overflow
-> release is enabled by default; use `--no-allow-overflow-release` to keep a
-> full destination roster unchanged.
+> players remain supported. Missing players are skipped. Automatic roster-space
+> release based on player roles is enabled by default; use
+> `--no-allow-overflow-release` to keep a full destination roster unchanged.
 
 > [!WARNING]
 > **Beta notice:** FL Daily Edit, its repository data, and generated releases are still being tested. They may not work with every game/save setup; some conditions are not supported yet.
@@ -95,12 +95,14 @@ All current roadmap items are complete. We are waiting for the next useful idea.
 - A process lock prevents two runs from writing the same output at once.
 - Incomplete FotMob snapshots abort the run instead of producing a partial save.
 - Ambiguous player matches and source-club mismatches are skipped.
-- Full destination squads use role-based overflow release by default. Use
-  `--no-allow-overflow-release` to keep a full roster unchanged.
-- The selector protects first-team and matchday-bench roles, prefers the
-  deepest native reserve, and protects reserved-range created players when a
-  native candidate exists. Ability/OVR is never used; malformed game-plan
-  order falls back to persisted roster order.
+- Full destination squads use automatic roster-space release based on player
+  roles by default. Use `--no-allow-overflow-release` to keep a full roster
+  unchanged.
+- The selector protects first-team and matchday-bench roles, prefers the deepest
+  player already present in the base save, and protects created-range players
+  when an original base player is available. Ability/OVR rating is never used
+  for release selection; malformed game-plan order falls back to persisted roster
+  order.
 - Wikipedia, Sortitoutsi, and Transfermarkt are supplemental. An outage in one
   of these sources does not invalidate a complete FotMob snapshot.
 
@@ -109,21 +111,23 @@ All current roadmap items are complete. We are waiting for the next useful idea.
 These are separate workflows:
 
 - `run` processes transfers for players who already exist in the save. If a
-  destination club is full, the role-based overflow candidate is released by
-  default; use `--no-allow-overflow-release` to skip that transfer.
+  destination club is full, an automatic roster-space candidate selected by
+  player roles is released by default; use `--no-allow-overflow-release` to skip
+  that transfer.
 - `players apply` applies reviewed attribute changes. Existing-player `update`
   specs are supported.
 - New-player `create` specs remain loadable and reviewable. `players apply`
-  attempts reviewed create specs by default when an explicit appearance donor
-  and valid `PlayerAppearance.bin` source are available. Use `--no-allow-create`
-  to disable them; missing or invalid donor data rejects the spec without
-  changing save bytes.
-- For `players apply`, a full destination roster uses role-based overflow by
-  default. The explicit positive flag is `--allow-overflow-release`; use
-  `--no-allow-overflow-release` to keep it unchanged. The selector protects
-  first-team roles, the matchday bench, transferred/protected IDs, and
-  reserved-range created players when native candidates exist. The minimum
-  goalkeeper rule is honored when position metadata is available.
+  attempts reviewed create specs by default when an explicit appearance source
+  player and valid `PlayerAppearance.bin` source are available. Use
+  `--no-allow-create` to disable them; missing or invalid appearance-source data
+  rejects the spec without changing save bytes.
+- For `players apply`, a full destination roster uses automatic roster-space
+  release based on player roles by default. The explicit positive flag is
+  `--allow-overflow-release`; use `--no-allow-overflow-release` to keep it
+  unchanged. The selector protects first-team roles, the matchday bench,
+  transferred/protected IDs, and reserved-range created players when original
+  base players are available. The minimum goalkeeper rule is honored when
+  position metadata is available.
 
 ## Run locally
 
@@ -152,7 +156,7 @@ python run.py run --dry-run --edit-file base/EDIT00000000
 # Validate an existing save
 python run.py validate --edit-file base/EDIT00000000
 
-# Audit one save against native metadata without writing it
+# Audit one save against the game's original metadata without writing it
 python run.py audit \
   --edit-file /path/to/EDIT00000000 \
   --game-root "/path/to/Football Life 2026" \
@@ -160,13 +164,13 @@ python run.py audit \
 
 python run.py base-audit --edit-file base/EDIT00000000
 
-# Compare two native CPK variants without merging them
+# Compare two game metadata CPK variants without merging them
 python run.py compare \
   --left-cpk /path/to/data_s2526.cpk \
   --right-cpk /path/to/data_extra.cpk \
   --json
 
-# Validate one-file-per-player updates against the pristine base revision
+# Validate one-file-per-player updates against the verified base revision
 python run.py players validate
 
 # Apply reviewed Player Updates explicitly to an existing output save
@@ -191,7 +195,7 @@ python run.py run --help
 | Command | Purpose |
 |---|---|
 | `run` | Apply verified transfers only |
-| `players validate` | Validate all Player Updates against the pristine base |
+| `players validate` | Validate all Player Updates against the verified base revision |
 | `players apply` | Apply reviewed Player Updates explicitly to one save |
 | `base-audit` | Check active Player Updates, destinations, and loan parents against a base roster |
 | `base-refresh` | Verify and optionally promote a local or HTTPS base candidate |
@@ -201,9 +205,8 @@ python run.py run --help
 | `inspect` | Inspect teams, player counts, and save offsets |
 | `validate` | Check roster registrations and game-plan mappings |
 | `repair` | Repair a legacy base using reference saves |
-| `audit` | Read-only audit of save and native Player/Team metadata |
-| `compare` | Read-only comparison of two native CPK metadata variants |
-
+| `audit` | Read-only audit of save and original game Player/Team metadata |
+| `compare` | Read-only comparison of two original game CPK metadata variants |
 
 `run` handles transfers only: it never loads or applies Player Updates. To combine
 both workflows, first run the transfer command against an output save, then run
@@ -213,17 +216,19 @@ both workflows, first run the transfer command against an output save, then run
 
 Each reviewed Player Update is one completed schema-version-2 JSON file per
 player under `players/`. It records an `operation` (`create` or `update`), a
-lifecycle (`active`, `upstreamed`, or `retired`), exact `applies_to` base
+lifecycle (`active`, `integrated`, or `superseded`), exact `applies_to` base
 revisions, stable player identity and Pes Retro Stats UUID/profile provenance,
 cited evidence, and reviewed PES data. Create updates contain a proposed
 complete player record and destination roster data. Existing-player updates
 contain only supported values that differ from the verified base; every change
 records literal `from` and `to` values.
+
+> **Lifecycle note:** `superseded` is a status for the Player Update, not for the player. It means the update no longer applies to the selected base revision.
 Create records remain schema-supported for review. CLI create mutation is
 enabled by default for reviewed specs when valid appearance data is available;
 use `--no-allow-create` to disable it. Direct API calls remain disabled by
 default. If the destination roster is full, use
-`--no-allow-overflow-release` to disable role-based overflow release; missing
+`--no-allow-overflow-release` to disable automatic roster-space release; missing
 or invalid safety metadata leaves the save unchanged.
 Supported update groups are abilities, position proficiency, playing style,
 player skills, COM styles, nationality, physical/basic settings, and
@@ -294,7 +299,7 @@ When the official base changes, update `base/EDIT00000000` and
 Player Update whose `applies_to` list does not contain the new revision is
 inactive: validation reports `needs_review` and application skips it. After
 review, add the new revision only when the Player Update still applies, mark it
-`upstreamed` when the official base includes its change, or mark it `retired`
+`integrated` when the official base includes its change, or mark it `superseded`
 when it no longer applies.
 
 Common `run` options:

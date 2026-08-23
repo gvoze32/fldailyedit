@@ -1705,7 +1705,7 @@ def test_inactive_create_returns_before_identity_or_edit_access(tmp_path, monkey
     edit_file = make_player_spec_edit_file(roster_size=39)
     spec = replace(
         dastan_spec(tmp_path),
-        lifecycle_status="retired",
+        lifecycle_status="superseded",
         lifecycle_reason="Historical record",
     )
     monkeypatch.setattr(
@@ -1728,7 +1728,7 @@ def test_inactive_create_returns_before_identity_or_edit_access(tmp_path, monkey
 
     result = assess_create(edit_file, spec, InaccessiblePlayers())
 
-    assert (result.status, result.reason) == ("retired", "Historical record")
+    assert (result.status, result.reason) == ("superseded", "Historical record")
 
 
 
@@ -1983,8 +1983,8 @@ def test_new_base_revision_skips_old_spec_before_mutation(tmp_path, monkeypatch)
 @pytest.mark.parametrize(
     ("lifecycle_status", "lifecycle_reason"),
     [
-        ("upstreamed", "Included by the upstream database"),
-        ("retired", "Historical record only"),
+        ("integrated", "Included in the official base"),
+        ("superseded", "Historical record only"),
     ],
 )
 def test_inactive_lifecycle_is_reported_before_revision_or_save_access(

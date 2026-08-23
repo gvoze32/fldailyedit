@@ -56,6 +56,15 @@ _README_COMMAND_FENCE_FIXTURES = (
     _COMMON_FENCE_FIXTURES[0],
     (
         "bash",
+        "f1e28d7d5261a0ec9549c5b33959b483f1a7bf23e95266336e5b8f13260fa411",
+    ),
+    _COMMON_FENCE_FIXTURES[2],
+)
+
+_INDONESIAN_COMMAND_FENCE_FIXTURES = (
+    _COMMON_FENCE_FIXTURES[0],
+    (
+        "bash",
         "e50fe2ab79916e99b4c184df354b72989e987b276beddeefd86f303d18468723",
     ),
     _COMMON_FENCE_FIXTURES[2],
@@ -75,7 +84,7 @@ README_STRUCTURE_FIXTURES = {
     Path("docs/readmes/README.id.md"): {
         "heading_counts": (11, 11, 3, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
-        "fenced_code_blocks": _README_COMMAND_FENCE_FIXTURES,
+        "fenced_code_blocks": _INDONESIAN_COMMAND_FENCE_FIXTURES,
         "relative_links": (
             "base/EDIT00000000",
             ".github/ISSUE_TEMPLATE/player-update.yml",

@@ -938,8 +938,8 @@ def test_players_validate_rejects_invalid_current_active_state(
         ("ready", "eligible", "active", ("expected-revision",)),
         ("waiting", "destination_roster_full", "active", ("expected-revision",)),
         ("needs_review", "base_revision_not_reviewed", "active", ("old-revision",)),
-        ("upstreamed", "included upstream", "upstreamed", ("expected-revision",)),
-        ("retired", "historical record", "retired", ("expected-revision",)),
+        ("integrated", "included in base", "integrated", ("expected-revision",)),
+        ("superseded", "historical record", "superseded", ("expected-revision",)),
     ],
 )
 def test_players_validate_permits_applicable_and_history_states(

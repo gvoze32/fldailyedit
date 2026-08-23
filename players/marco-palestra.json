@@ -2,7 +2,7 @@
   "schema_version": 2,
   "operation": "update",
   "lifecycle": {
-    "status": "retired",
+    "status": "superseded",
     "reason": "Superseded by Gondowan's 22 August 2026 EDIT base"
   },
   "applies_to": [

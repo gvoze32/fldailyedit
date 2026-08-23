@@ -375,7 +375,7 @@ def test_bundled_base_batch_survives_encryption_roundtrip(tmp_path):
             "Dastan Satpaev": ("rejected", "create_temporarily_unavailable"),
             "Kennet Eichhorn": ("rejected", "create_temporarily_unavailable"),
             "Marco Palestra": (
-                "retired",
+            "superseded",
                 "Superseded by Gondowan's 22 August 2026 EDIT base",
             ),
         }

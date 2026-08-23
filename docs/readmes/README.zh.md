@@ -1,4 +1,4 @@
-[![English](https://img.shields.io/badge/English-012169)](../../README.md) [![Indonesian](https://img.shields.io/badge/Indonesian-ce1126)](README.id.md) [![Español](https://img.shields.io/badge/Espa%C3%B1ol-aa151b)](README.es.md) [![Français](https://img.shields.io/badge/Français-002395)](README.fr.md) [![Português](https://img.shields.io/badge/Português-006600)](README.pt.md) [![Deutsch](https://img.shields.io/badge/Deutsch-000000)](README.de.md) [![Italiano](https://img.shields.io/badge/Italiano-009246)](README.it.md) [![Russian](https://img.shields.io/badge/Russian-0039a6)](README.ru.md) [![Türkçe](https://img.shields.io/badge/Turkish-e30a17)](README.tr.md) [![العربية](https://img.shields.io/badge/Arabic-008000)](README.ar.md) [![中文](https://img.shields.io/badge/Chinese-de2910)](README.zh.md)
+[![English](https://img.shields.io/badge/%F0%9F%87%AC%F0%9F%87%A7_English-012169?style=flat-square)](../../README.md) [![Indonesian](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%A9_Indonesian-ce1126?style=flat-square)](README.id.md) [![Español](https://img.shields.io/badge/%F0%9F%87%AA%F0%9F%87%B8_Espa%C3%B1ol-aa151b?style=flat-square)](README.es.md) [![Français](https://img.shields.io/badge/%F0%9F%87%AB%F0%9F%87%B7_Fran%C3%A7ais-002395?style=flat-square)](README.fr.md) [![Português](https://img.shields.io/badge/%F0%9F%87%B5%F0%9F%87%B9_Portugu%C3%AAs-006600?style=flat-square)](README.pt.md) [![Deutsch](https://img.shields.io/badge/%F0%9F%87%A9%F0%9F%87%AA_Deutsch-000000?style=flat-square)](README.de.md) [![Italiano](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%B9_Italiano-009246?style=flat-square)](README.it.md) [![Русский](https://img.shields.io/badge/%F0%9F%87%B7%F0%9F%87%BA_%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-d52b1e?style=flat-square)](README.ru.md) [![Türkçe](https://img.shields.io/badge/%F0%9F%87%B9%F0%9F%87%B7_T%C3%BCrk%C3%A7e-e30a17?style=flat-square)](README.tr.md) [![العربية](https://img.shields.io/badge/%F0%9F%87%B8%F0%9F%87%A6_%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A%D8%A9-006c35?style=flat-square)](README.ar.md) [![中文](https://img.shields.io/badge/%F0%9F%87%A8%F0%9F%87%B3_%E4%B8%AD%E6%96%87-de2910?style=flat-square)](README.zh.md)
 
 # FL Daily Edit
 
@@ -171,7 +171,9 @@ python run.py run --help
 
 ## 球员更新
 
-每个经审核的 Player Update 都是 `players/` 下每名球员一个的完整 schema-version-2 JSON 文件。文件记录 `operation`（`create` 或 `update`）、生命周期（`active`、`upstreamed` 或 `retired`）、精确的 `applies_to` 基础版本、稳定的球员身份信息和 Pes Retro Stats UUID/资料来源、带引用的证据，以及经审核的 PES 数据。创建更新包含拟定的完整球员记录和目标球队阵容数据。现有球员更新仅包含与已验证基础存档不同的受支持值；每项更改都会记录字面量 `from` 和 `to` 值。
+每个经审核的 Player Update 都是 `players/` 下每名球员一个的完整 schema-version-2 JSON 文件。文件记录 `operation`（`create` 或 `update`）、生命周期（`active`、`integrated` 或 `superseded`）、精确的 `applies_to` 基础版本、稳定的球员身份信息和 Pes Retro Stats UUID/资料来源、带引用的证据，以及经审核的 PES 数据。创建更新包含拟定的完整球员记录和目标球队阵容数据。现有球员更新仅包含与已验证基础存档不同的受支持值；每项更改都会记录字面量 `from` 和 `to` 值。
+
+> **生命周期说明：** `superseded` 是 Player Update 的状态，不代表球员退役；它表示该更新不再适用于所选基础版本。
 `create` 记录继续受 schema 支持以供审核。CLI 变更必须使用
 `players apply --allow-create` 和有效外观数据；直接 API 调用默认保持禁用。
 若目标阵容已满，请同时使用 `--allow-overflow-release`；缺失或无效的安全
@@ -199,7 +201,7 @@ python run.py run --help
 
 ### 版本生命周期
 
-官方基础存档发生变化时，请同时更新 `base/EDIT00000000` 和 `data/base_manifest.json`。将历史 Player Update 保留在 `players/` 中；不要仅仅因为版本变化就删除它们。如果一个 active Player Update 的 `applies_to` 列表不包含新版本，则该更新处于非活动状态：验证会报告 `needs_review`，应用时会跳过它。审核后，仅当 Player Update 仍然适用时才添加新版本；如果官方基础存档已包含其更改，则将其标记为 `upstreamed`；如果不再适用，则标记为 `retired`。
+官方基础存档发生变化时，请同时更新 `base/EDIT00000000` 和 `data/base_manifest.json`。将历史 Player Update 保留在 `players/` 中；不要仅仅因为版本变化就删除它们。如果一个 active Player Update 的 `applies_to` 列表不包含新版本，则该更新处于非活动状态：验证会报告 `needs_review`，应用时会跳过它。审核后，仅当 Player Update 仍然适用时才添加新版本；如果官方基础存档已包含其更改，则将其标记为 `integrated`；如果不再适用，则标记为 `superseded`。
 
 常用 `run` 选项：
 

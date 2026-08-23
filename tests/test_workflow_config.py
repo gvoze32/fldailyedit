@@ -311,7 +311,7 @@ def _remote_branch_fixture(
 def test_readme_uses_player_update_language_for_public_contributions():
     text = README_PATH.read_text(encoding="utf-8")
     assert "## Player Updates" in text
-    assert "Validate all Player Updates against the pristine base" in text
+    assert "Validate all Player Updates against the verified base revision" in text
     assert "Apply reviewed Player Updates explicitly to one save" in text
     assert "player update issue form" in text
     assert "CI accepts a Player Update only when" in text
@@ -330,8 +330,8 @@ def test_readme_uses_player_update_language_for_public_contributions():
         "`players/`",
         "`applies_to`",
         "`needs_review`",
-        "`upstreamed`",
-        "`retired`",
+        "`integrated`",
+        "`superseded`",
     ):
         assert technical_literal in lifecycle
 
