@@ -8,11 +8,11 @@
 FL Daily Edit memperbarui skuad SP Football Life 2026 dan eFootball PES 2021
 dengan menerapkan transfer dunia nyata ke file save `EDIT00000000`.
 
-> **Pembuatan pemain baru yang sudah ditinjau aktif secara default di
-> `players apply` jika donor `PlayerAppearance.bin` yang valid tersedia. Flag
-> positif eksplisitnya adalah `--allow-create`; gunakan `--no-allow-create`
-> untuk menonaktifkan mutasi create dari CLI. API langsung tetap dinonaktifkan
-> secara default.**
+> **Pembuatan pemain baru saat ini dinonaktifkan di semua jalur mutasi.
+> Spec `create` tetap dapat dimuat dan ditinjau, tetapi `--allow-create` hanya
+> dipertahankan sebagai flag kompatibilitas yang dicadangkan.
+> `PlayerAppearance.bin` tetap menjadi input yang dicadangkan; spec create
+> ditolak dengan `create_temporarily_unavailable`.**
 >
 > Transfer pemain yang sudah ada di save dan pembaruan pemain yang sudah ditinjau
 > tetap didukung. Pemain yang belum ada akan dilewati. Release overflow berbasis
@@ -115,19 +115,19 @@ Semua item roadmap saat ini telah selesai. Kami menunggu ide berguna berikutnya.
   `--no-allow-overflow-release` untuk melewati transfer tersebut.
 - `players apply` menerapkan perubahan atribut yang sudah ditinjau. Spec
   `update` untuk pemain yang sudah ada tetap didukung.
-- Spec `create` pemain baru tetap dapat dimuat dan ditinjau. `players apply`
-  mencoba spec create yang sudah ditinjau secara default jika donor appearance
-  eksplisit dan sumber `PlayerAppearance.bin` valid tersedia. Gunakan
-  `--no-allow-create` untuk menonaktifkannya; donor yang hilang atau rusak
-  menolak spec tanpa mengubah byte save.
-
-- Workflow sinkronisasi Fast dan Deep sementara memakai `--no-allow-create` dan `--no-allow-overflow-release`; sinkronisasi otomatis tidak menerapkan spec create. Perintah lokal `players apply` tetap memakai perilaku normal.
-- Untuk `players apply`, roster tujuan penuh menggunakan overflow berbasis role
-  secara default. Flag positif eksplisitnya adalah `--allow-overflow-release`;
-  gunakan `--no-allow-overflow-release` agar tetap unchanged. Selector melindungi
+- Spec `create` pemain baru tetap dapat dimuat dan ditinjau hanya untuk schema
+  dan review. `players apply` menolak semua mutasi create dengan
+  `create_temporarily_unavailable`; `--allow-create` dan
+  `PlayerAppearance.bin` hanya dipertahankan sebagai input kompatibilitas yang
+  dicadangkan.
+- Workflow sinkronisasi Fast dan Deep tetap memakai `--no-allow-create`;
+  `players apply` lokal memiliki perilaku create-disabled yang sama.
+- Perintah transfer mengaktifkan release overflow berbasis role secara default.
+  Jika tujuan penuh, reserve aman yang dipilih dilepas agar transfer dapat masuk;
+  gunakan `--no-allow-overflow-release` hanya untuk opt-out. Selector melindungi
   role first team, bench matchday, ID yang ditransfer/dilindungi, dan pemain
-  created-range selama masih ada kandidat native. Aturan minimum goalkeeper
-  dipakai jika metadata posisi tersedia.
+  created-range jika pemain base asli masih tersedia. Aturan minimum goalkeeper
+  tetap dipakai jika metadata posisi tersedia.
 
 ## Jalankan secara lokal
 
@@ -225,12 +225,12 @@ Pembaruan untuk pemain yang sudah ada hanya berisi nilai yang didukung dan berbe
 dari base terverifikasi; setiap perubahan mencatat nilai literal `from` dan `to`.
 
 > **Catatan lifecycle:** `superseded` adalah status untuk Pembaruan Pemain, bukan status karier pemain. Artinya perubahan tersebut tidak lagi berlaku untuk revisi base yang dipilih.
-Record `create` tetap didukung oleh schema untuk peninjauan. Mutasi create dari
-CLI aktif secara default untuk spec yang sudah ditinjau jika data appearance valid
-tersedia; gunakan `--no-allow-create` untuk menonaktifkannya. API langsung tetap
-dinonaktifkan secara default. Jika roster penuh, gunakan
-`--no-allow-overflow-release` untuk menonaktifkan overflow berbasis role; metadata
-keselamatan yang hilang atau rusak membuat save tidak berubah.
+Record `create` tetap didukung schema hanya untuk peninjauan. Semua mutasi create
+CLI dan API langsung dinonaktifkan; `--allow-create` dipertahankan sebagai flag
+kompatibilitas yang dicadangkan dan menghasilkan
+`create_temporarily_unavailable`. Release overflow transfer tetap aktif secara
+default; gunakan `--no-allow-overflow-release` untuk opt-out. Metadata keselamatan
+yang hilang atau rusak membuat save tidak berubah.
 Kelompok pembaruan yang didukung adalah kemampuan, kecakapan posisi, gaya bermain,
 keahlian pemain, gaya COM, kewarganegaraan, pengaturan fisik/dasar, dan posisi
 terdaftar.
@@ -319,7 +319,7 @@ Opsi `run` yang umum:
 | `--from-base` | Memulai dari `base/EDIT00000000` |
 | `--release-policy PATH` | Memuat daftar pemain protected per klub dan counter usage offline |
 | `--fotmob-only` | Berjalan tanpa sumber transfer tambahan |
-| `--numbers-only` | Memperbaiki nomor skuad saat ini hanya dari data skuad FotMob |
+| Nomor kit | Nomor skuad saat ini selalu disinkronkan pada setiap eksekusi transfer |
 
 File opsional `data/release_policy.json` dapat melindungi pemain per klub dan
 menyediakan counter offline `minutes`, `starts`, `appearances`, serta

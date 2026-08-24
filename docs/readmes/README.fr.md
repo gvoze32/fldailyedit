@@ -8,10 +8,12 @@
 FL Daily Edit met à jour les effectifs de SP Football Life 2026 et d'eFootball PES 2021
 en appliquant les transferts réels à un fichier de sauvegarde `EDIT00000000`.
 
-> **La création de nouveaux joueurs révisés est activée par défaut dans
-> `players apply` lorsqu'un donneur valide de `PlayerAppearance.bin` est disponible.
-> L'option positive est `--allow-create`; utilisez `--no-allow-create` pour
-> désactiver les créations CLI. Les appels API directs restent désactivés par défaut.**
+> **La création de nouveaux joueurs est actuellement désactivée dans tous les
+> chemins de mutation. Les spécifications `create` restent chargeables et
+> révisables, mais `--allow-create` est conservée uniquement comme option de
+> compatibilité réservée. `PlayerAppearance.bin` reste une entrée réservée ;
+> les spécifications create sont rejetées avec
+> `create_temporarily_unavailable`.**
 >
 > Les transferts des joueurs déjà présents et les mises à jour révisées des joueurs existants
 > restent pris en charge. Les joueurs absents sont ignorés. La libération overflow basée sur
@@ -113,14 +115,18 @@ Il s'agit de flux de travail distincts :
   utilisez `--no-allow-overflow-release` pour ignorer ce transfert.
 - `players apply` applique les modifications d'attributs révisées. Les spécifications `update`
   pour les joueurs existants sont prises en charge.
-- Les spécifications `create` pour les nouveaux joueurs restent chargeables et révisables.
-  `players apply` les tente par défaut lorsqu'un donneur explicite et une source valide de
-  `PlayerAppearance.bin` sont disponibles. Utilisez `--no-allow-create` pour les désactiver ;
-  un donneur absent ou invalide laisse la sauvegarde inchangée.
-
-- Les workflows de synchronisation Fast et Deep utilisent temporairement `--no-allow-create` et `--no-allow-overflow-release` ; la synchronisation automatique n'applique pas les spécifications `create`. La commande locale `players apply` conserve son comportement normal.
-- Pour `players apply`, un effectif complet utilise l'overflow basé sur les rôles par défaut.
-  L'option positive est `--allow-overflow-release`; `--no-allow-overflow-release` le désactive.
+- Les spécifications `create` pour les nouveaux joueurs restent chargeables et
+  révisables uniquement pour le schéma et la revue. `players apply` rejette toute
+  mutation create avec `create_temporarily_unavailable` ; `--allow-create` et
+  `PlayerAppearance.bin` restent des entrées de compatibilité réservées.
+- Les workflows de synchronisation Fast et Deep utilisent `--no-allow-create` ;
+  `players apply` local conserve le même comportement avec la création désactivée.
+- Les commandes de transfert activent par défaut la libération overflow basée sur
+  les rôles. Si la destination est complète, le remplaçant sûr sélectionné est
+  libéré pour laisser entrer le transfert ; utilisez
+  `--no-allow-overflow-release` uniquement pour le désactiver. Le sélecteur
+  protège les rôles de l'équipe première, le banc de match, les ID transférés ou
+  protégés et les joueurs de la plage réservée lorsqu'un joueur natif existe.
 
 ## Exécution locale
 
@@ -196,11 +202,12 @@ sauvegarde de sortie, puis lancez `players apply --in-place` sur cette même sau
 Chaque Player Update validée est un fichier JSON conforme au schéma v2 par joueur sous `players/`. Elle enregistre une `operation` (`create` ou `update`), un cycle de vie (`active`, `integrated` ou `superseded`), les révisions de base exactes dans `applies_to`, l'identité stable du joueur et la provenance UUID/profil Pes Retro Stats, les preuves citées et les données PES révisées. Les créations contiennent une proposition de profil complet du joueur et les données d'effectif cible. Les mises à jour de joueurs existants contiennent uniquement les valeurs compatibles différentes de la base vérifiée ; chaque modification consigne les valeurs littérales `from` et `to`.
 
 > **Note sur le cycle de vie :** `superseded` est un statut du Player Update, pas de la carrière du joueur. Cela signifie que la mise à jour ne s'applique plus à la révision de base sélectionnée.
-Les enregistrements `create` restent pris en charge par le schéma pour révision. La mutation
-via la CLI exige `players apply --allow-create` et des données d'apparence valides ; les appels
-API directs restent désactivés par défaut. Si l'effectif est complet, ajoutez
-`--allow-overflow-release` ; des métadonnées de sécurité absentes ou invalides laissent la
-sauvegarde inchangée.
+Les enregistrements `create` restent pris en charge par le schéma pour révision
+uniquement. Toutes les mutations create via CLI et API directe sont désactivées ;
+`--allow-create` reste une option de compatibilité réservée et renvoie
+`create_temporarily_unavailable`. La libération overflow des transferts reste
+activée par défaut ; utilisez `--no-allow-overflow-release` pour la désactiver.
+Des métadonnées de sécurité absentes ou invalides laissent la sauvegarde inchangée.
 Les groupes pris en charge sont les compétences, la maîtrise des postes, le style de jeu, les aptitudes de joueur, les styles COM, la nationalité, les paramètres physiques/de base et le poste enregistré.
 - Les valeurs de révision d'OVR générées sont des calculs déterministes basés sur la formule publiée de PES 2021. Elles constituent une aide à la parité et non une garantie indépendante du comportement du jeu en exécution ; les valeurs de capacité proposées nécessitent toujours une révision.
 - Les brouillons de joueurs générés avec l'ancien identifiant de modèle OVR doivent être régénérés avant toute validation ; il n'y a pas de migration implicite de v1 vers v2.
@@ -240,7 +247,7 @@ Options courantes de `run` :
 | `--from-base` | Partir de `base/EDIT00000000` |
 | `--fotmob-only` | Exécuter sans sources de transferts complémentaires |
 | `--release-policy PATH` | Charger les joueurs protégés par club et les compteurs d'utilisation hors ligne |
-| `--numbers-only` | Corriger les numéros actuels uniquement avec les données d'effectif FotMob |
+| Numéros de maillot | Synchroniser par défaut les numéros actuels à chaque exécution de transfert |
 
 Sans `--from-base`, une exécution standard reprend depuis la dernière sortie vérifiée. Cela évite que les transferts disparaissent lorsqu'une exécution planifiée ultérieure relit l'historique cumulé.
 

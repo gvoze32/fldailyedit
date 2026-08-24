@@ -7,10 +7,11 @@
 
 FL Daily Edit aktualisiert Kader in SP Football Life 2026 und eFootball PES 2021, indem reale Transfers auf eine `EDIT00000000`-Speicherdatei angewendet werden.
 
-> **Die Erstellung geprüfter neuer Spieler ist in `players apply` standardmäßig
-> aktiviert, wenn ein gültiger `PlayerAppearance.bin`-Donor vorhanden ist. Der
-> positive Schalter ist `--allow-create`; mit `--no-allow-create` wird die CLI-
-> Erstellung deaktiviert. Direkte API-Aufrufe bleiben standardmäßig deaktiviert.**
+> **Die Erstellung neuer Spieler ist derzeit in allen Mutationspfaden deaktiviert.
+> `create`-Spezifikationen bleiben für Schema und Prüfung ladbar, aber
+> `--allow-create` bleibt nur als reservierte Kompatibilitätsoption erhalten.
+> `PlayerAppearance.bin` bleibt ein reservierter Eingang; create-Spezifikationen
+> werden mit `create_temporarily_unavailable` abgelehnt.**
 >
 > Transfers für vorhandene Spieler und geprüfte Aktualisierungen bestehender Spieler
 > werden weiterhin unterstützt. Fehlende Spieler werden übersprungen. Rollenbasiertes
@@ -103,14 +104,18 @@ Dies sind getrennte Arbeitsabläufe:
   mit `--no-allow-overflow-release` wird der Transfer übersprungen.
 - `players apply` wendet geprüfte Attributänderungen an. `update`-Spezifikationen für bestehende
   Spieler werden unterstützt.
-- `create`-Spezifikationen für neue Spieler bleiben ladbar und überprüfbar. `players apply`
-  versucht sie standardmäßig bei vorhandenem explizitem Donor und gültiger
-  `PlayerAppearance.bin`-Quelle. Mit `--no-allow-create` werden sie deaktiviert; fehlende oder
-  ungültige Donor-Daten lassen den Speicherstand unverändert.
-
-- Die Fast- und Deep-Synchronisierungs-Workflows verwenden vorübergehend `--no-allow-create` und `--no-allow-overflow-release`; die automatische Synchronisierung wendet keine `create`-Spezifikationen an. Der lokale Befehl `players apply` behält das normale Verhalten bei.
-- Für `players apply` nutzt ein voller Zielkader standardmäßig rollenbasiertes Overflow.
-  Der positive Schalter ist `--allow-overflow-release`; `--no-allow-overflow-release` deaktiviert es.
+- `create`-Spezifikationen für neue Spieler bleiben nur für Schema und Prüfung ladbar.
+  `players apply` lehnt jede Create-Mutation mit
+  `create_temporarily_unavailable` ab; `--allow-create` und `PlayerAppearance.bin`
+  bleiben ausschließlich reservierte Kompatibilitätseingaben.
+- Die Fast- und Deep-Synchronisierungs-Workflows verwenden `--no-allow-create`;
+  der lokale Befehl `players apply` hat dasselbe deaktivierte Create-Verhalten.
+- Transferbefehle aktivieren rollenbasiertes Overflow-Freistellen standardmäßig.
+  Bei einem vollen Zielkader wird der sichere ausgewählte Reserve-Spieler
+  freigestellt, damit der Transfer möglich ist; `--no-allow-overflow-release`
+  deaktiviert dies nur bei ausdrücklichem Opt-out. Der Selektor schützt
+  Erstteamrollen, die Spieltagsbank, übertragene/geschützte IDs und reservierte
+  Created-Spieler, wenn ein nativer Basisspieler verfügbar ist.
 
 ## Lokale Ausführung
 
@@ -183,10 +188,12 @@ python run.py run --help
 Jedes geprüfte Player Update ist eine vollständige JSON-Datei der Schema-Version 2 pro Spieler unter `players/`. Es erfasst eine `operation` (`create` oder `update`), einen Lebenszyklus (`active`, `integrated` oder `superseded`), die genauen Basis-Revisionen in `applies_to`, die stabile Spieler-Identität und Pes-Retro-Stats-UUID/Profilherkunft, Belege und überprüfte PES-Daten. Erstellungs-Updates enthalten einen vollständigen Spielerdatensatz und Zielkader-Daten. Updates bestehender Spieler enthalten nur abweichende Werte von der geprüften Basis mit wörtlichen `from`- und `to`-Werten.
 
 > **Hinweis zum Lebenszyklus:** `superseded` ist ein Status des Player Updates, nicht der Spielerkarriere. Er bedeutet, dass das Update nicht mehr für die ausgewählte Basisrevision gilt.
-`create`-Einträge bleiben zur Prüfung schemaunterstützt. Eine Mutation über die CLI erfordert
-`players apply --allow-create` und gültige Aussehensdaten; direkte API-Aufrufe bleiben
-standardmäßig deaktiviert. Bei vollem Zielkader ist zusätzlich `--allow-overflow-release`
-erforderlich; fehlende oder ungültige Sicherheitsmetadaten lassen den Speicherstand unverändert.
+`create`-Einträge bleiben zur Prüfung schemaunterstützt. Alle CLI- und direkten
+API-Create-Mutationen sind deaktiviert; `--allow-create` bleibt als reservierte
+Kompatibilitätsoption erhalten und liefert `create_temporarily_unavailable`.
+Transfer-Overflow-Freistellen ist standardmäßig aktiv; mit
+`--no-allow-overflow-release` kann es deaktiviert werden. Fehlende oder ungültige
+Sicherheitsmetadaten lassen den Speicherstand unverändert.
 Unterstützte Update-Gruppen sind Fähigkeiten, Positionsbeherrschung, Spielstil, Spielerfähigkeiten, COM-Stile, Nationalität, physische/grundlegende Einstellungen und die registrierte Position.
 - Die generierten OVR-Prüfwerte sind deterministische Berechnungen basierend auf der veröffentlichten PES 2021-Formel. Sie dienen als Paritätshilfe und stellen keine unabhängige Garantie für die Laufzeit des Spiels dar; vorgeschlagene Fähigkeitswerte müssen weiterhin überprüft werden.
 - Spielerentwürfe, die mit der früheren OVR-Modellkennung generiert wurden, müssen vor der Validierung neu generiert werden; es gibt keine implizite Migration von v1 auf v2.
@@ -226,7 +233,7 @@ Häufige `run`-Optionen:
 | `--from-base` | Von `base/EDIT00000000` starten |
 | `--fotmob-only` | Ohne ergänzende Transferquellen ausführen |
 | `--release-policy PATH` | Geschützte Spieler pro Verein und Offline-Nutzungszähler laden |
-| `--numbers-only` | Aktuelle Rückennummern nur mit FotMob-Kaderdaten korrigieren |
+| Rückennummern | Aktuelle Rückennummern werden standardmäßig bei jedem Transferlauf synchronisiert |
 
 Ohne `--from-base` setzt ein normaler Lauf auf der letzten verifizierten Ausgabe auf. Dies verhindert das Verschwinden angewendeter Transfers, wenn ein späterer geplanter Lauf den akkumulierten Verlauf erneut liest.
 

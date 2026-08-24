@@ -42,6 +42,8 @@ from editor.editfile import (
 )
 from editor import logger as transfer_logger
 from editor.player_spec import (
+    PLAYER_CREATE_DISABLED_REASON,
+    PLAYER_CREATE_MUTATIONS_ENABLED,
     PlayerSpec,
     PlayerSpecError,
     SpecResult,
@@ -617,7 +619,7 @@ def _plan_roster_actions(
     club_ids: set[int],
     edit_file: EditFile,
     superseded_loan_sources: dict[int, frozenset[int]],
-    allow_overflow_release: bool = False,
+    allow_overflow_release: bool = True,
 ) -> list[PlannedRosterAction]:
     """Build one chronological roster plan and simulate every accepted action."""
     rosters = {
@@ -1262,28 +1264,6 @@ def _scrape_run_transfers(args):
         if since_date
         else f"window '{window}' ({start_date} to {end_date or 'latest'})"
     )
-    if bool(getattr(args, "numbers_only", False)):
-        print(
-            "\n🔢 Number Fix Mode: fetching current squad numbers "
-            f"({cutoff_info})..."
-        )
-        if club_filter:
-            clubs = [club.strip() for club in club_filter.split(",") if club.strip()]
-            observations = fetch_transfers_for_club_names(
-                clubs, since_date=since_date, window=window
-            )
-        else:
-            observations = fetch_major_clubs_transfers_safely(
-                since_date=since_date, window=window
-            )
-        transfers = [
-            transfer
-            for transfer in merge_transfers([observations])
-            if transfer.transfer_type == "shirt_number_update"
-        ]
-        transfers.sort(key=_transfer_sort_key)
-        print(f"  Squad-number observations: {len(transfers)}")
-        return transfers
     transfer_batches = []
     if club_filter:
         clubs = [club.strip() for club in club_filter.split(",") if club.strip()]
@@ -1329,6 +1309,21 @@ def _scrape_run_transfers(args):
                 window=window,
             )
         )
+        print(
+            "\n🔢 Syncing current squad numbers for indexed clubs "
+            f"({cutoff_info})..."
+        )
+        squad_observations = fetch_major_clubs_transfers_safely(
+            since_date=since_date,
+            window=window,
+        )
+        squad_number_updates = [
+            transfer
+            for transfer in squad_observations
+            if transfer.transfer_type == "shirt_number_update"
+        ]
+        print(f"  Squad-number observations: {len(squad_number_updates)}")
+        transfer_batches.append(squad_number_updates)
 
     fast_signals = []
     corroborators = []
@@ -1963,7 +1958,6 @@ class _RunLocalUpdateRuntime:
             club=request.club,
             deep=request.deep,
             fotmob_only=request.fotmob_only,
-            numbers_only=request.numbers_only,
             allow_overflow_release=request.allow_overflow_release,
         )
 
@@ -2533,7 +2527,6 @@ def cmd_run(args):
         threshold=getattr(args, "threshold", None) or config.MATCH_THRESHOLD_PLAYER,
         popular=bool(getattr(args, "popular", False)),
         fotmob_only=bool(getattr(args, "fotmob_only", False)),
-        numbers_only=bool(getattr(args, "numbers_only", False)),
         allow_overflow_release=bool(
             getattr(args, "allow_overflow_release", True)
         ),
@@ -2595,6 +2588,9 @@ def _assess_player_specs(
     edit_file: EditFile,
     specs: tuple[PlayerSpec, ...],
     base_revision: str,
+    *,
+    allow_overflow_release: bool = True,
+    reject_create_mutations: bool = False,
 ) -> tuple[SpecResult, ...]:
     """Assess every spec against one revision without mutating the edit file."""
     all_players = edit_file.get_all_players()
@@ -2618,8 +2614,24 @@ def _assess_player_specs(
                     "base_revision_not_reviewed",
                 )
             )
+        elif spec.operation == "create" and reject_create_mutations:
+            results.append(
+                SpecResult(
+                    spec.identity.pes_id,
+                    spec.identity.name,
+                    "rejected",
+                    PLAYER_CREATE_DISABLED_REASON,
+                )
+            )
         elif spec.operation == "create":
-            results.append(assess_create(edit_file, spec, all_players))
+            results.append(
+                assess_create(
+                    edit_file,
+                    spec,
+                    all_players,
+                    allow_overflow_release=allow_overflow_release,
+                )
+            )
         else:
             results.append(assess_update(edit_file, spec, all_players))
     return tuple(results)
@@ -2995,17 +3007,19 @@ def cmd_players_apply(args) -> None:
         data_file = _decrypted_data_file(decrypted)
         edit_file.load(data_file)
         _require_valid_edit(edit_file, "Input save")
-        allow_create = bool(getattr(args, "allow_create", False))
-        allow_overflow_release = bool(
-            getattr(args, "allow_overflow_release", False)
+        allow_create_requested = bool(getattr(args, "allow_create", False))
+        allow_create = (
+            allow_create_requested and PLAYER_CREATE_MUTATIONS_ENABLED
         )
-        appearance_source = None
-        if allow_overflow_release and not allow_create:
+        allow_overflow_release = bool(
+            getattr(args, "allow_overflow_release", True)
+        )
+        if allow_create_requested and not PLAYER_CREATE_MUTATIONS_ENABLED:
             print(
-                "--allow-overflow-release requires --allow-create "
-                "for Player Update create specs"
+                "  Reviewed create-player mutations are disabled; "
+                "--allow-create is reserved for a future safe implementation."
             )
-            raise SystemExit(2)
+        appearance_source = None
         if allow_create:
             appearance_data, appearance_source = _load_player_appearance_data(
                 getattr(args, "appearance_file", None),
@@ -3024,6 +3038,8 @@ def cmd_players_apply(args) -> None:
                 edit_file,
                 specs,
                 manifest.revision,
+                allow_overflow_release=allow_overflow_release,
+                reject_create_mutations=True,
             )
             _print_player_spec_results(specs, results)
             _print_player_apply_preflight(
@@ -3034,11 +3050,11 @@ def cmd_players_apply(args) -> None:
             )
             return
 
-        apply_kwargs = {}
+        apply_kwargs = {
+            "allow_overflow_release": allow_overflow_release,
+        }
         if allow_create:
             apply_kwargs["allow_create"] = True
-        if allow_overflow_release:
-            apply_kwargs["allow_overflow_release"] = True
         results = apply_player_specs(
             edit_file,
             specs,
@@ -3170,7 +3186,7 @@ def main():
 
     # run (default)
     p_run = sub.add_parser(
-        "run", help="Apply verified transfers"
+        "run", help="Apply verified transfers and current squad numbers"
     )
     p_run.add_argument("--dry-run", action="store_true", help="Don't modify the edit file")
     run_source = p_run.add_mutually_exclusive_group()
@@ -3198,11 +3214,6 @@ def main():
         "--fotmob-only",
         action="store_true",
         help="Disable supplemental Wikipedia and Sortitoutsi sources",
-    )
-    p_run.add_argument(
-        "--numbers-only",
-        action="store_true",
-        help="Fix current squad numbers only; implies deep squad scraping",
     )
     p_run.add_argument(
         "--allow-overflow-release",
@@ -3267,10 +3278,10 @@ def main():
     p_players_apply.add_argument(
         "--allow-create",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help=(
-            "Allow reviewed create specs (default); use --no-allow-create "
-            "to keep create mutations disabled"
+            "Reserved compatibility option; reviewed create-player mutations "
+            "are currently disabled until a safe implementation is available"
         ),
     )
     p_players_apply.add_argument(
@@ -3278,14 +3289,15 @@ def main():
         action=argparse.BooleanOptionalAction,
         default=True,
         help=(
-            "Allow a reviewed create to release a role-based reserve (default); "
-            "use --no-allow-overflow-release to keep full rosters unchanged"
+            "Keep role-based overflow release enabled by default for roster "
+            "mutations; use --no-allow-overflow-release to keep full rosters "
+            "unchanged"
         ),
     )
     p_players_apply.add_argument(
         "--appearance-file",
         type=Path,
-        help="Raw or WESYS PlayerAppearance.bin used by --allow-create",
+        help="Reserved raw or WESYS PlayerAppearance.bin compatibility input",
     )
     p_players_apply.add_argument(
         "--game-root",
@@ -3307,7 +3319,10 @@ def main():
     p_players_apply.set_defaults(func=cmd_players_apply)
 
     # schedule
-    p_sched = sub.add_parser("schedule", help="Run transfers continuously on a timer")
+    p_sched = sub.add_parser(
+        "schedule",
+        help="Run transfers and squad-number sync continuously on a timer",
+    )
     p_sched.add_argument("--interval-hours", type=_positive_float_arg, default=6.0, help="Interval between runs in hours (default: 6.0)")
     p_sched.add_argument("--dry-run", action="store_true", help="Don't modify the edit file")
     schedule_source = p_sched.add_mutually_exclusive_group()
@@ -3335,11 +3350,6 @@ def main():
         "--fotmob-only",
         action="store_true",
         help="Disable supplemental Wikipedia and Sortitoutsi sources",
-    )
-    p_sched.add_argument(
-        "--numbers-only",
-        action="store_true",
-        help="Fix current squad numbers only; implies deep squad scraping",
     )
     p_sched.add_argument(
         "--allow-overflow-release",

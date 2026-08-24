@@ -8,11 +8,11 @@
 FL Daily Edit aggiorna le rose di SP Football Life 2026 ed eFootball PES 2021
 applicando i trasferimenti del mondo reale a un file di salvataggio `EDIT00000000`.
 
-> **La creazione di nuovi giocatori revisionati è attiva per impostazione
-> predefinita in `players apply` quando è disponibile un donor valido di
-> `PlayerAppearance.bin`. L'opzione positiva è `--allow-create`; usa
-> `--no-allow-create` per disattivare le creazioni CLI. Le chiamate API dirette
-> restano disattivate per impostazione predefinita.**
+> **La creazione di nuovi giocatori è attualmente disattivata in tutti i
+> percorsi di mutazione. Le specifiche `create` restano caricabili e revisionabili,
+> ma `--allow-create` viene mantenuto solo come opzione di compatibilità riservata.
+> `PlayerAppearance.bin` resta un input riservato; le specifiche create vengono
+> rifiutate con `create_temporarily_unavailable`.**
 >
 > I trasferimenti per i giocatori già presenti nel salvataggio e gli aggiornamenti
 > revisionati per i giocatori esistenti rimangono supportati. I giocatori mancanti
@@ -115,15 +115,19 @@ Si tratta di flussi di lavoro separati:
   impostazione predefinita; usa `--no-allow-overflow-release` per ignorare il trasferimento.
 - `players apply` applica le modifiche agli attributi revisionate. Le specifiche `update` per i
   giocatori esistenti sono supportate.
-- Le specifiche `create` per nuovi giocatori rimangono caricabili e revisionabili. `players apply`
-  prova a eseguirle per impostazione predefinita quando sono disponibili un donor esplicito e
-  una fonte valida di `PlayerAppearance.bin`. Usa `--no-allow-create` per disattivarle; un donor
-  assente o non valido rifiuta la specifica senza modificare i byte del salvataggio.
-
-- I workflow di sincronizzazione Fast e Deep usano temporaneamente `--no-allow-create` e `--no-allow-overflow-release`; la sincronizzazione automatica non applica le specifiche `create`. Il comando locale `players apply` mantiene il comportamento normale.
-- Per `players apply`, una rosa completa usa l'overflow basato sui ruoli per impostazione
-  predefinita. L'opzione positiva è `--allow-overflow-release`; usa
-  `--no-allow-overflow-release` per ignorarlo. Non è richiesto un OVR positivo.
+- Le specifiche `create` per i nuovi giocatori restano caricabili e revisionabili
+  solo per schema e revisione. `players apply` rifiuta ogni mutazione create con
+  `create_temporarily_unavailable`; `--allow-create` e `PlayerAppearance.bin`
+  restano esclusivamente input di compatibilità riservati.
+- I workflow di sincronizzazione Fast e Deep usano `--no-allow-create`;
+  `players apply` locale mantiene lo stesso comportamento con create disattivato.
+- I comandi di trasferimento abilitano per impostazione predefinita il rilascio
+  overflow basato sui ruoli. Se la destinazione è piena, viene rilasciata la
+  riserva sicura selezionata per consentire il trasferimento; usa
+  `--no-allow-overflow-release` solo per disattivarlo. Il selettore protegge i
+  ruoli della prima squadra, la panchina del giorno partita, gli ID trasferiti o
+  protetti e i giocatori dell'intervallo riservato quando esiste un giocatore
+  nativo nella base.
 
 ## Esecuzione locale
 
@@ -205,11 +209,13 @@ della rosa di destinazione. Gli aggiornamenti dei giocatori esistenti contengono
 che differiscono dalla base verificata; ogni modifica registra i valori letterali `from` e `to`.
 
 > **Nota sul ciclo di vita:** `superseded` è uno stato del Player Update, non della carriera del giocatore. Indica che l'aggiornamento non si applica più alla revisione base selezionata.
-I record `create` restano supportati dallo schema per la revisione. La mutazione
-tramite CLI richiede `players apply --allow-create` e dati d'aspetto validi; le
-chiamate API dirette restano disabilitate per impostazione predefinita. Se la rosa
-è completa, aggiungere `--allow-overflow-release`; metadati di sicurezza assenti o
-non validi lasciano il salvataggio invariato.
+I record `create` restano supportati dallo schema solo per la revisione. Tutte le
+mutazioni create da CLI e API diretta sono disattivate; `--allow-create` resta
+un'opzione di compatibilità riservata e restituisce
+`create_temporarily_unavailable`. Il rilascio overflow dei trasferimenti resta
+attivo per impostazione predefinita; usa `--no-allow-overflow-release` per
+disattivarlo. Metadati di sicurezza mancanti o non validi lasciano invariato il
+salvataggio.
 I gruppi di aggiornamento supportati sono abilità, competenza nei ruoli, stile di gioco, abilità giocatore,
 stili COM, nazionalità, impostazioni fisiche/base e ruolo registrato.
 - I valori di revisione dell'OVR generati sono calcoli deterministici basati sulla formula
@@ -283,7 +289,7 @@ Opzioni comuni di `run`:
 | `--from-base` | Inizia da `base/EDIT00000000` |
 | `--fotmob-only` | Esegue senza fonti di trasferimento supplementari |
 | `--release-policy PATH` | Carica giocatori protetti per club e contatori di utilizzo offline |
-| `--numbers-only` | Correggere i numeri attuali usando solo i dati rosa di FotMob |
+| Numeri di maglia | Sincronizzare per impostazione predefinita i numeri attuali a ogni esecuzione dei trasferimenti |
 
 Senza `--from-base`, una normale esecuzione prosegue dall'ultimo output verificato. In questo modo si evita che i
 trasferimenti scompariranno quando una successiva esecuzione programmata rilegge lo storico accumulato.

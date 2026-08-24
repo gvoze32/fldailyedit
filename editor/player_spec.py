@@ -33,8 +33,9 @@ from scraper.pes_retro_snapshot import profile_from_snapshot
 from scraper.pes21_proposal import map_pes21_proposal
 from tools.player_proposal_review import validate_ovr_review_shape
 
-# Direct API calls remain disabled by default. The explicit allow_create
-# transaction flag enables only specs with a validated appearance donor.
+# Reviewed create specs remain loadable and reviewable, but player-creation
+# mutations are reserved until the underlying save mutation path is safe.
+# The CLI/API transaction flags remain part of the reserved compatibility API.
 PLAYER_CREATE_MUTATIONS_ENABLED = False
 PLAYER_CREATE_DISABLED_REASON = "create_temporarily_unavailable"
 
@@ -1551,7 +1552,7 @@ def assess_create(
     spec: PlayerSpec,
     all_players: Mapping[int, "PlayerInfo"],
     *,
-    allow_overflow_release: bool = False,
+    allow_overflow_release: bool = True,
     protected_player_ids: set[int] | None = None,
 ) -> SpecResult:
     """Assess create idempotency and destination safety without mutation."""
@@ -1620,7 +1621,7 @@ def apply_create(
     all_players: Mapping[int, "PlayerInfo"],
     *,
     allow_create: bool = False,
-    allow_overflow_release: bool = False,
+    allow_overflow_release: bool = True,
     protected_player_ids: set[int] | None = None,
 ) -> SpecResult:
     """Apply one reviewed create using an explicit appearance donor."""
@@ -1635,7 +1636,9 @@ def apply_create(
             all_players,
             allow_overflow_release=allow_overflow_release,
         )
-    if not (allow_create or PLAYER_CREATE_MUTATIONS_ENABLED):
+    # `allow_create` remains a reserved compatibility flag; this hard gate
+    # intentionally ignores it while create mutations are disabled.
+    if not PLAYER_CREATE_MUTATIONS_ENABLED:
         return _result(spec, "rejected", PLAYER_CREATE_DISABLED_REASON)
     assessment = assess_create(
         edit_file,
@@ -1871,7 +1874,7 @@ def apply_player_spec(
     all_players: Mapping[int, "PlayerInfo"],
     *,
     allow_create: bool = False,
-    allow_overflow_release: bool = False,
+    allow_overflow_release: bool = True,
     protected_player_ids: set[int] | None = None,
 ) -> SpecResult:
     """Apply one lifecycle-compatible spec with mutation isolation."""
@@ -1885,9 +1888,7 @@ def apply_player_spec(
         )
     if base_revision not in spec.applies_to:
         return _result(spec, "needs_review", "base_revision_not_reviewed")
-    if spec.operation == "create" and not (
-        allow_create or PLAYER_CREATE_MUTATIONS_ENABLED
-    ):
+    if spec.operation == "create" and not PLAYER_CREATE_MUTATIONS_ENABLED:
         return _result(spec, "rejected", PLAYER_CREATE_DISABLED_REASON)
 
     original_data = bytes(edit_file._data)
@@ -1947,7 +1948,7 @@ def apply_player_specs(
     all_players: Mapping[int, "PlayerInfo"],
     *,
     allow_create: bool = False,
-    allow_overflow_release: bool = False,
+    allow_overflow_release: bool = True,
 ) -> tuple[SpecResult, ...]:
     """Apply independent specs in deterministic filename order."""
     ordered_specs = sorted(specs, key=lambda spec: spec.path.name)

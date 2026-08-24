@@ -218,7 +218,7 @@ def test_roster_plan_refuses_to_reduce_a_club_below_sixteen_players():
     )
 
 
-def test_roster_plan_requires_explicit_overflow_permission():
+def test_roster_plan_enables_overflow_release_by_default():
     source, destination = 10, 20
     transfer = _club_match(
         source=source,
@@ -236,24 +236,28 @@ def test_roster_plan_requires_explicit_overflow_permission():
         def find_overflow_release_candidate(self, *_, **__):
             return 30, 1030
 
-    blocked = _plan_roster_actions(
-        [transfer], rosters, set(rosters), FakeEditFile(), {}
-    )
     allowed = _plan_roster_actions(
         [transfer],
         rosters,
         set(rosters),
         FakeEditFile(),
         {},
-        allow_overflow_release=True,
+    )
+    blocked = _plan_roster_actions(
+        [transfer],
+        rosters,
+        set(rosters),
+        FakeEditFile(),
+        {},
+        allow_overflow_release=False,
     )
 
+    assert allowed[0].action == "move"
+    assert allowed[0].overflow_player_id == 1030
     assert (blocked[0].action, blocked[0].reason) == (
         "skip",
         "destination_roster_full",
     )
-    assert allowed[0].action == "move"
-    assert allowed[0].overflow_player_id == 1030
 
 def test_local_runtime_apply_forwards_overflow_release_permission(
     monkeypatch, tmp_path
@@ -687,7 +691,7 @@ def test_runtime_club_identity_index_must_be_one_to_one(monkeypatch, tmp_path):
     with pytest.raises(IncompleteScrapeError, match="not one-to-one"):
         _load_represented_fotmob_club_ids()
     
-def test_numbers_only_mode_filters_transfer_events(monkeypatch):
+def test_transfer_run_includes_current_squad_numbers_by_default(monkeypatch):
     import run
 
     shirt = Transfer(
@@ -698,7 +702,8 @@ def test_numbers_only_mode_filters_transfer_events(monkeypatch):
         shirt_number=7,
         player_id_fotmob=1,
     )
-    transfer = Transfer("Player Two", "A", "B", transfer_type="transfer")
+    transfer = Transfer("Player Two", "A", "B")
+    monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_kwargs: [transfer])
     monkeypatch.setattr(
         run,
         "fetch_major_clubs_transfers_safely",
@@ -707,14 +712,13 @@ def test_numbers_only_mode_filters_transfer_events(monkeypatch):
 
     result = run._scrape_run_transfers(
         argparse.Namespace(
-            numbers_only=True,
             club=None,
             deep=False,
-            fotmob_only=False,
+            fotmob_only=True,
             popular=False,
             window="auto",
             since=None,
         )
     )
 
-    assert result == [shirt]
+    assert result == [transfer, shirt]

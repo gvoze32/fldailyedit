@@ -7,10 +7,11 @@
 
 FL Daily Edit, gerçek dünyadaki transferleri bir `EDIT00000000` kayıt dosyasına uygulayarak SP Football Life 2026 ve eFootball PES 2021 kadrolarını günceller.
 
-> **İncelenmiş yeni oyuncu oluşturma, geçerli bir `PlayerAppearance.bin` bağışlayıcısı
-> bulunduğunda `players apply` içinde varsayılan olarak etkindir. Pozitif seçenek
-> `--allow-create`'dir; CLI oluşturmayı kapatmak için `--no-allow-create` kullanın.
-> Doğrudan API çağrıları varsayılan olarak devre dışı kalır.**
+> **Yeni oyuncu oluşturma şu anda tüm mutasyon yollarında devre dışıdır.
+> `create` tanımları şema ve inceleme için yüklenebilir olmaya devam eder;
+> ancak `--allow-create` yalnızca ayrılmış bir uyumluluk seçeneği olarak tutulur.
+> `PlayerAppearance.bin` ayrılmış bir girdi olarak kalır; create tanımları
+> `create_temporarily_unavailable` nedeniyle reddedilir.**
 >
 > Kayıt dosyasında zaten bulunan oyuncular için transferler ve incelenmiş güncellemeler
 > desteklenir. Eksik oyuncular atlanır. Role dayalı overflow release varsayılan olarak
@@ -106,13 +107,18 @@ Bunlar ayrı iş akışlarıdır:
   `--no-allow-overflow-release` ile transfer atlanır.
 - `players apply`, incelenmiş özellik değişikliklerini uygular. Mevcut oyuncular için
   `update` tanımları desteklenir.
-- Yeni oyuncular için `create` tanımları yüklenebilir ve incelenebilir. Geçerli bir donor ve
-  `PlayerAppearance.bin` kaynağı varsa `players apply` bunları varsayılan olarak dener.
-  `--no-allow-create` ile kapatılabilir; eksik/geçersiz donor kaydı değiştirmez.
-
-- Fast ve Deep senkronizasyon iş akışları geçici olarak `--no-allow-create` ve `--no-allow-overflow-release` kullanır; otomatik senkronizasyon `create` tanımlarını uygulamaz. Yerel `players apply` normal davranışını korur.
-- `players apply` için dolu kadroda role dayalı overflow varsayılandır. Pozitif seçenek
-  `--allow-overflow-release`, kapatmak için `--no-allow-overflow-release` kullanılır.
+- Yeni oyuncular için `create` tanımları yalnızca şema ve inceleme amacıyla
+  yüklenebilir ve incelenebilir. `players apply` tüm create mutasyonlarını
+  `create_temporarily_unavailable` ile reddeder; `--allow-create` ve
+  `PlayerAppearance.bin` yalnızca ayrılmış uyumluluk girdileri olarak tutulur.
+- Fast ve Deep senkronizasyon iş akışları `--no-allow-create` kullanır; yerel
+  `players apply` de create kapalı aynı davranışı korur.
+- Transfer komutları role dayalı overflow release özelliğini varsayılan olarak
+  açar. Hedef kadro doluysa transferin girebilmesi için seçilen güvenli reserve
+  serbest bırakılır; kapatmak için yalnızca
+  `--no-allow-overflow-release` kullanın. Selector, native base oyuncusu varken
+  ilk takım rollerini, maç günü yedeklerini, aktarılan/korunan ID'leri ve
+  ayrılmış aralıktaki created oyuncuları korur.
 
 ## Yerel Kurulum
 
@@ -185,10 +191,12 @@ python run.py run --help
 İncelenen her Player Update, `players/` altında oyuncu başına şema-v2 formatında eksiksiz bir JSON dosyasıdır. Bir işlemi (`operation`: `create` veya `update`), bir yaşam döngüsünü (`active`, `integrated` veya `superseded`), `applies_to` içindeki kesin temel sürümleri, kararlı oyuncu kimliğini ve Pes Retro Stats UUID/profil kaynağını, kaynak gösterilen kanıtları ve incelenen PES verilerini kaydeder. Oluşturma güncellemeleri, önerilen eksiksiz bir oyuncu kaydı ve hedef kadro verilerini içerir. Mevcut oyuncu güncellemeleri, yalnızca doğrulanmış temelden farklı olan desteklenen değerleri içerir; her değişiklik birebir `from` ve `to` değerlerini kaydeder.
 
 > **Yaşam döngüsü notu:** `superseded`, oyuncunun kariyer durumu değil Player Update durumudur. Güncellemenin seçilen temel sürüm için artık geçerli olmadığı anlamına gelir.
-`create` kayıtları incelenmek üzere şema tarafından desteklenir. CLI mutasyonu
-`players apply --allow-create` ve geçerli görünüm verileri gerektirir; doğrudan API
-çağrıları varsayılan olarak devre dışıdır. Kadro doluysa `--allow-overflow-release`
-eklenmelidir; eksik veya geçersiz güvenlik meta verisi kayıt dosyasını değiştirmez.
+`create` kayıtları yalnızca inceleme için şema tarafından desteklenir. CLI ve
+doğrudan API create mutasyonlarının tamamı devre dışıdır; `--allow-create`
+ayrılmış uyumluluk seçeneği olarak tutulur ve
+`create_temporarily_unavailable` döndürür. Transfer overflow release varsayılan
+olarak açıktır; kapatmak için `--no-allow-overflow-release` kullanın. Eksik veya
+geçersiz güvenlik meta verisi kayıt dosyasını değiştirmez.
 Desteklenen güncelleme grupları yetenekler, mevki yetkinliği, oyun tarzı, oyuncu becerileri, COM tarzları, uyruk, fiziksel/temel ayarlar ve kayıtlı mevkidir.
 - Oluşturulan GEN (OVR) inceleme değerleri, yayınlanan PES 2021 formülüne dayanan deterministik hesaplamalardır. Oyun çalışma zamanının bağımsız bir garantisi değil, bir eşitlik yardımcısıdır; önerilen yetenek değerleri yine de inceleme gerektirir.
 - Önceki OVR model tanımlayıcısıyla oluşturulan oyuncu taslakları, doğrulamadan önce yeniden oluşturulmalıdır; v1'den v2'ye örtük bir geçiş yoktur.
@@ -228,7 +236,7 @@ Yaygın `run` seçenekleri:
 | `--from-base` | `base/EDIT00000000` dosyasından başlar |
 | `--fotmob-only` | Ek transfer kaynakları olmadan çalışır |
 | `--release-policy PATH` | Kulübe göre korunan oyuncuları ve çevrimdışı kullanım sayaçlarını yükler |
-| `--numbers-only` | Güncel forma numaralarını yalnızca FotMob kadro verileriyle düzeltir |
+| Forma numaraları | Güncel forma numaralarını her transfer çalışmasında varsayılan olarak senkronize eder |
 
 `--from-base` olmadan, normal bir çalıştırma son doğrulanan çıktıdan devam eder. Bu, daha sonra zamanlanmış bir çalıştırma birikmiş geçmişi tekrar okuduğunda uygulanan transferlerin kaybolmasını önler.
 

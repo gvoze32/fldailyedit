@@ -659,7 +659,7 @@ class TestReleaseAndAddPlayer:
         }
 
         # Add a new 41st player
-        ok = ef.add_player(9999, to_team_id=101, allow_overflow_release=True)
+        ok = ef.add_player(9999, to_team_id=101)
         assert ok is True
 
         new_roster = ef.get_team_roster(101)
@@ -797,7 +797,7 @@ class TestReleaseAndAddPlayer:
         assert 1039 not in new_roster.roster
         assert 1000 in new_roster.roster
         assert 1011 in new_roster.roster
-    def test_full_roster_rejects_unapproved_overflow_release(self):
+    def test_full_roster_rejects_explicitly_disabled_overflow_release(self):
         data = self._build_test_data()
         ef = EditFile()
         ef.load_bytes(data)
@@ -805,5 +805,5 @@ class TestReleaseAndAddPlayer:
         for slot in range(40):
             ef._write_player_slot(to_entry, slot, 1000 + slot, slot + 1)
 
-        assert ef.add_player(9999, to_team_id=101) is False
+        assert ef.add_player(9999, to_team_id=101, allow_overflow_release=False) is False
         assert ef.get_team_roster(101).roster == list(range(1000, 1040))

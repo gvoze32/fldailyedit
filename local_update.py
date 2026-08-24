@@ -28,7 +28,6 @@ class LocalUpdateRequest:
     threshold: int | None = None
     popular: bool = False
     fotmob_only: bool = False
-    numbers_only: bool = False
     allow_overflow_release: bool = True
     release_policy_file: Path | None = None
     dry_run: bool = False

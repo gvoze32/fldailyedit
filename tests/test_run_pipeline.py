@@ -990,9 +990,20 @@ def test_players_parser_dispatches_nested_apply(monkeypatch):
     assert dispatched[0].edit_file == "source"
     assert dispatched[0].output == "destination"
     assert dispatched[0].in_place is False
-    assert dispatched[0].allow_create is True
+    assert dispatched[0].allow_create is False
     assert dispatched[0].allow_overflow_release is True
 
+def test_run_parser_makes_squad_numbers_default(monkeypatch, capsys):
+    import run
+
+    monkeypatch.setattr(run.sys, "argv", ["run.py", "--help"])
+    with pytest.raises(SystemExit) as exc_info:
+        run.main()
+
+    assert exc_info.value.code == 0
+    help_output = capsys.readouterr().out
+    assert "--numbers-only" not in help_output
+    assert "Apply verified transfers and current squad numbers" in help_output
 
 def test_players_parser_dispatches_overflow_release_option(monkeypatch):
     import run
@@ -1176,7 +1187,7 @@ def test_players_apply_no_change_writes_nothing(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(
         run,
         "apply_player_specs",
-        lambda *_args: (
+        lambda *_args, **_kwargs: (
             SpecResult(162196, "Marco Palestra", "needs_review", "base_revision_not_reviewed"),
         ),
     )
@@ -1212,7 +1223,7 @@ def test_players_apply_no_change_writes_nothing(monkeypatch, tmp_path, capsys):
 
 
 
-def test_players_apply_allow_create_attaches_appearance_source(
+def test_players_apply_allow_create_is_reserved_and_never_loads_appearance(
     monkeypatch, tmp_path, capsys
 ):
     import run
@@ -1246,13 +1257,13 @@ def test_players_apply_allow_create_attaches_appearance_source(
         return b"raw appearance", "fixture::PlayerAppearance.bin"
 
     def apply_specs(*args, **kwargs):
-        assert kwargs == {"allow_create": True}
+        assert kwargs == {"allow_overflow_release": True}
         return (
             SpecResult(
                 DASTAN_ID,
                 "Dastan Satpaev",
                 "rejected",
-                "appearance_template_unavailable",
+                "create_temporarily_unavailable",
             ),
         )
 
@@ -1281,9 +1292,9 @@ def test_players_apply_allow_create_attaches_appearance_source(
         )
     )
 
-    assert loader_args == [(appearance_file, tmp_path / "game")]
-    assert attached == [b"raw appearance"]
-    assert "appearance_template_unavailable" in capsys.readouterr().out
+    assert loader_args == []
+    assert attached == []
+    assert "create_temporarily_unavailable" in capsys.readouterr().out
 
 def _prepare_players_apply_results(
     monkeypatch,
@@ -1561,7 +1572,7 @@ def test_players_apply_audits_and_rebuilds_same_save_reports_after_roundtrip(
     monkeypatch.setattr(
         run,
         "apply_player_specs",
-        lambda *_args: (
+        lambda *_args, **_kwargs: (
             SpecResult(162196, "Marco Palestra", "updated", "patched"),
         ),
     )
@@ -1666,7 +1677,7 @@ def _assert_players_apply_aborts_for_backup_race(
     monkeypatch.setattr(
         run,
         "apply_player_specs",
-        lambda *_args: (
+        lambda *_args, **_kwargs: (
             SpecResult(162196, "Marco Palestra", "updated", "patched"),
         ),
     )

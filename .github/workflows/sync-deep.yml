@@ -45,18 +45,16 @@ jobs:
             --deep \
             --edit-file output/EDIT00000000 \
             --in-place
-          # Temporary: keep reviewed create specs disabled in automated syncs.
+          # Reviewed create specs stay disabled while their mutation path is reserved.
           python run.py players apply \
             --base-revision "$BASE_REVISION" \
             --edit-file output/EDIT00000000 \
-            --no-allow-overflow-release \
             --no-allow-create \
             --preflight \
             --in-place
           python run.py players apply \
             --base-revision "$BASE_REVISION" \
             --edit-file output/EDIT00000000 \
-            --no-allow-overflow-release \
             --no-allow-create \
             --in-place
           python run.py base-audit \

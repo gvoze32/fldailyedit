@@ -641,6 +641,11 @@ def test_run_pipeline_accepts_transfermarkt_dated_event_without_other_sources(
         transfer_id_transfermarkt=6481567,
     )
     monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_: [])
+    monkeypatch.setattr(
+        run,
+        "fetch_major_clubs_transfers_safely",
+        lambda **_: [],
+    )
     monkeypatch.setattr(run, "fetch_wikipedia_transfers", lambda **_: [])
     monkeypatch.setattr(run, "fetch_sortitoutsi_transfers", lambda **_: [])
     monkeypatch.setattr(
@@ -689,6 +694,11 @@ def test_run_pipeline_reconciles_supplemental_sources(monkeypatch):
         transfer_id_transfermarkt=6481567,
     )
     monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_: [fotmob])
+    monkeypatch.setattr(
+        run,
+        "fetch_major_clubs_transfers_safely",
+        lambda **_: [],
+    )
     monkeypatch.setattr(run, "fetch_wikipedia_transfers", lambda **_: [wikipedia])
     monkeypatch.setattr(run, "fetch_sortitoutsi_transfers", lambda **_: [signal])
     monkeypatch.setattr(
@@ -736,6 +746,11 @@ def test_run_pipeline_treats_undated_wikipedia_route_as_corroborator(monkeypatch
         verification_status="corroborator",
     )
     monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_: [fotmob])
+    monkeypatch.setattr(
+        run,
+        "fetch_major_clubs_transfers_safely",
+        lambda **_: [],
+    )
     monkeypatch.setattr(run, "fetch_wikipedia_transfers", lambda **_: [wikipedia])
     monkeypatch.setattr(run, "fetch_sortitoutsi_transfers", lambda **_: [])
     monkeypatch.setattr(run, "fetch_transfermarkt_transfers", lambda **_: [])
@@ -764,6 +779,11 @@ def test_fotmob_only_flag_does_not_call_supplemental_sources(monkeypatch):
         run,
         "fetch_fotmob_transfers",
         lambda **_: [Transfer("Player", "A", "B", date="2026-08-03")],
+    )
+    monkeypatch.setattr(
+        run,
+        "fetch_major_clubs_transfers_safely",
+        lambda **_: [],
     )
     monkeypatch.setattr(
         run,

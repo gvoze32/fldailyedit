@@ -7,9 +7,9 @@
 
 FL Daily Edit 通过将现实世界中的转会应用到 `EDIT00000000` 存档文件，更新 SP Football Life 2026 和 eFootball PES 2021 的阵容。
 
-> **经审核的新球员创建在 `players apply` 中默认启用，但必须存在有效的
-> `PlayerAppearance.bin` donor。正向选项是 `--allow-create`；使用
-> `--no-allow-create` 可禁用 CLI 创建。直接 API 调用仍默认禁用。**
+> **新球员创建目前在所有变更路径中均已禁用。`create` 规范仍可加载和审核，
+> 但 `--allow-create` 仅作为保留的兼容选项；`PlayerAppearance.bin` 仍是保留
+> 输入。所有 create 规范都会以 `create_temporarily_unavailable` 拒绝。**
 >
 > 仍支持存档中已有球员的转会以及现有球员的已审核更新。缺失的球员将被跳过。
 > 基于角色的 overflow release 默认启用；使用 `--no-allow-overflow-release`
@@ -97,13 +97,15 @@ Windows 安装程序是面向新手的推荐方式。安装程序界面目前仅
 - `run` 仅处理存档中已有球员的转会。若目标俱乐部已满，默认释放基于角色的
   overflow candidate；使用 `--no-allow-overflow-release` 可跳过该转会。
 - `players apply` 应用经审核的属性变更。支持现有球员的 `update` 规范。
-- 新球员的 `create` 规范仍可加载和审核。存在明确 donor 和有效
-  `PlayerAppearance.bin` 来源时，`players apply` 默认尝试创建。使用
-  `--no-allow-create` 可禁用；donor 缺失或无效时不会改变存档。
-
-- Fast 和 Deep 同步工作流暂时使用 `--no-allow-create` 和 `--no-allow-overflow-release`；自动同步不会应用 `create` 规范。本地 `players apply` 保持正常行为。
-- `players apply` 在目标阵容已满时默认使用基于角色的 overflow；正向选项是
-  `--allow-overflow-release`，使用 `--no-allow-overflow-release` 可跳过。
+- 新球员的 `create` 规范仍可加载和审核，但仅用于 schema 和审核。
+  `players apply` 会以 `create_temporarily_unavailable` 拒绝所有 create
+  变更；`--allow-create` 和 `PlayerAppearance.bin` 仅作为保留的兼容输入。
+- Fast 和 Deep 同步工作流使用 `--no-allow-create`；本地 `players apply`
+  也保持 create 禁用的相同行为。
+- 转会命令默认启用基于角色的 overflow release。目标阵容已满时，会释放选定的
+  安全 reserve 以便转会进入；只有需要退出时才使用
+  `--no-allow-overflow-release`。当基础存档存在 native 球员时，selector
+  保护首发角色、比赛日替补、已转入/受保护的 ID 以及保留范围内的 created 球员。
 
 ## 本地运行
 
@@ -176,10 +178,10 @@ python run.py run --help
 每个经审核的 Player Update 都是 `players/` 下每名球员一个的完整 schema-version-2 JSON 文件。文件记录 `operation`（`create` 或 `update`）、生命周期（`active`、`integrated` 或 `superseded`）、精确的 `applies_to` 基础版本、稳定的球员身份信息和 Pes Retro Stats UUID/资料来源、带引用的证据，以及经审核的 PES 数据。创建更新包含拟定的完整球员记录和目标球队阵容数据。现有球员更新仅包含与已验证基础存档不同的受支持值；每项更改都会记录字面量 `from` 和 `to` 值。
 
 > **生命周期说明：** `superseded` 是 Player Update 的状态，不代表球员退役；它表示该更新不再适用于所选基础版本。
-`create` 记录继续受 schema 支持以供审核。CLI 变更必须使用
-`players apply --allow-create` 和有效外观数据；直接 API 调用默认保持禁用。
-若目标阵容已满，请同时使用 `--allow-overflow-release`；缺失或无效的安全
-元数据会保持存档不变。
+`create` 记录继续受 schema 支持，但仅用于审核。CLI 和直接 API 的所有 create
+变更均已禁用；`--allow-create` 作为保留的兼容选项，并返回
+`create_temporarily_unavailable`。转会 overflow release 默认启用；使用
+`--no-allow-overflow-release` 可关闭。缺失或无效的安全元数据会保持存档不变。
 受支持的更新分组包括能力值、位置熟练度、比赛风格、球员技能、COM 风格、国籍、身体/基本设置和注册位置。
 - 生成的 OVR 审核值是基于已公布 PES 2021 公式进行的确定性计算。它们是平性辅助工具，并非游戏运行时环境的独立保证；拟定的能力值仍需审核。
 - 使用旧版 OVR 模型标识符生成的球员草稿必须在验证前重新生成；不支持从 v1 到 v2 的隐式迁移。
@@ -219,7 +221,7 @@ python run.py run --help
 | `--from-base` | 从 `base/EDIT00000000` 开始 |
 | `--fotmob-only` | 不使用补充转会来源运行 |
 | `--release-policy PATH` | 加载按球队保护的球员和离线 usage counters |
-| `--numbers-only` | 仅使用 FotMob 阵容数据修正当前球衣号码 |
+| 球衣号码 | 每次转会运行都默认同步当前阵容球衣号码 |
 
 不使用 `--from-base` 时，常规运行会从上次已验证的输出继续。这样可以避免后续定时运行再次读取累积历史时，已应用的转会消失。
 

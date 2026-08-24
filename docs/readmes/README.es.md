@@ -8,11 +8,12 @@
 FL Daily Edit actualiza las plantillas de SP Football Life 2026 y eFootball PES 2021 mediante
 la aplicación de transferencias reales a un archivo guardado `EDIT00000000`.
 
-> **La creación de jugadores nuevos está habilitada por defecto para
-> especificaciones revisadas en `players apply` cuando existe un donante válido
-> de `PlayerAppearance.bin`. La opción positiva es `--allow-create`; use
-> `--no-allow-create` para desactivar las creaciones de la CLI. La API directa
-> permanece desactivada por defecto.**
+> **La creación de jugadores nuevos está actualmente desactivada en todas las
+> rutas de mutación. Las especificaciones `create` siguen siendo cargables y
+> revisables, pero `--allow-create` se conserva únicamente como opción de
+> compatibilidad reservada. `PlayerAppearance.bin` sigue siendo una entrada
+> reservada; las especificaciones create se rechazan con
+> `create_temporarily_unavailable`.**
 >
 > Las transferencias de jugadores que ya están en el guardado y las actualizaciones
 > revisadas de jugadores existentes siguen siendo compatibles. Los jugadores faltantes
@@ -116,15 +117,19 @@ Son flujos de trabajo separados:
   `--no-allow-overflow-release` para omitir esa transferencia.
 - `players apply` aplica cambios de atributos revisados. Se admiten especificaciones `update`
   de jugadores existentes.
-- Las especificaciones `create` de nuevos jugadores siguen siendo cargables y revisables.
-  `players apply` las intenta por defecto con un donante de apariencia explícito y una fuente
-  válida de `PlayerAppearance.bin`. Use `--no-allow-create` para desactivarlas; un donante
-  ausente o inválido rechaza la especificación sin cambiar los bytes del guardado.
-
-- Los workflows de sincronización Fast y Deep usan temporalmente `--no-allow-create` y `--no-allow-overflow-release`; la sincronización automática no aplica especificaciones `create`. El comando local `players apply` mantiene su comportamiento normal.
-- Para `players apply`, una plantilla llena usa overflow basado en roles por defecto. La opción
-  positiva es `--allow-overflow-release`; use `--no-allow-overflow-release` para omitirlo.
-  No se exige un OVR positivo.
+- Las especificaciones `create` de nuevos jugadores siguen siendo cargables y
+  revisables solo para el esquema y la revisión. `players apply` rechaza toda
+  mutación create con `create_temporarily_unavailable`; `--allow-create` y
+  `PlayerAppearance.bin` se conservan únicamente como entradas reservadas de
+  compatibilidad.
+- Los workflows de sincronización Fast y Deep usan `--no-allow-create`;
+  `players apply` local tiene el mismo comportamiento con create desactivado.
+- Los comandos de transferencias habilitan por defecto la liberación overflow
+  basada en roles. Si el destino está lleno, se libera el reserva seguro elegido
+  para que entre la transferencia; usa `--no-allow-overflow-release` solo para
+  desactivarlo. El selector protege los roles del primer equipo, el banquillo de
+  partido, los ID transferidos/protegidos y los jugadores del rango reservado
+  cuando existe un jugador nativo en la base.
 
 ## Ejecución local
 
@@ -207,10 +212,12 @@ contienen únicamente valores compatibles que difieren de la base verificada; ca
 registra valores literales `from` y `to`.
 
 > **Nota del ciclo de vida:** `superseded` es un estado del Player Update, no de la carrera del jugador. Significa que la actualización ya no se aplica a la revisión base seleccionada.
-Los registros `create` siguen siendo compatibles con el esquema para su revisión.
-La mutación desde la CLI requiere `players apply --allow-create` y datos de
-apariencia válidos; la API directa permanece desactivada por defecto. Si la
-plantilla está llena, añada `--allow-overflow-release`; los metadatos de seguridad
+Los registros `create` siguen siendo compatibles con el esquema solo para su
+revisión. Todas las mutaciones create de la CLI y de la API directa están
+desactivadas; `--allow-create` se conserva como opción de compatibilidad
+reservada y devuelve `create_temporarily_unavailable`. La liberación overflow
+de transferencias sigue activa por defecto; usa
+`--no-allow-overflow-release` para desactivarla. Los metadatos de seguridad
 ausentes o inválidos dejan el guardado sin cambios.
 Los grupos de actualización compatibles son habilidades, dominio de posiciones, estilo de juego,
 habilidades del jugador, estilos COM, nacionalidad, configuración física/básica y
@@ -297,7 +304,7 @@ Opciones comunes de `run`:
 | `--from-base` | Comenzar desde `base/EDIT00000000` |
 | `--fotmob-only` | Ejecutar sin fuentes de transferencias complementarias |
 | `--release-policy PATH` | Cargar jugadores protegidos por club y contadores de uso offline |
-| `--numbers-only` | Corregir los dorsales actuales usando solo los datos de plantillas de FotMob |
+| Números de camiseta | Sincronizar por defecto los dorsales actuales en cada ejecución de transferencias |
 
 Sin `--from-base`, una ejecución normal continúa desde la última salida verificada.
 Esto evita que las transferencias desaparezcan cuando una ejecución programada posterior vuelve a leer el

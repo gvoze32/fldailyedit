@@ -8,10 +8,11 @@
 FL Daily Edit updates SP Football Life 2026 and eFootball PES 2021 squads by
 applying real-world transfers to an `EDIT00000000` save file.
 
-> **Reviewed new-player creation is enabled by default in `players apply` when
-> a valid appearance source from `PlayerAppearance.bin` is available. The explicit positive flag
-> is `--allow-create`; use `--no-allow-create` to disable CLI create mutations.
-> Direct API calls remain disabled by default.**
+> **Reviewed new-player creation is currently disabled in every mutation path.
+> `create` specs remain loadable and reviewable, but `--allow-create` is retained
+> only as a reserved compatibility flag. `PlayerAppearance.bin` remains a
+> reserved input; create specs are rejected with
+> `create_temporarily_unavailable`.**
 >
 > Transfers for players already in the save and reviewed updates to existing
 > players remain supported. Missing players are skipped. Automatic roster-space
@@ -116,21 +117,18 @@ These are separate workflows:
   that transfer.
 - `players apply` applies reviewed attribute changes. Existing-player `update`
   specs are supported.
-- New-player `create` specs remain loadable and reviewable. `players apply`
-  attempts reviewed create specs by default when an explicit appearance source
-  player and valid `PlayerAppearance.bin` source are available. Use
-  `--no-allow-create` to disable them; missing or invalid appearance-source data
-  rejects the spec without changing save bytes.
-- Automated Fast and Deep sync workflows temporarily pass
-  `--no-allow-create` and `--no-allow-overflow-release`; local
-  `players apply` keeps its normal create behavior.
-- For `players apply`, a full destination roster uses automatic roster-space
-  release based on player roles by default. The explicit positive flag is
-  `--allow-overflow-release`; use `--no-allow-overflow-release` to keep it
-  unchanged. The selector protects first-team roles, the matchday bench,
-  transferred/protected IDs, and reserved-range created players when original
-  base players are available. The minimum goalkeeper rule is honored when
-  position metadata is available.
+- New-player `create` specs remain loadable and reviewable for schema and review
+  only. `players apply` rejects every create mutation with
+  `create_temporarily_unavailable`; `--allow-create` and `PlayerAppearance.bin`
+  are retained only as reserved compatibility inputs.
+- Automated Fast and Deep sync workflows pass `--no-allow-create`; local
+  `players apply` has the same create-disabled behavior.
+- Transfer commands enable role-based overflow release by default. A full
+  destination releases the selected safe reserve so the transfer can enter;
+  use `--no-allow-overflow-release` only to opt out. The selector protects
+  first-team roles, the matchday bench, transferred/protected IDs, and
+  reserved-range created players when original base players are available.
+  The minimum goalkeeper rule is honored when position metadata is available.
 
 ## Run locally
 
@@ -227,12 +225,12 @@ contain only supported values that differ from the verified base; every change
 records literal `from` and `to` values.
 
 > **Lifecycle note:** `superseded` is a status for the Player Update, not for the player. It means the update no longer applies to the selected base revision.
-Create records remain schema-supported for review. CLI create mutation is
-enabled by default for reviewed specs when valid appearance data is available;
-use `--no-allow-create` to disable it. Direct API calls remain disabled by
-default. If the destination roster is full, use
-`--no-allow-overflow-release` to disable automatic roster-space release; missing
-or invalid safety metadata leaves the save unchanged.
+Create records remain schema-supported for review only. All CLI and direct API
+create mutations are disabled; `--allow-create` is retained as a reserved
+compatibility flag and returns `create_temporarily_unavailable`. Transfer
+overflow release remains enabled by default; use
+`--no-allow-overflow-release` to opt out. Missing or invalid safety metadata
+leaves the save unchanged.
 Supported update groups are abilities, position proficiency, playing style,
 player skills, COM styles, nationality, physical/basic settings, and
 registered position.
@@ -319,7 +317,7 @@ Common `run` options:
 | `--from-base` | Start from `base/EDIT00000000` |
 | `--fotmob-only` | Run without supplemental transfer sources |
 | `--release-policy PATH` | Load per-club protected players and offline usage counters |
-| `--numbers-only` | Fix current squad numbers using FotMob squad data only |
+| Kit numbers | Synchronize current squad shirt numbers alongside every transfer run |
 The optional `data/release_policy.json` file can protect a player per team
 and provide offline `minutes`, `starts`, `appearances`, and `news_mentions`
 counters. Missing usage data never blocks a run; it only removes that

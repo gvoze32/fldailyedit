@@ -1108,7 +1108,7 @@ class EditFile:
         shirt_number: int | None = None,
         preferred_shirt_number: int | None = None,
         position: str = "",
-        allow_overflow_release: bool = False,
+        allow_overflow_release: bool = True,
     ) -> bool:
         """
         Transfer a player from one team to another.
@@ -1321,7 +1321,7 @@ class EditFile:
         shirt_number: int | None = None,
         preferred_shirt_number: int | None = None,
         position: str = "",
-        allow_overflow_release: bool = False,
+        allow_overflow_release: bool = True,
         protected_player_ids: set[int] | None = None,
     ) -> bool:
         """
