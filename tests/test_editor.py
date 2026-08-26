@@ -406,6 +406,67 @@ class TestEditFileHeader:
         assert updated_lineup[:11] == list(range(1, 12))
         assert updated_lineup[-1] == 0
         assert sorted(updated_lineup) == list(range(TP_MAX_PLAYERS))
+
+    def test_game_plan_removal_updates_active_prefix_with_legacy_tail(self):
+        data = _build_mock_data(
+            num_players=17,
+            num_teams=1,
+            num_team_player=1,
+            num_game_plans=1,
+            team_player_entries=[
+                (101, list(range(1000, 1017)), list(range(1, 18))),
+            ],
+            league_team_ids=[101],
+        )
+        edit_file = EditFile()
+        edit_file.load_bytes(data)
+        game_plan_base = edit_file.game_plan_start
+        lineup = [0, 1, 16, *range(2, 16)]
+        lineup.extend([0xFF] * (TP_MAX_PLAYERS - len(lineup)))
+        edit_file._data[
+            game_plan_base + GP_LINEUP : game_plan_base + GP_LINEUP + TP_MAX_PLAYERS
+        ] = bytes(lineup)
+
+        assert edit_file.release_player(1005, 101)
+
+        updated_lineup = list(
+            edit_file._data[
+                game_plan_base + GP_LINEUP : game_plan_base + GP_LINEUP + TP_MAX_PLAYERS
+            ]
+        )
+        assert updated_lineup[:16] == list(range(16))
+        assert edit_file.validate_integrity()["valid"] is True
+
+    def test_game_plan_addition_updates_active_prefix_with_legacy_tail(self):
+        data = _build_mock_data(
+            num_players=15,
+            num_teams=1,
+            num_team_player=1,
+            num_game_plans=1,
+            team_player_entries=[
+                (101, list(range(1000, 1015)), list(range(1, 16))),
+            ],
+            league_team_ids=[101],
+        )
+        edit_file = EditFile()
+        edit_file.load_bytes(data)
+        game_plan_base = edit_file.game_plan_start
+        lineup = list(range(15)) + [0xFF] * (TP_MAX_PLAYERS - 15)
+        edit_file._data[
+            game_plan_base + GP_LINEUP : game_plan_base + GP_LINEUP + TP_MAX_PLAYERS
+        ] = bytes(lineup)
+
+        assert edit_file.add_player(9999, 101)
+
+        updated_lineup = list(
+            edit_file._data[
+                game_plan_base + GP_LINEUP : game_plan_base + GP_LINEUP + TP_MAX_PLAYERS
+            ]
+        )
+        assert updated_lineup[:16] == list(range(16))
+        assert edit_file.validate_integrity()["valid"] is True
+
+
 class TestReadPlayers:
     def test_read_players(self):
         data = _build_mock_data(

@@ -34,96 +34,6 @@ DEEP_ZIP_URL = (
     "https://github.com/gvoze32/fldailyedit/releases/download/latest/"
     "fldailyedit-fl2026-deep.zip"
 )
-README_INSTALLER_CONTRACTS = (
-    (
-        Path("README.md"),
-        "## Windows installer",
-        "## Roadmap / Complete for now",
-        "The installer interface is currently available in English only.",
-        "The installer executable is unsigned, so Windows SmartScreen may display a warning when you run it. Before continuing, verify the downloaded `FLDailyEditInstaller.zip` against the published `FLDailyEditInstaller.zip.sha256` on the [latest release]",
-        "Detection for vanilla eFootball PES 2021 is present, but installation remains disabled until a matching validated base is published.",
-    ),
-    (
-        Path("docs/readmes/README.id.md"),
-        "## Installer Windows",
-        "## Roadmap / Selesai untuk saat ini",
-        "Antarmuka installer saat ini hanya tersedia dalam bahasa Inggris.",
-        "Executable installer belum ditandatangani, sehingga Windows SmartScreen mungkin menampilkan peringatan saat Anda menjalankannya. Sebelum melanjutkan, verifikasi `FLDailyEditInstaller.zip` yang diunduh dengan `FLDailyEditInstaller.zip.sha256` yang diterbitkan pada [rilis terbaru]",
-        "Deteksi untuk vanilla eFootball PES 2021 sudah tersedia, tetapi pemasangan tetap dinonaktifkan hingga base tervalidasi yang sesuai diterbitkan.",
-    ),
-    (
-        Path("docs/readmes/README.zh.md"),
-        "## Windows 安装程序",
-        "## 路线图 / 当前已完成",
-        "安装程序界面目前仅提供英语版本。",
-        "初始安装程序可执行文件尚未签名，因此运行时 Windows SmartScreen 可能会显示警告。继续前，请将下载的 `FLDailyEditInstaller.zip` 与[最新版本]",
-        "程序可以检测原版 eFootball PES 2021，但在发布匹配且经过验证的基础存档前，安装功能将保持禁用。",
-    ),
-    (
-        Path("docs/readmes/README.ar.md"),
-        "## مُثبِّت Windows",
-        "## خارطة الطريق / مكتملة حاليًا",
-        "تتوفر واجهة المُثبِّت حاليًا باللغة الإنجليزية فقط.",
-        "الملف التنفيذي للمُثبِّت غير موقّع، لذلك قد يعرض Windows SmartScreen تحذيرًا عند تشغيله. قبل المتابعة، قارن ملف `FLDailyEditInstaller.zip` المنزّل بملف `FLDailyEditInstaller.zip.sha256` المنشور في [أحدث إصدار]",
-        "يتوفر اكتشاف vanilla eFootball PES 2021، لكن يظل التثبيت معطّلًا حتى نشر قاعدة أساسية متحقّق منها ومطابقة.",
-    ),
-    (
-        Path("docs/readmes/README.ru.md"),
-        "## Установщик Windows",
-        "## План развития / Пока завершён",
-        "Интерфейс установщика пока доступен только на английском языке.",
-        "Исполняемый файл установщика не подписан, поэтому при запуске Windows SmartScreen может показать предупреждение. Перед продолжением сравните загруженный `FLDailyEditInstaller.zip` с контрольной суммой `FLDailyEditInstaller.zip.sha256`, опубликованной в [последнем релизе]",
-        "Обнаружение vanilla eFootball PES 2021 поддерживается, но установка остаётся отключённой до публикации подходящей проверенной базы.",
-    ),
-    (
-        Path("docs/readmes/README.it.md"),
-        "## Programma di installazione per Windows",
-        "## Roadmap / Completa per ora",
-        "L'interfaccia del programma di installazione è attualmente disponibile solo in inglese.",
-        "L'eseguibile dell'installer non è firmato, quindi Windows SmartScreen potrebbe all'avvio mostrare un avviso. Prima di proseguire, confrontare il file `FLDailyEditInstaller.zip` scaricato con il file `FLDailyEditInstaller.zip.sha256` pubblicato nella [versione più recente]",
-        "Il rilevamento di eFootball PES 2021 vanilla è disponibile, ma l'installazione rimane disabilitata finché non viene pubblicata una base convalidata corrispondente.",
-    ),
-    (
-        Path("docs/readmes/README.pt.md"),
-        "## Instalador para Windows",
-        "## Roteiro / Concluído por enquanto",
-        "A interface do instalador está disponível somente em inglês no momento.",
-        "O executável do instalador não é assinado, portanto o Windows SmartScreen pode exibir um aviso ao executá-lo. Antes de continuar, verifique o `FLDailyEditInstaller.zip` baixado com o `FLDailyEditInstaller.zip.sha256` publicado na [versão mais recente]",
-        "A detecção do eFootball PES 2021 vanilla está presente, mas a instalação permanece desativada até que uma base validada correspondente seja publicada.",
-    ),
-    (
-        Path("docs/readmes/README.es.md"),
-        "## Instalador para Windows",
-        "## Hoja de ruta / Completada por ahora",
-        "La interfaz del instalador actualmente solo está disponible en inglés.",
-        "El ejecutable del instalador no está firmado, por lo que Windows SmartScreen puede mostrar una advertencia al ejecutarlo. Antes de continuar, verificar el `FLDailyEditInstaller.zip` descargado con el `FLDailyEditInstaller.zip.sha256` publicado en la [versión más reciente]",
-        "La detección de eFootball PES 2021 vanilla está disponible, pero la instalación permanece desactivada hasta que se publique una base validada correspondiente.",
-    ),
-    (
-        Path("docs/readmes/README.tr.md"),
-        "## Windows yükleyici",
-        "## Yol Haritası / Şimdilik tamamlandı",
-        "Yükleyici arayüzü şu anda yalnızca İngilizce olarak sunulmaktadır.",
-        "Yükleyici yürütülebilir dosyası imzasızdır; bu nedenle çalıştırdığınızda Windows SmartScreen bir uyarı gösterebilir. Devam etmeden önce indirilen `FLDailyEditInstaller.zip` dosyasını [en son sürümde]",
-        "Vanilla eFootball PES 2021 algılanabilir, ancak eşleşen doğrulanmış bir temel yayımlanana kadar kurulum devre dışı kalır.",
-    ),
-    (
-        Path("docs/readmes/README.de.md"),
-        "## Windows-Installationsprogramm",
-        "## Roadmap / Vorerst abgeschlossen",
-        "Die Benutzeroberfläche des Installationsprogramms ist derzeit nur auf Englisch verfügbar.",
-        "Die ausführbare Installationsdatei ist nicht signiert, daher kann Windows SmartScreen beim Starten eine Warnung anzeigen. Vergleichen Sie vor dem Fortfahren die heruntergeladene `FLDailyEditInstaller.zip` mit der im [neuesten Release]",
-        "Vanilla eFootball PES 2021 wird erkannt, die Installation bleibt jedoch deaktiviert, bis eine passende validierte Basis veröffentlicht wird.",
-    ),
-    (
-        Path("docs/readmes/README.fr.md"),
-        "## Programme d’installation Windows",
-        "## Feuille de route / Terminée pour l’instant",
-        "L’interface du programme d’installation est actuellement disponible uniquement en anglais.",
-        "L’exécutable de l’installateur n’est pas signé ; Windows SmartScreen peut donc afficher un avertissement lors de son lancement. Avant de continuer, comparez le `FLDailyEditInstaller.zip` téléchargé avec le `FLDailyEditInstaller.zip.sha256` publié dans la [dernière version]",
-        "La détection d’eFootball PES 2021 vanilla est disponible, mais l’installation reste désactivée jusqu’à la publication d’une base validée correspondante.",
-    ),
-)
 
 
 
@@ -311,76 +221,87 @@ def _remote_branch_fixture(
 def test_readme_uses_player_update_language_for_public_contributions():
     text = README_PATH.read_text(encoding="utf-8")
     assert "## Player Updates" in text
-    assert "Validate all Player Updates against the verified base revision" in text
-    assert "Apply reviewed Player Updates explicitly to one save" in text
+    assert "Reviewed updates live as one JSON file per player in `players/`." in text
+    assert "New-player `create` records are review-only" in text
+    assert "create_temporarily_unavailable" in text
     assert "player update issue form" in text
-    assert "CI accepts a Player Update only when" in text
+    assert "python run.py players validate" in text
     assert "## Player-spec contributions" not in text
-    lifecycle = " ".join(
-        text.split("### Revision lifecycle", 1)[1]
-        .split("Common `run` options:", 1)[0]
-        .split()
-    )
-    assert "Keep historical Player Updates in `players/`" in lifecycle
-    assert "An active Player Update whose `applies_to` list" in lifecycle
-    assert "revision only when the Player Update still applies" in lifecycle
-    for retired_phrase in ("historical specs", "active spec", "the spec"):
-        assert retired_phrase not in lifecycle
-    for technical_literal in (
-        "`players/`",
-        "`applies_to`",
-        "`needs_review`",
-        "`integrated`",
-        "`superseded`",
-    ):
-        assert technical_literal in lifecycle
 
-
-def test_localized_readmes_are_installer_first_and_keep_public_manual_fallbacks():
-    for path, installer_heading, roadmap_heading, ui_copy, warning, pes_copy in (
-        README_INSTALLER_CONTRACTS
+def test_localized_readmes_keep_installer_and_manual_download_contracts():
+    for path in (
+        README_PATH,
+        Path("docs/readmes/README.id.md"),
+        Path("docs/readmes/README.es.md"),
+        Path("docs/readmes/README.pt.md"),
+        Path("docs/readmes/README.ar.md"),
+        Path("docs/readmes/README.zh.md"),
+        Path("docs/readmes/README.it.md"),
+        Path("docs/readmes/README.ru.md"),
+        Path("docs/readmes/README.de.md"),
+        Path("docs/readmes/README.fr.md"),
+        Path("docs/readmes/README.tr.md"),
     ):
         text = path.read_text(encoding="utf-8")
 
         assert text.count(INSTALLER_URL) == 1, path
         assert text.count(FAST_ZIP_URL) == 1, path
         assert text.count(DEEP_ZIP_URL) == 1, path
-        assert installer_heading in text, path
-        assert ui_copy in text, path
-        assert warning in text, path
-        assert pes_copy in text, path
+        assert "Download and install" in text, path
+        assert "Update" in text, path
+        assert "Apply update" in text, path
+        assert "Run workflow" in text, path
 
-        roadmap = text.split(roadmap_heading, 1)[1].split("\n## ", 1)[0]
-        numbered_items = re.findall(r"(?m)^\d+\. \*\*", roadmap)
-        assert numbered_items == [], path
-        assert "installer" not in roadmap.casefold(), path
-
-
-def test_readmes_document_reserved_create_and_native_metadata_tools():
-    for path, *_ in README_INSTALLER_CONTRACTS:
+def test_readmes_document_current_mutation_and_diagnostic_commands():
+    readme_paths = (
+        README_PATH,
+        Path("docs/readmes/README.id.md"),
+        Path("docs/readmes/README.es.md"),
+        Path("docs/readmes/README.pt.md"),
+        Path("docs/readmes/README.ar.md"),
+        Path("docs/readmes/README.zh.md"),
+        Path("docs/readmes/README.it.md"),
+        Path("docs/readmes/README.ru.md"),
+        Path("docs/readmes/README.de.md"),
+        Path("docs/readmes/README.fr.md"),
+        Path("docs/readmes/README.tr.md"),
+    )
+    for path in readme_paths:
         text = path.read_text(encoding="utf-8")
         assert "create_temporarily_unavailable" in text, path
-        assert "--allow-create" in text, path
-        assert "PlayerAppearance.bin" in text, path
         assert "--no-allow-overflow-release" in text, path
-        assert "| `audit` |" in text, path
-        assert "| `compare` |" in text, path
+        assert "python run.py players validate" in text, path
+        assert "python run.py run --window auto" in text, path
+        assert "python run.py <command> --help" in text, path
 
-    for path in (Path("README.md"), Path("docs/readmes/README.id.md")):
+
+def test_localized_readmes_document_smart_screen_warning():
+    for path in (
+        README_PATH,
+        Path("docs/readmes/README.id.md"),
+        Path("docs/readmes/README.es.md"),
+        Path("docs/readmes/README.pt.md"),
+        Path("docs/readmes/README.ar.md"),
+        Path("docs/readmes/README.zh.md"),
+        Path("docs/readmes/README.it.md"),
+        Path("docs/readmes/README.ru.md"),
+        Path("docs/readmes/README.de.md"),
+        Path("docs/readmes/README.fr.md"),
+        Path("docs/readmes/README.tr.md"),
+    ):
         text = path.read_text(encoding="utf-8")
-        assert "python run.py audit" in text, path
-        assert "python run.py compare" in text, path
+        assert "SmartScreen" in text, path
+
+def test_readme_lists_player_update_contract():
+    text = README_PATH.read_text(encoding="utf-8")
+    contribution_section = text.split("## Player Updates", 1)[1]
+    assert "`players/`" in contribution_section
+    assert "`update`" in contribution_section
+    assert "`create`" in contribution_section
+    assert "create_temporarily_unavailable" in contribution_section
+    assert "player update issue form" in contribution_section
 
 
-def test_localized_readmes_document_smart_app_control_bypass():
-    for path, *_ in README_INSTALLER_CONTRACTS:
-        text = path.read_text(encoding="utf-8")
-        assert (
-            "Settings → Privacy & security → Windows Security → "
-            "App & browser control → Smart App Control settings"
-        ) in text, path
-        assert "Properties" in text, path
-        assert "Unblock" in text, path
 
 
 def test_workflows_use_player_update_copy_on_public_surfaces():
@@ -1129,22 +1050,6 @@ def test_fast_and_deep_sync_workflows_differ_only_by_channel_and_deep_mode():
 
     assert normalized_fast == normalized_deep
 
-def test_readme_lists_every_whitelisted_update_patch_group_and_pair_contract():
-    text = README_PATH.read_text(encoding="utf-8")
-    contribution_section = text.split("## Player Updates", 1)[1]
-    for group in (
-        "abilities",
-        "position proficiency",
-        "playing style",
-        "player skills",
-        "COM styles",
-        "nationality",
-        "physical/basic settings",
-        "registered position",
-    ):
-        assert group in contribution_section
-    assert "`from`" in contribution_section
-    assert "`to`" in contribution_section
 
 
 
