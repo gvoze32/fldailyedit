@@ -5,134 +5,67 @@
 [![Versione Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Licenza: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../../LICENSE)
 
-FL Daily Edit aggiorna le rose di SP Football Life 2026 ed eFootball PES 2021
-applicando i trasferimenti del mondo reale a un file di salvataggio `EDIT00000000`.
+Aggiorna i file `EDIT00000000` di SP Football Life 2026 ed eFootball PES 2021
+con trasferimenti reali verificati e aggiornamenti dei giocatori revisionati.
 
-> **La creazione di nuovi giocatori è attualmente disattivata in tutti i
-> percorsi di mutazione. Le specifiche `create` restano caricabili e revisionabili,
-> ma `--allow-create` viene mantenuto solo come opzione di compatibilità riservata.
-> `PlayerAppearance.bin` resta un input riservato; le specifiche create vengono
-> rifiutate con `create_temporarily_unavailable`.**
+> **Beta:** release e compatibilità dei salvataggi sono ancora in fase di test.
 >
-> I trasferimenti per i giocatori già presenti nel salvataggio e gli aggiornamenti
-> revisionati per i giocatori esistenti rimangono supportati. I giocatori mancanti
-> vengono ignorati. L'overflow basato sui ruoli è attivo per impostazione predefinita;
-> usa `--no-allow-overflow-release` per lasciare invariata una rosa completa.
-
-> [!WARNING]
-> **Avviso beta:** FL Daily Edit, i dati del repository e le versioni generate sono ancora in fase di test. Potrebbero non funzionare con ogni configurazione di gioco/salvataggio; alcune condizioni non sono ancora supportate.
+> **La creazione di nuovi giocatori è disattivata per ora.** Sono supportati i
+> trasferimenti e gli aggiornamenti revisionati dei giocatori già presenti. I
+> giocatori mancanti o ambigui vengono ignorati. Se la rosa di destinazione è
+> piena, viene svincolata una riserva sicura in base al ruolo; usa
+> `--no-allow-overflow-release` per lasciare la rosa invariata.
 
 ## Compatibilità
 
-La base inclusa è destinata a **SP Football Life 2026**. Richiede:
+La [base inclusa](../../base/EDIT00000000) richiede:
 
-- Football Life 26 Update 2.2
-- SmokePatch's National Squads Update
+- **SP Football Life 2026 Update 2.2**
+- **SmokePatch's National Squads Update**
 
-Non è compatibile con UML, versioni precedenti di FL26 o installazioni prive
-dell'aggiornamento per le nazionali. Avviare una nuova carriera Campionato Master o Diventa un Mito
-dopo aver installato il file di salvataggio.
+Non è compatibile con UML, versioni precedenti di FL26 o installazioni senza
+l’aggiornamento delle squadre nazionali. Inizia una nuova carriera di Master
+League o Diventa una leggenda dopo l’installazione.
 
-La [base inclusa](../../base/EDIT00000000) è il file
-[Gondowan's EDIT del 22 agosto 2026](https://www.reddit.com/r/SPFootballLife/comments/1vvh129/release_gondowans_edit_file_22082026_latest/).
-Include i trasferimenti dell'ultimo minuto del 22/08/2026 per tutti i campionati,
-variazioni dei valori per oltre 600 giocatori, promozioni e retrocessioni tra
-prima e seconda divisione, correzioni di altezza e ruolo, aggiornamenti di nomi e
-numeri, modifiche agli allenatori disponibili e formazioni automatiche ordinate
-per i giocatori migliori. Non crea nuovi giocatori né aggiunge squadre promosse dalla terza serie.
+## Programma di installazione Windows
 
-## Programma di installazione per Windows
+Il programma di installazione è l’opzione più semplice:
 
-Il programma di installazione per Windows è l'opzione consigliata per i principianti. L'interfaccia del programma di installazione è attualmente disponibile solo in inglese. I download convalidati correnti sono destinati **esclusivamente a Football Life 2026 Update 2.2 + SmokePatch's National Squads Update**. Il rilevamento di eFootball PES 2021 vanilla è disponibile, ma l'installazione rimane disabilitata finché non viene pubblicata una base convalidata corrispondente.
+1. Scarica ed estrai [FLDailyEditInstaller.zip](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.zip).
+2. Chiudi il gioco e scegli **Fast** o **Deep**.
+3. Conferma la cartella di Football Life e seleziona **Download and install**.
 
-1. Scaricare ed estrarre [FLDailyEditInstaller.zip](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.zip).
-2. Chiudere il gioco.
-3. Selezionare **Fast** o **Deep**. Sono opzioni separate per la copertura dell'aggiornamento e ciascuna mostra la data e ora di generazione.
-4. Confermare la cartella di Football Life 2026 rilevata, oppure usare **Browse** se necessario.
-5. Selezionare **Download and install**. L'installer verifica il download, esegue il backup del salvataggio corrente e lo sostituisce in modo atomico.
+Il programma verifica la release, crea un backup e sostituisce il salvataggio in
+modo atomico. Per aggiornare un file esistente, scegli **Update my local save**,
+selezionalo e fai clic su **Apply update**.
 
-**Aggiornare un salvataggio esistente tramite GUI:** L'installer può anche
-aggiornare un file `EDIT00000000` con layout comune selezionato dall'utente,
-anziché installare una versione precompilata. Selezionare **Update my local
-save**, scegliere un percorso rilevato o utilizzare **Browse**, selezionare
-**Fast** o **Deep** e, dopo la revisione, fare clic su **Apply update**. La
-procedura guidata convalida il salvataggio prima di modificarlo, crea un backup
-nella stessa posizione e mostra l'avanzamento, il risultato o la diagnostica.
-L'idoneità locale non dipende dall'etichetta SPFL/PES/UML e questa procedura non
-scarica una versione remota precompilata. Se i cataloghi esterni opzionali di
-SPFL non sono disponibili, il matcher locale utilizza i nomi di giocatori e
-squadre integrati nel salvataggio selezionato, consentendo l'aggiornamento locale
-anche senza di essi.
+Il programma non è firmato. Verifica `FLDailyEditInstaller.zip` con il file
+`FLDailyEditInstaller.zip.sha256` pubblicato nell’[ultima release](https://github.com/gvoze32/fldailyedit/releases/tag/latest)
+prima di eseguirlo; Windows SmartScreen potrebbe mostrare un avviso.
 
-> [!WARNING]
-> L'eseguibile dell'installer non è firmato, quindi Windows SmartScreen potrebbe all'avvio mostrare un avviso. Prima di proseguire, confrontare il file `FLDailyEditInstaller.zip` scaricato con il file `FLDailyEditInstaller.zip.sha256` pubblicato nella [versione più recente](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
-> Se Windows blocca l'installer tramite Smart App Control, aprire **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control settings** e impostarlo su **Off**. In alternativa, fare clic con il tasto destro sul file scaricato, aprire **Properties** e selezionare **Unblock**, se disponibile.
-
-Per l'installazione manuale senza installer, scaricare il [file ZIP pubblico della versione Fast](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) o il [file ZIP pubblico della versione Deep](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip). Estrarre `EDIT00000000`, eseguire il backup del file corrente e copiare il file estratto in:
+Per l’installazione manuale, scarica lo [ZIP Fast](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip)
+o lo [ZIP Deep](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip).
+Crea un backup, estrai `EDIT00000000` e copialo in:
 
 `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\`
 
-Per un'esecuzione su richiesta o per utilizzare un elenco personalizzato di club, effettuare un fork del repository e utilizzare **Run workflow** dalla scheda Actions.
+Per un’esecuzione su richiesta o un elenco di club personalizzato, fai un fork
+del repository e usa **Run workflow** nella scheda Actions.
 
 ## Cosa viene aggiornato
 
 - Trasferimenti, svincoli, prestiti e rientri dai prestiti
-- Numeri di maglia disponibili dai dati delle rose di FotMob
-- Identità dei giocatori verificate rispetto alla rosa attuale di FL26
-- Formazioni e schemi di gioco modificati in base alle variazioni di rosa
-- Report sui trasferimenti e registri di controllo JSON Lines
-- Salvataggi precompilati giornalieri tramite GitHub Actions
-- Creazioni di giocatori e correzioni degli attributi revisionate tramite comandi espliciti Player Update
+- Numeri di maglia, formazioni e piani di gioco modificati dai cambi di rosa
+- Report dei trasferimenti e log di audit
+- Salvataggi precompilati ogni giorno tramite GitHub Actions
 
-L'aggiornatore non sovrascrive un numero di maglia già utilizzato da un altro membro
-della rosa. Inoltre verifica la squadra attuale del giocatore prima di applicare un trasferimento.
-
-## Roadmap / Completa per ora
-
-Tutte le attività attuali della roadmap sono completate. Attendiamo la prossima idea utile.
-
-## Sicurezza e limitazioni
-
-- Le esecuzioni locali creano backup progressivi e utilizzano una crittografia atomica verificata.
-- I salvataggi vengono convalidati prima e dopo le modifiche alle rose.
-- Un blocco di processo impedisce a due esecuzioni di scrivere contemporaneamente sullo stesso output.
-- Gli snapshot di FotMob incompleti interrompono l'esecuzione anziché generare un salvataggio parziale.
-- Le corrispondenze ambigue dei giocatori e le discrepanze sulla squadra di origine vengono ignorate.
-- Le rose di destinazione complete usano l'overflow basato sui ruoli per impostazione
-  predefinita. Titolari e panchina della partita sono protetti; si preferisce la
-  riserva nativa più profonda e i giocatori creati sono protetti quando esiste un
-  candidato nativo. Ability/OVR non viene mai usato; usa
-  `--no-allow-overflow-release` per disattivarlo.
-- Wikipedia, Sortitoutsi e Transfermarkt sono fonti supplementari. Un'interruzione in una di queste
-  fonti non invalida uno snapshot completo di FotMob.
-
-**Aggiornamenti dei trasferimenti vs Player Updates**
-
-Si tratta di flussi di lavoro separati:
-
-- `run` elabora i trasferimenti per i giocatori già presenti nel salvataggio. Se una squadra di
-  destinazione è completa, la riserva overflow basata sui ruoli viene svincolata per
-  impostazione predefinita; usa `--no-allow-overflow-release` per ignorare il trasferimento.
-- `players apply` applica le modifiche agli attributi revisionate. Le specifiche `update` per i
-  giocatori esistenti sono supportate.
-- Le specifiche `create` per i nuovi giocatori restano caricabili e revisionabili
-  solo per schema e revisione. `players apply` rifiuta ogni mutazione create con
-  `create_temporarily_unavailable`; `--allow-create` e `PlayerAppearance.bin`
-  restano esclusivamente input di compatibilità riservati.
-- I workflow di sincronizzazione Fast e Deep usano `--no-allow-create`;
-  `players apply` locale mantiene lo stesso comportamento con create disattivato.
-- I comandi di trasferimento abilitano per impostazione predefinita il rilascio
-  overflow basato sui ruoli. Se la destinazione è piena, viene rilasciata la
-  riserva sicura selezionata per consentire il trasferimento; usa
-  `--no-allow-overflow-release` solo per disattivarlo. Il selettore protegge i
-  ruoli della prima squadra, la panchina del giorno partita, gli ID trasferiti o
-  protetti e i giocatori dell'intervallo riservato quando esiste un giocatore
-  nativo nella base.
+L’aggiornamento controlla il club attuale del giocatore e non sovrascrive un
+numero di maglia già usato.
 
 ## Esecuzione locale
 
-La configurazione locale è supportata su macOS, Linux e Windows tramite WSL. È richiesto Python 3.10
-o versioni successive.
+Compatibile con macOS, Linux e Windows tramite WSL. È richiesto Python 3.10 o
+successivo.
 
 ```bash
 git clone https://github.com/gvoze32/fldailyedit.git
@@ -150,22 +83,10 @@ cd ../..
 ## Comandi comuni
 
 ```bash
-# Preview changes without writing a save
+# Preview transfers without writing a save
 python run.py run --dry-run --edit-file base/EDIT00000000
 
-# Validate an existing save
-python run.py validate --edit-file base/EDIT00000000
-
-# Validate one-file-per-player updates against the pristine base revision
-python run.py players validate
-
-# Apply reviewed Player Updates explicitly to an existing output save
-python run.py players apply \
-  --base-revision fl26-u2.2-national-squads \
-  --edit-file output/EDIT00000000 \
-  --in-place
-
-# Apply all effective transfers available through today
+# Apply all available transfers
 python run.py run --window auto
 
 # Rebuild from the bundled base
@@ -174,151 +95,54 @@ python run.py run --from-base --window auto
 # Update a specific save in place
 python run.py run --edit-file /path/to/EDIT00000000 --in-place
 
-# Show every run option
+# Validate a save
+python run.py validate --edit-file /path/to/EDIT00000000
+
+# Validate Player Updates
+python run.py players validate
+
+# Apply reviewed Player Updates
+python run.py players apply \
+  --base-revision fl26-u2.2-national-squads \
+  --edit-file /path/to/EDIT00000000 \
+  --in-place
+
+# Show command options
 python run.py run --help
 ```
 
-| Comando | Scopo |
-|---|---|
-| `run` | Applica solo i trasferimenti verificati |
-| `players validate` | Convalida tutti i Player Update rispetto alla base originale |
-| `players apply` | Applica esplicitamente i Player Update revisionati a un salvataggio |
-| `base-audit` | Controlla Player Updates attivi, destinazioni e parent dei prestiti rispetto alla base |
-| `base-refresh` | Verifica e, opzionalmente, promuove una base locale o HTTPS |
-| `usage-import` | Unisce i dati CSV sull'utilizzo dei giocatori alla release policy |
-| `players apply --preflight` | Mostra destinazioni create revisionate e dati di sicurezza senza scrivere |
-| `log` | Mostra i trasferimenti applicati di recente |
-| `inspect` | Ispeziona squadre, conteggio giocatori e offset del salvataggio |
-| `validate` | Controlla le registrazioni nelle rose e le mappature dei piani di gioco |
-| `repair` | Ripara una base legacy utilizzando salvataggi di riferimento |
-| `audit` | Verifica in sola lettura del salvataggio e dei metadati nativi |
-| `compare` | Confronto in sola lettura di due varianti CPK native |
+`run` applica solo i trasferimenti. `players apply` è un flusso separato. Per
+usare entrambi, esegui prima i trasferimenti e poi applica i Player Updates allo
+stesso file. Usa `python run.py <command> --help` per audit, confronto, log e
+riparazione.
 
-`run` gestisce esclusivamente i trasferimenti: non carica né applica mai i Player Update.
-Per combinare entrambi i flussi di lavoro, eseguire prima il comando di trasferimento su un
-salvataggio di output, quindi eseguire `players apply --in-place` sullo stesso file.
+## Aggiornamenti giocatori
 
-## Aggiornamenti giocatori (Player Updates)
+Gli aggiornamenti revisionati sono salvati in `players/`, con un file JSON per
+giocatore. I record `update` dei giocatori esistenti possono essere applicati. I
+record `create` per nuovi giocatori servono solo per la revisione e vengono
+rifiutati da `players apply` con `create_temporarily_unavailable`.
 
-Ogni Player Update revisionato è un file JSON completo conforme alla versione 2 dello schema per
-singolo giocatore in `players/`. Registra un'operazione (`operation`: `create` o `update`), un ciclo di
-vita (`active`, `integrated` o `superseded`), le revisioni base esatte
-del giocatore e la provenienza del profilo/UUID da Pes Retro Stats, le prove citate e i dati PES
-revisionati. Gli aggiornamenti di creazione contengono una proposta di scheda giocatore completa e i dati
-della rosa di destinazione. Gli aggiornamenti dei giocatori esistenti contengono solo i valori supportati
-che differiscono dalla base verificata; ogni modifica registra i valori letterali `from` e `to`.
+Per proporre un aggiornamento:
 
-> **Nota sul ciclo di vita:** `superseded` è uno stato del Player Update, non della carriera del giocatore. Indica che l'aggiornamento non si applica più alla revisione base selezionata.
-I record `create` restano supportati dallo schema solo per la revisione. Tutte le
-mutazioni create da CLI e API diretta sono disattivate; `--allow-create` resta
-un'opzione di compatibilità riservata e restituisce
-`create_temporarily_unavailable`. Il rilascio overflow dei trasferimenti resta
-attivo per impostazione predefinita; usa `--no-allow-overflow-release` per
-disattivarlo. Metadati di sicurezza mancanti o non validi lasciano invariato il
-salvataggio.
-I gruppi di aggiornamento supportati sono abilità, competenza nei ruoli, stile di gioco, abilità giocatore,
-stili COM, nazionalità, impostazioni fisiche/base e ruolo registrato.
-- I valori di revisione dell'OVR generati sono calcoli deterministici basati sulla formula
-  pubblicata di PES 2021. Sono un ausilio per la parità, non una garanzia indipendente della
-  runtime del gioco; i valori di abilità proposti richiedono comunque una revisione.
-- Le bozze dei giocatori generate con il precedente identificatore del modello OVR devono essere rigenerate
-  prima della convalida; non vi è alcuna migrazione implicita da v1 a v2.
+1. Apri il [modulo issue per gli aggiornamenti dei giocatori](../../.github/ISSUE_TEMPLATE/player-update.yml).
+2. Inserisci il nome esattamente come appare nel profilo Pes Retro Stats e aggiungi URL di prova.
+3. Controlla la bozza, esegui `python run.py players validate` e invia un solo file JSON del giocatore.
 
-### Percorso semplificato tramite issue
+## Sicurezza
 
-1. Aprire il [modulo issue per l'aggiornamento dei giocatori](../../.github/ISSUE_TEMPLATE/player-update.yml).
-   Inserire il `Player name` esattamente come appare in un singolo `Pes Retro Stats profile` canonico,
-   fornire gli URL delle prove e attendere che un manutentore applichi l'etichetta precisa `generate-player-draft`.
-2. Il workflow del generatore configurato recupera tale profilo e apre una bozza di PR contenente una proposta
-   `players/<player-slug>.json` conforme alla versione 2 dello schema. Ricava dal profilo lo snapshot di origine,
-   l'identità, le impostazioni fisiche, i dati del ruolo, le abilità, lo stile di gioco, le abilità speciali e gli stili COM.
-3. Per una creazione, solo i valori di gioco locali non disponibili dalla fonte rimangono elencati in `draft.missing`:
-   gli ID PES e i nomi stampati per l'identità e il giocatore, ID e nome della squadra, ID della nazionalità,
-   colore della pelle e colore dell'iride. Un collaboratore o manutentore deve fornirli. Per un aggiornamento,
-   il generatore individua il giocatore nella base verificata ed emette solo le differenze effettive `from`/`to`.
-   Un ruolo di origine non supportato da PES 2021, come `RWB`, viene omesso anziché rimappato, anche per quanto
-   riguarda il cambio di ruolo registrato.
-4. Un collaboratore e un manutentore esaminano ogni valore generato come proposta non approvata. La CI accetta un
-   Player Update solo quando la PR aggiunge o modifica esattamente un percorso JSON canonico del giocatore e il
-   validatore semantico condiviso ha esito positivo.
-5. L'unione (merge) della PR costituisce lo stato di approvazione umana. Non è presente alcun flag `approved` separato nel file JSON.
-
-Ogni proposta generata è destinata a non superare la convalida del file completo. Per convertire le prove generate
-nello schema v2 completo, rimuovere i campi esclusivi della bozza `evidence.current_team`, `evidence.issue_number` ed
-`evidence.issue_url`; mantenere l'URL canonico `evidence.profile_url`, le `evidence.proof_urls` revisionate e l'esatta
-`evidence.effective_date`; e aggiungere un campo `evidence.reason` revisionato e non vuoto. Salvare l'UUID canonico del
-profilo come `identity.pes_retro_stats_id` e solo i valori di gioco revisionati in `pes`. Per una creazione, completare
-inoltre ogni campo locale del gioco indicato in `draft.missing`. Gli ID PES dei giocatori creati devono essere univoci
-e pari ad almeno `0x100000` (1.048.576); l'allocatore delle proposte rimane in tale intervallo riservato.
-Quindi rimuovere gli oggetti di primo livello `source` e `draft`, che costituiscono metadati generati per la bozza a
-solo scopo di revisione, prima della convalida del file completo.
-
-### Percorso diretto tramite PR a file singolo
-
-Un collaboratore esperto può saltare la bozza generata tramite issue e aprire direttamente una PR che aggiunga o
-modifichi esattamente un file completo `players/<player-slug>.json`. Fornire la provenienza canonica dell'UUID/profilo
-in `identity` ed `evidence`, le prove citate, i valori PES revisionati, le basi di riferimento previste per l'aggiornamento,
-il ciclo di vita e la revisione di base esatta, quindi eseguire `python run.py players validate` prima di richiedere
-la revisione. Non includere i metadati di primo livello `source` o `draft` della bozza generata. Non includere altre
-modifiche al codice o alla documentazione in tale PR.
-
-L'applicazione richiede sempre un comando esplicito e necessita della revisione esatta indicata in
-`data/base_manifest.json`; una mancata corrispondenza della revisione genera un errore prima della decrittografia
-del salvataggio di destinazione.
-
-### Ciclo di vita delle revisioni
-
-Quando la base ufficiale cambia, aggiornare contemporaneamente `base/EDIT00000000` e `data/base_manifest.json`.
-Conservare lo storico dei Player Update in `players/`; non eliminarli semplicemente perché la revisione è cambiata.
-Un Player Update attivo la cui lista `applies_to` non contiene la nuova revisione risulta inattivo: la convalida
-segnala `needs_review` e l'applicazione lo ignora. Dopo la revisione, aggiungere la nuova revisione solo se il
-Player Update è ancora applicabile, contrassegnarlo come `integrated` se la base ufficiale include già la modifica,
-o come `superseded` se non è più applicabile.
-
-Opzioni comuni di `run`:
-
-| Opzione | Scopo |
-|---|---|
-| `--deep` | Recupera tutti i club FotMob indicizzati localmente |
-| `--club "Chelsea,Arsenal"` | Limita l'esecuzione ai club selezionati |
-| `--window auto` | Riproduce tutti i trasferimenti datati disponibili fino a oggi |
-| `--window summer` | Utilizza l'intervallo più recente dal 1° giugno al 30 settembre |
-| `--window winter` | Utilizza l'intervallo di gennaio-febbraio dell'anno selezionato |
-| `--since YYYY-MM-DD` | Imposta manualmente il limite di data inferiore |
-| `--dry-run` | Pianifica le modifiche senza scrivere un salvataggio |
-| `--from-base` | Inizia da `base/EDIT00000000` |
-| `--fotmob-only` | Esegue senza fonti di trasferimento supplementari |
-| `--release-policy PATH` | Carica giocatori protetti per club e contatori di utilizzo offline |
-| Numeri di maglia | Sincronizzare per impostazione predefinita i numeri attuali a ogni esecuzione dei trasferimenti |
-
-Senza `--from-base`, una normale esecuzione prosegue dall'ultimo output verificato. In questo modo si evita che i
-trasferimenti scompariranno quando una successiva esecuzione programmata rilegge lo storico accumulato.
-
-## Fonti dei trasferimenti
-
-FotMob fornisce lo storico primario dei trasferimenti e i metadati delle rose. Gli elenchi stagionali di Wikipedia, i
-contributi abilitati sui trasferimenti di SortitoutSI e i record datati verificati di Transfermarkt integrano o
-confermano i percorsi dei trasferimenti. I profili di Pes Retro Stats forniscono proposte derivate dalla fonte e non
-approvate per le bozze dei Player Update.
-
-I record provenienti da fonti diverse vengono riconciliati senza tralasciare date, ID, citazioni o link di prova. Eventi
-senza date, con decorrenza futura, contrastanti o ambigui non possono aggiornare il salvataggio in modo autonomo.
-
-La corrispondenza dei giocatori inizia dalla rosa della squadra di origine e utilizza la rosa della squadra di
-destinazione come fallback idempotente. Ruolo, nazionalità ed età vengono presi in considerazione solo se tali
-informazioni sono disponibili.
+- I salvataggi vengono convalidati prima e dopo le modifiche.
+- Le esecuzioni locali creano backup rotativi e usano una crittografia atomica verificata.
+- Un blocco impedisce scritture simultanee nella stessa destinazione.
+- Dati incompleti interrompono l’esecuzione; le corrispondenze ambigue vengono ignorate.
+- FotMob è la fonte principale; le altre fonti la integrano o la confermano.
 
 ## Sviluppo
-
-Per eseguire la suite di test:
 
 ```bash
 pytest -v
 ```
 
-La suite comprende analisi e convalida dei salvataggi, riconciliazione dei trasferimenti, pianificazione delle rose,
-storico dei prestiti, corrispondenza dei giocatori, limiti delle rose, reportistica, backup e blocco dei processi.
-
 ## Licenza
 
-FL Daily Edit è distribuito sotto [Licenza MIT](../../LICENSE).
+FL Daily Edit è distribuito con la [Licenza MIT](../../LICENSE).

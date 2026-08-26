@@ -45,7 +45,7 @@ _COMMON_FENCE_FIXTURES = (
     ),
     (
         "bash",
-        "6ae9b802adb7e7661be45a5d2674540cbfb44610f45feb34b4ab9b67ccf7a1ac",
+        "4c3d49affa7ed46ba77326624356642faee14a6cfd2ef084f271d187cb8c4565",
     ),
     (
         "bash",
@@ -56,7 +56,7 @@ _README_COMMAND_FENCE_FIXTURES = (
     _COMMON_FENCE_FIXTURES[0],
     (
         "bash",
-        "f1e28d7d5261a0ec9549c5b33959b483f1a7bf23e95266336e5b8f13260fa411",
+        "4c3d49affa7ed46ba77326624356642faee14a6cfd2ef084f271d187cb8c4565",
     ),
     _COMMON_FENCE_FIXTURES[2],
 )
@@ -65,14 +65,14 @@ _INDONESIAN_COMMAND_FENCE_FIXTURES = (
     _COMMON_FENCE_FIXTURES[0],
     (
         "bash",
-        "e50fe2ab79916e99b4c184df354b72989e987b276beddeefd86f303d18468723",
+        "4c3d49affa7ed46ba77326624356642faee14a6cfd2ef084f271d187cb8c4565",
     ),
     _COMMON_FENCE_FIXTURES[2],
 )
 
 README_STRUCTURE_FIXTURES = {
     Path("README.md"): {
-        "heading_counts": (11, 11, 3, 0, 0, 0),
+        "heading_counts": (9, 9, 0, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": _README_COMMAND_FENCE_FIXTURES,
         "relative_links": (
@@ -82,7 +82,7 @@ README_STRUCTURE_FIXTURES = {
         ),
     },
     Path("docs/readmes/README.id.md"): {
-        "heading_counts": (11, 11, 3, 0, 0, 0),
+        "heading_counts": (9, 9, 0, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": _INDONESIAN_COMMAND_FENCE_FIXTURES,
         "relative_links": (
@@ -92,7 +92,7 @@ README_STRUCTURE_FIXTURES = {
         ),
     },
     Path("docs/readmes/README.es.md"): {
-        "heading_counts": (9, 11, 3, 0, 0, 0),
+        "heading_counts": (9, 9, 0, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": _COMMON_FENCE_FIXTURES,
         "relative_links": (
@@ -102,7 +102,7 @@ README_STRUCTURE_FIXTURES = {
         ),
     },
     Path("docs/readmes/README.pt.md"): {
-        "heading_counts": (9, 11, 3, 0, 0, 0),
+        "heading_counts": (9, 9, 0, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": _COMMON_FENCE_FIXTURES,
         "relative_links": (
@@ -112,7 +112,7 @@ README_STRUCTURE_FIXTURES = {
         ),
     },
     Path("docs/readmes/README.ar.md"): {
-        "heading_counts": (9, 11, 3, 0, 0, 0),
+        "heading_counts": (9, 9, 0, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": _COMMON_FENCE_FIXTURES,
         "relative_links": (
@@ -122,7 +122,7 @@ README_STRUCTURE_FIXTURES = {
         ),
     },
     Path("docs/readmes/README.zh.md"): {
-        "heading_counts": (9, 11, 3, 0, 0, 0),
+        "heading_counts": (9, 9, 0, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": _COMMON_FENCE_FIXTURES,
         "relative_links": (
@@ -132,7 +132,7 @@ README_STRUCTURE_FIXTURES = {
         ),
     },
     Path("docs/readmes/README.it.md"): {
-        "heading_counts": (9, 11, 3, 0, 0, 0),
+        "heading_counts": (9, 9, 0, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": _COMMON_FENCE_FIXTURES,
         "relative_links": (
@@ -142,7 +142,7 @@ README_STRUCTURE_FIXTURES = {
         ),
     },
     Path("docs/readmes/README.ru.md"): {
-        "heading_counts": (9, 11, 3, 0, 0, 0),
+        "heading_counts": (9, 9, 0, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": _COMMON_FENCE_FIXTURES,
         "relative_links": (
@@ -152,13 +152,13 @@ README_STRUCTURE_FIXTURES = {
         ),
     },
     Path("docs/readmes/README.de.md"): {
-        "heading_counts": (9, 11, 3, 0, 0, 0),
+        "heading_counts": (9, 9, 0, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": (
             _COMMON_FENCE_FIXTURES[0],
             (
                 "bash",
-                "0246034e1e3ae6f9d18de5f4fb696dd04e991a75fde50c4ca9294e559bac0250",
+                "4c3d49affa7ed46ba77326624356642faee14a6cfd2ef084f271d187cb8c4565",
             ),
             _COMMON_FENCE_FIXTURES[2],
         ),
@@ -169,13 +169,13 @@ README_STRUCTURE_FIXTURES = {
         ),
     },
     Path("docs/readmes/README.fr.md"): {
-        "heading_counts": (9, 11, 3, 0, 0, 0),
+        "heading_counts": (9, 9, 0, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": (
             _COMMON_FENCE_FIXTURES[0],
             (
                 "bash",
-                "9ad788f9bd22ec1478c92c412796236837e473e54decbfa699e0cd7e642dbb66",
+                "4c3d49affa7ed46ba77326624356642faee14a6cfd2ef084f271d187cb8c4565",
             ),
             _COMMON_FENCE_FIXTURES[2],
         ),
@@ -186,13 +186,13 @@ README_STRUCTURE_FIXTURES = {
         ),
     },
     Path("docs/readmes/README.tr.md"): {
-        "heading_counts": (9, 11, 3, 0, 0, 0),
+        "heading_counts": (9, 9, 0, 0, 0, 0),
         "badge_targets": _BADGE_TARGETS,
         "fenced_code_blocks": (
             _COMMON_FENCE_FIXTURES[0],
             (
                 "bash",
-                "fae93c55a19e0a3ccee28ce2d9020e9fabbf03a93388728b5fbcc430024cb4b1",
+                "4c3d49affa7ed46ba77326624356642faee14a6cfd2ef084f271d187cb8c4565",
             ),
             _COMMON_FENCE_FIXTURES[2],
         ),
@@ -205,50 +205,17 @@ README_STRUCTURE_FIXTURES = {
 }
 
 ROADMAP_FIXTURES = {
-    Path("README.md"): (
-        "## Roadmap / Complete for now",
-        "All current roadmap items are complete. We are waiting for the next useful idea.",
-    ),
-    Path("docs/readmes/README.id.md"): (
-        "## Roadmap / Selesai untuk saat ini",
-        "Semua item roadmap saat ini telah selesai. Kami menunggu ide berguna berikutnya.",
-    ),
-    Path("docs/readmes/README.es.md"): (
-        "## Hoja de ruta / Completada por ahora",
-        "Todos los elementos actuales de la hoja de ruta están terminados. Esperamos la próxima idea útil.",
-    ),
-    Path("docs/readmes/README.pt.md"): (
-        "## Roteiro / Concluído por enquanto",
-        "Todos os itens atuais do roteiro foram concluídos. Estamos aguardando a próxima ideia útil.",
-    ),
-    Path("docs/readmes/README.ar.md"): (
-        "## خارطة الطريق / مكتملة حاليًا",
-        "اكتملت جميع عناصر خارطة الطريق الحالية. ننتظر الفكرة المفيدة التالية.",
-    ),
-    Path("docs/readmes/README.zh.md"): (
-        "## 路线图 / 当前已完成",
-        "当前路线图中的所有项目都已完成。我们正在等待下一个有价值的想法。",
-    ),
-    Path("docs/readmes/README.it.md"): (
-        "## Roadmap / Completa per ora",
-        "Tutte le attività attuali della roadmap sono completate. Attendiamo la prossima idea utile.",
-    ),
-    Path("docs/readmes/README.ru.md"): (
-        "## План развития / Пока завершён",
-        "Все текущие задачи плана развития завершены. Ждём следующую полезную идею.",
-    ),
-    Path("docs/readmes/README.de.md"): (
-        "## Roadmap / Vorerst abgeschlossen",
-        "Alle aktuellen Roadmap-Aufgaben sind abgeschlossen. Wir warten auf die nächste sinnvolle Idee.",
-    ),
-    Path("docs/readmes/README.fr.md"): (
-        "## Feuille de route / Terminée pour l’instant",
-        "Tous les éléments actuels de la feuille de route sont terminés. Nous attendons la prochaine idée utile.",
-    ),
-    Path("docs/readmes/README.tr.md"): (
-        "## Yol Haritası / Şimdilik tamamlandı",
-        "Mevcut yol haritasındaki tüm maddeler tamamlandı. Sıradaki faydalı fikri bekliyoruz.",
-    ),
+    Path("README.md"): None,
+    Path("docs/readmes/README.id.md"): None,
+    Path("docs/readmes/README.es.md"): None,
+    Path("docs/readmes/README.pt.md"): None,
+    Path("docs/readmes/README.ar.md"): None,
+    Path("docs/readmes/README.zh.md"): None,
+    Path("docs/readmes/README.it.md"): None,
+    Path("docs/readmes/README.ru.md"): None,
+    Path("docs/readmes/README.de.md"): None,
+    Path("docs/readmes/README.fr.md"): None,
+    Path("docs/readmes/README.tr.md"): None,
 }
 
 
@@ -320,13 +287,17 @@ def _roadmap_section(text: str, heading: str) -> str:
 def test_readmes_preserve_immutable_structure_and_clean_roadmap(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     structure = README_STRUCTURE_FIXTURES[path]
-    roadmap_heading, completion_marker = ROADMAP_FIXTURES[path]
+    roadmap_fixture = ROADMAP_FIXTURES[path]
 
     assert _heading_counts(text) == structure["heading_counts"]
     assert _badge_targets(text, path) == structure["badge_targets"]
     assert _fenced_code_blocks(text) == structure["fenced_code_blocks"]
     assert _relative_links(path, text) == structure["relative_links"]
 
+    if roadmap_fixture is None:
+        return
+
+    roadmap_heading, completion_marker = roadmap_fixture
     roadmap = _roadmap_section(text, roadmap_heading)
     normalized_roadmap = " ".join(roadmap.split())
     planned_items = _PLANNED_ITEM_RE.findall(roadmap)

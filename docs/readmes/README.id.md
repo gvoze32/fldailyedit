@@ -5,134 +5,67 @@
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../../LICENSE)
 
-FL Daily Edit memperbarui skuad SP Football Life 2026 dan eFootball PES 2021
-dengan menerapkan transfer dunia nyata ke file save `EDIT00000000`.
+Perbarui save `EDIT00000000` SP Football Life 2026 dan eFootball PES 2021
+dengan transfer nyata yang terverifikasi serta pembaruan pemain yang telah ditinjau.
 
-> **Pembuatan pemain baru saat ini dinonaktifkan di semua jalur mutasi.
-> Spec `create` tetap dapat dimuat dan ditinjau, tetapi `--allow-create` hanya
-> dipertahankan sebagai flag kompatibilitas yang dicadangkan.
-> `PlayerAppearance.bin` tetap menjadi input yang dicadangkan; spec create
-> ditolak dengan `create_temporarily_unavailable`.**
+> **Beta:** Rilis dan kompatibilitas save masih dalam pengujian.
 >
-> Transfer pemain yang sudah ada di save dan pembaruan pemain yang sudah ditinjau
-> tetap didukung. Pemain yang belum ada akan dilewati. Release overflow berbasis
-> role aktif secara default; gunakan `--no-allow-overflow-release` agar roster
-> tujuan yang penuh tetap tidak berubah.
-
-> [!WARNING]
-> **Pemberitahuan beta:** FL Daily Edit, data repositorinya, dan rilis yang dihasilkan masih dalam tahap pengujian. Fitur ini mungkin belum berfungsi pada semua konfigurasi gim/save; beberapa kondisi belum didukung.
+> **Pembuatan pemain baru untuk sementara dinonaktifkan.** Transfer dan
+> pembaruan pemain yang sudah ada tetap didukung. Pemain yang tidak ditemukan
+> atau ambigu akan dilewati. Roster tujuan yang penuh akan melepas pemain cadangan
+> yang aman berdasarkan role; gunakan `--no-allow-overflow-release` untuk
+> membiarkan roster penuh tanpa perubahan.
 
 ## Kompatibilitas
 
-Base yang disertakan ditujukan untuk **SP Football Life 2026**. Base ini memerlukan:
+[Base save yang disertakan](../../base/EDIT00000000) memerlukan:
 
-- Football Life 26 Update 2.2
-- SmokePatch's National Squads Update
+- **SP Football Life 2026 Update 2.2**
+- **SmokePatch's National Squads Update**
 
-Base ini tidak kompatibel dengan UML, versi FL26 yang lebih lama, atau instalasi
-tanpa pembaruan skuad nasional. Mulailah karier Master League atau Become a Legend
-baru setelah memasang save ini.
- 
-[Base yang disertakan](../../base/EDIT00000000) adalah
-[Gondowan's EDIT tanggal 22 Agustus 2026](https://www.reddit.com/r/SPFootballLife/comments/1vvh129/release_gondowans_edit_file_22082026_latest/).
-Base ini mencakup transfer terbaru hingga 22/08/2026 untuk semua liga, perubahan
-rating lebih dari 600 pemain, promosi/degradasi divisi pertama-kedua, perbaikan
-tinggi dan posisi, pembaruan nama/nomor, perubahan manajer yang tersedia, serta
-auto-lineup berdasarkan pemain terbaik. Base ini tidak membuat pemain atau
-menambahkan klub promosi dari divisi ketiga.
+Tidak kompatibel dengan UML, FL26 versi lama, atau instalasi tanpa pembaruan
+skuad nasional. Mulai karier Master League atau Become a Legend baru setelah
+memasangnya.
 
 ## Installer Windows
 
-Installer Windows adalah pilihan yang disarankan untuk pemula. Antarmuka installer saat ini hanya tersedia dalam bahasa Inggris. Unduhan tervalidasi saat ini hanya mendukung **Football Life 2026 Update 2.2 + SmokePatch's National Squads Update**. Deteksi untuk vanilla eFootball PES 2021 sudah tersedia, tetapi pemasangan tetap dinonaktifkan hingga base tervalidasi yang sesuai diterbitkan.
+Installer adalah pilihan termudah:
 
 1. Unduh dan ekstrak [FLDailyEditInstaller.zip](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.zip).
-2. Tutup gim.
-3. Pilih **Fast** atau **Deep**. Keduanya adalah pilihan cakupan pembaruan yang terpisah, dan masing-masing menampilkan waktu pembuatannya.
-4. Konfirmasikan folder Football Life 2026 yang terdeteksi, atau gunakan **Browse** bila perlu.
-5. Pilih **Download and install**. Installer memverifikasi unduhan, mencadangkan save saat ini, lalu menggantinya secara atomik.
+2. Tutup gim dan pilih **Fast** atau **Deep**.
+3. Konfirmasi folder Football Life, lalu pilih **Download and install**.
 
-**Memperbarui save yang ada melalui GUI:** Installer juga dapat memperbarui
-`EDIT00000000` ber-layout umum yang dipilih pengguna, bukan memasang rilis
-prebuilt. Pilih **Update my local save**, pilih lokasi yang terdeteksi atau
-gunakan **Browse**, pilih **Fast** atau **Deep**, lalu tinjau dan pilih
-**Apply update**. Wizard memvalidasi save sebelum perubahan, membuat backup di
-tempat, dan menampilkan progres, hasil, atau diagnostik. Kelayakan lokal tidak
-bergantung pada label SPFL/PES/UML, dan jalur ini tidak mengunduh rilis remote
-prebuilt.
-Saat katalog SPFL eksternal opsional tersebut tidak tersedia, pencocokan lokal
-beralih ke nama pemain dan klub yang tersimpan di save terpilih, sehingga jalur
-pembaruan lokal dalam paket dapat berjalan tanpa katalog tersebut.
+Installer memverifikasi rilis, mencadangkan save saat ini, lalu menggantinya
+secara atomik. Untuk memperbarui save yang sudah ada, pilih **Update my local
+save**, pilih save, lalu pilih **Apply update**.
 
+Installer belum ditandatangani. Verifikasi `FLDailyEditInstaller.zip` dengan
+`FLDailyEditInstaller.zip.sha256` pada [rilis terbaru](https://github.com/gvoze32/fldailyedit/releases/tag/latest)
+sebelum menjalankannya; Windows SmartScreen mungkin menampilkan peringatan.
 
-> [!WARNING]
-> Executable installer belum ditandatangani, sehingga Windows SmartScreen mungkin menampilkan peringatan saat Anda menjalankannya. Sebelum melanjutkan, verifikasi `FLDailyEditInstaller.zip` yang diunduh dengan `FLDailyEditInstaller.zip.sha256` yang diterbitkan pada [rilis terbaru](https://github.com/gvoze32/fldailyedit/releases/tag/latest).
-> Jika Windows memblokir installer melalui Smart App Control, buka **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control settings**, lalu ubah ke **Off**. Alternatifnya, klik kanan file yang diunduh, buka **Properties**, lalu centang **Unblock** jika tersedia.
-
-Untuk pemasangan manual tanpa installer, unduh [ZIP rilis Fast](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip) atau [ZIP rilis Deep](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip) yang bersifat publik. Ekstrak `EDIT00000000`, cadangkan save Anda saat ini, lalu salin file tersebut ke:
+Untuk pemasangan manual, unduh [ZIP Fast](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip)
+atau [ZIP Deep](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip).
+Cadangkan save, ekstrak `EDIT00000000`, lalu salin ke:
 
 `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\`
 
-Untuk menjalankannya sesuai permintaan atau menggunakan daftar klub khusus, fork repositori ini dan gunakan **Run workflow** dari tab Actions.
+Untuk daftar klub khusus atau proses on-demand, fork repositori dan gunakan
+**Run workflow** pada tab Actions.
 
 ## Yang diperbarui
 
-- Transfer, pelepasan, peminjaman, dan pemain yang kembali dari peminjaman
-- Nomor skuad yang tersedia berdasarkan data skuad FotMob
-- Identitas pemain yang diperiksa terhadap roster FL26 saat ini
-- Susunan pemain dan game plan yang terdampak oleh perubahan roster
-- Laporan transfer dan log audit JSON Lines
+- Transfer, pelepasan, peminjaman, dan pengembalian pinjaman
+- Nomor punggung, lineup, dan game plan yang terdampak perubahan roster
+- Laporan transfer dan log audit
 - Save siap pakai harian melalui GitHub Actions
-- Pembuatan pemain dan koreksi atribut yang telah ditinjau melalui perintah Pembaruan Pemain secara eksplisit
 
-Updater tidak menimpa nomor seragam yang sudah digunakan oleh anggota skuad lain.
-Updater juga memeriksa klub pemain saat ini sebelum menerapkan perpindahan.
-
-## Roadmap / Selesai untuk saat ini
-
-Semua item roadmap saat ini telah selesai. Kami menunggu ide berguna berikutnya.
-
-## Keamanan dan keterbatasan
-
-- Eksekusi lokal membuat cadangan bergilir serta menggunakan enkripsi atomik yang terverifikasi.
-- Save divalidasi sebelum dan sesudah perubahan roster.
-- Process lock mencegah dua proses menulis output yang sama secara bersamaan.
-- Snapshot FotMob yang tidak lengkap membatalkan proses alih-alih menghasilkan save parsial.
-- Kecocokan pemain yang ambigu dan ketidakcocokan klub sumber akan dilewati.
-- Roster tujuan yang penuh menggunakan release overflow berbasis role secara
-  default. Gunakan `--no-allow-overflow-release` untuk mempertahankan roster
-  penuh tanpa perubahan.
-- Selector melindungi role first team dan bench matchday, memilih reserve native
-  terdalam, serta melindungi pemain created-range jika masih ada kandidat native.
-  Ability/OVR tidak pernah dipakai; urutan game plan rusak akan fallback ke
-  urutan roster tersimpan.
-- Wikipedia, Sortitoutsi, dan Transfermarkt merupakan sumber tambahan. Gangguan
-  pada salah satu sumber tersebut tidak membatalkan snapshot FotMob yang lengkap.
-
-**Transfer dan Player Updates adalah alur yang berbeda**
-
-- `run` memproses transfer pemain yang sudah ada di save. Jika klub tujuan penuh,
-  kandidat overflow berbasis role dilepas secara default; gunakan
-  `--no-allow-overflow-release` untuk melewati transfer tersebut.
-- `players apply` menerapkan perubahan atribut yang sudah ditinjau. Spec
-  `update` untuk pemain yang sudah ada tetap didukung.
-- Spec `create` pemain baru tetap dapat dimuat dan ditinjau hanya untuk schema
-  dan review. `players apply` menolak semua mutasi create dengan
-  `create_temporarily_unavailable`; `--allow-create` dan
-  `PlayerAppearance.bin` hanya dipertahankan sebagai input kompatibilitas yang
-  dicadangkan.
-- Workflow sinkronisasi Fast dan Deep tetap memakai `--no-allow-create`;
-  `players apply` lokal memiliki perilaku create-disabled yang sama.
-- Perintah transfer mengaktifkan release overflow berbasis role secara default.
-  Jika tujuan penuh, reserve aman yang dipilih dilepas agar transfer dapat masuk;
-  gunakan `--no-allow-overflow-release` hanya untuk opt-out. Selector melindungi
-  role first team, bench matchday, ID yang ditransfer/dilindungi, dan pemain
-  created-range jika pemain base asli masih tersedia. Aturan minimum goalkeeper
-  tetap dipakai jika metadata posisi tersedia.
+Updater memeriksa klub pemain sebelum memindahkan pemain dan tidak menimpa nomor
+punggung yang sudah dipakai anggota skuad lain.
 
 ## Jalankan secara lokal
 
-Penyiapan lokal didukung di macOS, Linux, dan Windows melalui WSL. Python 3.10
-atau yang lebih baru diperlukan.
+Didukung di macOS, Linux, dan Windows melalui WSL. Python 3.10 atau lebih baru
+diperlukan.
 
 ```bash
 git clone https://github.com/gvoze32/fldailyedit.git
@@ -150,36 +83,10 @@ cd ../..
 ## Perintah umum
 
 ```bash
-# Preview changes without writing a save
+# Preview transfers without writing a save
 python run.py run --dry-run --edit-file base/EDIT00000000
 
-# Validate an existing save
-python run.py validate --edit-file base/EDIT00000000
-
-# Audit one save against native metadata without writing it
-python run.py audit \
-  --edit-file /path/to/EDIT00000000 \
-  --game-root "/path/to/Football Life 2026" \
-  --json
-
-python run.py base-audit --edit-file base/EDIT00000000
-
-# Compare two native CPK variants without merging them
-python run.py compare \
-  --left-cpk /path/to/data_s2526.cpk \
-  --right-cpk /path/to/data_extra.cpk \
-  --json
-
-# Validate one-file-per-player updates against the pristine base revision
-python run.py players validate
-
-# Apply reviewed Player Updates explicitly to an existing output save
-python run.py players apply \
-  --base-revision fl26-u2.2-national-squads \
-  --edit-file output/EDIT00000000 \
-  --in-place
-
-# Apply all effective transfers available through today
+# Apply all available transfers
 python run.py run --window auto
 
 # Rebuild from the bundled base
@@ -188,175 +95,53 @@ python run.py run --from-base --window auto
 # Update a specific save in place
 python run.py run --edit-file /path/to/EDIT00000000 --in-place
 
-# Show every run option
+# Validate a save
+python run.py validate --edit-file /path/to/EDIT00000000
+
+# Validate Player Updates
+python run.py players validate
+
+# Apply reviewed Player Updates
+python run.py players apply \
+  --base-revision fl26-u2.2-national-squads \
+  --edit-file /path/to/EDIT00000000 \
+  --in-place
+
+# Show command options
 python run.py run --help
 ```
 
-| Perintah | Kegunaan |
-|---|---|
-| `run` | Hanya menerapkan transfer yang terverifikasi |
-| `players validate` | Memvalidasi semua Pembaruan Pemain terhadap base asli |
-| `players apply` | Menerapkan Pembaruan Pemain yang telah ditinjau secara eksplisit ke satu save |
-| `base-audit` | Memeriksa Player Updates aktif, tujuan, dan parent loan terhadap roster base |
-| `base-refresh` | Memverifikasi dan opsional mempromosikan kandidat base lokal atau HTTPS |
-| `usage-import` | Menggabungkan CSV usage pemain offline ke release policy |
-| `players apply --preflight` | Menampilkan tujuan create dan input keselamatan tanpa menulis save |
-| `log` | Menampilkan transfer yang baru diterapkan |
-| `inspect` | Memeriksa tim, jumlah pemain, dan offset save |
-| `validate` | Memeriksa pendaftaran roster dan pemetaan game plan |
-| `repair` | Memperbaiki base lama menggunakan save referensi |
-| `audit` | Audit read-only save dan metadata native Player/Team |
-| `compare` | Perbandingan read-only dua varian metadata CPK native |
+`run` hanya menerapkan transfer. `players apply` adalah alur terpisah. Untuk
+menggabungkan keduanya, jalankan transfer terlebih dahulu, lalu terapkan Player
+Updates ke save yang sama. Gunakan `python run.py <command> --help` untuk tools
+audit, perbandingan, logging, dan repair.
 
-`run` hanya menangani transfer: perintah ini tidak pernah memuat atau menerapkan
-Pembaruan Pemain. Untuk menggabungkan kedua alur kerja, pertama-tama jalankan
-perintah transfer terhadap save output, lalu jalankan
-`players apply --in-place` terhadap save yang sama.
+## Player Updates
 
-## Pembaruan Pemain
+Pembaruan yang telah ditinjau disimpan sebagai satu file JSON per pemain di
+`players/`. Record `update` untuk pemain yang sudah ada dapat diterapkan. Record
+`create` untuk pemain baru hanya untuk review dan saat ini ditolak oleh
+`players apply` dengan `create_temporarily_unavailable`.
 
-Setiap Pembaruan Pemain yang telah ditinjau berupa satu file JSON schema-version-2
-yang lengkap per pemain di dalam `players/`. File tersebut mencatat `operation`
-(`create` atau `update`), lifecycle (`active`, `integrated`, atau `superseded`), revisi
-base `applies_to` yang tepat, identitas pemain yang stabil beserta provenance
-UUID/profil Pes Retro Stats, bukti yang dikutip, dan data PES yang telah ditinjau.
-Pembaruan create berisi usulan record pemain lengkap dan data roster tujuan.
-Pembaruan untuk pemain yang sudah ada hanya berisi nilai yang didukung dan berbeda
-dari base terverifikasi; setiap perubahan mencatat nilai literal `from` dan `to`.
-
-> **Catatan lifecycle:** `superseded` adalah status untuk Pembaruan Pemain, bukan status karier pemain. Artinya perubahan tersebut tidak lagi berlaku untuk revisi base yang dipilih.
-Record `create` tetap didukung schema hanya untuk peninjauan. Semua mutasi create
-CLI dan API langsung dinonaktifkan; `--allow-create` dipertahankan sebagai flag
-kompatibilitas yang dicadangkan dan menghasilkan
-`create_temporarily_unavailable`. Release overflow transfer tetap aktif secara
-default; gunakan `--no-allow-overflow-release` untuk opt-out. Metadata keselamatan
-yang hilang atau rusak membuat save tidak berubah.
-Kelompok pembaruan yang didukung adalah kemampuan, kecakapan posisi, gaya bermain,
-keahlian pemain, gaya COM, kewarganegaraan, pengaturan fisik/dasar, dan posisi
-terdaftar.
-- Nilai tinjauan OVR yang dihasilkan adalah kalkulasi deterministik berdasarkan
-  formula PES 2021 yang dipublikasikan. Nilai ini membantu parity, bukan jaminan
-  independen bahwa runtime game memakai hasil yang sama; ability tetap perlu ditinjau.
-- Draf pemain yang dibuat dengan pengidentifikasi model OVR sebelumnya harus
-  dibuat ulang sebelum validasi; tidak ada migrasi v1-ke-v2 implisit.
-
-### Jalur issue sederhana
+Untuk mengusulkan pembaruan:
 
 1. Buka [formulir issue pembaruan pemain](../../.github/ISSUE_TEMPLATE/player-update.yml).
-   Masukkan `Player name` persis seperti yang ditampilkan pada satu `Pes Retro Stats
-   profile` kanonis, berikan URL bukti, lalu tunggu maintainer menerapkan label
-   `generate-player-draft` yang tepat.
-2. Workflow generator yang dikonfigurasi mengambil profil tersebut dan membuka
-   draft PR yang berisi satu usulan schema-version-2
-   `players/<player-slug>.json`. Workflow ini memperoleh snapshot sumber,
-   identitas, pengaturan fisik, data posisi, kemampuan, gaya bermain, keahlian
-   pemain, dan gaya COM dari profil tersebut.
-3. Untuk create, hanya nilai lokal gim yang tidak tersedia dari sumber yang tetap
-   tercantum di `draft.missing`: ID PES dan nama cetak untuk identitas dan pemain,
-   ID dan nama tim, ID kewarganegaraan, warna kulit, dan warna iris. Kontributor
-   atau maintainer harus melengkapinya. Untuk update, generator mencari pemain
-   di base terverifikasi dan hanya menghasilkan perbedaan `from`/`to` yang nyata.
-   Posisi sumber yang tidak didukung PES 2021, seperti `RWB`, dihilangkan dan
-   bukan dipetakan ulang, termasuk dari perubahan posisi terdaftar.
-4. Kontributor dan maintainer meninjau setiap nilai yang dihasilkan sebagai usulan
-   yang belum disetujui. CI hanya menerima Pembaruan Pemain jika PR menambahkan
-   atau mengubah tepat satu path JSON pemain kanonis dan validator semantik
-   bersama berhasil.
-5. Penggabungan PR tetap menjadi status persetujuan manusia. Tidak ada flag
-   `approved` terpisah di dalam file JSON.
+2. Masukkan nama pemain persis seperti pada profil Pes Retro Stats dan sertakan URL bukti.
+3. Tinjau draft yang dihasilkan, jalankan `python run.py players validate`, lalu kirim satu file JSON pemain.
 
-Setiap usulan yang dihasilkan diperkirakan gagal pada validasi file lengkap. Untuk
-mengubah bukti yang dihasilkan menjadi schema v2 lengkap, hapus field khusus draft
-`evidence.current_team`, `evidence.issue_number`, dan `evidence.issue_url`;
-pertahankan `evidence.profile_url` kanonis, `evidence.proof_urls` yang telah
-ditinjau, dan `evidence.effective_date`; lalu tambahkan `evidence.reason` yang telah
-ditinjau dan tidak kosong. Simpan UUID profil kanonis sebagai
-`identity.pes_retro_stats_id` dan hanya nilai gameplay yang telah ditinjau di
-`pes`. Untuk create, lengkapi juga setiap field lokal gim yang disebutkan oleh
-`draft.missing`. ID PES pemain yang dibuat harus unik dan setidaknya `0x100000` (1.048.576);
-alokator proposal tetap berada dalam rentang yang dicadangkan tersebut.
-Setelah itu, hapus objek tingkat teratas `source` dan `draft`,
-yang merupakan metadata draft hasil generator dan hanya digunakan untuk peninjauan,
-sebelum validasi lengkap.
+## Keamanan
 
-### Jalur PR satu file langsung
-
-Kontributor tingkat lanjut dapat melewati draft yang dihasilkan dari issue dan
-langsung membuka PR yang menambahkan atau mengubah tepat satu file lengkap
-`players/<player-slug>.json`. Berikan provenance UUID/profil kanonis di dalam
-`identity` dan `evidence`, bukti yang dikutip, nilai PES yang telah ditinjau,
-baseline update yang diharapkan, lifecycle, dan revisi base yang tepat, lalu
-jalankan `python run.py players validate` sebelum meminta peninjauan. Jangan
-sertakan metadata `source` atau `draft` tingkat teratas milik draft yang
-dihasilkan. Jangan sertakan perubahan kode atau dokumentasi lain di PR tersebut.
-
-Penerapan selalu dilakukan melalui perintah eksplisit dan memerlukan revisi yang
-tepat dari `data/base_manifest.json`; ketidakcocokan revisi menyebabkan kegagalan
-sebelum save target didekripsi.
-
-### Siklus hidup revisi
-
-Saat base resmi berubah, perbarui `base/EDIT00000000` dan
-`data/base_manifest.json` secara bersamaan. Simpan riwayat Pembaruan Pemain di
-`players/`; jangan menghapusnya hanya karena revisi berubah. Pembaruan Pemain
-aktif yang daftar `applies_to`-nya tidak memuat revisi baru menjadi tidak aktif:
-validasi melaporkan `needs_review` dan penerapan akan melewatinya. Setelah ditinjau,
-tambahkan revisi baru hanya jika Pembaruan Pemain masih berlaku, tandai sebagai
-`integrated` ketika base resmi sudah menyertakan perubahannya, atau tandai sebagai
-`superseded` ketika perubahan tersebut tidak lagi berlaku.
-
-Opsi `run` yang umum:
-
-| Opsi | Kegunaan |
-|---|---|
-| `--deep` | Mengambil setiap klub FotMob yang diindeks secara lokal |
-| `--club "Chelsea,Arsenal"` | Membatasi proses ke klub yang dipilih |
-| `--window auto` | Memutar ulang semua transfer bertanggal yang tersedia hingga hari ini |
-| `--window summer` | Menggunakan rentang terbaru 1 Juni–30 September |
-| `--window winter` | Menggunakan rentang Januari–Februari pada tahun yang dipilih |
-| `--since YYYY-MM-DD` | Menetapkan batas bawah tanggal secara manual |
-| `--dry-run` | Merencanakan perubahan tanpa menulis save |
-| `--from-base` | Memulai dari `base/EDIT00000000` |
-| `--release-policy PATH` | Memuat daftar pemain protected per klub dan counter usage offline |
-| `--fotmob-only` | Berjalan tanpa sumber transfer tambahan |
-| Nomor kit | Nomor skuad saat ini selalu disinkronkan pada setiap eksekusi transfer |
-
-File opsional `data/release_policy.json` dapat melindungi pemain per klub dan
-menyediakan counter offline `minutes`, `starts`, `appearances`, serta
-`news_mentions`. Usage yang hilang tidak menghentikan proses; hanya tie-breaker
-tersebut yang tidak digunakan.
-
-Tanpa `--from-base`, proses normal dilanjutkan dari output terverifikasi terakhir.
-Hal ini mencegah hilangnya transfer ketika proses terjadwal berikutnya membaca
-kembali riwayat kumulatif.
-
-## Sumber transfer
-
-FotMob menyediakan riwayat transfer dan metadata skuad utama. Daftar musiman
-Wikipedia, pengajuan transfer SortitoutSI yang diaktifkan, dan record Transfermarkt
-bertanggal yang terverifikasi melengkapi atau mengonfirmasi rute transfer. Profil
-Pes Retro Stats menyediakan usulan berbasis sumber yang belum disetujui untuk
-draft Pembaruan Pemain.
-
-Record dari sumber yang berbeda direkonsiliasi tanpa membuang tanggal, ID, kutipan,
-atau tautan buktinya. Peristiwa tanpa tanggal, berlaku pada masa mendatang,
-bertentangan, atau ambigu tidak dapat memperbarui save dengan sendirinya.
-
-Pencocokan pemain dimulai dari roster sumber dan menggunakan roster tujuan sebagai
-fallback idempoten. Posisi, kewarganegaraan, dan usia hanya dipertimbangkan jika
-informasi tersebut tersedia.
+- Save divalidasi sebelum dan sesudah perubahan.
+- Eksekusi lokal membuat backup bergilir dan memakai enkripsi atomik terverifikasi.
+- Process lock mencegah penulisan bersamaan ke output yang sama.
+- Data sumber yang tidak lengkap membatalkan proses; kecocokan ambigu dilewati.
+- FotMob adalah sumber utama. Sumber lain hanya melengkapi atau mengonfirmasi.
 
 ## Pengembangan
-
-Jalankan test suite dengan:
 
 ```bash
 pytest -v
 ```
-
-Suite tersebut mencakup parsing dan validasi save, rekonsiliasi transfer,
-perencanaan roster, riwayat peminjaman, pencocokan pemain, batas skuad, pelaporan,
-cadangan, dan process locking.
 
 ## Lisensi
 
