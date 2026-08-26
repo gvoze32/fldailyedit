@@ -33,6 +33,20 @@ def _entries():
             "dry_run": False,
         },
     ]
+
+def _player_release_entry():
+    return {
+        "player_name": "Released Player",
+        "position": "GK",
+        "from_team": "Old Club",
+        "to_team": "",
+        "transfer_type": "transfer",
+        "confidence": 100.0,
+        "roster_action": "release",
+        "dry_run": False,
+    }
+
+
 def test_reports_and_json_logs_include_native_metadata(monkeypatch, tmp_path):
     import config
 
@@ -87,6 +101,22 @@ def test_markdown_separates_transfers_from_shirt_numbers():
     assert "Shirt-number changes (1)" in report
     assert "| #18 | #8 |" in report
     assert "They never move a player between clubs" in report
+
+
+def test_reports_list_player_releases_separately():
+    entry = _player_release_entry()
+
+    markdown = generate_markdown_report([entry])
+    html = generate_html_report([entry])
+
+    assert "Roster actions: 0 direct moves · 0 signings · 1 releases" in markdown
+    assert "### Player releases (1)" in markdown
+    assert "Released Player" in markdown
+    assert "Club transfers (" not in markdown
+    assert "Player releases" in html
+    assert "Released Player" in html
+    assert 'badge-release">Released' in html
+
 
 
 def test_github_summary_keeps_detailed_metrics_without_tables():
