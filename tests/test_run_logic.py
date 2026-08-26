@@ -720,5 +720,34 @@ def test_transfer_run_includes_current_squad_numbers_by_default(monkeypatch):
             since=None,
         )
     )
-
     assert result == [transfer, shirt]
+
+
+def test_deep_auto_restricts_club_history_to_current_year(monkeypatch):
+    import run
+
+    calls = {}
+    monkeypatch.setattr(
+        run,
+        "fetch_major_clubs_transfers_safely",
+        lambda **kwargs: calls.update(kwargs) or [],
+    )
+    monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_kwargs: [])
+
+    transfers = run._scrape_run_transfers(
+        SimpleNamespace(
+            club=None,
+            deep=True,
+            fotmob_only=True,
+            popular=False,
+            window="auto",
+            since=None,
+        )
+    )
+
+    assert transfers == []
+    assert calls["window"] == "auto"
+    assert calls["since_date"] == (
+        run.date.today().replace(month=1, day=1).isoformat()
+    )
+

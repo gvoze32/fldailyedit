@@ -1249,6 +1249,17 @@ def cmd_repair(args):
         crypto.cleanup_temp(base_temp)
 
 
+
+def _deep_transfer_since_date(
+    window: str,
+    since_date: str | None,
+) -> str | None:
+    """Avoid replaying stale club-history events against the current base."""
+    if since_date is not None or (window or "auto").casefold() != "auto":
+        return since_date
+    return date.today().replace(month=1, day=1).isoformat()
+
+
 def _scrape_run_transfers(args):
     """Fetch, merge, order, and preview transfers for one pipeline run."""
     popular_only = bool(getattr(args, "popular", False))
@@ -1281,9 +1292,10 @@ def _scrape_run_transfers(args):
             "\n🌪️ Deep Mode: Scraping transfers and squads for indexed clubs "
             f"({cutoff_info})..."
         )
+        deep_since_date = _deep_transfer_since_date(window, since_date)
         transfer_batches.append(
             fetch_major_clubs_transfers_safely(
-                since_date=since_date, window=window
+                since_date=deep_since_date, window=window
             )
         )
         print(
