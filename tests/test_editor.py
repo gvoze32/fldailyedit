@@ -300,6 +300,112 @@ class TestEditFileHeader:
         assert metrics["reset_roles"] == 1
         assert report["valid"] is True
 
+    def test_game_plan_removal_keeps_backup_goalkeeper_in_goalkeeper_role(self):
+        data = _build_mock_data(
+            num_players=40,
+            num_teams=1,
+            num_team_player=1,
+            num_game_plans=1,
+            team_player_entries=[
+                (101, list(range(1000, 1040)), list(range(1, 41))),
+            ],
+        )
+        edit_file = EditFile()
+        edit_file.load_bytes(data)
+        game_plan_base = edit_file.game_plan_start
+        lineup = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 39, 0]
+        lineup.extend(range(11, 39))
+        edit_file._data[
+            game_plan_base + GP_LINEUP : game_plan_base + GP_LINEUP + TP_MAX_PLAYERS
+        ] = bytes(lineup)
+        edit_file._player_cache = {
+            1000: PlayerInfo(1000, "Backup goalkeeper", position="GK"),
+            1001: PlayerInfo(1001, "Starting goalkeeper", position="GK"),
+        }
+
+        assert edit_file.release_player(1001, 101)
+
+        roster = edit_file.get_team_roster(101)
+        assert roster is not None
+        assert roster.player_ids[0] == 1000
+        updated_lineup = list(
+            edit_file._data[
+                game_plan_base + GP_LINEUP : game_plan_base + GP_LINEUP + TP_MAX_PLAYERS
+            ]
+        )
+        assert updated_lineup[:11] == [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1]
+        assert updated_lineup.index(0) == 0
+        assert sorted(updated_lineup) == list(range(TP_MAX_PLAYERS))
+
+    def test_game_plan_removal_does_not_promote_goalkeeper_to_outfield_role(self):
+        data = _build_mock_data(
+            num_players=40,
+            num_teams=1,
+            num_team_player=1,
+            num_game_plans=1,
+            team_player_entries=[
+                (101, list(range(1000, 1040)), list(range(1, 41))),
+            ],
+        )
+        edit_file = EditFile()
+        edit_file.load_bytes(data)
+        game_plan_base = edit_file.game_plan_start
+        lineup = [0, 2, 3, 4, 5, 6, 7, 8, 9, 39, 10, 1, 11]
+        lineup.extend(range(12, 39))
+        edit_file._data[
+            game_plan_base + GP_LINEUP : game_plan_base + GP_LINEUP + TP_MAX_PLAYERS
+        ] = bytes(lineup)
+        edit_file._player_cache = {
+            1000: PlayerInfo(1000, "Starting goalkeeper", position="GK"),
+            1001: PlayerInfo(1001, "Backup goalkeeper", position="GK"),
+            1011: PlayerInfo(1011, "Reserve forward", position="CF"),
+            1010: PlayerInfo(1010, "Starting forward", position="CF"),
+        }
+
+        assert edit_file.release_player(1010, 101)
+
+        roster = edit_file.get_team_roster(101)
+        assert roster is not None
+        updated_lineup = list(
+            edit_file._data[
+                game_plan_base + GP_LINEUP : game_plan_base + GP_LINEUP + TP_MAX_PLAYERS
+            ]
+        )
+        assert updated_lineup[:11] == [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        assert roster.player_ids[10] == 1039
+        assert roster.player_ids[11] == 1011
+        assert updated_lineup.index(1) == 11
+        assert sorted(updated_lineup) == list(range(TP_MAX_PLAYERS))
+
+
+    def test_game_plan_addition_uses_active_bench_role_for_sparse_roster_slot(self):
+        data = _build_mock_data(
+            num_players=39,
+            num_teams=1,
+            num_team_player=1,
+            num_game_plans=1,
+            team_player_entries=[
+                (101, [0] + list(range(1001, 1040)), list(range(40))),
+            ],
+        )
+        edit_file = EditFile()
+        edit_file.load_bytes(data)
+        game_plan_base = edit_file.game_plan_start
+        lineup = list(range(1, 40)) + [0]
+        edit_file._data[
+            game_plan_base + GP_LINEUP : game_plan_base + GP_LINEUP + TP_MAX_PLAYERS
+        ] = bytes(lineup)
+
+        assert edit_file.add_player(9999, 101)
+
+        updated_lineup = list(
+            edit_file._data[
+                game_plan_base + GP_LINEUP : game_plan_base + GP_LINEUP + TP_MAX_PLAYERS
+            ]
+        )
+        assert updated_lineup[:11] == list(range(1, 12))
+        assert updated_lineup[-1] == 0
+        assert sorted(updated_lineup) == list(range(TP_MAX_PLAYERS))
 class TestReadPlayers:
     def test_read_players(self):
         data = _build_mock_data(

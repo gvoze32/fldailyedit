@@ -304,6 +304,41 @@ def test_integrity_reports_goalkeeper_assigned_to_outfield_position():
     report = edit_file.validate_integrity()
     assert sum("assigns GK" in error for error in report["errors"]) == 3
 
+
+def test_integrity_reads_position_preset_by_lineup_role():
+    from tests.test_editor import _build_mock_data
+
+    data = _build_mock_data(
+        num_players=16,
+        num_teams=1,
+        num_team_player=1,
+        num_game_plans=1,
+        team_player_entries=[
+            (101, [2000, 162196] + list(range(2001, 2015)), list(range(1, 17)))
+        ],
+        league_team_ids=[101],
+    )
+    edit_file = EditFile()
+    edit_file.load_bytes(data)
+    edit_file.attach_playerbin(
+        PlayerBinDatabase({162196: PlayerBinRecord(162196, "Marco", 20, "GK", 0)})
+    )
+    game_plan_offset = edit_file.game_plan_start
+    edit_file._data[
+        game_plan_offset + GP_LINEUP : game_plan_offset + GP_LINEUP + 40
+    ] = bytes([1, 0] + list(range(2, 40)))
+    for preset_offset in GP_POSITION_PRESETS:
+        struct.pack_into(
+            "<I",
+            edit_file._data,
+            game_plan_offset + preset_offset + 4,
+            1,
+        )
+
+    report = edit_file.validate_integrity()
+
+    assert not any("assigns GK" in error for error in report["errors"])
+
 @pytest.mark.skipif(not CPK_PATH.exists(), reason="CPK fixture is not available")
 def test_runtime_loads_playerbin_from_discovered_game_download(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

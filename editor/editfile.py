@@ -1214,7 +1214,12 @@ class EditFile:
         if last_idx == player_idx:
             # Player is the last one — just zero out
             self._write_player_slot(from_entry, player_idx, 0, 0)
-            self._update_game_plan_after_removal(from_team_id, player_idx, -1)
+            self._update_game_plan_after_removal(
+                from_team_id,
+                player_idx,
+                -1,
+                removed_player_id=player_id,
+            )
         elif last_idx > player_idx:
             # Move last player into the vacated slot (compact)
             self._write_player_slot(
@@ -1226,11 +1231,21 @@ class EditFile:
             self._write_player_slot(from_entry, last_idx, 0, 0)
 
             # Update game plan for source team (index IDs shifted & repaired)
-            self._update_game_plan_after_removal(from_team_id, player_idx, last_idx)
+            self._update_game_plan_after_removal(
+                from_team_id,
+                player_idx,
+                last_idx,
+                removed_player_id=player_id,
+            )
         else:
             # player_idx > last_idx shouldn't happen, but handle gracefully
             self._write_player_slot(from_entry, player_idx, 0, 0)
-            self._update_game_plan_after_removal(from_team_id, player_idx, -1)
+            self._update_game_plan_after_removal(
+                from_team_id,
+                player_idx,
+                -1,
+                removed_player_id=player_id,
+            )
 
         # Re-read to_roster in case from_entry == to_entry
         to_roster = self._read_team_player_entry(to_entry)
@@ -1298,7 +1313,12 @@ class EditFile:
 
         if last_idx == player_idx:
             self._write_player_slot(from_entry, player_idx, 0, 0)
-            self._update_game_plan_after_removal(from_team_id, player_idx, -1)
+            self._update_game_plan_after_removal(
+                from_team_id,
+                player_idx,
+                -1,
+                removed_player_id=player_id,
+            )
         elif last_idx > player_idx:
             self._write_player_slot(
                 from_entry, player_idx,
@@ -1306,10 +1326,20 @@ class EditFile:
                 from_roster.shirt_numbers[last_idx],
             )
             self._write_player_slot(from_entry, last_idx, 0, 0)
-            self._update_game_plan_after_removal(from_team_id, player_idx, last_idx)
+            self._update_game_plan_after_removal(
+                from_team_id,
+                player_idx,
+                last_idx,
+                removed_player_id=player_id,
+            )
         else:
             self._write_player_slot(from_entry, player_idx, 0, 0)
-            self._update_game_plan_after_removal(from_team_id, player_idx, -1)
+            self._update_game_plan_after_removal(
+                from_team_id,
+                player_idx,
+                -1,
+                removed_player_id=player_id,
+            )
 
         logger.info(f"Released player {player_id} from team {from_team_id} (now Free Agent)")
         return True
@@ -1429,13 +1459,63 @@ class EditFile:
         struct.pack_into("<I", self._data, pid_offset, player_id)
         struct.pack_into("<H", self._data, sn_offset, shirt_num)
 
-    def _update_game_plan_after_removal(self, team_id: int, removed_idx: int, replacement_idx: int):
-        """
-        Game Plan Doctor: Repair squad tactics integrity when a player is removed.
-        Preserve the order of active players after roster compaction.
+    def _select_game_plan_promotion_slot(
+        self,
+        team_id: int,
+        candidate_slots: list[int],
+        removed_player_id: int | None,
+        removed_role: int,
+    ) -> int | None:
+        """Choose a bench player compatible with a vacated starter role."""
+        roster = self.get_team_roster(team_id)
+        if roster is None:
+            return None
 
-        Only a structurally valid game plan is changed. Custom/legacy layouts
-        that do not map the active roster exactly are left byte-for-byte intact.
+        removed_position = (
+            (self.get_player_position(removed_player_id) or "").strip().upper()
+            if removed_player_id is not None
+            else ""
+        )
+        target_is_goalkeeper = removed_position == "GK" or (
+            not removed_position and removed_role == 0
+        )
+
+        known_same_position: list[int] = []
+        same_goalkeeper_class: list[int] = []
+        same_outfield_class: list[int] = []
+        for slot in candidate_slots:
+            player_id = roster.player_ids[slot]
+            if not player_id:
+                continue
+            position = (self.get_player_position(player_id) or "").strip().upper()
+            if removed_position and position == removed_position:
+                known_same_position.append(slot)
+            if position == "GK":
+                same_goalkeeper_class.append(slot)
+            elif position:
+                same_outfield_class.append(slot)
+
+        if known_same_position:
+            return known_same_position[0]
+        if target_is_goalkeeper:
+            return same_goalkeeper_class[0] if same_goalkeeper_class else None
+        return same_outfield_class[0] if same_outfield_class else None
+
+    def _update_game_plan_after_removal(
+        self,
+        team_id: int,
+        removed_idx: int,
+        replacement_idx: int,
+        *,
+        removed_player_id: int | None = None,
+    ) -> None:
+        """
+        Keep game-plan roles attached to players after roster compaction.
+
+        Team-Player removal copies the last active player into the removed
+        roster slot.  Rebuild the active lineup from the old role order,
+        remap that copied player, and promote a compatible bench player only
+        when a starter was removed.  Invalid/custom lineups remain untouched.
         """
         gp_offset = self._find_game_plan_offset(team_id)
         if gp_offset is None or gp_offset + GAME_PLAN_ENTRY_SIZE > len(self._data):
@@ -1443,84 +1523,166 @@ class EditFile:
 
         lineup_offset = gp_offset + GP_LINEUP
         lineup = list(self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS])
-
-        old_size = (replacement_idx + 1) if replacement_idx >= 0 else (removed_idx + 1)
-        if not 1 <= old_size <= TP_MAX_PLAYERS:
-            return
-        expected_old_slots = set(range(old_size))
-        active_order = lineup[:old_size]
-        if len(active_order) != len(set(active_order)) or set(active_order) != expected_old_slots:
+        if len(lineup) != TP_MAX_PLAYERS or sorted(lineup) != list(range(TP_MAX_PLAYERS)):
             logger.warning(
                 f"Team {team_id} has a non-standard game plan; preserving it during removal"
             )
             return
 
-        last_idx = old_size - 1
-        # The player at last_idx is copied into removed_idx in Team-Player.
-        # Keep the ordinal that belonged to the removed player and drop the
-        # stale last-slot ordinal from the active prefix.
-        new_active_order = [slot for slot in active_order if slot != last_idx]
+        old_size = (
+            replacement_idx + 1
+            if replacement_idx >= 0
+            else removed_idx + 1
+        )
+        if not 1 <= old_size <= TP_MAX_PLAYERS:
+            return
+
+        active_order = lineup[:old_size]
         if (
-            len(new_active_order) != old_size - 1
-            or set(new_active_order) != set(range(old_size - 1))
+            len(active_order) != old_size
+            or len(set(active_order)) != old_size
+            or set(active_order) != set(range(old_size))
+            or removed_idx not in active_order
+            or (
+                replacement_idx >= 0
+                and replacement_idx not in active_order
+            )
         ):
             logger.warning(
-                f"Could not safely compact game plan for team {team_id}; preserving it"
+                f"Team {team_id} has a non-standard active game-plan order; "
+                "preserving it during removal"
             )
             return
 
-        lineup[: old_size - 1] = new_active_order
-        lineup[old_size - 1] = last_idx
-        self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS] = bytes(lineup)
+        removed_role = active_order.index(removed_idx)
+        promoted_slot: int | None = None
+        if removed_role < FIRST_TEAM_SLOT_COUNT and old_size > FIRST_TEAM_SLOT_COUNT:
+            promotion_candidates = [
+                slot
+                for slot in active_order[FIRST_TEAM_SLOT_COUNT:]
+                if slot not in {removed_idx, replacement_idx}
+            ]
+            promoted_slot = self._select_game_plan_promotion_slot(
+                team_id,
+                promotion_candidates,
+                removed_player_id,
+                removed_role,
+            )
 
-        # Update role bytes (Captain, CK, PK, Attackers)
-        # In PES21, these bytes store the ROSTER INDEX (0..39) or 0xFF (Default/Auto)
-        for roff in GP_SINGLE_PLAYER_ROLES:
-            target_off = gp_offset + roff
-            if target_off < len(self._data):
-                val = self._data[target_off]
-                if val == removed_idx:
-                    self._data[target_off] = 0xFF
-                elif val == last_idx:
-                    self._data[target_off] = removed_idx
+        if promoted_slot is not None:
+            new_active: list[int] = []
+            for slot in active_order:
+                if slot == removed_idx:
+                    new_active.append(promoted_slot)
+                elif slot == replacement_idx:
+                    new_active.append(removed_idx)
+                elif slot == promoted_slot:
+                    continue
+                else:
+                    new_active.append(slot)
+        else:
+            # Keep the departed player's old role for the player copied into
+            # that roster slot.  This is the least disruptive fallback when
+            # position metadata cannot identify a safe promotion.
+            removed_lineup_slot = (
+                replacement_idx if replacement_idx >= 0 else removed_idx
+            )
+            new_active = [
+                slot for slot in active_order if slot != removed_lineup_slot
+            ]
 
-        att_off = gp_offset + GP_ATTACK_PLAYERS
-        for b in range(3):
-            if att_off + b < len(self._data):
-                val = self._data[att_off + b]
-                if val == removed_idx:
-                    self._data[att_off + b] = 0xFF
-                elif val == last_idx:
-                    self._data[att_off + b] = removed_idx
+        expected_new_slots = set(range(old_size - 1))
+        if (
+            len(new_active) != old_size - 1
+            or set(new_active) != expected_new_slots
+        ):
+            logger.warning(
+                f"Could not safely compact game plan for team {team_id}; "
+                "preserving it"
+            )
+            return
 
-    def _update_game_plan_after_addition(self, team_id: int, added_slot: int):
+        tail_slot = replacement_idx if replacement_idx >= 0 else removed_idx
+        new_lineup = new_active + lineup[old_size:] + [tail_slot]
+        if (
+            len(new_lineup) != TP_MAX_PLAYERS
+            or sorted(new_lineup) != list(range(TP_MAX_PLAYERS))
+        ):
+            logger.warning(
+                f"Could not safely rebuild game plan for team {team_id}; "
+                "preserving it"
+            )
+            return
+        self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS] = bytes(
+            new_lineup
+        )
+
+        for role_offset in GP_SINGLE_PLAYER_ROLES:
+            target_offset = gp_offset + role_offset
+            value = self._data[target_offset]
+            if value == removed_idx:
+                self._data[target_offset] = 0xFF
+            elif replacement_idx >= 0 and value == replacement_idx:
+                self._data[target_offset] = removed_idx
+
+        attack_offset = gp_offset + GP_ATTACK_PLAYERS
+        for index in range(3):
+            target_offset = attack_offset + index
+            value = self._data[target_offset]
+            if value == removed_idx:
+                self._data[target_offset] = 0xFF
+            elif replacement_idx >= 0 and value == replacement_idx:
+                self._data[target_offset] = removed_idx
+
+    def _update_game_plan_after_addition(self, team_id: int, added_slot: int) -> None:
         """
-        Ensure newly signed player at added_slot is placed on active bench
-        while preserving the active-roster one-to-one mapping.
+        Append a newly registered player to the active game-plan bench.
+
+        Existing role order is preserved.  The roster slot can be sparse in a
+        legacy save, so it must not be used as a formation-role index.
         """
         gp_offset = self._find_game_plan_offset(team_id)
         if gp_offset is None or gp_offset + GAME_PLAN_ENTRY_SIZE > len(self._data):
             return
 
-        lineup_offset = gp_offset + GP_LINEUP
-        lineup = list(self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS])
-
-        # The active prefix before addition must be a one-to-one mapping of
-        # the compact roster slots. Otherwise preserve the original tactics.
-        active_prefix = lineup[:added_slot]
-        if len(active_prefix) != len(set(active_prefix)) or set(active_prefix) != set(range(added_slot)):
+        roster = self.get_team_roster(team_id)
+        if roster is None or not 0 <= added_slot < TP_MAX_PLAYERS:
+            return
+        active_slots = [
+            slot for slot, player_id in enumerate(roster.player_ids) if player_id
+        ]
+        if added_slot not in active_slots:
             return
 
-        if added_slot < TP_MAX_PLAYERS:
-            try:
-                pos = lineup.index(added_slot, added_slot)
-            except ValueError:
-                pos = -1
-            if pos >= 0 and pos != added_slot:
-                lineup[pos], lineup[added_slot] = lineup[added_slot], lineup[pos]
-            else:
-                lineup[added_slot] = added_slot
-            self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS] = bytes(lineup)
+        active_count = len(active_slots)
+        old_active_count = active_count - 1
+        if old_active_count < 0:
+            return
+
+        lineup_offset = gp_offset + GP_LINEUP
+        lineup = list(self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS])
+        if (
+            len(lineup) != TP_MAX_PLAYERS
+            or sorted(lineup) != list(range(TP_MAX_PLAYERS))
+            or len(set(lineup[:old_active_count])) != old_active_count
+            or set(lineup[:old_active_count])
+            != set(active_slots) - {added_slot}
+        ):
+            return
+
+        try:
+            added_role = lineup.index(added_slot, old_active_count)
+        except ValueError:
+            return
+        if added_role != old_active_count:
+            lineup[added_role], lineup[old_active_count] = (
+                lineup[old_active_count],
+                lineup[added_role],
+            )
+            self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS] = bytes(
+                lineup
+            )
+
 
     def _find_game_plan_offset(self, team_id: int) -> int | None:
         """Find the byte offset of a team's game plan entry."""
@@ -1622,7 +1784,7 @@ class EditFile:
             return 0
         starter_slots = lineup[: min(11, roster.roster_size)]
         checks = 0
-        for slot in starter_slots:
+        for role, slot in enumerate(starter_slots):
             player_id = roster.player_ids[slot] if 0 <= slot < TP_MAX_PLAYERS else 0
             if not player_id:
                 continue
@@ -1633,7 +1795,7 @@ class EditFile:
                 position_address = (
                     offset
                     + preset_offset
-                    + slot * GP_POSITION_ENTRY_SIZE
+                    + role * GP_POSITION_ENTRY_SIZE
                 )
                 if position_address + GP_POSITION_ENTRY_SIZE > len(self._data):
                     continue
