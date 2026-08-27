@@ -1498,8 +1498,13 @@ class EditFile:
         if known_same_position:
             return known_same_position[0]
         if target_is_goalkeeper:
-            return same_goalkeeper_class[0] if same_goalkeeper_class else None
-        return same_outfield_class[0] if same_outfield_class else None
+            if same_goalkeeper_class:
+                return same_goalkeeper_class[0]
+            # Slot zero is the historical PES fallback for the goalkeeper.
+            return next((slot for slot in candidate_slots if slot == 0), None)
+        if same_outfield_class:
+            return same_outfield_class[0]
+        return None
 
     def _update_game_plan_after_removal(
         self,
@@ -1571,6 +1576,26 @@ class EditFile:
                 removed_player_id,
                 removed_role,
             )
+            if promoted_slot is None:
+                removed_position_known = bool(
+                    removed_player_id is not None
+                    and self.get_player_position(removed_player_id)
+                )
+                stale_role = active_order.index(stale_slot)
+                goalkeeper_role = (
+                    active_order.index(0) if 0 in active_order else None
+                )
+                goalkeeper_would_enter_starters = (
+                    stale_role < FIRST_TEAM_SLOT_COUNT
+                    and goalkeeper_role is not None
+                    and goalkeeper_role > stale_role
+                    and goalkeeper_role - 1 < FIRST_TEAM_SLOT_COUNT
+                )
+                if not removed_position_known and goalkeeper_would_enter_starters:
+                    promoted_slot = next(
+                        (slot for slot in promotion_candidates if slot != 0),
+                        None,
+                    )
 
         if promoted_slot is not None:
             new_active: list[int] = []

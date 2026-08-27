@@ -377,6 +377,36 @@ class TestEditFileHeader:
         assert updated_lineup.index(1) == 11
         assert sorted(updated_lineup) == list(range(TP_MAX_PLAYERS))
 
+    def test_game_plan_removal_avoids_slot_zero_goalkeeper_without_metadata(self):
+        data = _build_mock_data(
+            num_players=40,
+            num_teams=1,
+            num_team_player=1,
+            num_game_plans=1,
+            team_player_entries=[
+                (101, list(range(1000, 1040)), list(range(1, 41))),
+            ],
+        )
+        edit_file = EditFile()
+        edit_file.load_bytes(data)
+        game_plan_base = edit_file.game_plan_start
+        lineup = [1, 2, 3, 4, 5, 6, 7, 8, 9, 39, 10, 0, 11]
+        lineup.extend(range(12, 39))
+        edit_file._data[
+            game_plan_base + GP_LINEUP : game_plan_base + GP_LINEUP + TP_MAX_PLAYERS
+        ] = bytes(lineup)
+
+        assert edit_file.release_player(1010, 101)
+
+        updated_lineup = list(
+            edit_file._data[
+                game_plan_base + GP_LINEUP : game_plan_base + GP_LINEUP + TP_MAX_PLAYERS
+            ]
+        )
+        assert updated_lineup[:11] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        assert updated_lineup.index(0) == 11
+        assert sorted(updated_lineup) == list(range(TP_MAX_PLAYERS))
+
 
     def test_game_plan_addition_uses_active_bench_role_for_sparse_roster_slot(self):
         data = _build_mock_data(
