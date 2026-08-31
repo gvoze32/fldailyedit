@@ -63,6 +63,10 @@ del repositorio y usa **Run workflow** en la pestaña Actions.
 El actualizador comprueba el club actual del jugador y no sobrescribe un dorsal
 que ya use otro integrante de la plantilla.
 
+Los archivos guardados PES21 limpios pueden conservar dorsales en puestos vacíos
+de la plantilla. Se muestran como advertencias no bloqueantes y no impiden una
+actualización local.
+
 ## Ejecución local
 
 Compatible con macOS, Linux y Windows mediante WSL. Se requiere Python 3.10 o

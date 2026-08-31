@@ -62,6 +62,10 @@ del repository e usa **Run workflow** nella scheda Actions.
 L’aggiornamento controlla il club attuale del giocatore e non sovrascrive un
 numero di maglia già usato.
 
+I salvataggi PES21 puliti possono conservare numeri di maglia negli slot vuoti
+della rosa. Vengono segnalati come avvisi non bloccanti e non impediscono un
+aggiornamento locale.
+
 ## Esecuzione locale
 
 Compatibile con macOS, Linux e Windows tramite WSL. È richiesto Python 3.10 o

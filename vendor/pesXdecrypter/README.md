@@ -12,6 +12,11 @@ Since then, support for newer game versions and CMake has been added, along with
 
 Thanks go to zlac for providing simplified decryption/encryption functions, as well as additional encryption keys.
 
+FLDailyEdit integration
+-----------------------
+When FLDailyEdit processes a clean PES21 EDIT file, shirt numbers left in empty
+roster slots are reported as non-blocking warnings rather than fatal errors.
+
 Background
 ----------
 

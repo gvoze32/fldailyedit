@@ -62,6 +62,9 @@ For a custom club list or on-demand run, fork the repository and use
 It checks the player's current club and never overwrites a shirt number already
 used by another squad member.
 
+Clean PES21 saves may retain shirt numbers in empty roster slots. These are
+reported as non-blocking warnings and do not prevent a local update.
+
 ## Run locally
 
 Supported on macOS, Linux, and Windows through WSL. Python 3.10 or newer is

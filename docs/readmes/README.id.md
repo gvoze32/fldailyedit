@@ -62,6 +62,10 @@ Untuk daftar klub khusus atau proses on-demand, fork repositori dan gunakan
 Updater memeriksa klub pemain sebelum memindahkan pemain dan tidak menimpa nomor
 punggung yang sudah dipakai anggota skuad lain.
 
+Save PES21 yang bersih dapat menyisakan nomor punggung pada slot roster kosong.
+Kondisi ini dilaporkan sebagai peringatan yang tidak memblokir dan tidak
+menghentikan update lokal.
+
 ## Jalankan secara lokal
 
 Didukung di macOS, Linux, dan Windows melalui WSL. Python 3.10 atau lebih baru

@@ -1927,8 +1927,15 @@ class EditFile:
                 errors.append(f"Team {tid} contains a shirt number above 999")
             if len(active_shirts) != len(set(active_shirts)):
                 errors.append(f"Team {tid} contains duplicate non-zero shirt numbers")
-            if any(pid == 0 and shirt != 0 for pid, shirt in zip(roster.player_ids, roster.shirt_numbers)):
-                errors.append(f"Team {tid} has a shirt number assigned to an empty roster slot")
+            if any(
+                pid == 0 and shirt != 0
+                for pid, shirt in zip(roster.player_ids, roster.shirt_numbers)
+            ):
+                # PES21 can retain stale shirt numbers in unused slots. They
+                # are ignored by the game and must not block a local update.
+                warnings.append(
+                    f"Team {tid} has a shirt number assigned to an empty roster slot"
+                )
 
         league_divisions = self.get_league_divisions()
         club_ids = {team_id for division in league_divisions for team_id in division}

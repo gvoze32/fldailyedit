@@ -63,6 +63,9 @@ do repositório e use **Run workflow** na aba Actions.
 O atualizador verifica o clube atual do jogador e nunca substitui um número de
 camisa já usado por outro jogador do elenco.
 
+Arquivos PES21 limpos podem manter números de camisa em slots vazios do elenco.
+Eles são reportados como avisos não bloqueadores e não impedem uma atualização local.
+
 ## Execução local
 
 Compatível com macOS, Linux e Windows por meio do WSL. É necessário Python 3.10

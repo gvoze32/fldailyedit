@@ -190,6 +190,30 @@ class TestEditFileHeader:
         assert report["valid"] is True
         assert report["errors"] == []
 
+    def test_integrity_warns_for_shirt_numbers_on_empty_roster_slots(self):
+        data = _build_mock_data(
+            num_players=16,
+            num_teams=1,
+            num_team_player=1,
+            num_game_plans=1,
+            team_entries=[(101, "Alpha FC")],
+            team_player_entries=[
+                (101, list(range(1001, 1017)), list(range(1, 17)) + [99]),
+            ],
+            league_team_ids=[101],
+        )
+        ef = EditFile()
+        ef.load_bytes(data)
+
+        report = ef.validate_integrity()
+
+        assert report["valid"] is True
+        assert report["errors"] == []
+        assert report["warnings"] == [
+            "Team 101 has a shirt number assigned to an empty roster slot"
+        ]
+
+
     def test_integrity_rejects_club_with_fewer_than_sixteen_players(self):
         data = _build_mock_data(
             num_players=15,

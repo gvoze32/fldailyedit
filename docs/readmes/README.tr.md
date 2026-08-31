@@ -62,6 +62,9 @@ sekmesinden **Run workflow** seçeneğini kullanın.
 Güncelleyici oyuncunun mevcut kulübünü kontrol eder ve başka bir oyuncunun kullandığı
 forma numarasını değiştirmez.
 
+Temiz PES21 kayıtlarında boş kadro yuvalarında forma numaraları kalabilir. Bunlar
+engelleyici olmayan uyarılar olarak bildirilir ve yerel güncellemeyi durdurmaz.
+
 ## Yerel kurulum
 
 macOS, Linux ve WSL üzerinden Windows desteklenir. Python 3.10 veya daha yeni bir

@@ -64,6 +64,10 @@ Für einen manuellen Lauf oder eine eigene Vereinsliste das Repository forken un
 Der Updater prüft den aktuellen Verein des Spielers und überschreibt keine bereits
 verwendete Trikotnummer.
 
+Saubere PES21-Spielstände können Trikotnummern in leeren Kaderplätzen behalten.
+Sie werden als nicht blockierende Warnungen gemeldet und verhindern keine lokale
+Aktualisierung.
+
 ## Lokale Ausführung
 
 Unter macOS, Linux und Windows über WSL. Python 3.10 oder neuer ist erforderlich.

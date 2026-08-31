@@ -63,6 +63,10 @@ dépôt et utilisez **Run workflow** dans l’onglet Actions.
 Le programme vérifie le club actuel du joueur et n’écrase jamais un numéro de
 maillot déjà utilisé.
 
+Les sauvegardes PES21 propres peuvent conserver des numéros de maillot dans des
+emplacements vides de l’effectif. Ils sont signalés comme des avertissements non
+bloquants et n’empêchent pas une mise à jour locale.
+
 ## Exécution locale
 
 Compatible avec macOS, Linux et Windows via WSL. Python 3.10 ou une version plus

@@ -235,6 +235,45 @@ def test_local_runtime_rejects_invalid_save_without_backup_or_target_text(
     assert edit_path.read_bytes() == original
 
 
+def test_local_runtime_accepts_non_blocking_roster_warnings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import run
+    from local_update import CancellationToken, LocalUpdateRequest
+
+    edit_path = tmp_path / "EDIT00000000"
+    edit_path.write_bytes(b"encrypted-save")
+    decrypted = tmp_path / "decrypted-warning"
+    decrypted.mkdir()
+    (decrypted / "data.dat").write_bytes(b"decrypted")
+    warning = "Team 11 has a shirt number assigned to an empty roster slot"
+
+    class WarningEditFile:
+        def load(self, _path: Path) -> None:
+            pass
+
+        def validate_integrity(self) -> dict[str, object]:
+            return {
+                "valid": True,
+                "errors": [],
+                "warnings": [warning],
+                "metrics": {},
+            }
+
+    monkeypatch.setattr(run, "EditFile", WarningEditFile)
+    monkeypatch.setattr(run.crypto, "decrypt", lambda _path: decrypted)
+    monkeypatch.setattr(run.crypto, "cleanup_temp", lambda _path: None)
+
+    runtime = run._RunLocalUpdateRuntime()
+    prepared = runtime.validate_and_prepare(
+        LocalUpdateRequest(edit_path), (), CancellationToken()
+    )
+    try:
+        assert prepared.edit_file is not None
+    finally:
+        runtime.cleanup(prepared)
+
+
 def test_local_runtime_uses_selected_input_without_opening_configured_base(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
