@@ -9,31 +9,9 @@ import pytest
 
 README_PATHS = (
     Path("README.md"),
-    Path("docs/readmes/README.id.md"),
-    Path("docs/readmes/README.es.md"),
-    Path("docs/readmes/README.pt.md"),
-    Path("docs/readmes/README.ar.md"),
-    Path("docs/readmes/README.zh.md"),
-    Path("docs/readmes/README.it.md"),
-    Path("docs/readmes/README.ru.md"),
-    Path("docs/readmes/README.de.md"),
-    Path("docs/readmes/README.fr.md"),
-    Path("docs/readmes/README.tr.md"),
 )
 
-_LANGUAGE_BADGE_TARGETS = (
-    "README.md",
-    "docs/readmes/README.id.md",
-    "docs/readmes/README.es.md",
-    "docs/readmes/README.fr.md",
-    "docs/readmes/README.pt.md",
-    "docs/readmes/README.de.md",
-    "docs/readmes/README.it.md",
-    "docs/readmes/README.ru.md",
-    "docs/readmes/README.tr.md",
-    "docs/readmes/README.ar.md",
-    "docs/readmes/README.zh.md",
-)
+_LANGUAGE_BADGE_TARGETS = ()
 _BADGE_TARGETS = _LANGUAGE_BADGE_TARGETS + (
     "https://www.python.org/",
     "LICENSE",
@@ -61,14 +39,7 @@ _README_COMMAND_FENCE_FIXTURES = (
     _COMMON_FENCE_FIXTURES[2],
 )
 
-_INDONESIAN_COMMAND_FENCE_FIXTURES = (
-    _COMMON_FENCE_FIXTURES[0],
-    (
-        "bash",
-        "4c3d49affa7ed46ba77326624356642faee14a6cfd2ef084f271d187cb8c4565",
-    ),
-    _COMMON_FENCE_FIXTURES[2],
-)
+
 
 README_STRUCTURE_FIXTURES = {
     Path("README.md"): {
@@ -81,142 +52,14 @@ README_STRUCTURE_FIXTURES = {
             "LICENSE",
         ),
     },
-    Path("docs/readmes/README.id.md"): {
-        "heading_counts": (9, 9, 0, 0, 0, 0),
-        "badge_targets": _BADGE_TARGETS,
-        "fenced_code_blocks": _INDONESIAN_COMMAND_FENCE_FIXTURES,
-        "relative_links": (
-            "base/EDIT00000000",
-            ".github/ISSUE_TEMPLATE/player-update.yml",
-            "LICENSE",
-        ),
-    },
-    Path("docs/readmes/README.es.md"): {
-        "heading_counts": (9, 9, 0, 0, 0, 0),
-        "badge_targets": _BADGE_TARGETS,
-        "fenced_code_blocks": _COMMON_FENCE_FIXTURES,
-        "relative_links": (
-            "base/EDIT00000000",
-            ".github/ISSUE_TEMPLATE/player-update.yml",
-            "LICENSE",
-        ),
-    },
-    Path("docs/readmes/README.pt.md"): {
-        "heading_counts": (9, 9, 0, 0, 0, 0),
-        "badge_targets": _BADGE_TARGETS,
-        "fenced_code_blocks": _COMMON_FENCE_FIXTURES,
-        "relative_links": (
-            "base/EDIT00000000",
-            ".github/ISSUE_TEMPLATE/player-update.yml",
-            "LICENSE",
-        ),
-    },
-    Path("docs/readmes/README.ar.md"): {
-        "heading_counts": (9, 9, 0, 0, 0, 0),
-        "badge_targets": _BADGE_TARGETS,
-        "fenced_code_blocks": _COMMON_FENCE_FIXTURES,
-        "relative_links": (
-            "base/EDIT00000000",
-            ".github/ISSUE_TEMPLATE/player-update.yml",
-            "LICENSE",
-        ),
-    },
-    Path("docs/readmes/README.zh.md"): {
-        "heading_counts": (9, 9, 0, 0, 0, 0),
-        "badge_targets": _BADGE_TARGETS,
-        "fenced_code_blocks": _COMMON_FENCE_FIXTURES,
-        "relative_links": (
-            "base/EDIT00000000",
-            ".github/ISSUE_TEMPLATE/player-update.yml",
-            "LICENSE",
-        ),
-    },
-    Path("docs/readmes/README.it.md"): {
-        "heading_counts": (9, 9, 0, 0, 0, 0),
-        "badge_targets": _BADGE_TARGETS,
-        "fenced_code_blocks": _COMMON_FENCE_FIXTURES,
-        "relative_links": (
-            "base/EDIT00000000",
-            ".github/ISSUE_TEMPLATE/player-update.yml",
-            "LICENSE",
-        ),
-    },
-    Path("docs/readmes/README.ru.md"): {
-        "heading_counts": (9, 9, 0, 0, 0, 0),
-        "badge_targets": _BADGE_TARGETS,
-        "fenced_code_blocks": _COMMON_FENCE_FIXTURES,
-        "relative_links": (
-            "base/EDIT00000000",
-            ".github/ISSUE_TEMPLATE/player-update.yml",
-            "LICENSE",
-        ),
-    },
-    Path("docs/readmes/README.de.md"): {
-        "heading_counts": (9, 9, 0, 0, 0, 0),
-        "badge_targets": _BADGE_TARGETS,
-        "fenced_code_blocks": (
-            _COMMON_FENCE_FIXTURES[0],
-            (
-                "bash",
-                "4c3d49affa7ed46ba77326624356642faee14a6cfd2ef084f271d187cb8c4565",
-            ),
-            _COMMON_FENCE_FIXTURES[2],
-        ),
-        "relative_links": (
-            "base/EDIT00000000",
-            ".github/ISSUE_TEMPLATE/player-update.yml",
-            "LICENSE",
-        ),
-    },
-    Path("docs/readmes/README.fr.md"): {
-        "heading_counts": (9, 9, 0, 0, 0, 0),
-        "badge_targets": _BADGE_TARGETS,
-        "fenced_code_blocks": (
-            _COMMON_FENCE_FIXTURES[0],
-            (
-                "bash",
-                "4c3d49affa7ed46ba77326624356642faee14a6cfd2ef084f271d187cb8c4565",
-            ),
-            _COMMON_FENCE_FIXTURES[2],
-        ),
-        "relative_links": (
-            "base/EDIT00000000",
-            ".github/ISSUE_TEMPLATE/player-update.yml",
-            "LICENSE",
-        ),
-    },
-    Path("docs/readmes/README.tr.md"): {
-        "heading_counts": (9, 9, 0, 0, 0, 0),
-        "badge_targets": _BADGE_TARGETS,
-        "fenced_code_blocks": (
-            _COMMON_FENCE_FIXTURES[0],
-            (
-                "bash",
-                "4c3d49affa7ed46ba77326624356642faee14a6cfd2ef084f271d187cb8c4565",
-            ),
-            _COMMON_FENCE_FIXTURES[2],
-        ),
-        "relative_links": (
-            "base/EDIT00000000",
-            ".github/ISSUE_TEMPLATE/player-update.yml",
-            "LICENSE",
-        ),
-    },
 }
 
 ROADMAP_FIXTURES = {
     Path("README.md"): None,
-    Path("docs/readmes/README.id.md"): None,
-    Path("docs/readmes/README.es.md"): None,
-    Path("docs/readmes/README.pt.md"): None,
-    Path("docs/readmes/README.ar.md"): None,
-    Path("docs/readmes/README.zh.md"): None,
-    Path("docs/readmes/README.it.md"): None,
-    Path("docs/readmes/README.ru.md"): None,
-    Path("docs/readmes/README.de.md"): None,
-    Path("docs/readmes/README.fr.md"): None,
-    Path("docs/readmes/README.tr.md"): None,
 }
+
+def test_non_english_readmes_are_removed() -> None:
+    assert not list(Path("docs/readmes").glob("README.*.md"))
 
 
 

@@ -39,8 +39,7 @@ reference/
 MEMORY.md
 .worktrees/
 .codegraph
-docs/plans
-docs/superpowers
+docs/
 
 # Native build products
 vendor/pesXdecrypter/decrypter21

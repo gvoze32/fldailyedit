@@ -1,5 +1,3 @@
-[![English](https://img.shields.io/badge/%F0%9F%87%AC%F0%9F%87%A7_English-012169?style=flat-square)](README.md) [![Indonesian](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%A9_Indonesian-ce1126?style=flat-square)](docs/readmes/README.id.md) [![Español](https://img.shields.io/badge/%F0%9F%87%AA%F0%9F%87%B8_Espa%C3%B1ol-aa151b?style=flat-square)](docs/readmes/README.es.md) [![Français](https://img.shields.io/badge/%F0%9F%87%AB%F0%9F%87%B7_Fran%C3%A7ais-002395?style=flat-square)](docs/readmes/README.fr.md) [![Português](https://img.shields.io/badge/%F0%9F%87%B5%F0%9F%87%B9_Portugu%C3%AAs-006600?style=flat-square)](docs/readmes/README.pt.md) [![Deutsch](https://img.shields.io/badge/%F0%9F%87%A9%F0%9F%87%AA_Deutsch-000000?style=flat-square)](docs/readmes/README.de.md) [![Italiano](https://img.shields.io/badge/%F0%9F%87%AE%F0%9F%87%B9_Italiano-009246?style=flat-square)](docs/readmes/README.it.md) [![Русский](https://img.shields.io/badge/%F0%9F%87%B7%F0%9F%87%BA_%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-d52b1e?style=flat-square)](docs/readmes/README.ru.md) [![Türkçe](https://img.shields.io/badge/%F0%9F%87%B9%F0%9F%87%B7_T%C3%BCrk%C3%A7e-e30a17?style=flat-square)](docs/readmes/README.tr.md) [![العربية](https://img.shields.io/badge/%F0%9F%87%B8%F0%9F%87%A6_%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A%D8%A9-006c35?style=flat-square)](docs/readmes/README.ar.md) [![中文](https://img.shields.io/badge/%F0%9F%87%A8%F0%9F%87%B3_%E4%B8%AD%E6%96%87-de2910?style=flat-square)](docs/readmes/README.zh.md)
-
 # FL Daily Edit
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
@@ -21,6 +19,10 @@ The bundled [base save](base/EDIT00000000) requires:
 
 - **SP Football Life 2026 Update 2.2**
 - **SmokePatch's National Squads Update**
+
+The bundled base save is based on [Gondowan's latest EDIT file](https://www.reddit.com/r/SPFootballLife/comments/1vvh129/release_gondowans_edit_file_22082026_latest/).
+We edited the Premier League game plans using the [MG-FOXHOUND Reddit tactics update](https://www.reddit.com/r/SPFootballLife/comments/1vzspt0/download_real_2627_premier_league_tactics_updated/) as our reference.
+A follow-up [MG-FOXHOUND tactics update](https://www.reddit.com/r/SPFootballLife/comments/1w13ecp/tactics_update/) is in progress with further Premier League tuning and a La Liga project; it is not included in this base yet.
 
 It is not compatible with UML, older FL26 versions, or installations without
 the national-squad update. Start a new Master League or Become a Legend career
