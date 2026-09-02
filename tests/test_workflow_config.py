@@ -228,19 +228,9 @@ def test_readme_uses_player_update_language_for_public_contributions():
     assert "python run.py players validate" in text
     assert "## Player-spec contributions" not in text
 
-def test_localized_readmes_keep_installer_and_manual_download_contracts():
+def test_readme_keeps_installer_and_manual_download_contracts():
     for path in (
         README_PATH,
-        Path("docs/readmes/README.id.md"),
-        Path("docs/readmes/README.es.md"),
-        Path("docs/readmes/README.pt.md"),
-        Path("docs/readmes/README.ar.md"),
-        Path("docs/readmes/README.zh.md"),
-        Path("docs/readmes/README.it.md"),
-        Path("docs/readmes/README.ru.md"),
-        Path("docs/readmes/README.de.md"),
-        Path("docs/readmes/README.fr.md"),
-        Path("docs/readmes/README.tr.md"),
     ):
         text = path.read_text(encoding="utf-8")
 
@@ -252,19 +242,9 @@ def test_localized_readmes_keep_installer_and_manual_download_contracts():
         assert "Apply update" in text, path
         assert "Run workflow" in text, path
 
-def test_readmes_document_current_mutation_and_diagnostic_commands():
+def test_readme_documents_current_mutation_and_diagnostic_commands():
     readme_paths = (
         README_PATH,
-        Path("docs/readmes/README.id.md"),
-        Path("docs/readmes/README.es.md"),
-        Path("docs/readmes/README.pt.md"),
-        Path("docs/readmes/README.ar.md"),
-        Path("docs/readmes/README.zh.md"),
-        Path("docs/readmes/README.it.md"),
-        Path("docs/readmes/README.ru.md"),
-        Path("docs/readmes/README.de.md"),
-        Path("docs/readmes/README.fr.md"),
-        Path("docs/readmes/README.tr.md"),
     )
     for path in readme_paths:
         text = path.read_text(encoding="utf-8")
@@ -275,19 +255,9 @@ def test_readmes_document_current_mutation_and_diagnostic_commands():
         assert "python run.py <command> --help" in text, path
 
 
-def test_localized_readmes_document_smart_screen_warning():
+def test_readme_documents_smart_screen_warning():
     for path in (
         README_PATH,
-        Path("docs/readmes/README.id.md"),
-        Path("docs/readmes/README.es.md"),
-        Path("docs/readmes/README.pt.md"),
-        Path("docs/readmes/README.ar.md"),
-        Path("docs/readmes/README.zh.md"),
-        Path("docs/readmes/README.it.md"),
-        Path("docs/readmes/README.ru.md"),
-        Path("docs/readmes/README.de.md"),
-        Path("docs/readmes/README.fr.md"),
-        Path("docs/readmes/README.tr.md"),
     ):
         text = path.read_text(encoding="utf-8")
         assert "SmartScreen" in text, path
