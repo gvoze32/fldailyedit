@@ -142,6 +142,8 @@ GP_SINGLE_PLAYER_ROLES = (
 GP_POSITION_PRESETS = (0x004, 0x0A4, 0x144)
 GP_POSITION_ENTRY_SIZE = 4
 
+_GOALKEEPER_POSITION_LABELS = frozenset({"GK", "GOALKEEPER", "KEEPER", "GOALIE"})
+
 
 def assign_smart_shirt_number(
     used_numbers: set[int],
@@ -165,7 +167,7 @@ def assign_smart_shirt_number(
 
     pos_upper = (position or "").strip().upper()
 
-    if is_gk or pos_upper == "GK":
+    if is_gk or pos_upper in _GOALKEEPER_POSITION_LABELS:
         priority = [1, 12, 13, 22, 23, 25, 30, 31, 33, 40, 99]
     elif pos_upper in ("CB", "LB", "RB", "CB/LB", "CB/RB", "LWB", "RWB"):
         priority = [2, 3, 4, 5, 6, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
@@ -1258,9 +1260,18 @@ class EditFile:
 
         pinfo = getattr(self, "_player_cache", {}).get(player_id)
         effective_pos = position or (pinfo.position if pinfo else "")
-        is_gk = (pinfo.is_goalkeeper if pinfo else False) or (effective_pos.upper() == "GK")
+        is_gk = (
+            (pinfo.is_goalkeeper if pinfo else False)
+            or effective_pos.strip().upper() in _GOALKEEPER_POSITION_LABELS
+        )
 
-        used_numbers = {sn for sn in to_roster.shirt_numbers if sn > 0}
+        used_numbers = {
+            shirt_number
+            for player_id, shirt_number in zip(
+                to_roster.player_ids, to_roster.shirt_numbers
+            )
+            if player_id != 0 and shirt_number > 0
+        }
         shirt_num = assign_smart_shirt_number(
             used_numbers=used_numbers,
             preferred_number=target_shirt,
@@ -1418,9 +1429,18 @@ class EditFile:
 
         pinfo = getattr(self, "_player_cache", {}).get(player_id)
         effective_pos = position or (pinfo.position if pinfo else "")
-        is_gk = (pinfo.is_goalkeeper if pinfo else False) or (effective_pos.upper() == "GK")
+        is_gk = (
+            (pinfo.is_goalkeeper if pinfo else False)
+            or effective_pos.strip().upper() in _GOALKEEPER_POSITION_LABELS
+        )
 
-        used_numbers = {sn for sn in to_roster.shirt_numbers if sn > 0}
+        used_numbers = {
+            shirt_number
+            for player_id, shirt_number in zip(
+                to_roster.player_ids, to_roster.shirt_numbers
+            )
+            if player_id != 0 and shirt_number > 0
+        }
         shirt_num = assign_smart_shirt_number(
             used_numbers=used_numbers,
             preferred_number=target_shirt,

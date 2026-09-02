@@ -40,7 +40,7 @@ _NON_CLUB_NAMES = {
 }
 
 # Position categorization maps
-_POS_GK = {"GK"}
+_POS_GK = {"GK", "GOALKEEPER", "KEEPER", "GOALIE"}
 _POS_DEF = {"CB", "LB", "RB", "DF", "LWB", "RWB"}
 _POS_MID = {"DMF", "CMF", "AMF", "LMF", "RMF", "DM", "CM", "CAM", "AM", "LM", "RM", "MF"}
 _POS_FWD = {"LWF", "RWF", "SS", "CF", "ST", "LW", "RW", "FW"}

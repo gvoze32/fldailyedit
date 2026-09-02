@@ -21,6 +21,7 @@ from editor.editfile import (
     GP_TEAM_ID, GP_LINEUP, GP_CAPTAIN,
     PE_PLAYER_ID, PE_PLAYER_NAME,
     TE_TEAM_ID, TE_TEAM_NAME,
+    assign_smart_shirt_number,
 )
 from editor.models import TeamData, PlayerInfo, TeamInfo
 
@@ -728,6 +729,31 @@ class TestMovePlayer:
         shirt = dst.shirt_numbers[idx]
         assert shirt > 0
 
+    def test_keeper_alias_uses_goalkeeper_shirt_priority(self):
+        assert assign_smart_shirt_number({1}, position="Keeper") == 12
+
+    def test_transfer_ignores_stale_shirt_numbers_in_empty_slots(self):
+        stale_shirts = [1, 2] + list(range(3, 41))
+        data = _build_mock_data(
+            num_players=5,
+            num_teams=2,
+            num_team_player=2,
+            num_game_plans=2,
+            team_player_entries=[
+                (101, [1001, 1002, 1003], [10, 7, 11]),
+                (102, [2001, 2002] + [0] * 38, stale_shirts),
+            ],
+            league_team_ids=[101, 102],
+        )
+        ef = EditFile()
+        ef.load_bytes(data)
+
+        assert ef.move_player(1001, from_team_id=101, to_team_id=102)
+
+        destination = ef.get_team_roster(102)
+        assert destination is not None
+        assert destination.shirt_numbers[destination.player_index(1001)] == 10
+
     def test_multiple_transfers(self):
         """Move two players sequentially."""
         data = self._build_transfer_data()
@@ -833,6 +859,31 @@ class TestReleaseAndAddPlayer:
         roster = ef.get_team_roster(102)
         assert 3001 in roster.roster
         assert roster.roster_size == 3
+
+    def test_add_ignores_stale_shirt_numbers_in_empty_slots(self):
+        data = _build_mock_data(
+            num_players=5,
+            num_teams=2,
+            num_team_player=2,
+            num_game_plans=2,
+            team_player_entries=[
+                (101, [1001, 1002, 1003], [7, 10, 11]),
+                (
+                    102,
+                    [2001, 2002] + [0] * 38,
+                    [1, 2] + list(range(3, 41)),
+                ),
+            ],
+            league_team_ids=[101, 102],
+        )
+        ef = EditFile()
+        ef.load_bytes(data)
+
+        assert ef.add_player(3001, to_team_id=102)
+
+        destination = ef.get_team_roster(102)
+        assert destination is not None
+        assert destination.shirt_numbers[destination.player_index(3001)] == 7
 
     def test_add_player_already_exists(self):
         data = self._build_test_data()

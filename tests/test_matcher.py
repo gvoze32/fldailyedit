@@ -187,6 +187,18 @@ class TestPlayerMatching:
         pid, name, conf = m.match_player("David Raya", position="ST")
         assert pid == 7002
 
+    def test_keeper_labels_are_treated_as_goalkeeper(self):
+        matcher = NameMatcher()
+        matcher.load_player_db(
+            players=[("David Raya", 7001), ("David Raya", 7002)],
+            positions={7001: "GK", 7002: "CF"},
+        )
+
+        for label in ("Keeper", "Goalkeeper", "Goalie"):
+            player_id, _, _ = matcher.match_player("David Raya", position=label)
+            assert player_id == 7001
+
+
     def test_tri_factor_nationality_and_age_disambiguation(self):
         """Disambiguate identical or very similar names using nationality and age."""
         m = NameMatcher()
