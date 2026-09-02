@@ -691,24 +691,16 @@ def test_runtime_club_identity_index_must_be_one_to_one(monkeypatch, tmp_path):
     with pytest.raises(IncompleteScrapeError, match="not one-to-one"):
         _load_represented_fotmob_club_ids()
     
-def test_transfer_run_includes_current_squad_numbers_by_default(monkeypatch):
+def test_transfer_run_skips_squad_number_sync_in_fast_mode(monkeypatch):
     import run
 
-    shirt = Transfer(
-        "Player One",
-        "Club",
-        "Club",
-        transfer_type="shirt_number_update",
-        shirt_number=7,
-        player_id_fotmob=1,
-    )
     transfer = Transfer("Player Two", "A", "B")
     monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_kwargs: [transfer])
-    monkeypatch.setattr(
-        run,
-        "fetch_major_clubs_transfers_safely",
-        lambda **_kwargs: [shirt, transfer],
-    )
+
+    def fail_deep_fetch(**_kwargs):
+        raise AssertionError("Fast mode must not fetch indexed clubs")
+
+    monkeypatch.setattr(run, "fetch_major_clubs_transfers_safely", fail_deep_fetch)
 
     result = run._scrape_run_transfers(
         argparse.Namespace(
@@ -720,7 +712,7 @@ def test_transfer_run_includes_current_squad_numbers_by_default(monkeypatch):
             since=None,
         )
     )
-    assert result == [transfer, shirt]
+    assert result == [transfer]
 
 
 def test_deep_auto_restricts_club_history_to_current_year(monkeypatch):

@@ -1321,21 +1321,6 @@ def _scrape_run_transfers(args):
                 window=window,
             )
         )
-        print(
-            "\n🔢 Syncing current squad numbers for indexed clubs "
-            f"({cutoff_info})..."
-        )
-        squad_observations = fetch_major_clubs_transfers_safely(
-            since_date=since_date,
-            window=window,
-        )
-        squad_number_updates = [
-            transfer
-            for transfer in squad_observations
-            if transfer.transfer_type == "shirt_number_update"
-        ]
-        print(f"  Squad-number observations: {len(squad_number_updates)}")
-        transfer_batches.append(squad_number_updates)
 
     fast_signals = []
     corroborators = []
