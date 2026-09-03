@@ -533,6 +533,85 @@ def test_stateful_matching_keeps_identity_across_loan_chain():
 
     assert [item.player_id for item in matched] == [3001, 3001]
 
+def test_stateful_matching_reconciles_parent_sale_before_loan():
+    from scraper.matcher import NameMatcher
+
+    parent, loan_club, new_parent = 234, 382, 102
+    player_id = 172021
+    matcher = NameMatcher()
+    matcher.load_player_db(
+        [("Honest Ahanor", player_id)],
+        positions={player_id: "CB"},
+    )
+    matcher.load_team_db(
+        {
+            "Atalanta": parent,
+            "Crystal Palace": loan_club,
+            "Chelsea": new_parent,
+        }
+    )
+    transfers = [
+        Transfer(
+            "Honest Ahanor",
+            "Atalanta",
+            "Crystal Palace",
+            date="2026-09-01T15:26:32Z",
+            transfer_type="loan",
+            is_loan=True,
+            player_id_fotmob=1669629,
+            position="CB",
+        ),
+        Transfer(
+            "Honest Ahanor",
+            "Atalanta",
+            "Chelsea",
+            date="2026-09-01T13:21:39Z",
+            player_id_fotmob=1669629,
+            position="CB",
+        ),
+    ]
+    player_map = {
+        parent: [player_id] + list(range(200001, 200017)),
+        loan_club: list(range(300001, 300017)),
+        new_parent: list(range(400001, 400017)),
+    }
+
+    matched = _match_transfers_statefully(
+        transfers,
+        matcher,
+        80,
+        player_map,
+        set(player_map),
+    )
+
+    assert [
+        (item.transfer.transfer_type, item.from_team_id, item.to_team_id)
+        for item in matched
+    ] == [
+        ("transfer", parent, new_parent),
+        ("loan", new_parent, loan_club),
+    ]
+
+    rosters = {
+        team_id: TeamData(team_id, ids + [0] * (40 - len(ids)))
+        for team_id, ids in player_map.items()
+    }
+    plan = _plan_roster_actions(
+        matched,
+        rosters,
+        set(rosters),
+        object(),
+        {},
+    )
+
+    assert [
+        (item.action, item.current_team_id)
+        for item in plan
+    ] == [
+        ("move", parent),
+        ("move", new_parent),
+    ]
+
 
 def test_stateful_matching_recovers_renamed_player_from_fotmob_history():
     from scraper.matcher import NameMatcher

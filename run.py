@@ -28,7 +28,7 @@ import sys
 import time
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import config
@@ -310,6 +310,18 @@ def _match_transfer_team(
     return None, "", best_unresolved_confidence
 
 
+def _transfer_event_order_key(
+    indexed_transfer: tuple[int, object],
+) -> tuple[bool, datetime, int]:
+    """Order transfer events by timestamp while preserving unknown-order input."""
+    index, transfer = indexed_transfer
+    event_datetime = parse_iso_datetime(str(getattr(transfer, "date", "") or ""))
+    return (
+        event_datetime is None,
+        event_datetime or datetime.max.replace(tzinfo=timezone.utc),
+        index,
+    )
+
 def _match_transfers_statefully(
     transfers,
     matcher: NameMatcher,
@@ -319,12 +331,15 @@ def _match_transfers_statefully(
     historical_entries: list[dict] | None = None,
     validated_fotmob_ids: set[int] | None = None,
 ) -> list[MatchedTransfer]:
-    """Match chronologically while advancing a virtual roster context."""
+    """Match transfer events chronologically while advancing virtual rosters."""
     virtual_rosters = {
         team_id: list(player_ids)
         for team_id, player_ids in team_player_map.items()
     }
     loaned_by_parent: dict[int, set[int]] = {}
+    prior_permanent_routes: dict[
+        tuple[int, int], list[tuple[int, datetime]]
+    ] = {}
     fotmob_identity_candidates: dict[int, set[int]] = {}
     fotmob_identity_names: dict[int, str] = {}
 
@@ -346,10 +361,23 @@ def _match_transfers_statefully(
         source = _optional_positive_int(entry.get("from_team_id"))
         if not player_id or not source:
             continue
-        if str(entry.get("transfer_type", "")).lower() == "loan":
+        transfer_type = str(entry.get("transfer_type", "")).lower()
+        destination = _optional_positive_int(entry.get("to_team_id"))
+        event_datetime = parse_iso_datetime(
+            str(entry.get("transfer_date") or entry.get("timestamp") or "")
+        )
+        if transfer_type == "loan":
             loaned_by_parent.setdefault(source, set()).add(player_id)
         else:
             loaned_by_parent.get(source, set()).discard(player_id)
+            if (
+                destination
+                and event_datetime is not None
+                and transfer_type not in {"end of loan", "shirt_number_update"}
+            ):
+                prior_permanent_routes.setdefault((player_id, source), []).append(
+                    (destination, event_datetime)
+                )
 
     fotmob_to_pes = {
         fotmob_player_id: next(iter(player_ids))
@@ -357,8 +385,19 @@ def _match_transfers_statefully(
         if len(player_ids) == 1
     }
 
+    ordered_transfers = [
+        transfer
+        for _, transfer in sorted(
+            enumerate(transfers),
+            key=_transfer_event_order_key,
+        )
+    ]
     matched: list[MatchedTransfer] = []
-    for transfer in transfers:
+
+    for transfer in ordered_transfers:
+        transfer_datetime = parse_iso_datetime(
+            str(getattr(transfer, "date", "") or "")
+        )
         ftid, ftname, ftconf = _match_transfer_team(
             matcher,
             transfer.from_club,
@@ -418,8 +457,9 @@ def _match_transfers_statefully(
             if pid is not None
             else []
         )
+        current_team_id = current_clubs[0] if len(current_clubs) == 1 else None
         if ftid is None and transfer.infer_from_current_roster:
-            inferred_team_id = current_clubs[0] if len(current_clubs) == 1 else None
+            inferred_team_id = current_team_id
             inferred_team_name = (
                 matcher.get_team_name(inferred_team_id)
                 if inferred_team_id is not None
@@ -455,6 +495,42 @@ def _match_transfers_statefully(
                 ftname = ""
                 ftconf = 0.0
 
+        is_loan_transfer = (
+            transfer.is_loan or transfer.transfer_type == "loan"
+        )
+        if (
+            pid is not None
+            and is_loan_transfer
+            and ftid is not None
+            and ftid >= 0
+            and ttid is not None
+            and ttid >= 0
+            and current_team_id is not None
+            and current_team_id != ftid
+            and current_team_id != ttid
+            and transfer_datetime is not None
+            and any(
+                destination_team_id == current_team_id
+                and route_datetime <= transfer_datetime
+                for destination_team_id, route_datetime in prior_permanent_routes.get(
+                    (pid, ftid), []
+                )
+            )
+        ):
+            stale_source_id = ftid
+            stale_source_name = ftname or transfer.from_club
+            ftid = current_team_id
+            ftname = matcher.get_team_name(current_team_id) or ftname
+            ftconf = 100.0
+            logger.info(
+                "Reconciled stale loan source for %s: %s (%s) -> %s (%s)",
+                transfer.player_name,
+                stale_source_name,
+                stale_source_id,
+                ftname or "current roster",
+                current_team_id,
+            )
+
         if pid is not None and fotmob_player_id is not None:
             existing_pid = fotmob_to_pes.get(fotmob_player_id)
             if existing_pid is None:
@@ -481,7 +557,18 @@ def _match_transfers_statefully(
         ):
             continue
 
-        current_team_id = current_clubs[0] if len(current_clubs) == 1 else None
+        if (
+            ftid is not None
+            and ttid is not None
+            and current_team_id == ftid
+            and transfer_datetime is not None
+            and not is_loan_transfer
+            and transfer.transfer_type != "end of loan"
+        ):
+            prior_permanent_routes.setdefault((pid, ftid), []).append(
+                (ttid, transfer_datetime)
+            )
+
         can_move_from_parent = (
             ftid is not None
             and pid in loaned_by_parent.get(ftid, set())
@@ -499,7 +586,7 @@ def _match_transfers_statefully(
         elif ftid is not None and ttid is None and current_team_id == ftid:
             virtual_rosters[ftid].remove(pid)
 
-        if ftid is not None and (transfer.is_loan or transfer.transfer_type == "loan"):
+        if is_loan_transfer and ftid is not None:
             loaned_by_parent.setdefault(ftid, set()).add(pid)
         elif ftid is not None:
             loaned_by_parent.get(ftid, set()).discard(pid)
