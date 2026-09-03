@@ -21,8 +21,7 @@ The bundled [base save](base/EDIT00000000) requires:
 - **SmokePatch's National Squads Update**
 
 The bundled base save is based on [Gondowan's latest EDIT file](https://www.reddit.com/r/SPFootballLife/comments/1vvh129/release_gondowans_edit_file_22082026_latest/).
-We edited the Premier League game plans using the [MG-FOXHOUND Reddit tactics update](https://www.reddit.com/r/SPFootballLife/comments/1vzspt0/download_real_2627_premier_league_tactics_updated/) as our reference.
-A follow-up [MG-FOXHOUND tactics update](https://www.reddit.com/r/SPFootballLife/comments/1w13ecp/tactics_update/) is in progress with further Premier League tuning and a La Liga project; it is not included in this base yet.
+The Premier League game plans combine [MG-FOXHOUND's Reddit tactics update](https://www.reddit.com/r/SPFootballLife/comments/1vzspt0/download_real_2627_premier_league_tactics_updated/) with [Klashman69's EPL 26/27 tactics release](https://evoweb.uk/threads/pes-2021-tactics-discussion-real-teams-thread.84178/page-29), using Klashman's tactical settings while preserving the base's current FL26 roster data and EPL lineups.
 
 It is not compatible with UML, older FL26 versions, or installations without
 the national-squad update. Start a new Master League or Become a Legend career
