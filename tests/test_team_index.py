@@ -64,6 +64,52 @@ def test_curated_legacy_identity_wins_over_duplicate_sitemap_entry():
     assert all(item["fotmob_id"] != 1_802_179 for item in result)
 
 
+def test_curated_transfer_identities_stay_on_expected_pes_clubs():
+    pes = {
+        218: "Stade Rennais FC",
+        328: "Delfino Pescara",
+        4137: "FC Köln",
+        5454: "CA Platense",
+    }
+    fotmob = [
+        _team(9851, "Rennes"),
+        _team(9878, "Pescara"),
+        _team(8722, "1 FC Koln"),
+        _team(10089, "Club Atletico Platense"),
+        _team(519457, "Delfin"),
+        _team(49777, "Platense FC"),
+    ]
+    major = {
+        "Stade Rennais FC": 9851,
+        "Delfino Pescara": 9878,
+        "FC Köln": 8722,
+        "CA Platense": 10089,
+    }
+
+    result = build_validated_club_index(pes, fotmob, major)
+    by_pes_id = {item["pes_team_id"]: item for item in result}
+
+    assert {
+        pes_id: by_pes_id[pes_id]["fotmob_id"]
+        for pes_id in pes
+    } == {
+        218: 9851,
+        328: 9878,
+        4137: 8722,
+        5454: 10089,
+    }
+
+
+def test_fuzzy_index_rejects_short_unrelated_club_name():
+    result = build_validated_club_index(
+        {200: "Ceres Negros"},
+        [_team(2313, "Os")],
+        {},
+    )
+
+    assert result == []
+
+
 def test_sitemap_crawl_never_overwrites_index_after_partial_failure(
     monkeypatch, tmp_path
 ):

@@ -50,6 +50,26 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 1757,
+    "name": "America Mg",
+    "slug": "america-mg",
+    "url": "https://www.fotmob.com/teams/1757/overview/america-mg",
+    "pes_team_id": 2450,
+    "pes_team_name": "América Mineiro",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 1773,
+    "name": "Oh Leuven",
+    "slug": "oh-leuven",
+    "url": "https://www.fotmob.com/teams/1773/overview/oh-leuven",
+    "pes_team_id": 5217,
+    "pes_team_name": "Oud-Heverlee Leuven",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 1848,
     "name": "Sporting Cristal",
     "slug": "sporting-cristal",
@@ -410,6 +430,16 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 4401,
+    "name": "Bucaramanga",
+    "slug": "bucaramanga",
+    "url": "https://www.fotmob.com/teams/4401/overview/bucaramanga",
+    "pes_team_id": 5208,
+    "pes_team_name": "Atlético Bucaramanga",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 4403,
     "name": "Millonarios",
     "slug": "millonarios",
@@ -498,6 +528,16 @@
     "pes_team_name": "Eyüpspor",
     "match_score": 100.0,
     "identity_source": "unambiguous_name"
+  },
+  {
+    "fotmob_id": 4685,
+    "name": "Kasmpasa",
+    "slug": "kasmpasa",
+    "url": "https://www.fotmob.com/teams/4685/overview/kasmpasa",
+    "pes_team_id": 2625,
+    "pes_team_name": "Kasimpaşa SK",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
   },
   {
     "fotmob_id": 4688,
@@ -628,6 +668,16 @@
     "pes_team_name": "Club Cerro Porteño",
     "match_score": 98.0,
     "identity_source": "unambiguous_name"
+  },
+  {
+    "fotmob_id": 6296,
+    "name": "Ohiggins",
+    "slug": "ohiggins",
+    "url": "https://www.fotmob.com/teams/6296/overview/ohiggins",
+    "pes_team_id": 2541,
+    "pes_team_name": "CD O'Higgins",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
   },
   {
     "fotmob_id": 6304,
@@ -800,6 +850,16 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 6458,
+    "name": "Universidad Catolica",
+    "slug": "universidad-catolica",
+    "url": "https://www.fotmob.com/teams/6458/overview/universidad-catolica",
+    "pes_team_id": 2191,
+    "pes_team_name": "Universidad Católica",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 6479,
     "name": "Pisa",
     "slug": "pisa",
@@ -836,6 +896,16 @@
     "url": "https://www.fotmob.com/teams/6504/overview/monza",
     "pes_team_id": 4914,
     "pes_team_name": "AC Monza",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 6514,
+    "name": "Red Bull New York",
+    "slug": "red-bull-new-york",
+    "url": "https://www.fotmob.com/teams/6514/overview/red-bull-new-york",
+    "pes_team_id": 4158,
+    "pes_team_name": "New York RB",
     "match_score": 100.0,
     "identity_source": "major_clubs"
   },
@@ -1010,6 +1080,16 @@
     "identity_source": "major_clubs"
   },
   {
+    "fotmob_id": 7733,
+    "name": "Vitoria",
+    "slug": "vitoria",
+    "url": "https://www.fotmob.com/teams/7733/overview/vitoria",
+    "pes_team_id": 1937,
+    "pes_team_name": "EC Vitória",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 7753,
     "name": "Ofi Crete",
     "slug": "ofi-crete",
@@ -1070,6 +1150,16 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 7818,
+    "name": "Santa Fe",
+    "slug": "santa-fe",
+    "url": "https://www.fotmob.com/teams/7818/overview/santa-fe",
+    "pes_team_id": 2657,
+    "pes_team_name": "Independiente Santa Fe",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 7819,
     "name": "Caen",
     "slug": "caen",
@@ -1100,6 +1190,16 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 7844,
+    "name": "Vitoria De Guimaraes",
+    "slug": "vitoria-de-guimaraes",
+    "url": "https://www.fotmob.com/teams/7844/overview/vitoria-de-guimaraes",
+    "pes_team_id": 1804,
+    "pes_team_name": "Vitória Sport Clube",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 7849,
     "name": "Monterrey",
     "slug": "monterrey",
@@ -1128,6 +1228,16 @@
     "pes_team_name": "CD Leganés",
     "match_score": 98.0,
     "identity_source": "unambiguous_name"
+  },
+  {
+    "fotmob_id": 7869,
+    "name": "Cordoba",
+    "slug": "cordoba",
+    "url": "https://www.fotmob.com/teams/7869/overview/cordoba",
+    "pes_team_id": 359,
+    "pes_team_name": "Córdoba CF",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
   },
   {
     "fotmob_id": 7876,
@@ -1220,6 +1330,16 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 7998,
+    "name": "Partizan Beograd",
+    "slug": "partizan-beograd",
+    "url": "https://www.fotmob.com/teams/7998/overview/partizan-beograd",
+    "pes_team_id": 272,
+    "pes_team_name": "FK Partizan",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 8006,
     "name": "Nagoya Grampus",
     "slug": "nagoya-grampus",
@@ -1250,12 +1370,32 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 8071,
+    "name": "Agf",
+    "slug": "agf",
+    "url": "https://www.fotmob.com/teams/8071/overview/agf",
+    "pes_team_id": 2067,
+    "pes_team_name": "Aarhus GF",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 8113,
     "name": "Fc Midtjylland",
     "slug": "fc-midtjylland",
     "url": "https://www.fotmob.com/teams/8113/overview/fc-midtjylland",
     "pes_team_id": 2069,
     "pes_team_name": "FC Midtjylland",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 8120,
+    "name": "AE Larisa",
+    "slug": "",
+    "url": "https://www.fotmob.com/teams/8120/overview",
+    "pes_team_id": 9008,
+    "pes_team_name": "AE Larisa",
     "match_score": 100.0,
     "identity_source": "major_clubs"
   },
@@ -1278,6 +1418,16 @@
     "pes_team_name": "FC Union Berlin",
     "match_score": 98.0,
     "identity_source": "unambiguous_name"
+  },
+  {
+    "fotmob_id": 8152,
+    "name": "St Pauli",
+    "slug": "st-pauli",
+    "url": "https://www.fotmob.com/teams/8152/overview/st-pauli",
+    "pes_team_id": 4139,
+    "pes_team_name": "FC St. Pauli",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
   },
   {
     "fotmob_id": 8153,
@@ -1400,12 +1550,32 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 8287,
+    "name": "Fortaleza",
+    "slug": "fortaleza",
+    "url": "https://www.fotmob.com/teams/8287/overview/fortaleza",
+    "pes_team_id": 5143,
+    "pes_team_name": "Fortaleza EC",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 8302,
     "name": "Sevilla",
     "slug": "sevilla",
     "url": "https://www.fotmob.com/teams/8302/overview/sevilla",
     "pes_team_id": 265,
     "pes_team_name": "Sevilla FC",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 8304,
+    "name": "Nacional",
+    "slug": "nacional",
+    "url": "https://www.fotmob.com/teams/8304/overview/nacional",
+    "pes_team_id": 1262,
+    "pes_team_name": "Club Nacional",
     "match_score": 100.0,
     "identity_source": "major_clubs"
   },
@@ -1468,6 +1638,16 @@
     "pes_team_name": "Moreirense FC",
     "match_score": 98.0,
     "identity_source": "unambiguous_name"
+  },
+  {
+    "fotmob_id": 8355,
+    "name": "Botafogo Sp",
+    "slug": "botafogo-sp",
+    "url": "https://www.fotmob.com/teams/8355/overview/botafogo-sp",
+    "pes_team_id": 5139,
+    "pes_team_name": "Botafogo FC",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
   },
   {
     "fotmob_id": 8358,
@@ -1550,6 +1730,16 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 8402,
+    "name": "Bodoglimt",
+    "slug": "bodoglimt",
+    "url": "https://www.fotmob.com/teams/8402/overview/bodoglimt",
+    "pes_team_id": 5253,
+    "pes_team_name": "FK Bodø/Glimt",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 8406,
     "name": "Augsburg",
     "slug": "augsburg",
@@ -1580,6 +1770,16 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 8414,
+    "name": "Ob",
+    "slug": "ob",
+    "url": "https://www.fotmob.com/teams/8414/overview/ob",
+    "pes_team_id": 2070,
+    "pes_team_name": "Odense Boldklub",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 8415,
     "name": "Silkeborg",
     "slug": "silkeborg",
@@ -1598,6 +1798,16 @@
     "pes_team_name": "Bristol City",
     "match_score": 100.0,
     "identity_source": "unambiguous_name"
+  },
+  {
+    "fotmob_id": 8450,
+    "name": "Club Atletico Penarol",
+    "slug": "club-atletico-penarol",
+    "url": "https://www.fotmob.com/teams/8450/overview/club-atletico-penarol",
+    "pes_team_id": 1263,
+    "pes_team_name": "CA Peñarol",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
   },
   {
     "fotmob_id": 8451,
@@ -1710,6 +1920,16 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 8487,
+    "name": "Sonderjyske",
+    "slug": "sonderjyske",
+    "url": "https://www.fotmob.com/teams/8487/overview/sonderjyske",
+    "pes_team_id": 5226,
+    "pes_team_name": "Sønderjyske Fodbold",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 8514,
     "name": "Santos Fc",
     "slug": "santos-fc",
@@ -1718,6 +1938,26 @@
     "pes_team_name": "Santos FC",
     "match_score": 100.0,
     "identity_source": "unambiguous_name"
+  },
+  {
+    "fotmob_id": 8517,
+    "name": "Botafogo Rj",
+    "slug": "botafogo-rj",
+    "url": "https://www.fotmob.com/teams/8517/overview/botafogo-rj",
+    "pes_team_id": 1246,
+    "pes_team_name": "Botafogo",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 8521,
+    "name": "Brest",
+    "slug": "brest",
+    "url": "https://www.fotmob.com/teams/8521/overview/brest",
+    "pes_team_id": 1329,
+    "pes_team_name": "Stade Brestois",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
   },
   {
     "fotmob_id": 8524,
@@ -1950,6 +2190,16 @@
     "identity_source": "major_clubs"
   },
   {
+    "fotmob_id": 8595,
+    "name": "Brondby If",
+    "slug": "brondby-if",
+    "url": "https://www.fotmob.com/teams/8595/overview/brondby-if",
+    "pes_team_id": 1832,
+    "pes_team_name": "Bröndby IF",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 8596,
     "name": "Falkirk",
     "slug": "falkirk",
@@ -2146,6 +2396,16 @@
     "url": "https://www.fotmob.com/teams/8640/overview/psv-eindhoven",
     "pes_team_id": 118,
     "pes_team_name": "PSV Eindhoven",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 8643,
+    "name": "Spartak Moscow",
+    "slug": "spartak-moscow",
+    "url": "https://www.fotmob.com/teams/8643/overview/spartak-moscow",
+    "pes_team_id": 135,
+    "pes_team_name": "Spartak Moskva",
     "match_score": 100.0,
     "identity_source": "major_clubs"
   },
@@ -2430,6 +2690,16 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 8708,
+    "name": "Fk Akhmat",
+    "slug": "fk-akhmat",
+    "url": "https://www.fotmob.com/teams/8708/overview/fk-akhmat",
+    "pes_team_id": 5196,
+    "pes_team_name": "Akhmat Grozny",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 8709,
     "name": "Krylya Sovetov Samara",
     "slug": "krylya-sovetov-samara",
@@ -2440,12 +2710,32 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 8710,
+    "name": "Lokomotiv Moscow",
+    "slug": "lokomotiv-moscow",
+    "url": "https://www.fotmob.com/teams/8710/overview/lokomotiv-moscow",
+    "pes_team_id": 271,
+    "pes_team_name": "Lokomotiv Moskva",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 8721,
     "name": "Wolfsburg",
     "slug": "wolfsburg",
     "url": "https://www.fotmob.com/teams/8721/overview/wolfsburg",
     "pes_team_id": 232,
     "pes_team_name": "VfL Wolfsburg",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 8722,
+    "name": "1 Fc Koln",
+    "slug": "1-fc-koln",
+    "url": "https://www.fotmob.com/teams/8722/overview/1-fc-koln",
+    "pes_team_id": 4137,
+    "pes_team_name": "FC Köln",
     "match_score": 100.0,
     "identity_source": "major_clubs"
   },
@@ -2550,6 +2840,16 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 9760,
+    "name": "Cska Moscow",
+    "slug": "cska-moscow",
+    "url": "https://www.fotmob.com/teams/9760/overview/cska-moscow",
+    "pes_team_id": 1217,
+    "pes_team_name": "CSKA Moskva",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 9761,
     "name": "Nac Breda",
     "slug": "nac-breda",
@@ -2558,6 +2858,16 @@
     "pes_team_name": "NAC Breda",
     "match_score": 100.0,
     "identity_source": "unambiguous_name"
+  },
+  {
+    "fotmob_id": 9763,
+    "name": "Dinamo Moscow",
+    "slug": "dinamo-moscow",
+    "url": "https://www.fotmob.com/teams/9763/overview/dinamo-moscow",
+    "pes_team_id": 1753,
+    "pes_team_name": "Dinamo Moskva",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
   },
   {
     "fotmob_id": 9764,
@@ -2586,6 +2896,16 @@
     "url": "https://www.fotmob.com/teams/9768/overview/sporting-cp",
     "pes_team_id": 193,
     "pes_team_name": "Sporting CP",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 9769,
+    "name": "Gremio",
+    "slug": "gremio",
+    "url": "https://www.fotmob.com/teams/9769/overview/gremio",
+    "pes_team_id": 1250,
+    "pes_team_name": "Grêmio",
     "match_score": 100.0,
     "identity_source": "major_clubs"
   },
@@ -2688,6 +3008,16 @@
     "pes_team_name": "Heracles Almelo",
     "match_score": 100.0,
     "identity_source": "unambiguous_name"
+  },
+  {
+    "fotmob_id": 9800,
+    "name": "St Mirren",
+    "slug": "st-mirren",
+    "url": "https://www.fotmob.com/teams/9800/overview/st-mirren",
+    "pes_team_id": 1987,
+    "pes_team_name": "St. Mirren FC",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
   },
   {
     "fotmob_id": 9804,
@@ -2844,8 +3174,18 @@
     "name": "Rennes",
     "slug": "rennes",
     "url": "https://www.fotmob.com/teams/9851/overview/rennes",
-    "pes_team_id": 1528,
-    "pes_team_name": "Valenciennes FC",
+    "pes_team_id": 218,
+    "pes_team_name": "Stade Rennais FC",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 9853,
+    "name": "Saint Etienne",
+    "slug": "saint-etienne",
+    "url": "https://www.fotmob.com/teams/9853/overview/saint-etienne",
+    "pes_team_id": 418,
+    "pes_team_name": "AS Saint-Étienne",
     "match_score": 100.0,
     "identity_source": "major_clubs"
   },
@@ -2950,6 +3290,26 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 9873,
+    "name": "Valenciennes",
+    "slug": "valenciennes",
+    "url": "https://www.fotmob.com/teams/9873/overview/valenciennes",
+    "pes_team_id": 1528,
+    "pes_team_name": "Valenciennes FC",
+    "match_score": 98.0,
+    "identity_source": "unambiguous_name"
+  },
+  {
+    "fotmob_id": 9874,
+    "name": "Sochaux",
+    "slug": "sochaux",
+    "url": "https://www.fotmob.com/teams/9874/overview/sochaux",
+    "pes_team_id": 219,
+    "pes_team_name": "FC Sochaux-Montbéliard",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 9875,
     "name": "Napoli",
     "slug": "napoli",
@@ -2970,12 +3330,32 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 9878,
+    "name": "Delfino Pescara",
+    "slug": "",
+    "url": "https://www.fotmob.com/teams/9878/overview",
+    "pes_team_id": 328,
+    "pes_team_name": "Delfino Pescara",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 9879,
     "name": "Fulham",
     "slug": "fulham",
     "url": "https://www.fotmob.com/teams/9879/overview/fulham",
     "pes_team_id": 178,
     "pes_team_name": "Fulham FC",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 9881,
+    "name": "Spezia Calcio",
+    "slug": "",
+    "url": "https://www.fotmob.com/teams/9881/overview",
+    "pes_team_id": 1600,
+    "pes_team_name": "Spezia Calcio",
     "match_score": 100.0,
     "identity_source": "major_clubs"
   },
@@ -3170,6 +3550,16 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 9976,
+    "name": "SSC Bari",
+    "slug": "",
+    "url": "https://www.fotmob.com/teams/9976/overview",
+    "pes_team_id": 319,
+    "pes_team_name": "SSC Bari",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 9977,
     "name": "Lask",
     "slug": "lask",
@@ -3200,6 +3590,16 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 9986,
+    "name": "Sporting Charleroi",
+    "slug": "sporting-charleroi",
+    "url": "https://www.fotmob.com/teams/9986/overview/sporting-charleroi",
+    "pes_team_id": 2010,
+    "pes_team_name": "RSC Charleroi",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 9987,
     "name": "Genk",
     "slug": "genk",
@@ -3228,6 +3628,16 @@
     "pes_team_name": "KAA Gent",
     "match_score": 98.0,
     "identity_source": "unambiguous_name"
+  },
+  {
+    "fotmob_id": 9997,
+    "name": "Sttruiden",
+    "slug": "sttruiden",
+    "url": "https://www.fotmob.com/teams/9997/overview/sttruiden",
+    "pes_team_id": 5194,
+    "pes_team_name": "Sint-Truiden VV",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
   },
   {
     "fotmob_id": 10000,
@@ -3350,6 +3760,16 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 10082,
+    "name": "Lanus",
+    "slug": "lanus",
+    "url": "https://www.fotmob.com/teams/10082/overview/lanus",
+    "pes_team_id": 1929,
+    "pes_team_name": "Club Atlético Lanús",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 10083,
     "name": "San Lorenzo",
     "slug": "san-lorenzo",
@@ -3390,6 +3810,36 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 10089,
+    "name": "Club Atletico Platense",
+    "slug": "club-atletico-platense",
+    "url": "https://www.fotmob.com/teams/10089/overview/club-atletico-platense",
+    "pes_team_id": 5454,
+    "pes_team_name": "CA Platense",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 10090,
+    "name": "Instituto",
+    "slug": "instituto",
+    "url": "https://www.fotmob.com/teams/10090/overview/instituto",
+    "pes_team_id": 2727,
+    "pes_team_name": "Instituto AC Córdoba",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 10092,
+    "name": "Belgrano",
+    "slug": "belgrano",
+    "url": "https://www.fotmob.com/teams/10092/overview/belgrano",
+    "pes_team_id": 2536,
+    "pes_team_name": "Club Atlético Belgrano",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 10094,
     "name": "Estudiantes",
     "slug": "estudiantes",
@@ -3398,6 +3848,26 @@
     "pes_team_name": "Estudiantes de la Plata",
     "match_score": 100.0,
     "identity_source": "unambiguous_name"
+  },
+  {
+    "fotmob_id": 10101,
+    "name": "Talleres",
+    "slug": "talleres",
+    "url": "https://www.fotmob.com/teams/10101/overview/talleres",
+    "pes_team_id": 5046,
+    "pes_team_name": "Club Atlético Talleres",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 10103,
+    "name": "Gimnasia Lp",
+    "slug": "gimnasia-lp",
+    "url": "https://www.fotmob.com/teams/10103/overview/gimnasia-lp",
+    "pes_team_id": 1239,
+    "pes_team_name": "Gimnasia La Plata",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
   },
   {
     "fotmob_id": 10154,
@@ -3560,6 +4030,16 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 10202,
+    "name": "Nordsjaelland",
+    "slug": "nordsjaelland",
+    "url": "https://www.fotmob.com/teams/10202/overview/nordsjaelland",
+    "pes_team_id": 1208,
+    "pes_team_name": "FC Nordsjælland",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 10203,
     "name": "Nottingham Forest",
     "slug": "nottingham-forest",
@@ -3586,6 +4066,16 @@
     "url": "https://www.fotmob.com/teams/10205/overview/villarreal",
     "pes_team_id": 267,
     "pes_team_name": "Villarreal CF",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 10214,
+    "name": "Nacional",
+    "slug": "nacional",
+    "url": "https://www.fotmob.com/teams/10214/overview/nacional",
+    "pes_team_id": 1944,
+    "pes_team_name": "CD Nacional",
     "match_score": 100.0,
     "identity_source": "major_clubs"
   },
@@ -3770,6 +4260,16 @@
     "identity_source": "major_clubs"
   },
   {
+    "fotmob_id": 10272,
+    "name": "Atletico Mg",
+    "slug": "atletico-mg",
+    "url": "https://www.fotmob.com/teams/10272/overview/atletico-mg",
+    "pes_team_id": 1245,
+    "pes_team_name": "Atlético Mineiro",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 10273,
     "name": "Athletico Paranaense",
     "slug": "athletico-paranaense",
@@ -3910,16 +4410,6 @@
     "identity_source": "unambiguous_name"
   },
   {
-    "fotmob_id": 49777,
-    "name": "Platense Fc",
-    "slug": "platense-fc",
-    "url": "https://www.fotmob.com/teams/49777/overview/platense-fc",
-    "pes_team_id": 5454,
-    "pes_team_name": "CA Platense",
-    "match_score": 90.9,
-    "identity_source": "unambiguous_name"
-  },
-  {
     "fotmob_id": 51442,
     "name": "Henan Fc",
     "slug": "henan-fc",
@@ -3928,6 +4418,16 @@
     "pes_team_name": "Henan FC",
     "match_score": 100.0,
     "identity_source": "unambiguous_name"
+  },
+  {
+    "fotmob_id": 51443,
+    "name": "Zhejiang Professional",
+    "slug": "zhejiang-professional",
+    "url": "https://www.fotmob.com/teams/51443/overview/zhejiang-professional",
+    "pes_team_id": 5180,
+    "pes_team_name": "Zhejiang FC",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
   },
   {
     "fotmob_id": 67366,
@@ -3958,6 +4458,16 @@
     "pes_team_name": "Asteras Tripolis",
     "match_score": 100.0,
     "identity_source": "unambiguous_name"
+  },
+  {
+    "fotmob_id": 89396,
+    "name": "Tigre",
+    "slug": "tigre",
+    "url": "https://www.fotmob.com/teams/89396/overview/tigre",
+    "pes_team_id": 1926,
+    "pes_team_name": "Club Atlético Tigre",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
   },
   {
     "fotmob_id": 94937,
@@ -4020,6 +4530,56 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 101656,
+    "name": "Al Quwa Al Jawiya",
+    "slug": "al-quwa-al-jawiya",
+    "url": "https://www.fotmob.com/teams/101656/overview/al-quwa-al-jawiya",
+    "pes_team_id": 70923,
+    "pes_team_name": "Air Force Club",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 101688,
+    "name": "Al Hussein SC",
+    "slug": "",
+    "url": "https://www.fotmob.com/teams/101688/overview",
+    "pes_team_id": 71576,
+    "pes_team_name": "Al Hussein SC",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 101690,
+    "name": "Al Wehdat SC",
+    "slug": "",
+    "url": "https://www.fotmob.com/teams/101690/overview",
+    "pes_team_id": 70490,
+    "pes_team_name": "Al Wehdat SC",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 101713,
+    "name": "Kuwait Sc",
+    "slug": "kuwait-sc",
+    "url": "https://www.fotmob.com/teams/101713/overview/kuwait-sc",
+    "pes_team_id": 4171,
+    "pes_team_name": "Al Kuwait SC",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 101745,
+    "name": "Al Ahly Sc",
+    "slug": "al-ahly-sc",
+    "url": "https://www.fotmob.com/teams/101745/overview/al-ahly-sc",
+    "pes_team_id": 9029,
+    "pes_team_name": "El Ahly Cairo",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 101895,
     "name": "Al Sadd",
     "slug": "al-sadd",
@@ -4070,6 +4630,16 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 101916,
+    "name": "Al Shabab",
+    "slug": "al-shabab",
+    "url": "https://www.fotmob.com/teams/101916/overview/al-shabab",
+    "pes_team_id": 1348,
+    "pes_team_name": "Al Shabab Club",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 101918,
     "name": "Al Nassr Fc",
     "slug": "al-nassr-fc",
@@ -4110,6 +4680,16 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 102124,
+    "name": "Sharjah Cultural Club",
+    "slug": "sharjah-cultural-club",
+    "url": "https://www.fotmob.com/teams/102124/overview/sharjah-cultural-club",
+    "pes_team_id": 71212,
+    "pes_team_name": "Sharjah FC",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 102141,
     "name": "Pakhtakor Tashkent",
     "slug": "pakhtakor-tashkent",
@@ -4138,6 +4718,26 @@
     "pes_team_name": "True Bangkok United",
     "match_score": 100.0,
     "identity_source": "unambiguous_name"
+  },
+  {
+    "fotmob_id": 104814,
+    "name": "Panserraikos FC",
+    "slug": "",
+    "url": "https://www.fotmob.com/teams/104814/overview",
+    "pes_team_id": 9019,
+    "pes_team_name": "Panserraikos FC",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 104821,
+    "name": "Crb",
+    "slug": "crb",
+    "url": "https://www.fotmob.com/teams/104821/overview/crb",
+    "pes_team_id": 2506,
+    "pes_team_name": "Clube de Regatas Brasil",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
   },
   {
     "fotmob_id": 104822,
@@ -4400,6 +5000,16 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 165545,
+    "name": "Atletico Go",
+    "slug": "atletico-go",
+    "url": "https://www.fotmob.com/teams/165545/overview/atletico-go",
+    "pes_team_id": 2451,
+    "pes_team_name": "Atlético Goianiense",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 168719,
     "name": "Fc Krasnodar",
     "slug": "fc-krasnodar",
@@ -4490,6 +5100,26 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 193025,
+    "name": "Aguilas Doradas",
+    "slug": "aguilas-doradas",
+    "url": "https://www.fotmob.com/teams/193025/overview/aguilas-doradas",
+    "pes_team_id": 2653,
+    "pes_team_name": "Rionegro Águilas",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 193029,
+    "name": "Alianza Fc",
+    "slug": "alianza-fc",
+    "url": "https://www.fotmob.com/teams/193029/overview/alianza-fc",
+    "pes_team_id": 5207,
+    "pes_team_name": "Alianza FC",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 194011,
     "name": "Machida Zelvia",
     "slug": "machida-zelvia",
@@ -4500,6 +5130,16 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 194016,
+    "name": "V Varen Nagasaki",
+    "slug": "v-varen-nagasaki",
+    "url": "https://www.fotmob.com/teams/194016/overview/v-varen-nagasaki",
+    "pes_team_id": 2373,
+    "pes_team_name": "V-Varen Nagasaki",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 195601,
     "name": "Pfc Sochi",
     "slug": "pfc-sochi",
@@ -4508,6 +5148,16 @@
     "pes_team_name": "FC Sochi",
     "match_score": 94.1,
     "identity_source": "unambiguous_name"
+  },
+  {
+    "fotmob_id": 197429,
+    "name": "Operario Ferroviario",
+    "slug": "operario-ferroviario",
+    "url": "https://www.fotmob.com/teams/197429/overview/operario-ferroviario",
+    "pes_team_id": 5433,
+    "pes_team_name": "Operário PR",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
   },
   {
     "fotmob_id": 197693,
@@ -4610,6 +5260,16 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 213596,
+    "name": "Central Cordoba De Santiago",
+    "slug": "central-cordoba-de-santiago",
+    "url": "https://www.fotmob.com/teams/213596/overview/central-cordoba-de-santiago",
+    "pes_team_id": 4995,
+    "pes_team_name": "Central Córdoba SDE",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 231931,
     "name": "Sao Bernardo",
     "slug": "sao-bernardo",
@@ -4618,6 +5278,16 @@
     "pes_team_name": "São Bernardo FC",
     "match_score": 98.0,
     "identity_source": "unambiguous_name"
+  },
+  {
+    "fotmob_id": 244167,
+    "name": "Fortaleza Fc",
+    "slug": "fortaleza-fc",
+    "url": "https://www.fotmob.com/teams/244167/overview/fortaleza-fc",
+    "pes_team_id": 5371,
+    "pes_team_name": "Fortaleza CEIF",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
   },
   {
     "fotmob_id": 245905,
@@ -4720,6 +5390,26 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 424270,
+    "name": "Cd Jaguares",
+    "slug": "cd-jaguares",
+    "url": "https://www.fotmob.com/teams/424270/overview/cd-jaguares",
+    "pes_team_id": 5376,
+    "pes_team_name": "Jaguares de Córdoba",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 488099,
+    "name": "Kifisia Fc",
+    "slug": "kifisia-fc",
+    "url": "https://www.fotmob.com/teams/488099/overview/kifisia-fc",
+    "pes_team_id": 9020,
+    "pes_team_name": "AE Kifisias",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 494050,
     "name": "Fc Andorra",
     "slug": "fc-andorra",
@@ -4727,16 +5417,6 @@
     "pes_team_id": 5644,
     "pes_team_name": "FC Andorra",
     "match_score": 100.0,
-    "identity_source": "unambiguous_name"
-  },
-  {
-    "fotmob_id": 519457,
-    "name": "Delfin",
-    "slug": "delfin",
-    "url": "https://www.fotmob.com/teams/519457/overview/delfin",
-    "pes_team_id": 328,
-    "pes_team_name": "Delfino Pescara",
-    "match_score": 90.0,
     "identity_source": "unambiguous_name"
   },
   {
@@ -4770,6 +5450,26 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 578651,
+    "name": "Mohun Bagan Sg",
+    "slug": "mohun-bagan-sg",
+    "url": "https://www.fotmob.com/teams/578651/overview/mohun-bagan-sg",
+    "pes_team_id": 71574,
+    "pes_team_name": "Mohun Bagan Super Giant",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 581838,
+    "name": "Novorizontino",
+    "slug": "novorizontino",
+    "url": "https://www.fotmob.com/teams/581838/overview/novorizontino",
+    "pes_team_id": 5768,
+    "pes_team_name": "Grêmio Novorizontino",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 582739,
     "name": "Al Riyadh",
     "slug": "al-riyadh",
@@ -4788,6 +5488,26 @@
     "pes_team_name": "Al Fayha FC",
     "match_score": 98.0,
     "identity_source": "unambiguous_name"
+  },
+  {
+    "fotmob_id": 582759,
+    "name": "Al Okhdood Club",
+    "slug": "",
+    "url": "https://www.fotmob.com/teams/582759/overview",
+    "pes_team_id": 9005,
+    "pes_team_name": "Al Okhdood Club",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 582823,
+    "name": "Damac FC",
+    "slug": "",
+    "url": "https://www.fotmob.com/teams/582823/overview",
+    "pes_team_id": 9003,
+    "pes_team_name": "Damac FC",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
   },
   {
     "fotmob_id": 583944,
@@ -4820,22 +5540,32 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 606032,
+    "name": "FC Istiqlol Dushanbe",
+    "slug": "",
+    "url": "https://www.fotmob.com/teams/606032/overview",
+    "pes_team_id": 71135,
+    "pes_team_name": "FC Istiqlol Dushanbe",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 612493,
+    "name": "Kaya FC-Iloilo",
+    "slug": "",
+    "url": "https://www.fotmob.com/teams/612493/overview",
+    "pes_team_id": 71311,
+    "pes_team_name": "Kaya FC-Iloilo",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 657508,
     "name": "Nizhny Novgorod",
     "slug": "nizhny-novgorod",
     "url": "https://www.fotmob.com/teams/657508/overview/nizhny-novgorod",
     "pes_team_id": 5300,
     "pes_team_name": "FC Pari Nizhny Novgorod",
-    "match_score": 100.0,
-    "identity_source": "unambiguous_name"
-  },
-  {
-    "fotmob_id": 672088,
-    "name": "Fc Koln",
-    "slug": "fc-koln",
-    "url": "https://www.fotmob.com/teams/672088/overview/fc-koln",
-    "pes_team_id": 4137,
-    "pes_team_name": "FC Köln",
     "match_score": 100.0,
     "identity_source": "unambiguous_name"
   },
@@ -4890,6 +5620,16 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 885256,
+    "name": "Nfc Volos",
+    "slug": "nfc-volos",
+    "url": "https://www.fotmob.com/teams/885256/overview/nfc-volos",
+    "pes_team_id": 2555,
+    "pes_team_name": "Volos NPS",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 915807,
     "name": "Nashville Sc",
     "slug": "nashville-sc",
@@ -4930,6 +5670,26 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 1068353,
+    "name": "Dynamo Makhachkala",
+    "slug": "dynamo-makhachkala",
+    "url": "https://www.fotmob.com/teams/1068353/overview/dynamo-makhachkala",
+    "pes_team_id": 9015,
+    "pes_team_name": "Dinamo Makhachkala",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
+    "fotmob_id": 1068364,
+    "name": "Akron Togliatti",
+    "slug": "akron-togliatti",
+    "url": "https://www.fotmob.com/teams/1068364/overview/akron-togliatti",
+    "pes_team_id": 9016,
+    "pes_team_name": "Akron Tolyatti",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 1074320,
     "name": "Estrela Da Amadora",
     "slug": "estrela-da-amadora",
@@ -4958,6 +5718,16 @@
     "pes_team_name": "RAAL La Louvière",
     "match_score": 100.0,
     "identity_source": "unambiguous_name"
+  },
+  {
+    "fotmob_id": 1221604,
+    "name": "Athletic Club",
+    "slug": "athletic-club",
+    "url": "https://www.fotmob.com/teams/1221604/overview/athletic-club",
+    "pes_team_id": 5973,
+    "pes_team_name": "Athletic Club",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
   },
   {
     "fotmob_id": 1283248,
@@ -5008,6 +5778,16 @@
     "pes_team_name": "Al Kholood Club",
     "match_score": 98.0,
     "identity_source": "unambiguous_name"
+  },
+  {
+    "fotmob_id": 1523707,
+    "name": "Al Najma SC",
+    "slug": "",
+    "url": "https://www.fotmob.com/teams/1523707/overview",
+    "pes_team_id": 9006,
+    "pes_team_name": "Al Najma SC",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
   },
   {
     "fotmob_id": 1552577,

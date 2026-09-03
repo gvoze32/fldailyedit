@@ -102,6 +102,19 @@ def _rank_club_name(pes_name: str, fotmob_name: str) -> tuple[int, float]:
         return 2, 98.0
     return 1, _score_club_name(pes_name, fotmob_name)
 
+def _has_meaningful_fuzzy_overlap(pes_name: str, fotmob_name: str) -> bool:
+    """Require a substantive token link for fuzzy-only club matches."""
+    pes_tokens = set(_clean_club_name(pes_name).split())
+    fotmob_tokens = set(_clean_club_name(fotmob_name).split())
+    if any(len(token) >= 3 for token in pes_tokens & fotmob_tokens):
+        return True
+    for pes_token in pes_tokens:
+        for fotmob_token in fotmob_tokens:
+            shorter, longer = sorted((pes_token, fotmob_token), key=len)
+            if len(shorter) >= 4 and longer.startswith(shorter):
+                return True
+    return False
+
 
 def build_validated_club_index(
     pes_clubs: dict[int, str],
@@ -195,6 +208,10 @@ def build_validated_club_index(
             if len(legacy_candidates) != 1:
                 continue
             best_tier, best_score, best = legacy_candidates[0]
+        if best_tier == 1 and not _has_meaningful_fuzzy_overlap(
+            pes_name, best["name"]
+        ):
+            continue
         proposals[pes_team_id] = (best_score, best)
 
     proposed_by_fotmob: dict[int, list[int]] = defaultdict(list)
