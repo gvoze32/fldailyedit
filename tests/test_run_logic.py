@@ -272,7 +272,7 @@ def test_local_runtime_apply_forwards_overflow_release_permission(
             self.move_kwargs = kwargs
             return True
 
-        def repair_goalkeeper_game_plans(self):
+        def repair_game_plan_positions(self):
             self.repair_called = True
             return {
                 "repaired_goalkeeper_roles": 1,

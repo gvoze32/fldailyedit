@@ -457,7 +457,7 @@ def test_repair_game_plans_moves_goalkeeper_out_of_striker_role():
                 game_plan_offset + preset_offset + phase_offset + 11
             ] = bytes([0, 12] + [1] * 9)
 
-    metrics = edit_file.repair_goalkeeper_game_plans()
+    metrics = edit_file.repair_game_plan_positions()
     lineup = list(edit_file._data[lineup_offset : lineup_offset + 11])
 
     assert lineup[:2] == [1, 0]
@@ -469,9 +469,52 @@ def test_repair_game_plans_moves_goalkeeper_out_of_striker_role():
             ] == 0
             assert edit_file._data[
                 game_plan_offset + preset_offset + phase_offset + 1
-            ] == 12
+            ] == 9
 
 
+
+def test_repair_game_plan_positions_restores_registered_outfield_roles():
+    from tests.test_editor import _build_mock_data
+
+    data = _build_mock_data(
+        num_players=40,
+        num_teams=1,
+        num_team_player=1,
+        num_game_plans=1,
+        team_player_entries=[
+            (101, list(range(1000, 1040)), list(range(1, 41))),
+        ],
+        league_team_ids=[101],
+    )
+    edit_file = EditFile()
+    edit_file.load_bytes(data)
+    edit_file.attach_playerbin(
+        PlayerBinDatabase(
+            {
+                1000: PlayerBinRecord(1000, "Marco Palestra", 20, "RB", 0),
+                1001: PlayerBinRecord(1001, "Cole Palmer", 23, "AMF", 0),
+            }
+        )
+    )
+    game_plan_offset = edit_file.game_plan_start
+    for preset_offset in GP_POSITION_PRESETS:
+        for phase_offset in GP_POSITION_PHASE_OFFSETS:
+            edit_file._data[
+                game_plan_offset + preset_offset + phase_offset :
+                game_plan_offset + preset_offset + phase_offset + 11
+            ] = bytes([12, 4] + [1] * 9)
+
+    metrics = edit_file.repair_game_plan_positions()
+
+    assert metrics["repaired_position_bytes"] == 18
+    for preset_offset in GP_POSITION_PRESETS:
+        for phase_offset in GP_POSITION_PHASE_OFFSETS:
+            assert edit_file._data[
+                game_plan_offset + preset_offset + phase_offset
+            ] == 3
+            assert edit_file._data[
+                game_plan_offset + preset_offset + phase_offset + 1
+            ] == 8
 def test_goalkeeper_addition_uses_transfer_position_for_game_plan_role():
     from tests.test_editor import _build_mock_data
 

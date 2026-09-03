@@ -1567,7 +1567,7 @@ class EditFile:
         if same_outfield_class:
             return same_outfield_class[0]
         return None
-    def _repair_game_plan_goalkeeper_positions(
+    def _repair_game_plan_positions(
         self,
         game_plan_offset: int,
         roster: TeamData,
@@ -1575,7 +1575,7 @@ class EditFile:
         *,
         position_overrides: dict[int, str] | None = None,
     ) -> tuple[int, int]:
-        """Keep known goalkeepers out of outfield game-plan roles."""
+        """Align known starters with their registered game-plan positions."""
         starter_count = min(FIRST_TEAM_SLOT_COUNT, roster.roster_size)
         if len(lineup) < starter_count:
             return 0, 0
@@ -1628,13 +1628,7 @@ class EditFile:
                     if position_address >= len(self._data):
                         continue
                     current_code = self._data[position_address]
-                    desired_code = (
-                        0
-                        if registered_code == 0
-                        else registered_code
-                        if current_code == 0
-                        else current_code
-                    )
+                    desired_code = registered_code
                     if current_code != desired_code:
                         self._data[position_address] = desired_code
                         repaired_positions += 1
@@ -1772,7 +1766,7 @@ class EditFile:
         self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS] = bytes(
             new_lineup
         )
-        self._repair_game_plan_goalkeeper_positions(
+        self._repair_game_plan_positions(
             gp_offset,
             roster,
             new_lineup,
@@ -1858,7 +1852,7 @@ class EditFile:
             if added_position
             else None
         )
-        self._repair_game_plan_goalkeeper_positions(
+        self._repair_game_plan_positions(
             gp_offset,
             roster,
             lineup,
@@ -1867,8 +1861,8 @@ class EditFile:
 
 
 
-    def repair_goalkeeper_game_plans(self) -> dict[str, int]:
-        """Repair goalkeeper roles without rewriting other tactical data."""
+    def repair_game_plan_positions(self) -> dict[str, int]:
+        """Repair registered positions without rewriting ratings or other tactical settings."""
         rosters = self.get_all_rosters()
         repaired_goalkeeper_roles = 0
         repaired_position_bytes = 0
@@ -1891,7 +1885,7 @@ class EditFile:
 
             checked += 1
             role_repairs, position_repairs = (
-                self._repair_game_plan_goalkeeper_positions(
+                self._repair_game_plan_positions(
                     offset,
                     roster,
                     lineup,
@@ -1924,6 +1918,7 @@ class EditFile:
         active slots are appended, duplicate/empty references are displaced to
         the inactive tail, and roles pointing outside the active roster are reset
         to the game's automatic value (0xFF).
+        Known starter position codes are restored from attached player metadata.
         """
         rosters = self.get_all_rosters()
         repaired_lineups = 0
@@ -1964,7 +1959,7 @@ class EditFile:
                 )
                 repaired_lineups += 1
 
-            role_repairs, position_repairs = self._repair_game_plan_goalkeeper_positions(
+            role_repairs, position_repairs = self._repair_game_plan_positions(
                 offset,
                 roster,
                 lineup,
