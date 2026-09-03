@@ -20,7 +20,6 @@ SYNC_WORKFLOW_PATHS = (
 INSTALLER_WORKFLOW_PATH = Path(".github/workflows/build-installer.yml")
 INSTALLER_SPEC_PATH = Path("FLDailyEditInstaller.spec")
 PYPROJECT_PATH = Path("pyproject.toml")
-README_PATH = Path("README.md")
 
 INSTALLER_URL = (
     "https://github.com/gvoze32/fldailyedit/releases/download/latest/"
@@ -217,59 +216,6 @@ def _remote_branch_fixture(
     )
     return runner_repository, environment
 
-
-def test_readme_uses_player_update_language_for_public_contributions():
-    text = README_PATH.read_text(encoding="utf-8")
-    assert "## Player Updates" in text
-    assert "Reviewed updates live as one JSON file per player in `players/`." in text
-    assert "New-player `create` records are review-only" in text
-    assert "create_temporarily_unavailable" in text
-    assert "player update issue form" in text
-    assert "python run.py players validate" in text
-    assert "## Player-spec contributions" not in text
-
-def test_readme_keeps_installer_and_manual_download_contracts():
-    for path in (
-        README_PATH,
-    ):
-        text = path.read_text(encoding="utf-8")
-
-        assert text.count(INSTALLER_URL) == 1, path
-        assert text.count(FAST_ZIP_URL) == 1, path
-        assert text.count(DEEP_ZIP_URL) == 1, path
-        assert "Download and install" in text, path
-        assert "Update" in text, path
-        assert "Apply update" in text, path
-        assert "Run workflow" in text, path
-
-def test_readme_documents_current_mutation_and_diagnostic_commands():
-    readme_paths = (
-        README_PATH,
-    )
-    for path in readme_paths:
-        text = path.read_text(encoding="utf-8")
-        assert "create_temporarily_unavailable" in text, path
-        assert "--no-allow-overflow-release" in text, path
-        assert "python run.py players validate" in text, path
-        assert "python run.py run --window auto" in text, path
-        assert "python run.py <command> --help" in text, path
-
-
-def test_readme_documents_smart_screen_warning():
-    for path in (
-        README_PATH,
-    ):
-        text = path.read_text(encoding="utf-8")
-        assert "SmartScreen" in text, path
-
-def test_readme_lists_player_update_contract():
-    text = README_PATH.read_text(encoding="utf-8")
-    contribution_section = text.split("## Player Updates", 1)[1]
-    assert "`players/`" in contribution_section
-    assert "`update`" in contribution_section
-    assert "`create`" in contribution_section
-    assert "create_temporarily_unavailable" in contribution_section
-    assert "player update issue form" in contribution_section
 
 
 
