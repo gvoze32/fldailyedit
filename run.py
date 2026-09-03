@@ -2380,6 +2380,23 @@ class _RunLocalUpdateRuntime:
                 }
             )
 
+        repair_goalkeeper_game_plans = getattr(
+            prepared.edit_file,
+            "repair_goalkeeper_game_plans",
+            None,
+        )
+        if callable(repair_goalkeeper_game_plans):
+            repair_metrics = repair_goalkeeper_game_plans()
+            if (
+                repair_metrics["repaired_goalkeeper_roles"]
+                or repair_metrics["repaired_position_bytes"]
+            ):
+                print(
+                    "  Goalkeeper game-plan repairs: "
+                    f"{repair_metrics['repaired_goalkeeper_roles']} role(s), "
+                    f"{repair_metrics['repaired_position_bytes']} position byte(s)"
+                )
+
         print(
             f"\n  Transfers applied: {transfer_applied}, "
             f"shirt numbers changed: {shirt_numbers_applied}, "
