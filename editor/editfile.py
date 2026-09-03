@@ -137,10 +137,12 @@ GP_SINGLE_PLAYER_ROLES = (
     GP_CAPTAIN,
 )
 
-# Each game-plan preset stores 40 four-byte position codes before GP_LINEUP.
-# The codes use the same order as Player.bin's registered positions.
+# Each preset stores three 11-byte player-position arrays before GP_LINEUP:
+# kickoff, in possession, and out of possession. The codes use the same
+# order as Player.bin's registered positions.
 GP_POSITION_PRESETS = (0x004, 0x0A4, 0x144)
-GP_POSITION_ENTRY_SIZE = 4
+GP_POSITION_PHASE_OFFSETS = (0x000, 0x021, 0x042)
+GP_POSITION_ENTRY_SIZE = 1
 
 _GOALKEEPER_POSITION_LABELS = frozenset({"GK", "GOALKEEPER", "KEEPER", "GOALIE"})
 
@@ -1525,6 +1527,39 @@ class EditFile:
         if same_outfield_class:
             return same_outfield_class[0]
         return None
+    def _repair_game_plan_goalkeeper_positions(
+        self,
+        game_plan_offset: int,
+        roster: TeamData,
+        lineup: list[int],
+    ) -> int:
+        """Keep known goalkeepers at the goalkeeper position in each preset."""
+        starter_count = min(FIRST_TEAM_SLOT_COUNT, roster.roster_size)
+        if len(lineup) < starter_count:
+            return 0
+
+        repaired = 0
+        for role, slot in enumerate(lineup[:starter_count]):
+            if not 0 <= slot < TP_MAX_PLAYERS:
+                continue
+            player_id = roster.player_ids[slot]
+            position = (self.get_player_position(player_id) or "").strip().upper()
+            if not player_id or position not in _GOALKEEPER_POSITION_LABELS:
+                continue
+            for preset_offset in GP_POSITION_PRESETS:
+                for phase_offset in GP_POSITION_PHASE_OFFSETS:
+                    position_address = (
+                        game_plan_offset
+                        + preset_offset
+                        + phase_offset
+                        + role * GP_POSITION_ENTRY_SIZE
+                    )
+                    if position_address >= len(self._data):
+                        continue
+                    if self._data[position_address] != 0:
+                        self._data[position_address] = 0
+                        repaired += 1
+        return repaired
 
     def _update_game_plan_after_removal(
         self,
@@ -1659,6 +1694,11 @@ class EditFile:
         self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS] = bytes(
             new_lineup
         )
+        self._repair_game_plan_goalkeeper_positions(
+            gp_offset,
+            roster,
+            new_lineup,
+        )
 
         for role_offset in GP_SINGLE_PLAYER_ROLES:
             target_offset = gp_offset + role_offset
@@ -1728,6 +1768,11 @@ class EditFile:
         self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS] = bytes(
             lineup
         )
+        self._repair_game_plan_goalkeeper_positions(
+            gp_offset,
+            roster,
+            lineup,
+        )
 
 
 
@@ -1752,6 +1797,7 @@ class EditFile:
         """
         rosters = self.get_all_rosters()
         repaired_lineups = 0
+        repaired_goalkeeper_positions = 0
         reset_roles = 0
         checked = 0
 
@@ -1787,6 +1833,11 @@ class EditFile:
                 )
                 repaired_lineups += 1
 
+            repaired_goalkeeper_positions += self._repair_game_plan_goalkeeper_positions(
+                offset,
+                roster,
+                lineup,
+            )
             role_offsets = list(GP_SINGLE_PLAYER_ROLES)
             role_offsets.extend(GP_ATTACK_PLAYERS + index for index in range(3))
             for role_offset in role_offsets:
@@ -1800,6 +1851,7 @@ class EditFile:
             "checked_game_plans": checked,
             "repaired_lineups": repaired_lineups,
             "reset_roles": reset_roles,
+            "repaired_goalkeeper_positions": repaired_goalkeeper_positions,
         }
 
     # ──────────────────────────────────────────────────────────
@@ -1826,35 +1878,41 @@ class EditFile:
         lineup: list[int],
         errors: list[str],
     ) -> int:
-        """Validate goalkeeper starter position codes when Player.bin is attached."""
+        """Validate goalkeeper starter position codes when metadata is attached."""
         if getattr(self, "playerbin_db", None) is None:
             return 0
-        starter_slots = lineup[: min(11, roster.roster_size)]
+        starter_slots = lineup[: min(FIRST_TEAM_SLOT_COUNT, roster.roster_size)]
         checks = 0
         for role, slot in enumerate(starter_slots):
             player_id = roster.player_ids[slot] if 0 <= slot < TP_MAX_PLAYERS else 0
             if not player_id:
                 continue
-            registered_position = (self.get_player_position(player_id) or "").upper()
-            if registered_position != "GK":
+            registered_position = (self.get_player_position(player_id) or "").strip().upper()
+            if registered_position not in _GOALKEEPER_POSITION_LABELS:
                 continue
             for preset_offset in GP_POSITION_PRESETS:
-                position_address = (
-                    offset
-                    + preset_offset
-                    + role * GP_POSITION_ENTRY_SIZE
-                )
-                if position_address + GP_POSITION_ENTRY_SIZE > len(self._data):
-                    continue
-                position_code = struct.unpack_from(
-                    "<I", self._data, position_address
-                )[0] & 0xFF
-                checks += 1
-                if position_code != 0:
-                    errors.append(
-                        f"Team {team_id} game-plan preset 0x{preset_offset:X} "
-                        f"assigns GK player {player_id} position code {position_code}"
+                for phase_offset in GP_POSITION_PHASE_OFFSETS:
+                    position_address = (
+                        offset
+                        + preset_offset
+                        + phase_offset
+                        + role * GP_POSITION_ENTRY_SIZE
                     )
+                    if position_address >= len(self._data):
+                        continue
+                    position_code = self._data[position_address]
+                    checks += 1
+                    if position_code != 0:
+                        phase_label = (
+                            ""
+                            if phase_offset == 0
+                            else f" phase 0x{phase_offset:X}"
+                        )
+                        errors.append(
+                            f"Team {team_id} game-plan preset 0x{preset_offset:X}"
+                            f"{phase_label} assigns GK player {player_id} "
+                            f"position code {position_code}"
+                        )
         return checks
 
     # ──────────────────────────────────────────────────────────

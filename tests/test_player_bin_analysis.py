@@ -13,6 +13,7 @@ from editor.editfile import (
     GP_LINEUP,
     GP_PK,
     GP_POSITION_PRESETS,
+    GP_POSITION_PHASE_OFFSETS,
     GP_RIGHT_CK,
     EditFile,
 )
@@ -299,7 +300,7 @@ def test_integrity_reports_goalkeeper_assigned_to_outfield_position():
         range(40)
     )
     for preset_offset in GP_POSITION_PRESETS:
-        struct.pack_into("<I", edit_file._data, game_plan_offset + preset_offset, 1)
+        edit_file._data[game_plan_offset + preset_offset] = 1
 
     report = edit_file.validate_integrity()
     assert sum("assigns GK" in error for error in report["errors"]) == 3
@@ -328,16 +329,95 @@ def test_integrity_reads_position_preset_by_lineup_role():
         game_plan_offset + GP_LINEUP : game_plan_offset + GP_LINEUP + 40
     ] = bytes([1, 0] + list(range(2, 40)))
     for preset_offset in GP_POSITION_PRESETS:
-        struct.pack_into(
-            "<I",
-            edit_file._data,
-            game_plan_offset + preset_offset + 4,
-            1,
-        )
+        edit_file._data[game_plan_offset + preset_offset + 4] = 1
 
     report = edit_file.validate_integrity()
 
     assert not any("assigns GK" in error for error in report["errors"])
+
+def test_removal_repairs_goalkeeper_position_bytes_after_slot_compaction():
+    from tests.test_editor import _build_mock_data
+
+    data = _build_mock_data(
+        num_players=40,
+        num_teams=1,
+        num_team_player=1,
+        num_game_plans=1,
+        team_player_entries=[
+            (101, list(range(1000, 1040)), list(range(1, 41))),
+        ],
+        league_team_ids=[101],
+    )
+    edit_file = EditFile()
+    edit_file.load_bytes(data)
+    edit_file.attach_playerbin(
+        PlayerBinDatabase(
+            {
+                1039: PlayerBinRecord(1039, "Backup GK", 24, "GK", 0),
+            }
+        )
+    )
+    edit_file._player_cache = {
+        1001: PlayerInfo(1001, "Starter", position="CB"),
+        1039: PlayerInfo(1039, "Backup GK", position="GK"),
+    }
+    game_plan_offset = edit_file.game_plan_start
+    for preset_offset in GP_POSITION_PRESETS:
+        for phase_offset in GP_POSITION_PHASE_OFFSETS:
+            edit_file._data[
+                game_plan_offset + preset_offset + phase_offset :
+                game_plan_offset + preset_offset + phase_offset + 11
+            ] = bytes([0, 1] + [1] * 9)
+
+    before = edit_file.validate_integrity()
+    assert before["valid"] is True
+
+    assert edit_file.release_player(1001, 101)
+
+    roster = edit_file.get_team_roster(101)
+    assert roster is not None
+    assert roster.player_ids[1] == 1039
+    for preset_offset in GP_POSITION_PRESETS:
+        for phase_offset in GP_POSITION_PHASE_OFFSETS:
+            assert (
+                edit_file._data[
+                    game_plan_offset + preset_offset + phase_offset + 1
+                ]
+                == 0
+            )
+    report = edit_file.validate_integrity()
+    assert not any("assigns GK" in error for error in report["errors"])
+
+
+def test_repair_game_plans_repairs_goalkeeper_position_bytes():
+    from tests.test_editor import _build_mock_data
+
+    data = _build_mock_data(
+        num_players=16,
+        num_teams=1,
+        num_team_player=1,
+        num_game_plans=1,
+        team_player_entries=[
+            (101, list(range(1000, 1016)), list(range(1, 17))),
+        ],
+        league_team_ids=[101],
+    )
+    edit_file = EditFile()
+    edit_file.load_bytes(data)
+    edit_file.attach_playerbin(
+        PlayerBinDatabase({1000: PlayerBinRecord(1000, "Starting GK", 24, "GK", 0)})
+    )
+    game_plan_offset = edit_file.game_plan_start
+    for preset_offset in GP_POSITION_PRESETS:
+        for phase_offset in GP_POSITION_PHASE_OFFSETS:
+            edit_file._data[game_plan_offset + preset_offset + phase_offset] = 1
+
+    metrics = edit_file.repair_game_plans()
+
+    assert metrics["repaired_goalkeeper_positions"] == (
+        len(GP_POSITION_PRESETS) * len(GP_POSITION_PHASE_OFFSETS)
+    )
+    assert edit_file.validate_integrity()["valid"] is True
 
 @pytest.mark.skipif(not CPK_PATH.exists(), reason="CPK fixture is not available")
 def test_runtime_loads_playerbin_from_discovered_game_download(
