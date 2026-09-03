@@ -49,6 +49,21 @@ def test_curated_identity_wins_and_ambiguous_names_are_rejected():
     assert all(item["fotmob_id"] != 11 for item in result)
 
 
+def test_curated_legacy_identity_wins_over_duplicate_sitemap_entry():
+    pes = {4219: "Como 1907"}
+    fotmob = [
+        _team(10171, "Como"),
+        _team(1_802_179, "Calcio Como 1907"),
+    ]
+
+    result = build_validated_club_index(pes, fotmob, {"Como": 10171})
+    by_pes_id = {item["pes_team_id"]: item for item in result}
+
+    assert by_pes_id[4219]["fotmob_id"] == 10171
+    assert by_pes_id[4219]["identity_source"] == "major_clubs"
+    assert all(item["fotmob_id"] != 1_802_179 for item in result)
+
+
 def test_sitemap_crawl_never_overwrites_index_after_partial_failure(
     monkeypatch, tmp_path
 ):

@@ -3470,6 +3470,16 @@
     "identity_source": "unambiguous_name"
   },
   {
+    "fotmob_id": 10171,
+    "name": "Como",
+    "slug": "como",
+    "url": "https://www.fotmob.com/teams/10171/overview/como",
+    "pes_team_id": 4219,
+    "pes_team_name": "Como 1907",
+    "match_score": 100.0,
+    "identity_source": "major_clubs"
+  },
+  {
     "fotmob_id": 10172,
     "name": "Queens Park Rangers",
     "slug": "queens-park-rangers",
@@ -5017,16 +5027,6 @@
     "pes_team_id": 9004,
     "pes_team_name": "NEOM SC",
     "match_score": 100.0,
-    "identity_source": "unambiguous_name"
-  },
-  {
-    "fotmob_id": 1802179,
-    "name": "Calcio Como 1907",
-    "slug": "calcio-como-1907",
-    "url": "https://www.fotmob.com/teams/1802179/overview/calcio-como-1907",
-    "pes_team_id": 4219,
-    "pes_team_name": "Como 1907",
-    "match_score": 98.0,
     "identity_source": "unambiguous_name"
   },
   {
