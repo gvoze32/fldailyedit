@@ -1463,14 +1463,25 @@ def _load_playerbin_database(
     *,
     game_root: Path | str | None = None,
 ) -> tuple[PlayerBinDatabase | None, str | None]:
-    """Load Player.bin from an explicit path or selected game database CPK."""
+    """Load Player.bin from configured, game, or local reference metadata."""
     configured_path = (
         getattr(config, "PLAYER_BIN_FILE", None)
         if player_bin_path is None
         else player_bin_path
     )
-    return _load_binary_database(
+    database, source = _load_binary_database(
         configured_path,
+        PlayerBinDatabase,
+        _PLAYER_BIN_CPK_MEMBER,
+        "Player.bin",
+        game_root=game_root,
+    )
+    if database is not None or player_bin_path is not None:
+        return database, source
+
+    reference_path = Path(config.PROJECT_ROOT) / "reference" / "Player.bin"
+    return _load_binary_database(
+        reference_path,
         PlayerBinDatabase,
         _PLAYER_BIN_CPK_MEMBER,
         "Player.bin",
@@ -1526,8 +1537,9 @@ def _load_match_database(
     print("\n📋 Reading selected save database...")
     playerbin_database, playerbin_source = _load_playerbin_database()
     edit_file.playerbin_source = playerbin_source
-    if playerbin_database is not None:
-        edit_file.attach_playerbin(playerbin_database)
+    attach_playerbin = getattr(edit_file, "attach_playerbin", None)
+    if playerbin_database is not None and callable(attach_playerbin):
+        attach_playerbin(playerbin_database)
         print(f"  Loaded Player.bin metadata from {playerbin_source}")
     teambin_database, teambin_source = _load_teambin_database()
     edit_file.teambin_source = teambin_source
@@ -2101,7 +2113,22 @@ class _RunLocalUpdateRuntime:
             item.action in {"move", "add", "release", "shirt_update"}
             for item in prepared.roster_plan
         )
-        if not actionable_roster:
+        repair_game_plans = getattr(prepared.edit_file, "repair_game_plans", None)
+        repair_metrics = (
+            repair_game_plans()
+            if not actionable_roster and callable(repair_game_plans)
+            else {}
+        )
+        gameplan_changed = any(
+            repair_metrics.get(key, 0)
+            for key in (
+                "repaired_lineups",
+                "repaired_goalkeeper_roles",
+                "repaired_position_bytes",
+                "reset_roles",
+            )
+        )
+        if not actionable_roster and not gameplan_changed:
             unchanged = sum(
                 item.action == "noop" for item in prepared.roster_plan
             )
@@ -2118,6 +2145,13 @@ class _RunLocalUpdateRuntime:
                 unchanged=unchanged,
                 safety_skipped=safety_skipped,
                 no_changes=True,
+            )
+        if gameplan_changed:
+            print(
+                "\n🧭 Repairing game-plan lineup mappings: "
+                f"{repair_metrics.get('repaired_lineups', 0)} lineups, "
+                f"{repair_metrics.get('repaired_goalkeeper_roles', 0)} goalkeeper roles, "
+                f"{repair_metrics.get('repaired_position_bytes', 0)} position bytes"
             )
 
         token.raise_if_cancelled()
@@ -2220,6 +2254,7 @@ class _RunLocalUpdateRuntime:
                 ok = prepared.edit_file.release_player(
                     player_id,
                     match.from_team_id,
+                    position=transfer.position,
                 )
 
             if not ok:
@@ -2259,15 +2294,17 @@ class _RunLocalUpdateRuntime:
             )
 
 
-        repair_game_plans = getattr(prepared.edit_file, "repair_game_plans", None)
-        if callable(repair_game_plans):
+        if callable(repair_game_plans) and actionable_roster:
             repair_metrics = repair_game_plans()
+        if actionable_roster:
             repaired_roles = repair_metrics.get("repaired_goalkeeper_roles", 0)
             repaired_lineups = repair_metrics.get("repaired_lineups", 0)
-            if repaired_roles or repaired_lineups:
+            repaired_positions = repair_metrics.get("repaired_position_bytes", 0)
+            if repaired_roles or repaired_lineups or repaired_positions:
                 print(
                     "  Game-plan repairs: "
-                    f"{repaired_lineups} lineups, {repaired_roles} goalkeeper roles"
+                    f"{repaired_lineups} lineups, {repaired_roles} goalkeeper roles, "
+                    f"{repaired_positions} position bytes"
                 )
 
         print(

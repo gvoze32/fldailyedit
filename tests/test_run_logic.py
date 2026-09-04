@@ -310,6 +310,58 @@ def test_local_runtime_apply_forwards_overflow_release_permission(
     assert result.transfer_applied == 1
 
 
+def test_local_runtime_publishes_gameplan_repair_without_roster_action(
+    monkeypatch, tmp_path
+):
+    from local_update import CancellationToken, LocalUpdateRequest
+
+    class FakeEditFile:
+        def __init__(self):
+            self._data = bytearray(b"original")
+            self.repair_calls = 0
+
+        def repair_game_plans(self):
+            self.repair_calls += 1
+            self._data[:] = b"repaired"
+            return {
+                "repaired_lineups": 1,
+                "repaired_goalkeeper_roles": 0,
+                "repaired_position_bytes": 0,
+                "reset_roles": 0,
+            }
+
+    edit_path = tmp_path / "EDIT00000000"
+    edit_path.write_bytes(b"encrypted")
+    edit_file = FakeEditFile()
+    prepared = SimpleNamespace(
+        edit_file=edit_file,
+        edit_path=edit_path,
+        output_path=tmp_path / "output",
+        original_data=b"original",
+        roster_plan=[],
+        run_records=[],
+        backup_path=None,
+        pending_logs=[],
+        save_scope=str(edit_path),
+    )
+    monkeypatch.setattr(
+        "run.backup_mod.create_backup",
+        lambda _path: tmp_path / "backup",
+    )
+
+    result = _RunLocalUpdateRuntime().apply(
+        LocalUpdateRequest(edit_path),
+        prepared,
+        None,
+        CancellationToken(),
+    )
+
+    assert bytes(edit_file._data) == b"repaired"
+    assert edit_file.repair_calls == 1
+    assert result.transfer_applied == 0
+    assert result.shirt_numbers_changed == 0
+
+
 def test_same_day_transfers_sort_by_timestamp():
     from run import _transfer_sort_key
 
