@@ -324,6 +324,7 @@ async def _fetch_transfermarkt_transfers_async(
     timeout = aiohttp.ClientTimeout(total=30)
     transfers: list[Transfer] = []
     seen_transfer_ids: set[int] = set()
+    unique_pages = 0
     async with aiohttp.ClientSession(
         headers=TRANSFERMARKT_HEADERS,
         timeout=timeout,
@@ -412,6 +413,12 @@ async def _fetch_transfermarkt_transfers_async(
                 if transfer.transfer_id_transfermarkt not in seen_transfer_ids
             ]
             if not new:
+                logger.info(
+                    "Transfermarkt page %s repeated prior transfer IDs; "
+                    "latest-feed boundary reached after %s unique pages",
+                    page,
+                    unique_pages,
+                )
                 break
             transfers.extend(new)
             seen_transfer_ids.update(
@@ -419,10 +426,12 @@ async def _fetch_transfermarkt_transfers_async(
                 for transfer in new
                 if transfer.transfer_id_transfermarkt is not None
             )
+            unique_pages += 1
 
     logger.info(
-        "Transfermarkt found %s verified dated transfers",
+        "Transfermarkt found %s verified dated transfers across %s unique pages",
         len(transfers),
+        unique_pages,
     )
     return transfers
 

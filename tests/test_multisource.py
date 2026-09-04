@@ -564,6 +564,44 @@ def test_transfermarkt_fetch_automatically_continues_past_four_pages(monkeypatch
     assert "page=5" in requested[-2]
 
 
+def test_transfermarkt_fetch_has_no_250_transfer_cap(monkeypatch, caplog):
+    from scraper import transfermarkt
+
+    source_ids = ("6481933", "6481832", "6481567")
+    page_markdowns = {}
+    for page in range(1, 85):
+        markdown = TRANSFERMARKT_MARKDOWN
+        for index, source_id in enumerate(source_ids, start=1):
+            markdown = markdown.replace(
+                source_id,
+                str(8_000_000 + page * 10 + index),
+            )
+        page_markdowns[page] = markdown
+
+    async def fake_fetch(_session, reader_url):
+        if "page=" not in reader_url:
+            return page_markdowns[1]
+        page = int(reader_url.split("page=", 1)[1].split("&", 1)[0])
+        return page_markdowns.get(page, page_markdowns[84])
+
+    monkeypatch.setattr(transfermarkt, "_fetch_text", fake_fetch)
+    with caplog.at_level(logging.INFO, logger=transfermarkt.__name__):
+        transfers = asyncio.run(
+            transfermarkt._fetch_transfermarkt_transfers_async(
+                max_pages=85,
+                since_date=date(2026, 8, 3),
+                ref_date=date(2026, 8, 4),
+            )
+        )
+
+    assert len(transfers) == 252
+    assert len({item.transfer_id_transfermarkt for item in transfers}) == 252
+    assert any(
+        "latest-feed boundary reached after 84 unique pages" in record.message
+        for record in caplog.records
+    )
+
+
 def test_transfermarkt_fetch_continues_past_future_dated_first_page(monkeypatch):
     from scraper import transfermarkt
 
