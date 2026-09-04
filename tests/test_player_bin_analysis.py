@@ -527,6 +527,50 @@ def test_removal_promotes_player_matching_vacated_role_position():
 
 
 
+def test_promotion_uses_native_positions_over_stale_save_labels():
+    from tests.test_editor import _build_mock_data
+
+    data = _build_mock_data(
+        num_players=0,
+        num_teams=1,
+        num_team_player=1,
+        num_game_plans=1,
+        team_player_entries=[
+            (101, list(range(1000, 1011)) + [143196, 148009], list(range(1, 14)))
+        ],
+        league_team_ids=[101],
+    )
+    edit_file = EditFile()
+    edit_file.load_bytes(data)
+    edit_file._player_cache = {
+        143196: PlayerInfo(143196, "Moisés Caicedo", position="AMF"),
+        148009: PlayerInfo(148009, "Cristhian Mosquera", position="AMF"),
+    }
+    edit_file.attach_playerbin(
+        PlayerBinDatabase(
+            {
+                143196: PlayerBinRecord(143196, "Moisés Caicedo", 24, "DMF", 0),
+                148009: PlayerBinRecord(148009, "Cristhian Mosquera", 21, "CB", 0),
+            }
+        )
+    )
+
+    assert edit_file._select_game_plan_promotion_slot(
+        101,
+        [11, 12],
+        1000,
+        1,
+        target_position_code=POSITION_NAMES.index("CB"),
+    ) == 12
+    assert edit_file._select_game_plan_promotion_slot(
+        101,
+        [11, 12],
+        1000,
+        1,
+        target_position_code=POSITION_NAMES.index("DMF"),
+    ) == 11
+
+
 @pytest.mark.parametrize(
     ("player_id", "native_position", "supplied_position", "expected_role"),
     [
@@ -612,7 +656,7 @@ def test_added_player_preserves_existing_tactical_role(
     assert after_positions == before_positions
 
 
-def test_save_position_precedes_native_playerbin_position():
+def test_native_playerbin_position_overrides_stale_save_position():
     from tests.test_editor import _build_mock_data
 
     data = _build_mock_data(
@@ -647,9 +691,9 @@ def test_save_position_precedes_native_playerbin_position():
 
     players = edit_file.get_all_players()
 
-    assert players[138156].position == "GK"
-    assert edit_file.get_player_position(138156) == "GK"
-    assert edit_file._mutation_player_position(138156, "DMF") == "GK"
+    assert players[138156].position == "AMF"
+    assert edit_file.get_player_position(138156) == "AMF"
+    assert edit_file._mutation_player_position(138156, "DMF") == "AMF"
 
 
 def test_removal_preserves_tactical_role_for_copied_player():
@@ -925,6 +969,83 @@ def test_unknown_role_zero_keeps_incumbent_over_reserve_goalkeepers():
 
     assert lineup[:2] == [0, 1]
 
+
+def test_gameplan_uses_primary_native_goalkeeper_and_keeps_reserve():
+    from tests.test_editor import _build_mock_data
+
+    data = _build_mock_data(
+        num_players=0,
+        num_teams=1,
+        num_team_player=1,
+        num_game_plans=1,
+        team_player_entries=[
+            (
+                101,
+                [101076, 151751] + list(range(2000, 2038)),
+                list(range(1, 41)),
+            )
+        ],
+        league_team_ids=[101],
+    )
+    edit_file = EditFile()
+    edit_file.load_bytes(data)
+    edit_file.attach_playerbin(
+        PlayerBinDatabase(
+            {
+                101076: PlayerBinRecord(
+                    101076, "Emiliano Martínez", 33, "GK", 0, caps=37
+                ),
+                151751: PlayerBinRecord(151751, "Mike Penders", 20, "GK", 0),
+            }
+        )
+    )
+    game_plan_offset = edit_file.game_plan_start
+    lineup_offset = game_plan_offset + GP_LINEUP
+    edit_file._data[lineup_offset : lineup_offset + 40] = bytes(
+        [1] + list(range(2, 12)) + [0] + list(range(12, 40))
+    )
+
+    metrics = edit_file.repair_game_plans()
+
+    lineup = list(edit_file._data[lineup_offset : lineup_offset + 40])
+    assert lineup[0] == 0
+    assert lineup[11] == 1
+    assert metrics["repaired_goalkeeper_roles"] == 1
+
+
+def test_added_goalkeeper_stays_on_bench_when_primary_exists():
+    from tests.test_editor import _build_mock_data
+
+    data = _build_mock_data(
+        num_players=0,
+        num_teams=1,
+        num_team_player=1,
+        num_game_plans=1,
+        team_player_entries=[
+            (101, [101076] + list(range(2000, 2010)), list(range(1, 12)))
+        ],
+        league_team_ids=[101],
+    )
+    edit_file = EditFile()
+    edit_file.load_bytes(data)
+    edit_file.attach_playerbin(
+        PlayerBinDatabase(
+            {
+                101076: PlayerBinRecord(
+                    101076, "Emiliano Martínez", 33, "GK", 0, caps=37
+                ),
+                151751: PlayerBinRecord(151751, "Mike Penders", 20, "GK", 0),
+            }
+        )
+    )
+    game_plan_offset = edit_file.game_plan_start
+    lineup_offset = game_plan_offset + GP_LINEUP
+
+    assert edit_file.add_player(151751, 101, position="GK")
+
+    lineup = list(edit_file._data[lineup_offset : lineup_offset + 40])
+    assert lineup[0] == 0
+    assert lineup[11] == 11
 
 def test_goalkeeper_addition_uses_transfer_position_for_game_plan_role():
     from tests.test_editor import _build_mock_data

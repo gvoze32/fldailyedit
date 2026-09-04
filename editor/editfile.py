@@ -328,41 +328,55 @@ class EditFile:
         self.release_usage = {} if policy is None else dict(policy.usage)
 
 
-    def get_player_position(self, player_id: int) -> str | None:
-        """Return an edited or Player.bin registered position when available."""
-        player_cache = getattr(self, "_player_cache", {})
-        player_info = player_cache.get(player_id)
-        if player_info is not None and player_info.position:
-            return player_info.position
+    def _native_player_position(self, player_id: int) -> str | None:
+        """Return native registered position from the selected Player.bin."""
         database = getattr(self, "playerbin_db", None)
-        if database is not None:
-            record = database.get(player_id)
-            if record is not None:
-                return record.registered_position
-        return player_info.position if player_info is not None and player_info.position else None
+        if database is None:
+            return None
+        record = database.get(player_id)
+        if record is None:
+            return None
+        position = (record.registered_position or "").strip()
+        return position or None
+
+    def get_player_position(self, player_id: int) -> str | None:
+        """Return native position first, then selected-save fallback metadata."""
+        native_position = self._native_player_position(player_id)
+        if native_position:
+            return native_position
+        player_info = getattr(self, "_player_cache", {}).get(player_id)
+        return (
+            player_info.position
+            if player_info is not None and player_info.position
+            else None
+        )
 
     def _mutation_player_position(
         self, player_id: int, supplied_position: str = ""
     ) -> str:
-        """Prefer save/native registration over a transfer-source label."""
-        return self.get_player_position(player_id) or (supplied_position or "")
+        """Prefer native metadata, then transfer, then save fallback data."""
+        return (
+            self._native_player_position(player_id)
+            or (supplied_position or "").strip()
+            or self.get_player_position(player_id)
+            or ""
+        )
 
     def _player_metadata(self, player_id: int) -> PlayerInfo | None:
-        """Return save metadata enriched with Player.bin when necessary."""
-        player_cache = getattr(self, "_player_cache", {})
-        player_info = player_cache.get(player_id)
+        """Return save metadata enriched with authoritative native fields."""
+        player_info = getattr(self, "_player_cache", {}).get(player_id)
         database = getattr(self, "playerbin_db", None)
         record = database.get(player_id) if database is not None else None
         if player_info is not None:
-            if record is None or (player_info.position and player_info.age):
+            if record is None:
                 return player_info
             return PlayerInfo(
                 player_id=player_info.player_id,
                 name=player_info.name or record.name,
                 print_name=player_info.print_name or record.print_name or record.name,
-                position=player_info.position or record.registered_position,
+                position=record.registered_position or player_info.position,
                 nationality=player_info.nationality,
-                age=player_info.age or record.age,
+                age=record.age or player_info.age,
             )
         if record is None:
             return None
@@ -373,6 +387,7 @@ class EditFile:
             position=record.registered_position,
             age=record.age,
         )
+
 
     def load(self, path: str | Path | None = None):
         """Load and parse data.dat from disk."""
@@ -575,9 +590,9 @@ class EditFile:
                         player_id=existing.player_id,
                         name=existing.name or record.name,
                         print_name=existing.print_name or record.print_name or record.name,
-                        position=existing.position or record.registered_position,
+                        position=record.registered_position or existing.position,
                         nationality=existing.nationality,
-                        age=existing.age or record.age,
+                        age=record.age or existing.age,
                     )
             report = replace(
                 report,
@@ -1548,20 +1563,32 @@ class EditFile:
             for role in range(starter_count, active_count)
             if is_goalkeeper_role(role)
         ]
-        if starter_goalkeeper_roles:
-            goalkeeper_roles = starter_goalkeeper_roles
-        elif role0_is_unknown_incumbent and bench_goalkeeper_roles:
+        known_goalkeeper_roles = starter_goalkeeper_roles + bench_goalkeeper_roles
+        if role0_is_unknown_incumbent and bench_goalkeeper_roles:
             # A role-zero player with an unknown label and a valid GK marker
             # is an incumbent, not a reason to promote an arbitrary reserve.
             goalkeeper_roles = [0]
         else:
-            goalkeeper_roles = bench_goalkeeper_roles
+            goalkeeper_roles = known_goalkeeper_roles
         if not goalkeeper_roles:
             return 0, 0
 
         repaired_roles = 0
         lineup_changed = False
-        primary_role = 0 if 0 in goalkeeper_roles else goalkeeper_roles[0]
+        # Player.bin caps provide the strongest native first-choice signal.
+        # Fall back to roster order, then lineup order, for equal/unknown caps.
+        def goalkeeper_priority(role: int) -> tuple[int, int, int]:
+            slot = lineup[role]
+            player_id = roster.player_ids[slot]
+            database = getattr(self, "playerbin_db", None)
+            record = database.get(player_id) if database is not None else None
+            caps = record.caps if record is not None else 0
+            return caps, -slot, -role
+
+        primary_role = max(
+            goalkeeper_roles,
+            key=goalkeeper_priority,
+        )
         if primary_role != 0:
             lineup[0], lineup[primary_role] = (
                 lineup[primary_role],

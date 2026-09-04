@@ -2259,6 +2259,17 @@ class _RunLocalUpdateRuntime:
             )
 
 
+        repair_game_plans = getattr(prepared.edit_file, "repair_game_plans", None)
+        if callable(repair_game_plans):
+            repair_metrics = repair_game_plans()
+            repaired_roles = repair_metrics.get("repaired_goalkeeper_roles", 0)
+            repaired_lineups = repair_metrics.get("repaired_lineups", 0)
+            if repaired_roles or repaired_lineups:
+                print(
+                    "  Game-plan repairs: "
+                    f"{repaired_lineups} lineups, {repaired_roles} goalkeeper roles"
+                )
+
         print(
             f"\n  Transfers applied: {transfer_applied}, "
             f"shirt numbers changed: {shirt_numbers_applied}, "
