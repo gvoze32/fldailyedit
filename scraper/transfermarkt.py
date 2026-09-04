@@ -6,6 +6,7 @@ import asyncio
 import logging
 import re
 from datetime import date, datetime, timezone
+import unicodedata
 from urllib.parse import urlencode
 
 import aiohttp
@@ -29,19 +30,21 @@ class TransfermarktUnavailableError(RuntimeError):
     """Expected upstream failure for the optional Transfermarkt source."""
 
 
+_TRANSFERMARKT_HOST = r"(?:www\.)?transfermarkt\.[^/\s)]+"
 _LINK_RE = re.compile(
     r"\[([^\]]+)\]\((https?://[^\s)]+)(?:\s+\"([^\"]*)\")?\)"
 )
 _PLAYER_RE = re.compile(
-    r"\[([^\]]+)\]\((https?://www\.transfermarkt\.com/[^\s)]*?/profil/spieler/(\d+))"
-    r"(?:\s+\"[^\"]*\")?\)"
+    rf"\[([^\]]+)\]\((https?://{_TRANSFERMARKT_HOST}/[^\s)]*?/profil/spieler/(\d+))"
+    rf"(?:\s+\"[^\"]*\")?\)"
 )
 _CLUB_RE = re.compile(
-    r"\[([^\]]+)\]\((https?://www\.transfermarkt\.com/[^\s)]*?/startseite/verein/(\d+)"
-    r"[^\s)]*)(?:\s+\"([^\"]*)\")?\)"
+    rf"\[([^\]]+)\]\((https?://{_TRANSFERMARKT_HOST}/[^\s)]*?/startseite/verein/(\d+)"
+    rf"[^\s)]*)(?:\s+\"([^\"]*)\")?\)"
 )
 _TRANSFER_RE = re.compile(
-    r"\[([^\]]+)\]\((https?://www\.transfermarkt\.com/[^\s)]*?/transfer_id/(\d+))\)"
+    rf"\[([^\]]+)\]\((https?://{_TRANSFERMARKT_HOST}/[^\s)]*?/transfer_id/(\d+))"
+    rf"(?:\s+\"[^\"]*\")?\)"
 )
 _IMAGE_LINK_RE = re.compile(r"\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)")
 _IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
@@ -58,6 +61,54 @@ def _table_cells(line: str) -> list[str]:
     return [cell.strip() for cell in line.strip().strip("|").split("|")]
 
 
+_TABLE_COLUMN_ALIASES = {
+    "player": frozenset({"player", "spieler"}),
+    "age": frozenset({"age", "alter"}),
+    "nationality": frozenset({"nat", "nationality", "nationalitat"}),
+    "left": frozenset(
+        {"left", "from", "fromclub", "previousclub", "abgebenderverein"}
+    ),
+    "joined": frozenset(
+        {"joined", "to", "toclub", "newclub", "aufnehmenderverein"}
+    ),
+    "date": frozenset({"transferdate", "transferdatum", "date", "datum"}),
+    "market_value": frozenset({"marketvalue", "marktwert"}),
+    "fee": frozenset({"fee", "transferfee", "ablose", "gebuhr"}),
+}
+_REQUIRED_TABLE_COLUMNS = ("player", "left", "joined", "date", "fee")
+_TABLE_SEPARATOR_RE = re.compile(r":?-{3,}:?$")
+
+
+def _header_key(value: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", _plain_markdown(value).casefold())
+    return "".join(
+        character
+        for character in decomposed
+        if character.isalnum() and not unicodedata.combining(character)
+    )
+
+
+def _table_columns(line: str) -> dict[str, int] | None:
+    if not line.lstrip().startswith("|"):
+        return None
+    keys = [_header_key(cell) for cell in _table_cells(line)]
+    columns: dict[str, int] = {}
+    for column, aliases in _TABLE_COLUMN_ALIASES.items():
+        match = next(
+            (index for index, key in enumerate(keys) if key in aliases),
+            None,
+        )
+        if match is not None:
+            columns[column] = match
+    if not all(column in columns for column in _REQUIRED_TABLE_COLUMNS):
+        return None
+    return columns
+
+
+def _is_table_separator(cells: list[str]) -> bool:
+    return bool(cells) and all(_TABLE_SEPARATOR_RE.fullmatch(cell) for cell in cells)
+
+
 def _club(cell: str) -> tuple[str, int] | None:
     clean = _IMAGE_LINK_RE.sub("", cell)
     matches = list(_CLUB_RE.finditer(clean))
@@ -70,29 +121,43 @@ def _club(cell: str) -> tuple[str, int] | None:
 
 
 def _transfer_type(fee: str) -> tuple[str, bool]:
-    normalized = fee.casefold()
-    if "end of loan" in normalized:
+    normalized = _header_key(fee)
+    if "endofloan" in normalized or "leihende" in normalized:
         return "end of loan", False
-    if "loan" in normalized:
+    if "loan" in normalized or "leih" in normalized:
         return "loan", True
-    if "free transfer" in normalized:
+    if "freetransfer" in normalized or "ablosefrei" in normalized:
         return "free transfer", False
     return "transfer", False
 
 
 def _parse_transfer_date(value: str) -> date | None:
-    try:
-        return datetime.strptime(_plain_markdown(value), "%d/%m/%Y").date()
-    except ValueError:
-        return None
+    clean = _plain_markdown(value).strip()
+    for fmt in ("%d/%m/%Y", "%d.%m.%Y", "%d-%m-%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(clean, fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 def _parse_euro_amount(value: str) -> int:
-    match = re.search(r"([\d.]+)\s*([mk])?", _plain_markdown(value).casefold())
+    match = re.search(r"([\d.,]+)\s*([mk])?", _plain_markdown(value).casefold())
     if not match:
         return 0
+    number = match.group(1)
+    if "," in number and "." in number:
+        if number.rfind(",") > number.rfind("."):
+            number = number.replace(".", "").replace(",", ".")
+        else:
+            number = number.replace(",", "")
+    else:
+        number = number.replace(",", ".")
     multiplier = {"m": 1_000_000, "k": 1_000}.get(match.group(2), 1)
-    return round(float(match.group(1)) * multiplier)
+    try:
+        return round(float(number) * multiplier)
+    except ValueError:
+        return 0
 
 
 def parse_transfermarkt_markdown(
@@ -102,46 +167,41 @@ def parse_transfermarkt_markdown(
     start_date: date | None = None,
     end_date: date | None = None,
 ) -> list[Transfer]:
-    """Parse verified dated events from Transfermarkt's detailed table."""
+    """Parse verified dated events from a localized detailed table."""
     lines = markdown.splitlines()
-    header_index = next(
-        (
-            index
-            for index, line in enumerate(lines)
-            if line.lstrip().startswith("|")
-            and [
-                re.sub(r"[^a-z]+", "", _plain_markdown(cell).casefold())
-                for cell in _table_cells(line)
-            ]
-            == [
-                "player",
-                "age",
-                "nat",
-                "left",
-                "joined",
-                "transferdate",
-                "marketvalue",
-                "fee",
-            ]
-        ),
-        None,
-    )
-    if header_index is None:
+    header_index: int | None = None
+    columns: dict[str, int] | None = None
+    for index, line in enumerate(lines):
+        candidate = _table_columns(line)
+        if candidate is not None:
+            header_index = index
+            columns = candidate
+            break
+    if header_index is None or columns is None:
         return []
 
     transfers: list[Transfer] = []
     seen_transfer_ids: set[int] = set()
-    for line in lines[header_index + 2 :]:
+    max_column = max(columns.values())
+    data_started = False
+    for line in lines[header_index + 1 :]:
         if not line.lstrip().startswith("|"):
-            break
-        cells = _table_cells(line)
-        if len(cells) != 8:
+            if data_started:
+                break
             continue
-        player_match = _PLAYER_RE.search(cells[0])
-        from_club = _club(cells[3])
-        to_club = _club(cells[4])
-        event_date = _parse_transfer_date(cells[5])
-        transfer_match = _TRANSFER_RE.search(cells[7])
+        cells = _table_cells(line)
+        if _is_table_separator(cells):
+            continue
+        data_started = True
+        if len(cells) <= max_column:
+            continue
+
+        player_cell = cells[columns["player"]]
+        player_match = _PLAYER_RE.search(player_cell)
+        from_club = _club(cells[columns["left"]])
+        to_club = _club(cells[columns["joined"]])
+        event_date = _parse_transfer_date(cells[columns["date"]])
+        transfer_match = _TRANSFER_RE.search(cells[columns["fee"]])
         if (
             not player_match
             or not from_club
@@ -161,15 +221,32 @@ def parse_transfermarkt_markdown(
         seen_transfer_ids.add(transfer_id)
 
         player_name = " ".join(player_match.group(1).split())
-        player_cell_text = _plain_markdown(cells[0])
-        position = player_cell_text[len(player_name) :].strip() if player_cell_text.startswith(player_name) else ""
-        market_value = _parse_euro_amount(cells[6])
+        player_cell_text = _plain_markdown(player_cell)
+        position = (
+            player_cell_text[len(player_name) :].strip()
+            if player_cell_text.startswith(player_name)
+            else ""
+        )
+        market_value = _parse_euro_amount(
+            cells[columns["market_value"]]
+            if "market_value" in columns
+            else ""
+        )
         fee = _plain_markdown(transfer_match.group(1))
         transfer_type, is_loan = _transfer_type(fee)
         from_name, from_id = from_club
         to_name, to_id = to_club
         transfer_url = transfer_match.group(2)
-        age_text = _plain_markdown(cells[1])
+        age_text = (
+            _plain_markdown(cells[columns["age"]])
+            if "age" in columns
+            else ""
+        )
+        nationality = (
+            _plain_markdown(cells[columns["nationality"]])
+            if "nationality" in columns
+            else ""
+        )
 
         transfers.append(
             Transfer(
@@ -184,7 +261,7 @@ def parse_transfermarkt_markdown(
                 market_value=market_value,
                 from_club_full_name=from_name,
                 to_club_full_name=to_name,
-                nationality=_plain_markdown(cells[2]),
+                nationality=nationality,
                 age=int(age_text) if age_text.isdigit() else 0,
                 sources=("transfermarkt",),
                 source_urls=(source_url, transfer_url),

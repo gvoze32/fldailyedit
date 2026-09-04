@@ -146,6 +146,13 @@ TRANSFERMARKT_PAGE_2 = """
 """
 
 
+TRANSFERMARKT_LOCALIZED_MARKDOWN = """
+| Spieler | Alter | Nat. | Abgebender Verein | Aufnehmender Verein | Transferdatum | Marktwert | Ablöse |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| [Max Mustermann](https://www.transfermarkt.de/max-mustermann/profil/spieler/123 "Max Mustermann") Innenverteidiger | 24 |  | [Old FC](https://www.transfermarkt.de/old-fc/startseite/verein/10/saison_id/2026 "Old FC") | [New FC](https://www.transfermarkt.de/new-fc/startseite/verein/20/saison_id/2026 "New FC") | 04.09.2026 | €1,20m | [Leihgebühr](https://www.transfermarkt.de/jumplist/transfers/spieler/123/transfer_id/999 "Leihgebühr") |
+"""
+
+
 def test_wikipedia_parser_handles_rowspan_types_and_effective_date_filter():
     transfers = parse_wikipedia_transfer_html(
         WIKIPEDIA_HTML,
@@ -423,6 +430,41 @@ def test_transfermarkt_detailed_parser_extracts_dated_verified_events():
     assert peter.transfer_type == "transfer"
     assert jordan.transfer_type == "free transfer"
     assert jordan.source_urls[-1].endswith("/transfer_id/6481567")
+
+
+def test_transfermarkt_parser_accepts_localized_columns_and_urls():
+    from scraper.transfermarkt import parse_transfermarkt_markdown
+
+    transfers = parse_transfermarkt_markdown(
+        TRANSFERMARKT_LOCALIZED_MARKDOWN,
+        "https://www.transfermarkt.de/transfers/neuestetransfers/statistik",
+        start_date=date(2026, 9, 4),
+        end_date=date(2026, 9, 4),
+    )
+
+    assert len(transfers) == 1
+    transfer = transfers[0]
+    assert (
+        transfer.player_name,
+        transfer.from_club,
+        transfer.to_club,
+        transfer.date,
+        transfer.position,
+        transfer.market_value,
+        transfer.player_id_transfermarkt,
+        transfer.transfer_id_transfermarkt,
+    ) == (
+        "Max Mustermann",
+        "Old FC",
+        "New FC",
+        "2026-09-04",
+        "Innenverteidiger",
+        1_200_000,
+        123,
+        999,
+    )
+    assert (transfer.transfer_type, transfer.is_loan) == ("loan", True)
+
 
 
 def test_transfermarkt_fetch_uses_detailed_pages_and_stops_below_cutoff(monkeypatch):
