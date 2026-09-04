@@ -467,6 +467,32 @@ def test_transfermarkt_parser_accepts_localized_columns_and_urls():
 
 
 
+
+def test_transfermarkt_parser_accepts_current_reader_table_shape():
+    from scraper import transfermarkt
+
+    markdown = """
+| Player | Age | Nat. | Left | Joined | [Transfer date](https://www.transfermarkt.com/transfers/neuestetransfers/statistik?sort=datum_hidden.desc) | [Market value](https://www.transfermarkt.com/transfers/neuestetransfers/statistik?sort=marktwert.desc) | [Fee](https://www.transfermarkt.com/transfers/neuestetransfers/statistik?sort=abloese.desc) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| ![Image 1: Current Player](https://img.transfermarkt.test/player.png)[Current Player](https://www.transfermarkt.com/current-player/profil/spieler/123 "Current Player") Central Midfield | 25 | ![Image 2: Country](https://img.transfermarkt.test/country.png) | [![Image 3: Old FC](https://img.transfermarkt.test/old.png)](https://www.transfermarkt.com/old-fc/startseite/verein/10/saison_id/2026)[Old FC](https://www.transfermarkt.com/old-fc/startseite/verein/10/saison_id/2026 "Old FC") | [![Image 4: New FC](https://img.transfermarkt.test/new.png)](https://www.transfermarkt.com/new-fc/startseite/verein/20/saison_id/2026)[New FC](https://www.transfermarkt.com/new-fc/startseite/verein/20/saison_id/2026 "New FC") | 05/09/2026 | €1.20m | [?](https://www.transfermarkt.com/jumplist/transfers/spieler/123/transfer_id/1001) |
+"""
+
+    transfers = transfermarkt.parse_transfermarkt_markdown(
+        markdown,
+        "https://www.transfermarkt.com/transfers/neuestetransfers/statistik",
+        start_date=date(2026, 9, 5),
+        end_date=date(2026, 9, 5),
+    )
+
+    assert len(transfers) == 1
+    assert (
+        transfers[0].player_name,
+        transfers[0].from_club,
+        transfers[0].to_club,
+        transfers[0].position,
+        transfers[0].market_value,
+    ) == ("Current Player", "Old FC", "New FC", "Central Midfield", 1_200_000)
+
 def test_transfermarkt_fetch_uses_detailed_pages_and_stops_below_cutoff(monkeypatch):
     from scraper import transfermarkt
 
@@ -587,6 +613,36 @@ def test_transfermarkt_fetch_refreshes_empty_reader_response(monkeypatch):
     assert len(transfers) == 3
     assert len(requested) == 2
     assert "fldailyedit_refresh=" in requested[1]
+
+
+def test_transfermarkt_fetch_falls_back_to_german_reader_domain(monkeypatch):
+    from scraper import transfermarkt
+
+    requested = []
+
+    async def fake_fetch(_session, reader_url):
+        requested.append(reader_url)
+        if "transfermarkt.de" in reader_url:
+            return TRANSFERMARKT_LOCALIZED_MARKDOWN
+        return ""
+
+    monkeypatch.setattr(transfermarkt, "_fetch_text", fake_fetch)
+    transfers = asyncio.run(
+        transfermarkt._fetch_transfermarkt_transfers_async(
+            max_pages=1,
+            since_date=date(2026, 9, 4),
+            ref_date=date(2026, 9, 4),
+        )
+    )
+
+    assert len(transfers) == 1
+    assert transfers[0].source_urls[0].startswith(
+        "https://www.transfermarkt.de/"
+    )
+    assert len(requested) == 3
+    assert "transfermarkt.com" in requested[0]
+    assert "fldailyedit_refresh=" in requested[1]
+    assert "transfermarkt.de" in requested[2]
 
 
 def test_transfermarkt_network_outage_is_quiet_fallback(monkeypatch, caplog):

@@ -19,6 +19,7 @@ TRANSFERMARKT_URL = "https://www.transfermarkt.com/transfers/neuestetransfers/st
 AUTO_PAGE_LIMIT = 250
 
 TRANSFERMARKT_READER_PREFIX = "https://r.jina.ai/"
+TRANSFERMARKT_FALLBACK_DOMAIN = "www.transfermarkt.de"
 TRANSFERMARKT_HEADERS = {
     "User-Agent": "fldailyedit/0.1 (PES transfer updater; contact via project repository)",
     "Accept": "text/markdown, text/plain;q=0.9",
@@ -293,6 +294,14 @@ def _fresh_reader_url(source_url: str) -> str:
         f"{separator}fldailyedit_refresh={time.time_ns()}"
     )
 
+
+def _fallback_source_url(source_url: str) -> str | None:
+    """Switch to Transfermarkt's German mirror when the primary reader is empty."""
+    primary_domain = "www.transfermarkt.com"
+    if primary_domain not in source_url:
+        return None
+    return source_url.replace(primary_domain, TRANSFERMARKT_FALLBACK_DOMAIN, 1)
+
 async def _fetch_transfermarkt_transfers_async(
     max_pages: int | None = None,
     since_date: str | date | None = None,
@@ -329,25 +338,49 @@ async def _fetch_transfermarkt_transfers_async(
             if page > 1:
                 params["page"] = page
             source_url = f"{TRANSFERMARKT_URL}?{urlencode(params)}"
-            reader_url = f"{TRANSFERMARKT_READER_PREFIX}{source_url}"
-            fresh_url = _fresh_reader_url(source_url)
-            fresh_requested = False
-            try:
-                markdown = await _fetch_text(session, reader_url)
-            except (
-                TransfermarktUnavailableError,
-                aiohttp.ClientError,
-                TimeoutError,
-            ):
-                markdown = await _fetch_text(session, fresh_url)
-                fresh_requested = True
-            batch = parse_transfermarkt_markdown(markdown, source_url)
-            if not batch and not fresh_requested:
-                batch = parse_transfermarkt_markdown(
-                    await _fetch_text(session, fresh_url),
-                    source_url,
+            reader_candidates = [
+                (source_url, f"{TRANSFERMARKT_READER_PREFIX}{source_url}"),
+                (source_url, _fresh_reader_url(source_url)),
+            ]
+            fallback_source_url = _fallback_source_url(source_url)
+            if fallback_source_url is not None:
+                reader_candidates.append(
+                    (
+                        fallback_source_url,
+                        _fresh_reader_url(fallback_source_url),
+                    )
                 )
+
+            batch: list[Transfer] = []
+            fetched_response = False
+            last_fetch_error: Exception | None = None
+            for candidate_source_url, candidate_reader_url in reader_candidates:
+                try:
+                    markdown = await _fetch_text(session, candidate_reader_url)
+                except (
+                    TransfermarktUnavailableError,
+                    aiohttp.ClientError,
+                    TimeoutError,
+                ) as exc:
+                    last_fetch_error = exc
+                    continue
+                fetched_response = True
+                batch = parse_transfermarkt_markdown(
+                    markdown,
+                    candidate_source_url,
+                )
+                if batch:
+                    if candidate_source_url != source_url:
+                        logger.info(
+                            "Transfermarkt primary reader empty; "
+                            "using fallback domain for page %s",
+                            page,
+                        )
+                    break
+
             if not batch:
+                if last_fetch_error is not None and not fetched_response:
+                    raise last_fetch_error
                 logger.warning(
                     "Transfermarkt page %s returned no parseable dated rows",
                     page,
