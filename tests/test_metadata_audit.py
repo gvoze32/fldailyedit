@@ -121,6 +121,7 @@ def test_audit_cli_emits_machine_readable_sources_and_report(
     monkeypatch, tmp_path, capsys
 ):
     import run
+    import native_metadata
     from tests.test_editor import _build_mock_data
 
     edit_path = tmp_path / "EDIT00000000"
@@ -140,17 +141,17 @@ def test_audit_cli_emits_machine_readable_sources_and_report(
     monkeypatch.setattr(run.crypto, "decrypt", lambda _path: decrypted)
     monkeypatch.setattr(run.crypto, "cleanup_temp", lambda _path: None)
     monkeypatch.setattr(
-        run,
+        native_metadata,
         "_load_playerbin_database",
         lambda *args, **kwargs: (players, "fixture::Player.bin"),
     )
     monkeypatch.setattr(
-        run,
+        native_metadata,
         "_load_teambin_database",
         lambda *args, **kwargs: (teams, "fixture::Team.bin"),
     )
     monkeypatch.setattr(
-        run,
+        native_metadata,
         "_load_player_assignment_database",
         lambda *args, **kwargs: (assignments, "fixture::PlayerAssignment.bin"),
     )

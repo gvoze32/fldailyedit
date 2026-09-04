@@ -6,9 +6,11 @@ from types import SimpleNamespace
 
 
 import pytest
+import run_pipeline
 
 from editor.models import TeamData
 from scraper.models import MatchedTransfer, Transfer
+from transfer_planning import PlannedRosterAction
 
 
 
@@ -19,7 +21,7 @@ def test_transfer_run_skips_save_work_when_no_transfers(
 
     edit_path = tmp_path / "EDIT00000000"
     edit_path.write_bytes(b"encrypted-edit")
-    monkeypatch.setattr(run, "_scrape_run_transfers", lambda _args: [])
+    monkeypatch.setattr(run_pipeline, "_scrape_run_transfers", lambda _args: [])
     monkeypatch.setattr(
         run.crypto,
         "decrypt",
@@ -74,12 +76,12 @@ def test_cmd_run_routes_through_shared_local_update_service(
             )
 
     monkeypatch.setattr(
-        run,
+        run_pipeline,
         "build_local_update_service",
         lambda: FakeService(),
         raising=False,
     )
-    monkeypatch.setattr(run, "_scrape_run_transfers", lambda _args: [])
+    monkeypatch.setattr(run_pipeline, "_scrape_run_transfers", lambda _args: [])
 
     run.cmd_run(
         Namespace(
@@ -110,7 +112,7 @@ def test_cmd_run_routes_through_shared_local_update_service(
 def test_match_database_uses_save_team_names_without_external_catalog(
     monkeypatch, tmp_path
 ):
-    import run
+    import run_pipeline as run
     from editor.models import PlayerInfo, TeamData, TeamInfo
 
     class Save:
@@ -142,7 +144,7 @@ def test_match_database_uses_save_team_names_without_external_catalog(
 def test_match_database_keeps_external_team_catalog_strict_for_reference_save(
     monkeypatch, tmp_path
 ):
-    import run
+    import run_pipeline as run
     from editor.models import PlayerInfo, TeamData, TeamInfo
 
     class Save:
@@ -173,7 +175,7 @@ def test_match_database_keeps_external_team_catalog_strict_for_reference_save(
 def test_local_runtime_rejects_invalid_save_without_backup_or_target_text(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    import run
+    import run_pipeline as run
     from local_update import (
         CancellationToken,
         LocalUpdateError,
@@ -222,7 +224,7 @@ def test_local_runtime_rejects_invalid_save_without_backup_or_target_text(
 def test_local_runtime_accepts_non_blocking_roster_warnings(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    import run
+    import run_pipeline as run
     from local_update import CancellationToken, LocalUpdateRequest
 
     edit_path = tmp_path / "EDIT00000000"
@@ -261,7 +263,7 @@ def test_local_runtime_accepts_non_blocking_roster_warnings(
 def test_local_runtime_uses_selected_input(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    import run
+    import run_pipeline as run
     from local_update import CancellationToken, LocalUpdateRequest
 
     selected_input = tmp_path / "selected" / "EDIT00000000"
@@ -308,6 +310,7 @@ def test_local_runtime_uses_selected_input(
 
 def test_cmd_run_dry_run_resolves_stale_loan_chain(monkeypatch, tmp_path, capsys):
     import run
+    import run_pipeline
 
     psg, tottenham, juventus = 114, 179, 120
     player_id = 115254
@@ -383,15 +386,15 @@ def test_cmd_run_dry_run_resolves_stale_loan_chain(monkeypatch, tmp_path, capsys
         def get_player_shirt_number(self, *_):
             return None
 
-    monkeypatch.setattr(run, "EditFile", FakeEditFile)
-    monkeypatch.setattr(run.crypto, "decrypt", lambda _: decrypted)
-    monkeypatch.setattr(run.crypto, "cleanup_temp", lambda _: None)
+    monkeypatch.setattr(run_pipeline, "EditFile", FakeEditFile)
+    monkeypatch.setattr(run_pipeline.crypto, "decrypt", lambda _: decrypted)
+    monkeypatch.setattr(run_pipeline.crypto, "cleanup_temp", lambda _: None)
     monkeypatch.setattr(
-        run,
+        run_pipeline,
         "fetch_transfers_for_club_names",
         lambda *_, **__: transfers,
     )
-    monkeypatch.setattr(run.transfer_logger, "read_log", lambda *_, **__: [])
+    monkeypatch.setattr(run_pipeline.transfer_logger, "read_log", lambda *_, **__: [])
 
     run.cmd_run(Namespace(
         dry_run=True,
@@ -440,6 +443,7 @@ def test_real_run_skips_shirt_conflict_without_rolling_back(
     monkeypatch, tmp_path, capsys
 ):
     import run
+    import run_pipeline
 
     player_id, conflicting_player_id, team_id = 100527, 168639, 100
     edit_path = tmp_path / "EDIT00000000"
@@ -466,7 +470,7 @@ def test_real_run_skips_shirt_conflict_without_rolling_back(
         to_team_confidence=100,
         matched_player_name="Karl Darlow",
     )
-    plan = run.PlannedRosterAction(matched, "shirt_update", team_id)
+    plan = PlannedRosterAction(matched, "shirt_update", team_id)
 
     class FakeEditFile:
         def __init__(self):
@@ -496,19 +500,19 @@ def test_real_run_skips_shirt_conflict_without_rolling_back(
         def save(self, _):
             return None
 
-    monkeypatch.setattr(run, "EditFile", FakeEditFile)
-    monkeypatch.setattr(run, "_scrape_run_transfers", lambda _: [transfer])
-    monkeypatch.setattr(run, "_load_match_database", lambda _: (None, {}, {}, {team_id}))
+    monkeypatch.setattr(run_pipeline, "EditFile", FakeEditFile)
+    monkeypatch.setattr(run_pipeline, "_scrape_run_transfers", lambda _: [transfer])
+    monkeypatch.setattr(run_pipeline, "_load_match_database", lambda _: (None, {}, {}, {team_id}))
     monkeypatch.setattr(
-        run,
+        run_pipeline,
         "_match_and_plan_transfers",
         lambda *_, **__: ([plan], [matched], str(output_path.resolve())),
     )
-    monkeypatch.setattr(run.crypto, "decrypt", lambda _: decrypted)
-    monkeypatch.setattr(run.crypto, "encrypt", lambda *_: None)
-    monkeypatch.setattr(run.crypto, "cleanup_temp", lambda _: None)
-    monkeypatch.setattr(run.backup_mod, "create_backup", lambda _: tmp_path / "backup")
-    monkeypatch.setattr(run.transfer_logger, "save_reports", lambda _: None)
+    monkeypatch.setattr(run_pipeline.crypto, "decrypt", lambda _: decrypted)
+    monkeypatch.setattr(run_pipeline.crypto, "encrypt", lambda *_: None)
+    monkeypatch.setattr(run_pipeline.crypto, "cleanup_temp", lambda _: None)
+    monkeypatch.setattr(run_pipeline.backup_mod, "create_backup", lambda _: tmp_path / "backup")
+    monkeypatch.setattr(run_pipeline.transfer_logger, "save_reports", lambda _: None)
 
     run.cmd_run(Namespace(
         dry_run=False,
@@ -537,7 +541,7 @@ def test_real_run_skips_shirt_conflict_without_rolling_back(
 def test_local_runtime_baselines_native_integrity_diagnostics_before_verify(
     monkeypatch, tmp_path
 ):
-    import run
+    import run_pipeline as run
     from local_update import CancellationToken, LocalUpdateRequest, LocalUpdateError
 
     edit_path = tmp_path / "EDIT00000000"

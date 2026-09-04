@@ -6,7 +6,8 @@ from pathlib import Path
 import config
 import pytest
 
-from editor.editfile import (
+from editor.editfile import PE_REGISTERED_POSITION_BYTE, EditFile
+from editor.roster import (
     GP_ATTACK_PLAYERS,
     GP_CAPTAIN,
     GP_LEFT_CK,
@@ -15,8 +16,6 @@ from editor.editfile import (
     GP_POSITION_PRESETS,
     GP_POSITION_PHASE_OFFSETS,
     GP_RIGHT_CK,
-    PE_REGISTERED_POSITION_BYTE,
-    EditFile,
 )
 from editor.models import PlayerInfo
 from editor.player_assignment import (
@@ -1216,7 +1215,7 @@ def test_goalkeeper_addition_uses_transfer_position_for_game_plan_role():
 def test_runtime_falls_back_to_local_reference_playerbin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import run
+    import native_metadata
 
     reference_path = tmp_path / "reference" / "Player.bin"
     reference_path.parent.mkdir(parents=True)
@@ -1229,7 +1228,7 @@ def test_runtime_falls_back_to_local_reference_playerbin(
     monkeypatch.setattr(config, "PLAYER_BIN_FILE", tmp_path / "missing-Player.bin")
     monkeypatch.setattr(config, "GAME_ROOT", None)
 
-    database, source = run._load_playerbin_database()
+    database, source = native_metadata._load_playerbin_database()
 
     assert database is not None
     assert database.get(162196).registered_position == "RB"
@@ -1240,7 +1239,7 @@ def test_runtime_falls_back_to_local_reference_playerbin(
 def test_runtime_loads_playerbin_from_discovered_game_download(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import run
+    import native_metadata
 
     game_root = tmp_path / "Football Life 2026"
     archive = game_root / "download" / "data_s2526.cpk"
@@ -1249,7 +1248,7 @@ def test_runtime_loads_playerbin_from_discovered_game_download(
     monkeypatch.setattr(config, "GAME_ROOT", game_root)
     monkeypatch.setattr(config, "PLAYER_BIN_FILE", tmp_path / "missing-Player.bin")
 
-    database, source = run._load_playerbin_database()
+    database, source = native_metadata._load_playerbin_database()
 
     assert database is not None
     assert database.get(162196).registered_position == "RB"
@@ -1264,7 +1263,7 @@ def test_runtime_loads_playerbin_from_discovered_game_download(
 def test_runtime_loads_team_and_assignment_indexes_from_game_download(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import run
+    import native_metadata
 
     game_root = tmp_path / "Football Life 2026"
     download = game_root / "download"
@@ -1279,8 +1278,8 @@ def test_runtime_loads_team_and_assignment_indexes_from_game_download(
         tmp_path / "missing-PlayerAssignment.bin",
     )
 
-    teams, team_source = run._load_teambin_database()
-    assignments, assignment_source = run._load_player_assignment_database()
+    teams, team_source = native_metadata._load_teambin_database()
+    assignments, assignment_source = native_metadata._load_player_assignment_database()
 
     assert teams is not None
     assert teams.get(320) == TeamBinRecord(320, "Cagliari Calcio", "CAG")

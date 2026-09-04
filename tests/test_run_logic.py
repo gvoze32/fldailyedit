@@ -7,21 +7,27 @@ from types import SimpleNamespace
 import pytest
 
 from run import (
-    PlannedRosterAction,
-    _RunLocalUpdateRuntime,
-    _build_superseded_loan_sources,
     _competition_section_bounds,
-    _decide_roster_action,
-    _dedupe_shirt_number_matches,
     _iso_date_arg,
-    _match_and_plan_transfers,
-    _match_transfer_team,
-    _match_transfers_statefully,
-    _load_represented_fotmob_club_ids,
     _percentage_arg,
-    _plan_roster_actions,
     _positive_int_arg,
     _resolve_run_paths,
+)
+from run_pipeline import (
+    _RunLocalUpdateRuntime,
+    _find_shirt_number_conflict,
+    _load_represented_fotmob_club_ids,
+    _match_and_plan_transfers,
+)
+from transfer_planning import (
+    PlannedRosterAction,
+    _build_superseded_loan_sources,
+    _decide_roster_action,
+    _dedupe_shirt_number_matches,
+    _match_transfer_team,
+    _match_transfers_statefully,
+    _plan_roster_actions,
+    _transfer_sort_key,
 )
 from scraper.models import MatchedTransfer, Transfer
 from editor.models import TeamData
@@ -263,7 +269,7 @@ def test_local_runtime_apply_forwards_overflow_release_permission(
     monkeypatch, tmp_path
 ):
     from local_update import CancellationToken, LocalUpdateRequest
-    import run
+    import run_pipeline as run
 
     class FakeEditFile:
         _data = bytearray(b"updated")
@@ -345,7 +351,7 @@ def test_local_runtime_publishes_gameplan_repair_without_roster_action(
         save_scope=str(edit_path),
     )
     monkeypatch.setattr(
-        "run.backup_mod.create_backup",
+        "run_pipeline.backup_mod.create_backup",
         lambda _path: tmp_path / "backup",
     )
 
@@ -363,8 +369,6 @@ def test_local_runtime_publishes_gameplan_repair_without_roster_action(
 
 
 def test_same_day_transfers_sort_by_timestamp():
-    from run import _transfer_sort_key
-
     later = Transfer("Player", "B", "C", date="2026-08-02T18:00:00Z")
     earlier = Transfer("Player", "A", "B", date="2026-08-02T09:00:00Z")
 
@@ -372,8 +376,6 @@ def test_same_day_transfers_sort_by_timestamp():
 
 
 def test_shirt_number_conflict_identifies_other_player():
-    from run import _find_shirt_number_conflict
-
     class FakeEditFile:
         def get_team_roster(self, team_id):
             assert team_id == 100
@@ -848,7 +850,7 @@ def test_runtime_club_identity_index_must_be_one_to_one(monkeypatch, tmp_path):
         _load_represented_fotmob_club_ids()
     
 def test_transfer_run_skips_squad_number_sync_in_fast_mode(monkeypatch):
-    import run
+    import run_pipeline as run
 
     transfer = Transfer("Player Two", "A", "B")
     monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_kwargs: [transfer])
@@ -872,7 +874,7 @@ def test_transfer_run_skips_squad_number_sync_in_fast_mode(monkeypatch):
 
 
 def test_deep_auto_restricts_club_history_to_current_year(monkeypatch):
-    import run
+    import run_pipeline as run
 
     calls = {}
     monkeypatch.setattr(

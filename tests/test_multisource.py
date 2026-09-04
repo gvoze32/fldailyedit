@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from run import _match_transfers_statefully
+from transfer_planning import _match_transfers_statefully
 from scraper.matcher import NameMatcher
 from scraper.models import Transfer
 from scraper.sortitoutsi import parse_sortitoutsi_markdown
@@ -851,7 +851,7 @@ def test_destination_only_signal_cannot_infer_source_for_unresolved_destination(
 def test_run_pipeline_accepts_transfermarkt_dated_event_without_other_sources(
     monkeypatch,
 ):
-    import run
+    import run_pipeline as run
 
     transfermarkt = Transfer(
         "Jordan Henderson",
@@ -893,7 +893,7 @@ def test_run_pipeline_accepts_transfermarkt_dated_event_without_other_sources(
 
 
 def test_run_pipeline_reconciles_supplemental_sources(monkeypatch):
-    import run
+    import run_pipeline as run
 
     fotmob = Transfer(
         "Jordan Henderson", "Brentford", "Chelsea", date="2026-08-03"
@@ -953,7 +953,7 @@ def test_run_pipeline_reconciles_supplemental_sources(monkeypatch):
 
 
 def test_run_pipeline_treats_undated_wikipedia_route_as_corroborator(monkeypatch):
-    import run
+    import run_pipeline as run
 
     fotmob = Transfer(
         "Nathaniel Brown",
@@ -997,7 +997,7 @@ def test_run_pipeline_treats_undated_wikipedia_route_as_corroborator(monkeypatch
 
 
 def test_fotmob_only_flag_does_not_call_supplemental_sources(monkeypatch):
-    import run
+    import run_pipeline as run
 
     monkeypatch.setattr(
         run,

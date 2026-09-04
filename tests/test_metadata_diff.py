@@ -77,7 +77,7 @@ def test_compare_metadata_variants_reports_changed_and_added_native_records():
 def test_native_transfer_metadata_payload_is_bounded_and_json_safe():
     from types import SimpleNamespace
 
-    import run
+    import run_pipeline
 
     edit_file = SimpleNamespace(
         playerbin_db=PlayerBinDatabase(
@@ -91,7 +91,7 @@ def test_native_transfer_metadata_payload_is_bounded_and_json_safe():
         teambin_db=TeamBinDatabase((TeamBinRecord(10, "Native Club", "NAT"),)),
     )
 
-    payload = run._native_transfer_metadata(edit_file, 162196)
+    payload = run_pipeline._native_transfer_metadata(edit_file, 162196)
 
     assert payload["player_bin"]["found"] is True
     assert payload["player_bin"]["registered_position"] == "RB"

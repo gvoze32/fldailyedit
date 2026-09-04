@@ -21,20 +21,23 @@ from urllib.request import urlopen
 import pytest
 from installer import app as installer_app
 
-from installer.app import (
+from installer.state import (
     CatalogLoaded,
+    DestinationValidated,
+    DestinationValidationFailed,
     InstallCompleted,
     InstallerController,
     InstallerMode,
     InstallerState,
-    InstallerWorker,
     LocalProgressChanged,
     LocalUpdateCompleted,
+    LocationsDiscovered,
     ProgressChanged,
     WizardStep,
     WorkerFailed,
     error_copy,
 )
+from installer.worker import InstallerWorker
 from installer.catalog import (
     Catalog,
     CatalogError,
@@ -44,6 +47,7 @@ from installer.catalog import (
     download_archive,
     fetch_catalog,
 )
+from installer.install import InstallError, InstallResult, InstallStage
 from local_update import (
     CancellationToken,
     LocalUpdateError,
@@ -52,8 +56,7 @@ from local_update import (
     LocalUpdateResult,
     LocalUpdateStage,
 )
-from installer.install import InstallError, InstallResult, InstallStage
-from installer.paths import GameTarget, SaveLocation
+from installer.paths import DestinationError, GameTarget, SaveLocation
 
 
 GENERATED_AT = datetime(2026, 8, 6, tzinfo=timezone.utc)
@@ -961,13 +964,13 @@ def test_worker_runs_location_discovery_and_browse_validation_off_main_thread(
     )
     try:
         worker.discover_locations()
-        discovered = _next_event(worker, installer_app.LocationsDiscovered)
+        discovered = _next_event(worker, LocationsDiscovered)
         worker.validate_destination(
             save_directory,
             GameTarget.FL26,
             "Football Life 2026",
         )
-        validated = _next_event(worker, installer_app.DestinationValidated)
+        validated = _next_event(worker, DestinationValidated)
 
         assert discovered.locations == (location,)
         assert validated.location == location
@@ -980,7 +983,7 @@ def test_worker_runs_location_discovery_and_browse_validation_off_main_thread(
 def test_worker_reports_browse_validation_failure_as_a_typed_event(
     tmp_path: Path,
 ) -> None:
-    expected = installer_app.DestinationError(
+    expected = DestinationError(
         "not_save",
         "destination directory must be named save",
     )
@@ -997,7 +1000,7 @@ def test_worker_reports_browse_validation_failure_as_a_typed_event(
         )
         event = _next_event(
             worker,
-            installer_app.DestinationValidationFailed,
+            DestinationValidationFailed,
         )
 
         assert event.error is expected
@@ -1321,7 +1324,7 @@ def test_worker_validates_discovered_locations_and_emits_canonical_paths(
     )
     try:
         worker.discover_locations()
-        event = _next_event(worker, installer_app.LocationsDiscovered)
+        event = _next_event(worker, LocationsDiscovered)
 
         assert validation_calls == [(discovered_path, GameTarget.FL26)]
         assert event.locations == (
