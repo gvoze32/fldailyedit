@@ -272,12 +272,6 @@ def test_local_runtime_apply_forwards_overflow_release_permission(
             self.move_kwargs = kwargs
             return True
 
-        def repair_game_plan_positions(self):
-            self.repair_called = True
-            return {
-                "repaired_goalkeeper_roles": 1,
-                "repaired_position_bytes": 2,
-            }
 
     edit_path = tmp_path / "EDIT00000000"
     edit_path.write_bytes(b"encrypted")
@@ -314,7 +308,6 @@ def test_local_runtime_apply_forwards_overflow_release_permission(
 
     assert edit_file.move_kwargs["allow_overflow_release"] is True
     assert result.transfer_applied == 1
-    assert edit_file.repair_called is True
 
 
 def test_same_day_transfers_sort_by_timestamp():

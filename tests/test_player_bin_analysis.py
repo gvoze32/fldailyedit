@@ -395,16 +395,16 @@ def test_removal_repairs_goalkeeper_position_bytes_after_slot_compaction():
     assert not any("assigns GK" in error for error in report["errors"])
 
 
-def test_repair_game_plans_repairs_goalkeeper_position_bytes():
+def test_repair_game_plans_preserves_role_position_bytes_when_moving_goalkeeper():
     from tests.test_editor import _build_mock_data
 
     data = _build_mock_data(
-        num_players=16,
+        num_players=40,
         num_teams=1,
         num_team_player=1,
         num_game_plans=1,
         team_player_entries=[
-            (101, list(range(1000, 1016)), list(range(1, 17))),
+            (101, list(range(1000, 1040)), list(range(1, 41))),
         ],
         league_team_ids=[101],
     )
@@ -414,42 +414,10 @@ def test_repair_game_plans_repairs_goalkeeper_position_bytes():
         PlayerBinDatabase({1000: PlayerBinRecord(1000, "Starting GK", 24, "GK", 0)})
     )
     game_plan_offset = edit_file.game_plan_start
-    for preset_offset in GP_POSITION_PRESETS:
-        for phase_offset in GP_POSITION_PHASE_OFFSETS:
-            edit_file._data[game_plan_offset + preset_offset + phase_offset] = 1
-
-    metrics = edit_file.repair_game_plans()
-
-    assert metrics["repaired_position_bytes"] == (
-        len(GP_POSITION_PRESETS) * len(GP_POSITION_PHASE_OFFSETS)
-    )
-    assert edit_file.validate_integrity()["valid"] is True
-
-def test_repair_game_plans_moves_goalkeeper_out_of_striker_role():
-    from tests.test_editor import _build_mock_data
-
-    data = _build_mock_data(
-        num_players=40,
-        num_teams=1,
-        num_team_player=1,
-        num_game_plans=1,
-        team_player_entries=[
-            (101, list(range(1000, 1040)), list(range(1, 41))),
-        ],
-        league_team_ids=[101],
-    )
-    edit_file = EditFile()
-    edit_file.load_bytes(data)
-    edit_file.attach_playerbin(
-        PlayerBinDatabase(
-            {
-                1000: PlayerBinRecord(1000, "Wide Player", 24, "LWF", 0),
-                1001: PlayerBinRecord(1001, "Starting GK", 24, "GK", 0),
-            }
-        )
-    )
-    game_plan_offset = edit_file.game_plan_start
     lineup_offset = game_plan_offset + GP_LINEUP
+    edit_file._data[lineup_offset : lineup_offset + 40] = bytes(
+        [1, 0] + list(range(2, 40))
+    )
     for preset_offset in GP_POSITION_PRESETS:
         for phase_offset in GP_POSITION_PHASE_OFFSETS:
             edit_file._data[
@@ -457,11 +425,12 @@ def test_repair_game_plans_moves_goalkeeper_out_of_striker_role():
                 game_plan_offset + preset_offset + phase_offset + 11
             ] = bytes([0, 12] + [1] * 9)
 
-    metrics = edit_file.repair_game_plan_positions()
+    metrics = edit_file.repair_game_plans()
     lineup = list(edit_file._data[lineup_offset : lineup_offset + 11])
 
-    assert lineup[:2] == [1, 0]
+    assert lineup[:2] == [0, 1]
     assert metrics["repaired_goalkeeper_roles"] == 1
+    assert metrics["repaired_position_bytes"] == 0
     for preset_offset in GP_POSITION_PRESETS:
         for phase_offset in GP_POSITION_PHASE_OFFSETS:
             assert edit_file._data[
@@ -469,11 +438,11 @@ def test_repair_game_plans_moves_goalkeeper_out_of_striker_role():
             ] == 0
             assert edit_file._data[
                 game_plan_offset + preset_offset + phase_offset + 1
-            ] == 9
+            ] == 12
+    assert edit_file.validate_integrity()["valid"] is True
 
 
-
-def test_repair_game_plan_positions_restores_registered_outfield_roles():
+def test_repair_game_plans_moves_extra_goalkeeper_to_bench_without_relabeling_roles():
     from tests.test_editor import _build_mock_data
 
     data = _build_mock_data(
@@ -491,8 +460,61 @@ def test_repair_game_plan_positions_restores_registered_outfield_roles():
     edit_file.attach_playerbin(
         PlayerBinDatabase(
             {
-                1000: PlayerBinRecord(1000, "Marco Palestra", 20, "RB", 0),
-                1001: PlayerBinRecord(1001, "Cole Palmer", 23, "AMF", 0),
+                1000: PlayerBinRecord(1000, "Starting GK", 24, "GK", 0),
+                1008: PlayerBinRecord(1008, "Extra GK", 24, "GK", 0),
+                1011: PlayerBinRecord(1011, "Reserve CF", 24, "CF", 0),
+            }
+        )
+    )
+    game_plan_offset = edit_file.game_plan_start
+    lineup_offset = game_plan_offset + GP_LINEUP
+    edit_file._data[lineup_offset : lineup_offset + 40] = bytes(range(40))
+    before_positions = []
+    for preset_offset in GP_POSITION_PRESETS:
+        for phase_offset in GP_POSITION_PHASE_OFFSETS:
+            positions = bytes([0, 1, 1, 1, 1, 1, 1, 1, 10, 9, 12])
+            position_offset = game_plan_offset + preset_offset + phase_offset
+            edit_file._data[position_offset : position_offset + 11] = positions
+            before_positions.append(positions)
+
+    metrics = edit_file.repair_game_plans()
+    lineup = list(edit_file._data[lineup_offset : lineup_offset + 40])
+
+    assert lineup[:12] == [0, 1, 2, 3, 4, 5, 6, 7, 11, 9, 10, 8]
+    assert lineup[11] == 8
+    assert metrics["repaired_goalkeeper_roles"] == 1
+    position_index = 0
+    for preset_offset in GP_POSITION_PRESETS:
+        for phase_offset in GP_POSITION_PHASE_OFFSETS:
+            position_offset = game_plan_offset + preset_offset + phase_offset
+            assert (
+                bytes(edit_file._data[position_offset : position_offset + 11])
+                == before_positions[position_index]
+            )
+            position_index += 1
+
+
+def test_removal_promotes_player_matching_vacated_role_position():
+    from tests.test_editor import _build_mock_data
+
+    data = _build_mock_data(
+        num_players=40,
+        num_teams=1,
+        num_team_player=1,
+        num_game_plans=1,
+        team_player_entries=[
+            (101, list(range(1000, 1040)), list(range(1, 41))),
+        ],
+        league_team_ids=[101],
+    )
+    edit_file = EditFile()
+    edit_file.load_bytes(data)
+    edit_file.attach_playerbin(
+        PlayerBinDatabase(
+            {
+                1001: PlayerBinRecord(1001, "Departed CF", 24, "CF", 0),
+                1038: PlayerBinRecord(1038, "Reserve CF", 24, "CF", 0),
+                1039: PlayerBinRecord(1039, "Marco Palestra", 20, "RB", 0),
             }
         )
     )
@@ -502,19 +524,30 @@ def test_repair_game_plan_positions_restores_registered_outfield_roles():
             edit_file._data[
                 game_plan_offset + preset_offset + phase_offset :
                 game_plan_offset + preset_offset + phase_offset + 11
-            ] = bytes([12, 4] + [1] * 9)
+            ] = bytes([0, 12] + [1] * 9)
 
-    metrics = edit_file.repair_game_plan_positions()
+    assert edit_file.release_player(1001, 101)
 
-    assert metrics["repaired_position_bytes"] == 18
+    roster = edit_file.get_team_roster(101)
+    assert roster is not None
+    lineup = list(
+        edit_file._data[
+            game_plan_offset + GP_LINEUP :
+            game_plan_offset + GP_LINEUP + 40
+        ]
+    )
+    assert roster.player_ids[1] == 1039
+    assert roster.player_ids[38] == 1038
+    assert lineup[1] == 38
+    assert lineup.index(1) == 38
     for preset_offset in GP_POSITION_PRESETS:
         for phase_offset in GP_POSITION_PHASE_OFFSETS:
             assert edit_file._data[
-                game_plan_offset + preset_offset + phase_offset
-            ] == 3
-            assert edit_file._data[
                 game_plan_offset + preset_offset + phase_offset + 1
-            ] == 8
+            ] == 12
+
+
+
 def test_goalkeeper_addition_uses_transfer_position_for_game_plan_role():
     from tests.test_editor import _build_mock_data
 
