@@ -187,7 +187,7 @@ def _competition_section_bounds(edit_file: EditFile) -> tuple[int, int]:
     return start, start + COMPETITION_SECTION_SIZE
 
 
-def _load_represented_fotmob_club_ids() -> set[int]:
+def _load_represented_fotmob_club_map() -> dict[int, int]:
     """Load the generated one-to-one FotMob ↔ PES club identity index."""
     validated_path = config.DATA_DIR / "fotmob_teams_validated.json"
     try:
@@ -199,7 +199,7 @@ def _load_represented_fotmob_club_ids() -> set[int]:
             f"Could not load FotMob/PES club identity data: {exc}"
         ) from exc
 
-    represented_ids: set[int] = set()
+    represented: dict[int, int] = {}
     represented_pes_ids: set[int] = set()
     for item in validated_payload:
         if (
@@ -217,17 +217,22 @@ def _load_represented_fotmob_club_ids() -> set[int]:
             raise IncompleteScrapeError(
                 f"Non-numeric club identity in {validated_path}: {exc}"
             ) from exc
-        if fotmob_id in represented_ids or pes_team_id in represented_pes_ids:
+        if fotmob_id in represented or pes_team_id in represented_pes_ids:
             raise IncompleteScrapeError(
                 f"Club identity index is not one-to-one at FotMob {fotmob_id} / "
                 f"PES {pes_team_id}"
             )
-        represented_ids.add(fotmob_id)
+        represented[fotmob_id] = pes_team_id
         represented_pes_ids.add(pes_team_id)
 
-    if not represented_ids:
+    if not represented:
         raise IncompleteScrapeError("Represented FotMob club ID allowlist is empty")
-    return represented_ids
+    return represented
+
+
+def _load_represented_fotmob_club_ids() -> set[int]:
+    """Return the validated FotMob club IDs used by the transfer guard."""
+    return set(_load_represented_fotmob_club_map())
 
 
 def _transfer_sort_key(transfer):
@@ -246,6 +251,7 @@ def _match_transfer_team(
     full_name: str = "",
     fotmob_id: int | str | None = None,
     validated_fotmob_ids: set[int] | None = None,
+    validated_fotmob_teams: dict[int, int] | None = None,
 ) -> tuple[int | None, str, float]:
     """Match all available club names and reject conflicting identities."""
     raw_names = [full_name or "", short_name or ""]
@@ -253,11 +259,16 @@ def _match_transfer_team(
         return None, "", 100.0
 
     id_is_validated: bool | None = None
-    if fotmob_id is not None and validated_fotmob_ids is not None:
+    validated_team_id: int | None = None
+    if fotmob_id is not None:
         try:
-            id_is_validated = int(fotmob_id) in validated_fotmob_ids
+            normalized_fotmob_id = int(fotmob_id)
         except (TypeError, ValueError):
             return UNRESOLVED_TEAM_ID, "", 0.0
+        if validated_fotmob_ids is not None:
+            id_is_validated = normalized_fotmob_id in validated_fotmob_ids
+        if validated_fotmob_teams is not None:
+            validated_team_id = validated_fotmob_teams.get(normalized_fotmob_id)
 
     names: list[str] = []
     for value in (full_name, short_name):
@@ -267,6 +278,19 @@ def _match_transfer_team(
 
     results = [matcher.match_team(name) for name in names]
     matched_ids = {team_id for team_id, _, _ in results if team_id is not None}
+    if validated_team_id is not None:
+        if matched_ids and matched_ids != {validated_team_id}:
+            logger.warning(
+                "Conflicting FotMob ID/name identities for %s: id=%s names=%s",
+                names,
+                validated_team_id,
+                sorted(matched_ids),
+            )
+            return UNRESOLVED_TEAM_ID, "", max(
+                (confidence for _, _, confidence in results), default=100.0
+            )
+        if not matched_ids:
+            return validated_team_id, full_name or short_name, 100.0
     if len(matched_ids) > 1:
         logger.warning(
             "Conflicting club identities for %s: %s",
@@ -330,6 +354,7 @@ def _match_transfers_statefully(
     club_ids: set[int],
     historical_entries: list[dict] | None = None,
     validated_fotmob_ids: set[int] | None = None,
+    validated_fotmob_teams: dict[int, int] | None = None,
 ) -> list[MatchedTransfer]:
     """Match transfer events chronologically while advancing virtual rosters."""
     virtual_rosters = {
@@ -404,6 +429,7 @@ def _match_transfers_statefully(
             transfer.from_club_full_name,
             transfer.from_club_id_fotmob,
             validated_fotmob_ids,
+            validated_fotmob_teams,
         )
         ttid, ttname, ttconf = _match_transfer_team(
             matcher,
@@ -411,6 +437,7 @@ def _match_transfers_statefully(
             transfer.to_club_full_name,
             transfer.to_club_id_fotmob,
             validated_fotmob_ids,
+            validated_fotmob_teams,
         )
 
         context_map = virtual_rosters
@@ -1770,6 +1797,7 @@ def _match_and_plan_transfers(
         save_scope=save_scope,
         include_legacy=(output_path.resolve() == config.OUTPUT_FILE_PATH.resolve()),
     )
+    validated_fotmob_teams = _load_represented_fotmob_club_map()
     matched = _match_transfers_statefully(
         transfers,
         matcher,
@@ -1777,7 +1805,8 @@ def _match_and_plan_transfers(
         team_player_map,
         club_ids,
         historical_entries=historical_entries,
-        validated_fotmob_ids=_load_represented_fotmob_club_ids(),
+        validated_fotmob_ids=set(validated_fotmob_teams),
+        validated_fotmob_teams=validated_fotmob_teams,
     )
     matched, duplicate_shirt_matches = _dedupe_shirt_number_matches(matched)
     superseded_loan_sources = _build_superseded_loan_sources(

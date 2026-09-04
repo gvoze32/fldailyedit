@@ -28,7 +28,12 @@ from editor.player_assignment import (
     PlayerAssignmentDatabase,
     PlayerAssignmentRecord,
 )
-from editor.playerbin import RECORD_SIZE, PlayerBinDatabase, PlayerBinRecord
+from editor.playerbin import (
+    POSITION_NAMES,
+    RECORD_SIZE,
+    PlayerBinDatabase,
+    PlayerBinRecord,
+)
 from editor.teambin import TeamBinDatabase, TeamBinRecord
 from tools.cpk_extract import extract_file, extract_game_databases, list_files
 
@@ -546,6 +551,120 @@ def test_removal_promotes_player_matching_vacated_role_position():
                 game_plan_offset + preset_offset + phase_offset + 1
             ] == 12
 
+
+
+@pytest.mark.parametrize(
+    ("player_id", "native_position", "supplied_position", "expected_role"),
+    [
+        (151751, "GK", "AMF", 0),
+        (138156, "AMF", "DMF", 10),
+        (117087, "RWF", "AMF", 10),
+        (162196, "RB", "CF", 10),
+        (148009, "CB", "ST", 10),
+    ],
+    ids=("Penders", "Palmer", "Pedro-Neto", "Palestra", "Mosquera"),
+)
+def test_added_player_uses_native_position_for_new_game_plan_role(
+    player_id: int,
+    native_position: str,
+    supplied_position: str,
+    expected_role: int,
+):
+    from tests.test_editor import _build_mock_data
+
+    data = _build_mock_data(
+        num_players=0,
+        num_teams=1,
+        num_team_player=1,
+        num_game_plans=1,
+        team_player_entries=[
+            (101, list(range(1000, 1010)), list(range(1, 11))),
+        ],
+        league_team_ids=[101],
+    )
+    edit_file = EditFile()
+    edit_file.load_bytes(data)
+    edit_file.attach_playerbin(
+        PlayerBinDatabase(
+            {
+                player_id: PlayerBinRecord(
+                    player_id,
+                    f"Native {player_id}",
+                    20,
+                    native_position,
+                    0,
+                )
+            }
+        )
+    )
+    game_plan_offset = edit_file.game_plan_start
+    lineup_offset = game_plan_offset + GP_LINEUP
+    stale_position_code = POSITION_NAMES.index("CF")
+    for preset_offset in GP_POSITION_PRESETS:
+        for phase_offset in GP_POSITION_PHASE_OFFSETS:
+            edit_file._data[
+                game_plan_offset + preset_offset + phase_offset + 10
+            ] = stale_position_code
+
+    assert edit_file.add_player(
+        player_id,
+        101,
+        position=supplied_position,
+    )
+
+    lineup = list(edit_file._data[lineup_offset : lineup_offset + 11])
+    assert lineup.index(10) == expected_role
+    expected_position_code = POSITION_NAMES.index(native_position)
+    for preset_offset in GP_POSITION_PRESETS:
+        for phase_offset in GP_POSITION_PHASE_OFFSETS:
+            assert (
+                edit_file._data[
+                    game_plan_offset + preset_offset + phase_offset + expected_role
+                ]
+                == expected_position_code
+            )
+
+
+def test_removal_syncs_copied_player_to_vacated_game_plan_role():
+    from tests.test_editor import _build_mock_data
+
+    data = _build_mock_data(
+        num_players=0,
+        num_teams=1,
+        num_team_player=1,
+        num_game_plans=1,
+        team_player_entries=[
+            (101, list(range(1000, 1010)) + [162196], list(range(1, 12))),
+        ],
+        league_team_ids=[101],
+    )
+    edit_file = EditFile()
+    edit_file.load_bytes(data)
+    edit_file.attach_playerbin(
+        PlayerBinDatabase(
+            {
+                1001: PlayerBinRecord(1001, "Departed", 20, "CB", 0),
+                162196: PlayerBinRecord(162196, "Marco Palestra", 20, "RB", 0),
+            }
+        )
+    )
+    game_plan_offset = edit_file.game_plan_start
+    for preset_offset in GP_POSITION_PRESETS:
+        for phase_offset in GP_POSITION_PHASE_OFFSETS:
+            edit_file._data[
+                game_plan_offset + preset_offset + phase_offset + 1
+            ] = POSITION_NAMES.index("CF")
+
+    assert edit_file.release_player(1001, 101)
+
+    for preset_offset in GP_POSITION_PRESETS:
+        for phase_offset in GP_POSITION_PHASE_OFFSETS:
+            assert (
+                edit_file._data[
+                    game_plan_offset + preset_offset + phase_offset + 1
+                ]
+                == POSITION_NAMES.index("RB")
+            )
 
 
 def test_goalkeeper_addition_uses_transfer_position_for_game_plan_role():

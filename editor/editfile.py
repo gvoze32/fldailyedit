@@ -361,6 +361,13 @@ class EditFile:
                 return record.registered_position
         return player_info.position if player_info is not None and player_info.position else None
 
+    def _mutation_player_position(
+        self, player_id: int, supplied_position: str = ""
+    ) -> str:
+        """Prefer save/native registration over a transfer-source label."""
+        return self.get_player_position(player_id) or (supplied_position or "")
+
+
     def _player_metadata(self, player_id: int) -> PlayerInfo | None:
         """Return save metadata enriched with Player.bin when necessary."""
         player_cache = getattr(self, "_player_cache", {})
@@ -1306,12 +1313,8 @@ class EditFile:
             logger.error(f"No empty slot in destination team {to_team_id}")
             return False
 
-        pinfo = getattr(self, "_player_cache", {}).get(player_id)
-        effective_pos = position or (pinfo.position if pinfo else "")
-        is_gk = (
-            (pinfo.is_goalkeeper if pinfo else False)
-            or effective_pos.strip().upper() in _GOALKEEPER_POSITION_LABELS
-        )
+        effective_pos = self._mutation_player_position(player_id, position)
+        is_gk = _game_plan_position_code(effective_pos) == 0
 
         used_numbers = {
             shirt_number
@@ -1479,12 +1482,8 @@ class EditFile:
             logger.error(f"Team {to_team_id} roster is full (40 players)")
             return False
 
-        pinfo = getattr(self, "_player_cache", {}).get(player_id)
-        effective_pos = position or (pinfo.position if pinfo else "")
-        is_gk = (
-            (pinfo.is_goalkeeper if pinfo else False)
-            or effective_pos.strip().upper() in _GOALKEEPER_POSITION_LABELS
-        )
+        effective_pos = self._mutation_player_position(player_id, position)
+        is_gk = _game_plan_position_code(effective_pos) == 0
 
         used_numbers = {
             shirt_number
@@ -1594,6 +1593,37 @@ class EditFile:
         if same_position_line:
             return same_position_line[0]
         return None
+
+    def _repair_game_plan_role_position(
+        self,
+        game_plan_offset: int,
+        role: int,
+        position_code: int | None,
+    ) -> int:
+        """Relabel a role only when a roster mutation newly occupies it."""
+        if (
+            not 0 <= role < FIRST_TEAM_SLOT_COUNT
+            or position_code is None
+            or not 0 <= position_code < len(POSITION_NAMES)
+        ):
+            return 0
+
+        repaired = 0
+        for preset_offset in GP_POSITION_PRESETS:
+            for phase_offset in GP_POSITION_PHASE_OFFSETS:
+                position_address = (
+                    game_plan_offset
+                    + preset_offset
+                    + phase_offset
+                    + role * GP_POSITION_ENTRY_SIZE
+                )
+                if position_address >= len(self._data):
+                    continue
+                if self._data[position_address] != position_code:
+                    self._data[position_address] = position_code
+                    repaired += 1
+        return repaired
+
     def _repair_game_plan_goalkeeper_positions(
         self,
         game_plan_offset: int,
@@ -1672,6 +1702,7 @@ class EditFile:
             ] = bytes(lineup)
 
         return repaired_roles, 0
+
     def _update_game_plan_after_removal(
         self,
         team_id: int,
@@ -1696,6 +1727,11 @@ class EditFile:
         roster = self.get_team_roster(team_id)
         if roster is None:
             return
+        replacement_player_id = (
+            roster.player_ids[removed_idx]
+            if replacement_idx >= 0 and 0 <= removed_idx < TP_MAX_PLAYERS
+            else None
+        )
 
         lineup_offset = gp_offset + GP_LINEUP
         lineup = list(self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS])
@@ -1823,6 +1859,25 @@ class EditFile:
             roster,
             new_lineup,
         )
+        if promoted_slot is None and replacement_player_id is not None:
+            replacement_role = next(
+                (
+                    role
+                    for role, slot in enumerate(new_lineup[:FIRST_TEAM_SLOT_COUNT])
+                    if slot == removed_idx
+                ),
+                None,
+            )
+            replacement_position_code = _game_plan_position_code(
+                self.get_player_position(replacement_player_id)
+            )
+            if replacement_role is not None:
+                self._repair_game_plan_role_position(
+                    gp_offset,
+                    replacement_role,
+                    replacement_position_code,
+                )
+
         for role_offset in GP_SINGLE_PLAYER_ROLES:
             target_offset = gp_offset + role_offset
             value = self._data[target_offset]
@@ -1898,9 +1953,13 @@ class EditFile:
             lineup
         )
         added_player_id = roster.player_ids[added_slot]
+        effective_added_position = self._mutation_player_position(
+            added_player_id,
+            added_position,
+        )
         position_overrides = (
-            {added_player_id: added_position}
-            if added_position
+            {added_player_id: effective_added_position}
+            if effective_added_position
             else None
         )
         self._repair_game_plan_goalkeeper_positions(
@@ -1909,9 +1968,22 @@ class EditFile:
             lineup,
             position_overrides=position_overrides,
         )
-
-
-
+        added_role = next(
+            (
+                role
+                for role, slot in enumerate(
+                    lineup[: min(FIRST_TEAM_SLOT_COUNT, roster.roster_size)]
+                )
+                if slot == added_slot
+            ),
+            None,
+        )
+        if added_role is not None:
+            self._repair_game_plan_role_position(
+                gp_offset,
+                added_role,
+                _game_plan_position_code(effective_added_position),
+            )
 
     def _find_game_plan_offset(self, team_id: int) -> int | None:
         """Find the byte offset of a team's game plan entry."""

@@ -374,6 +374,15 @@ def test_team_matching_uses_full_name_and_rejects_conflicts():
         validated_fotmob_ids={1234},
     ) == (None, "", 100.0)
 
+    assert _match_transfer_team(
+        matcher,
+        "Barcelona",
+        "Barcelona",
+        fotmob_id=8634,
+        validated_fotmob_ids={8634},
+        validated_fotmob_teams={8634: 108},
+    ) == (108, "Barcelona", 100.0)
+
     unresolved = MatchedTransfer(
         transfer=Transfer("Player", "A", "B"),
         player_id=1,
