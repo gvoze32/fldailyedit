@@ -253,7 +253,7 @@ def _match_transfer_team(
     validated_fotmob_ids: set[int] | None = None,
     validated_fotmob_teams: dict[int, int] | None = None,
 ) -> tuple[int | None, str, float]:
-    """Match all available club names and reject conflicting identities."""
+    """Resolve validated IDs before falling back to club-name matching."""
     raw_names = [full_name or "", short_name or ""]
     if any(name.strip().casefold() in _NON_CLUB_LABELS for name in raw_names if name.strip()):
         return None, "", 100.0
@@ -269,6 +269,9 @@ def _match_transfer_team(
             id_is_validated = normalized_fotmob_id in validated_fotmob_ids
         if validated_fotmob_teams is not None:
             validated_team_id = validated_fotmob_teams.get(normalized_fotmob_id)
+    if validated_team_id is not None:
+        return validated_team_id, full_name or short_name, 100.0
+
 
     names: list[str] = []
     for value in (full_name, short_name):
@@ -278,19 +281,6 @@ def _match_transfer_team(
 
     results = [matcher.match_team(name) for name in names]
     matched_ids = {team_id for team_id, _, _ in results if team_id is not None}
-    if validated_team_id is not None:
-        if matched_ids and matched_ids != {validated_team_id}:
-            logger.warning(
-                "Conflicting FotMob ID/name identities for %s: id=%s names=%s",
-                names,
-                validated_team_id,
-                sorted(matched_ids),
-            )
-            return UNRESOLVED_TEAM_ID, "", max(
-                (confidence for _, _, confidence in results), default=100.0
-            )
-        if not matched_ids:
-            return validated_team_id, full_name or short_name, 100.0
     if len(matched_ids) > 1:
         logger.warning(
             "Conflicting club identities for %s: %s",
