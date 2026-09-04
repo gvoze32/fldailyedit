@@ -1027,6 +1027,95 @@ def test_gameplan_uses_primary_native_goalkeeper_and_keeps_reserve():
     assert metrics["repaired_goalkeeper_roles"] == 1
 
 
+def test_gameplan_uses_club_roster_order_not_international_caps():
+    from tests.test_editor import _build_mock_data
+
+    data = _build_mock_data(
+        num_players=0,
+        num_teams=1,
+        num_team_player=1,
+        num_game_plans=1,
+        team_player_entries=[
+            (
+                101,
+                [101520, 47242] + list(range(2000, 2038)),
+                list(range(1, 41)),
+            )
+        ],
+        league_team_ids=[101],
+    )
+    edit_file = EditFile()
+    edit_file.load_bytes(data)
+    edit_file.attach_playerbin(
+        PlayerBinDatabase(
+            {
+                101520: PlayerBinRecord(
+                    101520, "David Raya", 30, "GK", 0, caps=8
+                ),
+                47242: PlayerBinRecord(
+                    47242, "Kepa Arrizabalaga", 31, "GK", 0, caps=15
+                ),
+            }
+        )
+    )
+    lineup_offset = edit_file.game_plan_start + GP_LINEUP
+    edit_file._data[lineup_offset : lineup_offset + 40] = bytes(
+        [0] + list(range(2, 12)) + [1] + list(range(12, 40))
+    )
+
+    metrics = edit_file.repair_game_plans()
+
+    lineup = list(edit_file._data[lineup_offset : lineup_offset + 40])
+    assert lineup[0] == 0
+    assert lineup[11] == 1
+    assert metrics["repaired_goalkeeper_roles"] == 0
+
+
+
+def test_gameplan_moves_every_extra_goalkeeper_out_of_starters():
+    from tests.test_editor import _build_mock_data
+
+    data = _build_mock_data(
+        num_players=0,
+        num_teams=1,
+        num_team_player=1,
+        num_game_plans=1,
+        team_player_entries=[
+            (
+                101,
+                [101076, 151751] + list(range(2000, 2038)),
+                list(range(1, 41)),
+            )
+        ],
+        league_team_ids=[101],
+    )
+    edit_file = EditFile()
+    edit_file.load_bytes(data)
+    edit_file.attach_playerbin(
+        PlayerBinDatabase(
+            {
+                101076: PlayerBinRecord(
+                    101076, "Emiliano Martínez", 33, "GK", 0
+                ),
+                151751: PlayerBinRecord(
+                    151751, "Mike Penders", 20, "GK", 0
+                ),
+                2011: PlayerBinRecord(
+                    2011, "Bench Outfielder", 24, "CB", 0
+                ),
+            }
+        )
+    )
+    lineup_offset = edit_file.game_plan_start + GP_LINEUP
+
+    metrics = edit_file.repair_game_plans()
+
+    lineup = list(edit_file._data[lineup_offset : lineup_offset + 40])
+    assert lineup[0] == 0
+    assert lineup[1] == 11
+    assert lineup[11] == 1
+    assert metrics["repaired_goalkeeper_roles"] == 1
+
 
 def test_gameplan_does_not_promote_native_outfield_player_to_goalkeeper():
     from tests.test_editor import _build_mock_data

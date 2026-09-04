@@ -1654,19 +1654,12 @@ class EditFile:
 
         repaired_roles = 0
         lineup_changed = False
-        # Player.bin caps provide the strongest native first-choice signal.
-        # Fall back to roster order, then lineup order, for equal/unknown caps.
-        def goalkeeper_priority(role: int) -> tuple[int, int, int]:
-            slot = lineup[role]
-            player_id = roster.player_ids[slot]
-            database = getattr(self, "playerbin_db", None)
-            record = database.get(player_id) if database is not None else None
-            caps = record.caps if record is not None else 0
-            return caps, -slot, -role
-
-        primary_role = max(
+        # Team-Player slot order is the local squad hierarchy. Player.bin
+        # ``caps`` counts international appearances, so it cannot identify a
+        # club's first-choice goalkeeper (for example, Raya versus Kepa).
+        primary_role = min(
             goalkeeper_roles,
-            key=goalkeeper_priority,
+            key=lambda role: (lineup[role], role),
         )
         if primary_role != 0:
             lineup[0], lineup[primary_role] = (
@@ -1684,9 +1677,12 @@ class EditFile:
             )
             != 0
         ]
-        for goalkeeper_role in goalkeeper_roles:
-            if goalkeeper_role in {0, primary_role} or goalkeeper_role >= starter_count:
-                continue
+        extra_starter_goalkeeper_roles = [
+            role
+            for role in range(1, starter_count)
+            if is_goalkeeper_role(role)
+        ]
+        for goalkeeper_role in extra_starter_goalkeeper_roles:
             bench_role = next(iter(bench_roles), None)
             if bench_role is None:
                 break
