@@ -327,55 +327,42 @@ class EditFile:
         )
         self.release_usage = {} if policy is None else dict(policy.usage)
 
-    def _native_player_position(self, player_id: int) -> str | None:
-        """Return native registered position when the selected game metadata has it."""
-        database = getattr(self, "playerbin_db", None)
-        if database is None:
-            return None
-        record = database.get(player_id)
-        if record is None:
-            return None
-        position = (record.registered_position or "").strip()
-        return position or None
 
     def get_player_position(self, player_id: int) -> str | None:
-        """Return native position first, then the selected save's fallback metadata."""
-        native_position = self._native_player_position(player_id)
-        if native_position:
-            return native_position
-        player_info = getattr(self, "_player_cache", {}).get(player_id)
-        return (
-            player_info.position
-            if player_info is not None and player_info.position
-            else None
-        )
+        """Return an edited or Player.bin registered position when available."""
+        player_cache = getattr(self, "_player_cache", {})
+        player_info = player_cache.get(player_id)
+        if player_info is not None and player_info.position:
+            return player_info.position
+        database = getattr(self, "playerbin_db", None)
+        if database is not None:
+            record = database.get(player_id)
+            if record is not None:
+                return record.registered_position
+        return player_info.position if player_info is not None and player_info.position else None
 
     def _mutation_player_position(
         self, player_id: int, supplied_position: str = ""
     ) -> str:
-        """Prefer native metadata, then the transfer event, then save fallback data."""
-        return (
-            self._native_player_position(player_id)
-            or (supplied_position or "").strip()
-            or self.get_player_position(player_id)
-            or ""
-        )
+        """Prefer save/native registration over a transfer-source label."""
+        return self.get_player_position(player_id) or (supplied_position or "")
 
     def _player_metadata(self, player_id: int) -> PlayerInfo | None:
-        """Return save metadata enriched with authoritative native fields."""
-        player_info = getattr(self, "_player_cache", {}).get(player_id)
+        """Return save metadata enriched with Player.bin when necessary."""
+        player_cache = getattr(self, "_player_cache", {})
+        player_info = player_cache.get(player_id)
         database = getattr(self, "playerbin_db", None)
         record = database.get(player_id) if database is not None else None
         if player_info is not None:
-            if record is None:
+            if record is None or (player_info.position and player_info.age):
                 return player_info
             return PlayerInfo(
                 player_id=player_info.player_id,
                 name=player_info.name or record.name,
                 print_name=player_info.print_name or record.print_name or record.name,
-                position=record.registered_position or player_info.position,
+                position=player_info.position or record.registered_position,
                 nationality=player_info.nationality,
-                age=record.age or player_info.age,
+                age=player_info.age or record.age,
             )
         if record is None:
             return None
@@ -588,9 +575,9 @@ class EditFile:
                         player_id=existing.player_id,
                         name=existing.name or record.name,
                         print_name=existing.print_name or record.print_name or record.name,
-                        position=record.registered_position or existing.position,
+                        position=existing.position or record.registered_position,
                         nationality=existing.nationality,
-                        age=record.age or existing.age,
+                        age=existing.age or record.age,
                     )
             report = replace(
                 report,
@@ -1119,7 +1106,6 @@ class EditFile:
             old_sn = from_roster.shirt_numbers[player_idx]
             if old_sn > 0:
                 target_shirt = old_sn
-        effective_pos = self._mutation_player_position(player_id, position)
 
 
         overflow_pid: int | None = None
@@ -1162,7 +1148,6 @@ class EditFile:
                 player_idx,
                 -1,
                 removed_player_id=player_id,
-                removed_position=effective_pos,
             )
         elif last_idx > player_idx:
             # Move last player into the vacated slot (compact)
@@ -1180,7 +1165,6 @@ class EditFile:
                 player_idx,
                 last_idx,
                 removed_player_id=player_id,
-                removed_position=effective_pos,
             )
         else:
             # player_idx > last_idx shouldn't happen, but handle gracefully
@@ -1190,7 +1174,6 @@ class EditFile:
                 player_idx,
                 -1,
                 removed_player_id=player_id,
-                removed_position=effective_pos,
             )
 
         # Re-read to_roster in case from_entry == to_entry
@@ -1202,6 +1185,7 @@ class EditFile:
             logger.error(f"No empty slot in destination team {to_team_id}")
             return False
 
+        effective_pos = self._mutation_player_position(player_id, position)
         is_gk = _game_plan_position_code(effective_pos) == 0
 
         used_numbers = {
@@ -1232,12 +1216,7 @@ class EditFile:
         )
         return True
 
-    def release_player(
-        self,
-        player_id: int,
-        from_team_id: int,
-        position: str = "",
-    ) -> bool:
+    def release_player(self, player_id: int, from_team_id: int) -> bool:
         """
         Release a player to Free Agent (or when moving to an unrepresented club).
 
@@ -1248,7 +1227,6 @@ class EditFile:
         Args:
             player_id: Player ID to release.
             from_team_id: Team ID to remove player from.
-            position: Optional registered position label for game-plan repair.
 
         Returns:
             True if released successfully, False otherwise.
@@ -1262,10 +1240,7 @@ class EditFile:
         player_idx = from_roster.player_index(player_id)
         if player_idx == -1:
             logger.error(f"Player {player_id} not found on team {from_team_id}")
-
             return False
-        effective_pos = self._mutation_player_position(player_id, position)
-
 
         # Find last non-zero player in roster
         last_idx = -1
@@ -1281,7 +1256,6 @@ class EditFile:
                 player_idx,
                 -1,
                 removed_player_id=player_id,
-                removed_position=effective_pos,
             )
         elif last_idx > player_idx:
             self._write_player_slot(
@@ -1295,7 +1269,6 @@ class EditFile:
                 player_idx,
                 last_idx,
                 removed_player_id=player_id,
-                removed_position=effective_pos,
             )
         else:
             self._write_player_slot(from_entry, player_idx, 0, 0)
@@ -1304,7 +1277,6 @@ class EditFile:
                 player_idx,
                 -1,
                 removed_player_id=player_id,
-                removed_position=effective_pos,
             )
 
         logger.info(f"Released player {player_id} from team {from_team_id} (now Free Agent)")
@@ -1505,62 +1477,7 @@ class EditFile:
         return None
 
 
-    def _repair_game_plan_role_position(
-        self,
-        game_plan_offset: int,
-        role: int,
-        position_code: int | None,
-    ) -> int:
-        """Relabel a starter role when a roster mutation changes its player."""
-        if (
-            not 0 <= role < FIRST_TEAM_SLOT_COUNT
-            or position_code is None
-            or not 0 <= position_code < len(POSITION_NAMES)
-        ):
-            return 0
 
-        repaired = 0
-        for preset_offset in GP_POSITION_PRESETS:
-            for phase_offset in GP_POSITION_PHASE_OFFSETS:
-                position_address = (
-                    game_plan_offset
-                    + preset_offset
-                    + phase_offset
-                    + role * GP_POSITION_ENTRY_SIZE
-                )
-                if position_address >= len(self._data):
-                    continue
-                if self._data[position_address] != position_code:
-                    self._data[position_address] = position_code
-                    repaired += 1
-        return repaired
-
-    def _repair_game_plan_changed_player_positions(
-        self,
-        game_plan_offset: int,
-        roster: TeamData,
-        previous_player_roles: dict[int, int],
-        lineup: list[int],
-        *,
-        position_overrides: dict[int, str] | None = None,
-    ) -> int:
-        """Align changed starter occupants with their registered positions."""
-        overrides = position_overrides or {}
-        starter_count = min(FIRST_TEAM_SLOT_COUNT, roster.roster_size)
-        repaired = 0
-        for role, slot in enumerate(lineup[:starter_count]):
-            if not 0 <= slot < TP_MAX_PLAYERS:
-                continue
-            player_id = roster.player_ids[slot]
-            if not player_id or previous_player_roles.get(player_id) == role:
-                continue
-            position = overrides.get(player_id) or self.get_player_position(player_id) or ""
-            repaired += self._repair_game_plan_role_position(
-                game_plan_offset,
-                role,
-                _game_plan_position_code(position),
-            )
-        return repaired
 
 
     def _repair_game_plan_goalkeeper_positions(
@@ -1689,7 +1606,6 @@ class EditFile:
         replacement_idx: int,
         *,
         removed_player_id: int | None = None,
-        removed_position: str = "",
     ) -> None:
         """
         Keep game-plan roles attached to players after roster compaction.
@@ -1738,28 +1654,6 @@ class EditFile:
                 "preserving it during removal"
             )
             return
-        replacement_player_id = (
-            roster.player_ids[removed_idx]
-            if replacement_idx >= 0 and 0 <= removed_idx < TP_MAX_PLAYERS
-            else None
-        )
-
-        def previous_player_id(slot: int) -> int:
-            if slot == removed_idx:
-                return removed_player_id or 0
-            if replacement_idx >= 0 and slot == replacement_idx:
-                return replacement_player_id or 0
-            if 0 <= slot < TP_MAX_PLAYERS:
-                return roster.player_ids[slot]
-            return 0
-
-        previous_player_roles = {
-            player_id: role
-            for role, slot in enumerate(
-                active_order[: min(FIRST_TEAM_SLOT_COUNT, old_active_count)]
-            )
-            if (player_id := previous_player_id(slot))
-        }
 
         removed_role = active_order.index(removed_idx)
         target_position_code: int | None = None
@@ -1790,11 +1684,8 @@ class EditFile:
             )
             if promoted_slot is None:
                 removed_position_known = bool(
-                    removed_position
-                    or (
-                        removed_player_id is not None
-                        and self.get_player_position(removed_player_id)
-                    )
+                    removed_player_id is not None
+                    and self.get_player_position(removed_player_id)
                 )
                 stale_role = active_order.index(stale_slot)
                 goalkeeper_role = (
@@ -1872,18 +1763,6 @@ class EditFile:
             roster,
             new_lineup,
         )
-        position_overrides = (
-            {removed_player_id: removed_position}
-            if removed_player_id is not None and removed_position
-            else None
-        )
-        self._repair_game_plan_changed_player_positions(
-            gp_offset,
-            roster,
-            previous_player_roles,
-            new_lineup,
-            position_overrides=position_overrides,
-        )
         for role_offset in GP_SINGLE_PLAYER_ROLES:
             target_offset = gp_offset + role_offset
             value = self._data[target_offset]
@@ -1943,13 +1822,6 @@ class EditFile:
             or set(active_prefix) != old_active_slots
         ):
             return
-        previous_player_roles = {
-            player_id: role
-            for role, slot in enumerate(
-                active_prefix[: min(FIRST_TEAM_SLOT_COUNT, old_active_count)]
-            )
-            if (player_id := roster.player_ids[slot])
-        }
 
         try:
             added_role = lineup.index(added_slot, old_active_count)
@@ -1978,13 +1850,6 @@ class EditFile:
         self._repair_game_plan_goalkeeper_positions(
             gp_offset,
             roster,
-            lineup,
-            position_overrides=position_overrides,
-        )
-        self._repair_game_plan_changed_player_positions(
-            gp_offset,
-            roster,
-            previous_player_roles,
             lineup,
             position_overrides=position_overrides,
         )

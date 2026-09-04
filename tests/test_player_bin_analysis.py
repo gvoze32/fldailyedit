@@ -539,7 +539,7 @@ def test_removal_promotes_player_matching_vacated_role_position():
     ],
     ids=("Penders", "Palmer", "Caicedo", "Pedro-Neto", "Palestra", "Mosquera"),
 )
-def test_added_player_uses_native_position_for_changed_game_plan_role(
+def test_added_player_preserves_existing_tactical_role(
     player_id: int,
     native_position: str,
     supplied_position: str,
@@ -580,6 +580,16 @@ def test_added_player_uses_native_position_for_changed_game_plan_role(
             edit_file._data[
                 game_plan_offset + preset_offset + phase_offset + 10
             ] = stale_position_code
+    before_positions = tuple(
+        bytes(
+            edit_file._data[
+                game_plan_offset + preset_offset + phase_offset :
+                game_plan_offset + preset_offset + phase_offset + 11
+            ]
+        )
+        for preset_offset in GP_POSITION_PRESETS
+        for phase_offset in GP_POSITION_PHASE_OFFSETS
+    )
 
     assert edit_file.add_player(
         player_id,
@@ -589,15 +599,20 @@ def test_added_player_uses_native_position_for_changed_game_plan_role(
 
     lineup = list(edit_file._data[lineup_offset : lineup_offset + 11])
     assert lineup.index(10) == expected_role
-    expected_position_code = POSITION_NAMES.index(native_position)
-    for preset_offset in GP_POSITION_PRESETS:
-        for phase_offset in GP_POSITION_PHASE_OFFSETS:
-            assert edit_file._data[
-                game_plan_offset + preset_offset + phase_offset + expected_role
-            ] == expected_position_code
+    after_positions = tuple(
+        bytes(
+            edit_file._data[
+                game_plan_offset + preset_offset + phase_offset :
+                game_plan_offset + preset_offset + phase_offset + 11
+            ]
+        )
+        for preset_offset in GP_POSITION_PRESETS
+        for phase_offset in GP_POSITION_PHASE_OFFSETS
+    )
+    assert after_positions == before_positions
 
 
-def test_native_playerbin_position_overrides_stale_save_position():
+def test_save_position_precedes_native_playerbin_position():
     from tests.test_editor import _build_mock_data
 
     data = _build_mock_data(
@@ -632,12 +647,12 @@ def test_native_playerbin_position_overrides_stale_save_position():
 
     players = edit_file.get_all_players()
 
-    assert players[138156].position == "AMF"
-    assert edit_file.get_player_position(138156) == "AMF"
-    assert edit_file._mutation_player_position(138156, "DMF") == "AMF"
+    assert players[138156].position == "GK"
+    assert edit_file.get_player_position(138156) == "GK"
+    assert edit_file._mutation_player_position(138156, "DMF") == "GK"
 
 
-def test_removal_relabels_copied_player_with_native_position():
+def test_removal_preserves_tactical_role_for_copied_player():
     from tests.test_editor import _build_mock_data
 
     data = _build_mock_data(
@@ -696,7 +711,64 @@ def test_removal_relabels_copied_player_with_native_position():
         for phase_offset in GP_POSITION_PHASE_OFFSETS:
             assert edit_file._data[
                 game_plan_offset + preset_offset + phase_offset + 1
-            ] == POSITION_NAMES.index("RB")
+            ] == POSITION_NAMES.index("CB")
+
+
+def test_move_preserves_tactical_role_after_source_compaction():
+    from tests.test_editor import _build_mock_data
+
+    data = _build_mock_data(
+        num_players=0,
+        num_teams=2,
+        num_team_player=2,
+        num_game_plans=2,
+        team_player_entries=[
+            (101, list(range(1000, 1011)) + [162196], list(range(1, 13))),
+            (102, [2000] + [0] * 39, [20] + [0] * 39),
+        ],
+        league_team_ids=[101, 102],
+    )
+    edit_file = EditFile()
+    edit_file.load_bytes(data)
+    edit_file.attach_playerbin(
+        PlayerBinDatabase(
+            {
+                1001: PlayerBinRecord(1001, "Departed", 20, "CB", 0),
+                162196: PlayerBinRecord(162196, "Marco Palestra", 20, "RB", 0),
+                2000: PlayerBinRecord(2000, "Destination Player", 20, "CF", 0),
+            }
+        )
+    )
+
+    game_plan_offset = edit_file._find_game_plan_offset(101)
+    assert game_plan_offset is not None
+    for preset_offset in GP_POSITION_PRESETS:
+        for phase_offset in GP_POSITION_PHASE_OFFSETS:
+            position_offset = (
+                game_plan_offset + preset_offset + phase_offset
+            )
+            edit_file._data[position_offset + 1] = POSITION_NAMES.index("CB")
+            edit_file._data[position_offset + 0x0B + 2] = 0x12
+            edit_file._data[position_offset + 0x0B + 3] = 0x34
+
+    assert edit_file.move_player(1001, 101, 102, position="ST")
+
+    roster = edit_file.get_team_roster(101)
+    assert roster is not None
+    assert roster.player_ids[1] == 162196
+    lineup_offset = game_plan_offset + GP_LINEUP
+    assert edit_file._data[lineup_offset + 1] == 1
+    for preset_offset in GP_POSITION_PRESETS:
+        for phase_offset in GP_POSITION_PHASE_OFFSETS:
+            position_offset = (
+                game_plan_offset + preset_offset + phase_offset
+            )
+            assert edit_file._data[position_offset + 1] == POSITION_NAMES.index("CB")
+            assert bytes(
+                edit_file._data[
+                    position_offset + 0x0B + 2 : position_offset + 0x0B + 4
+                ]
+            ) == b"\x12\x34"
 
 
 def test_reserve_compaction_keeps_copied_starter_role():
@@ -729,7 +801,7 @@ def test_reserve_compaction_keeps_copied_starter_role():
     assert updated_lineup[15:] == list(range(16, 40)) + [15]
 
 
-def test_removal_relabels_promoted_player_position():
+def test_removal_promoted_player_keeps_vacated_tactical_role():
     from tests.test_editor import _build_mock_data
 
     data = _build_mock_data(
@@ -777,7 +849,7 @@ def test_removal_relabels_promoted_player_position():
         for phase_offset in GP_POSITION_PHASE_OFFSETS:
             assert edit_file._data[
                 game_plan_offset + preset_offset + phase_offset + 1
-            ] == POSITION_NAMES.index("RB")
+            ] == POSITION_NAMES.index("CB")
 
 
 def test_goalkeeper_removal_uses_first_reserve_without_metadata():
