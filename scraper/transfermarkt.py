@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from datetime import date, datetime, timezone
+import time
 import unicodedata
+from datetime import date, datetime, timezone
 from urllib.parse import urlencode
 
 import aiohttp
@@ -282,13 +283,22 @@ async def _fetch_text(session: aiohttp.ClientSession, url: str) -> str:
         return await response.text()
 
 
+def _fresh_reader_url(source_url: str) -> str:
+    """Build a cache-busting Reader URL for an empty or stale response."""
+    separator = "&" if "?" in source_url else "?"
+    return (
+        f"{TRANSFERMARKT_READER_PREFIX}{source_url}"
+        f"{separator}fldailyedit_refresh={time.time_ns()}"
+    )
+
+
 async def _fetch_transfermarkt_transfers_async(
     max_pages: int = 4,
     since_date: str | date | None = None,
     *,
     ref_date: date | None = None,
 ) -> list[Transfer]:
-    """Read detailed pages until cutoff, empty data, or repeated IDs."""
+    """Read detailed pages until the cutoff, an invalid page, or repeated IDs."""
     if max_pages <= 0:
         return []
 
@@ -317,21 +327,53 @@ async def _fetch_transfermarkt_transfers_async(
             if page > 1:
                 params["page"] = page
             source_url = f"{TRANSFERMARKT_URL}?{urlencode(params)}"
-            markdown = await _fetch_text(
-                session,
-                f"{TRANSFERMARKT_READER_PREFIX}{source_url}",
-            )
-            batch = parse_transfermarkt_markdown(
-                markdown,
-                source_url,
-                start_date=start_date,
-                end_date=today,
-            )
+            reader_url = f"{TRANSFERMARKT_READER_PREFIX}{source_url}"
+            fresh_url = _fresh_reader_url(source_url)
+            fresh_requested = False
+            try:
+                markdown = await _fetch_text(session, reader_url)
+            except (
+                TransfermarktUnavailableError,
+                aiohttp.ClientError,
+                TimeoutError,
+            ):
+                markdown = await _fetch_text(session, fresh_url)
+                fresh_requested = True
+            batch = parse_transfermarkt_markdown(markdown, source_url)
+            if not batch and not fresh_requested:
+                batch = parse_transfermarkt_markdown(
+                    await _fetch_text(session, fresh_url),
+                    source_url,
+                )
             if not batch:
+                logger.warning(
+                    "Transfermarkt page %s returned no parseable dated rows",
+                    page,
+                )
                 break
-            new = [
+
+            eligible = [
                 transfer
                 for transfer in batch
+                if (
+                    (
+                        start_date is None
+                        or date.fromisoformat(transfer.date) >= start_date
+                    )
+                    and date.fromisoformat(transfer.date) <= today
+                )
+            ]
+            if not eligible:
+                if start_date and all(
+                    date.fromisoformat(transfer.date) < start_date
+                    for transfer in batch
+                ):
+                    break
+                continue
+
+            new = [
+                transfer
+                for transfer in eligible
                 if transfer.transfer_id_transfermarkt not in seen_transfer_ids
             ]
             if not new:

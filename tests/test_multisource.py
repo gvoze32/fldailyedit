@@ -501,6 +501,58 @@ def test_transfermarkt_fetch_uses_detailed_pages_and_stops_below_cutoff(monkeypa
     )
 
 
+
+def test_transfermarkt_fetch_continues_past_future_dated_first_page(monkeypatch):
+    from scraper import transfermarkt
+
+    requested = []
+    future_page = TRANSFERMARKT_MARKDOWN.replace("03/08/2026", "04/08/2026")
+    valid_page = TRANSFERMARKT_PAGE_2.replace("02/08/2026", "03/08/2026")
+
+    async def fake_fetch(_session, reader_url):
+        requested.append(reader_url)
+        return valid_page if "page=2" in reader_url else future_page
+
+    monkeypatch.setattr(transfermarkt, "_fetch_text", fake_fetch)
+    transfers = asyncio.run(
+        transfermarkt._fetch_transfermarkt_transfers_async(
+            max_pages=2,
+            since_date=date(2026, 8, 3),
+            ref_date=date(2026, 8, 3),
+        )
+    )
+
+    assert [item.transfer_id_transfermarkt for item in transfers] == [6481688]
+    assert len(requested) == 2
+
+
+def test_transfermarkt_fetch_refreshes_empty_reader_response(monkeypatch):
+    from scraper import transfermarkt
+
+    requested = []
+
+    async def fake_fetch(_session, reader_url):
+        requested.append(reader_url)
+        return (
+            TRANSFERMARKT_MARKDOWN
+            if "fldailyedit_refresh=" in reader_url
+            else ""
+        )
+
+    monkeypatch.setattr(transfermarkt, "_fetch_text", fake_fetch)
+    transfers = asyncio.run(
+        transfermarkt._fetch_transfermarkt_transfers_async(
+            max_pages=1,
+            since_date=date(2026, 8, 3),
+            ref_date=date(2026, 8, 3),
+        )
+    )
+
+    assert len(transfers) == 3
+    assert len(requested) == 2
+    assert "fldailyedit_refresh=" in requested[1]
+
+
 def test_transfermarkt_network_outage_is_quiet_fallback(monkeypatch, caplog):
     from scraper import transfermarkt
 
