@@ -124,8 +124,8 @@ and repair tools.
 - Local runs create rolling backups and use atomic, verified encryption.
 - A process lock prevents concurrent writes to the same output.
 - Incomplete source data aborts the run; ambiguous matches are skipped.
-- Native `Player.bin` registered positions take precedence over stale save or
-  transfer-feed position labels when game-plan roles are updated.
+- Roster compaction preserves existing tactical game-plan positions while
+  updating lineup slot references and goalkeeper placement.
 
 ## Development
 
