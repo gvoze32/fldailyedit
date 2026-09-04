@@ -502,6 +502,42 @@ def test_transfermarkt_fetch_uses_detailed_pages_and_stops_below_cutoff(monkeypa
 
 
 
+def test_transfermarkt_fetch_automatically_continues_past_four_pages(monkeypatch):
+    from scraper import transfermarkt
+
+    page_markdowns = {}
+    source_ids = ("6481933", "6481832", "6481567")
+    for page in range(1, 6):
+        markdown = TRANSFERMARKT_MARKDOWN
+        for index, source_id in enumerate(source_ids, start=1):
+            markdown = markdown.replace(
+                source_id,
+                str(7_000_000 + page * 10 + index),
+            )
+        page_markdowns[page] = markdown
+    old_page = TRANSFERMARKT_MARKDOWN.replace("03/08/2026", "01/08/2026")
+    requested = []
+
+    async def fake_fetch(_session, reader_url):
+        requested.append(reader_url)
+        if "page=" not in reader_url:
+            return page_markdowns[1]
+        page = int(reader_url.split("page=", 1)[1].split("&", 1)[0])
+        return page_markdowns.get(page, old_page)
+
+    monkeypatch.setattr(transfermarkt, "_fetch_text", fake_fetch)
+    transfers = asyncio.run(
+        transfermarkt._fetch_transfermarkt_transfers_async(
+            since_date=date(2026, 8, 3),
+            ref_date=date(2026, 8, 4),
+        )
+    )
+
+    assert len(transfers) == 15
+    assert len(requested) == 6
+    assert "page=5" in requested[-2]
+
+
 def test_transfermarkt_fetch_continues_past_future_dated_first_page(monkeypatch):
     from scraper import transfermarkt
 

@@ -16,6 +16,8 @@ from scraper.models import Transfer
 
 
 TRANSFERMARKT_URL = "https://www.transfermarkt.com/transfers/neuestetransfers/statistik"
+AUTO_PAGE_LIMIT = 250
+
 TRANSFERMARKT_READER_PREFIX = "https://r.jina.ai/"
 TRANSFERMARKT_HEADERS = {
     "User-Agent": "fldailyedit/0.1 (PES transfer updater; contact via project repository)",
@@ -291,15 +293,15 @@ def _fresh_reader_url(source_url: str) -> str:
         f"{separator}fldailyedit_refresh={time.time_ns()}"
     )
 
-
 async def _fetch_transfermarkt_transfers_async(
-    max_pages: int = 4,
+    max_pages: int | None = None,
     since_date: str | date | None = None,
     *,
     ref_date: date | None = None,
 ) -> list[Transfer]:
-    """Read detailed pages until the cutoff, an invalid page, or repeated IDs."""
-    if max_pages <= 0:
+    """Read pages until the cutoff, repetition, or the safety page limit."""
+    page_limit = AUTO_PAGE_LIMIT if max_pages is None else max_pages
+    if page_limit <= 0:
         return []
 
     start_date = (
@@ -317,7 +319,7 @@ async def _fetch_transfermarkt_transfers_async(
         headers=TRANSFERMARKT_HEADERS,
         timeout=timeout,
     ) as session:
-        for page in range(1, max_pages + 1):
+        for page in range(1, page_limit + 1):
             params: dict[str, str | int] = {
                 "land_id": 0,
                 "verein_land_id": 0,
@@ -393,7 +395,7 @@ async def _fetch_transfermarkt_transfers_async(
 
 
 def fetch_transfermarkt_transfers(
-    max_pages: int = 4,
+    max_pages: int | None = None,
     since_date: str | date | None = None,
 ) -> list[Transfer]:
     """Fetch verified dated events without failing the primary pipeline."""
