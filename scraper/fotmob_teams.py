@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Fail-closed FotMob team sitemap crawler."""
 
-import csv
 import json
 import logging
 import os
@@ -34,12 +33,15 @@ def _fetch_text(url: str) -> str:
         return response.read().decode("utf-8")
 
 
-def _atomic_write(path: Path, write) -> None:
+def _atomic_write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
-            write(handle)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, ensure_ascii=False)
+            handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temp_name, path)
@@ -98,21 +100,9 @@ def crawl_sitemaps() -> list[dict]:
         )
     if not teams:
         raise RuntimeError("FotMob sitemap crawl produced no teams")
-
-    teams.sort(key=lambda item: item["fotmob_id"])
     json_path = config.DATA_DIR / "fotmob_teams.json"
-    csv_path = config.DATA_DIR / "fotmob_teams.csv"
-    _atomic_write(
-        json_path,
-        lambda handle: json.dump(teams, handle, indent=2, ensure_ascii=False),
-    )
-
-    def write_csv(handle) -> None:
-        writer = csv.DictWriter(handle, fieldnames=["fotmob_id", "name", "slug", "url"])
-        writer.writeheader()
-        writer.writerows(teams)
-
-    _atomic_write(csv_path, write_csv)
+    teams.sort(key=lambda item: item["fotmob_id"])
+    _atomic_write_json(json_path, teams)
     logger.info("Saved %s complete FotMob team identities", len(teams))
     return teams
 

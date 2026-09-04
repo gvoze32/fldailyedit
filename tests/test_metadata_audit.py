@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from argparse import Namespace
 from datetime import date
 
 from editor.metadata_audit import audit_metadata

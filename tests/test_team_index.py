@@ -119,7 +119,6 @@ def test_sitemap_crawl_never_overwrites_index_after_partial_failure(
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     monkeypatch.setattr(fotmob_teams.time, "sleep", lambda _: None)
     (tmp_path / "fotmob_teams.json").write_text("old-json", encoding="utf-8")
-    (tmp_path / "fotmob_teams.csv").write_text("old-csv", encoding="utf-8")
     index = (
         "<loc>https://www.fotmob.com/sitemap/en/teams/1.xml</loc>"
         "<loc>https://www.fotmob.com/sitemap/en/teams/2.xml</loc>"
@@ -138,4 +137,3 @@ def test_sitemap_crawl_never_overwrites_index_after_partial_failure(
         fotmob_teams.crawl_sitemaps()
 
     assert (tmp_path / "fotmob_teams.json").read_text() == "old-json"
-    assert (tmp_path / "fotmob_teams.csv").read_text() == "old-csv"

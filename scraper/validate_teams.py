@@ -236,7 +236,6 @@ def validate() -> None:
     fotmob_path = config.DATA_DIR / "fotmob_teams.json"
     major_path = config.DATA_DIR / "major_clubs.json"
     output_path = config.DATA_DIR / "fotmob_teams_validated.json"
-    pes_output_path = config.DATA_DIR / "pes_teams.json"
 
     fotmob_teams = json.loads(fotmob_path.read_text(encoding="utf-8"))
     major_clubs = json.loads(major_path.read_text(encoding="utf-8"))
@@ -248,10 +247,6 @@ def validate() -> None:
     if not validated:
         raise RuntimeError("Validation produced an empty FotMob/PES club index")
 
-    _atomic_write_json(
-        pes_output_path,
-        [{"pes_team_id": team_id, "name": name} for team_id, name in pes_clubs.items()],
-    )
     _atomic_write_json(output_path, validated)
     logger.info(
         "Validated %s/%s PES clubs; wrote %s",

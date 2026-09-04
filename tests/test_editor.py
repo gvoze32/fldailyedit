@@ -23,7 +23,7 @@ from editor.editfile import (
     TE_TEAM_ID, TE_TEAM_NAME,
     assign_smart_shirt_number,
 )
-from editor.models import TeamData, PlayerInfo, TeamInfo
+from editor.models import TeamData, PlayerInfo
 
 
 def _build_mock_data(
