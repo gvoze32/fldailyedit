@@ -5,7 +5,7 @@ from argparse import Namespace
 from datetime import date
 
 from editor.metadata_audit import audit_metadata
-from editor.models import PlayerInfo, TeamData
+from editor.models import TeamData
 from editor.player_assignment import (
     PlayerAssignmentDatabase,
     PlayerAssignmentRecord,
@@ -21,25 +21,6 @@ class _RosterSource:
     def get_all_rosters(self) -> dict[int, TeamData]:
         return self._rosters
 
-class _OvrRosterSource(_RosterSource):
-    def get_all_players(self, include_base_db: bool = True) -> dict[int, PlayerInfo]:
-        del include_base_db
-        return {
-            1: PlayerInfo(
-                1,
-                "Player One",
-                overall_rating=68,
-                position="CF",
-                position_proficiency={"CF": 2, "SS": 1},
-            ),
-            2: PlayerInfo(
-                2,
-                "Player Two",
-                overall_rating=72,
-                position="CMF",
-                position_proficiency={"CMF": 2},
-            ),
-        }
 
 
 
@@ -82,7 +63,7 @@ def _databases() -> tuple[
 
 def test_audit_metadata_reports_bounded_consistency_and_contract_diagnostics():
     players, teams, assignments = _databases()
-    source = _OvrRosterSource(
+    source = _RosterSource(
         {
             101: TeamData(101, [1, 2, 3, 0], [1, 2, 3, 0]),
         }
@@ -96,13 +77,6 @@ def test_audit_metadata_reports_bounded_consistency_and_contract_diagnostics():
         as_of=date(2025, 1, 1),
     )
 
-    assert report.save_players_with_ovr == 2
-    assert report.save_players_missing_ovr == 1
-    assert report.save_players_missing_ovr_preview == (3,)
-    assert report.save_players_with_secondary_positions == 1
-    assert report.save_secondary_position_entries == 1
-    assert report.save_players_missing_position_profile == 1
-    assert report.save_players_secondary_positions_preview == (1,)
     assert report.save_players_missing_from_playerbin == 1
     assert report.save_players_missing_from_playerbin_preview == (3,)
     assert report.assignment_players_missing_from_playerbin == 2
@@ -200,9 +174,6 @@ def test_audit_cli_emits_machine_readable_sources_and_report(
     payload = json.loads(capsys.readouterr().out)
     assert payload["as_of"] == "2025-01-01"
     assert payload["save_roster_players"] == 3
-    assert payload["save_players_with_ovr"] == 0
-    assert payload["save_players_missing_ovr"] == 3
-    assert payload["save_players_missing_ovr_preview"] == [1, 2, 3]
     assert payload["sources"] == {
         "Player.bin": "fixture::Player.bin",
         "Team.bin": "fixture::Team.bin",

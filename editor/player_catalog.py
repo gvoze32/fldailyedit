@@ -26,7 +26,6 @@ class PlayerCatalogReport:
     positions: int
     nationalities: int
     ages: int
-    overall_ratings: int
 
 
 
@@ -145,16 +144,9 @@ def build_player_catalog(
             player_id=player_id,
             name=existing.name,
             print_name=existing.print_name or edited_player.print_name,
-            overall_rating=(
-                edited_player.overall_rating or existing.overall_rating
-            ),
             position=edited_player.position or existing.position,
             nationality=edited_player.nationality or existing.nationality,
             age=edited_player.age or existing.age,
-            position_proficiency=(
-                edited_player.position_proficiency
-                or existing.position_proficiency
-            ),
         )
 
     missing = tuple(sorted(roster_ids - set(players)))
@@ -174,10 +166,6 @@ def build_player_catalog(
         ),
         ages=sum(
             bool(players.get(player_id) and players[player_id].age)
-            for player_id in roster_ids
-        ),
-        overall_ratings=sum(
-            bool(players.get(player_id) and players[player_id].overall_rating)
             for player_id in roster_ids
         ),
     )

@@ -18,12 +18,6 @@ from editor.editfile import (
     EditFile,
 )
 from editor.models import PlayerInfo
-from editor.player_codec import (
-    PLAYER_APPEARANCE_SIZE,
-    _build_generic_appearance,
-    load_appearance_template,
-    load_appearance_template_bytes,
-)
 from editor.player_assignment import (
     PlayerAssignmentDatabase,
     PlayerAssignmentRecord,
@@ -40,7 +34,6 @@ from tools.cpk_extract import extract_file, extract_game_databases, list_files
 
 CPK_PATH = Path("reference/data_s2526.cpk")
 EXTRA_CPK_PATH = Path("reference/download/data_extra.cpk")
-APPEARANCE_PATH = Path("data/PlayerAppearance.bin")
 
 
 
@@ -147,7 +140,6 @@ def test_extract_game_databases_reads_all_supported_cpk_members(tmp_path: Path):
 
     assert set(extracted) == {
         "Player.bin",
-        "PlayerAppearance.bin",
         "PlayerAssignment.bin",
         "Team.bin",
     }
@@ -156,24 +148,6 @@ def test_extract_game_databases_reads_all_supported_cpk_members(tmp_path: Path):
     assert len(PlayerAssignmentDatabase.load(extracted["PlayerAssignment.bin"])) == 21_245
 
 
-@pytest.mark.skipif(not APPEARANCE_PATH.exists(), reason="appearance fixture is not available")
-def test_appearance_template_overlays_only_identity_and_colors():
-    template = load_appearance_template(APPEARANCE_PATH, donor_player_id=91)
-    assert len(template) == PLAYER_APPEARANCE_SIZE
-    assert load_appearance_template_bytes(
-        APPEARANCE_PATH.read_bytes(), donor_player_id=91
-    ) == template
-
-    player = type("Player", (), {"player_id": 999, "skin_color": 2, "iris_color": 1})()
-    result = _build_generic_appearance(player, template=template)
-
-    assert len(result) == PLAYER_APPEARANCE_SIZE
-    assert struct.unpack_from("<I", result, 0)[0] == 999
-    assert struct.unpack_from("<I", result, 8)[0] == 999
-    assert result[45] == 2
-    assert result[64] & 0x0F == 1
-    for offset in (4, 5, 6, 7, 12, 20, 30, 40, 44, 46, 50, 60, 70):
-        assert result[offset] == template[offset]
 
 
 def test_playerbin_position_protects_unedited_goalkeeper_from_overflow_release():
@@ -192,7 +166,6 @@ def test_playerbin_position_protects_unedited_goalkeeper_from_overflow_release()
         1000 + index: PlayerInfo(
             player_id=1000 + index,
             name=f"P{index}",
-            overall_rating=80 if index != 25 and index != 35 else (52 if index == 25 else 62),
         )
         for index in range(40)
     }
@@ -930,23 +903,3 @@ def test_runtime_loads_team_and_assignment_indexes_from_game_download(
     assert assignments.team_keys_for(162196) == (12, 320)
     assert assignment_source == f"{extra}::PlayerAssignment.bin"
 
-
-@pytest.mark.skipif(not CPK_PATH.exists(), reason="CPK fixture is not available")
-def test_runtime_loads_playerappearance_from_discovered_game_download(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import run
-
-    game_root = tmp_path / "Football Life 2026"
-    archive = game_root / "download" / "data_s2526.cpk"
-    archive.parent.mkdir(parents=True)
-    archive.symlink_to(CPK_PATH.resolve())
-    monkeypatch.setattr(config, "PLAYER_APPEARANCE_FILE", tmp_path / "missing-appearance.bin")
-
-    data, source = run._load_player_appearance_data(game_root=game_root)
-
-    assert data is not None
-    assert source == f"{archive}::PlayerAppearance.bin"
-    assert load_appearance_template_bytes(data, donor_player_id=91) == load_appearance_template(
-        APPEARANCE_PATH, donor_player_id=91
-    )

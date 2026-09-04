@@ -17,7 +17,7 @@ from editor.editfile import (
     HDR_STADIUM_COUNT, HDR_COMPETITION_COUNT, HDR_UNKNOWN_COUNT,
     HDR_TEAM_PLAYER_COUNT, HDR_GAME_PLAN_COUNT,
     TP_TEAM_ID, TP_PLAYER_IDS, TP_SHIRT_NUMBERS, TP_MAX_PLAYERS,
-    CREATED_PLAYER_ID_MIN,
+    RESERVED_PLAYER_ID_MIN,
     GP_TEAM_ID, GP_LINEUP, GP_CAPTAIN,
     PE_PLAYER_ID, PE_PLAYER_NAME,
     TE_TEAM_ID, TE_TEAM_NAME,
@@ -904,8 +904,8 @@ class TestReleaseAndAddPlayer:
         assert ef.get_team_roster(101).has_player(1001)
         assert not ef.get_team_roster(102).has_player(1001)
 
-    def test_overflow_releases_deepest_reserve_without_ability_ranking(self):
-        """A full roster releases its deepest reserve, regardless of OVR."""
+    def test_overflow_releases_deepest_reserve(self):
+        """A full roster releases its deepest reserve."""
         data = self._build_test_data()
         ef = EditFile()
         ef.load_bytes(data)
@@ -919,13 +919,11 @@ class TestReleaseAndAddPlayer:
         assert roster.is_full is True
         assert roster.roster_size == 40
 
-        # Ability values are intentionally irrelevant to overflow ranking.
-        from editor.models import PlayerInfo
+        # Metadata is intentionally irrelevant to overflow ranking.
         ef._player_cache = {
             1000 + i: PlayerInfo(
                 player_id=1000 + i,
                 name=f"P{i}",
-                overall_rating=99 if i == 30 else 40,
             )
             for i in range(40)
         }
@@ -937,7 +935,7 @@ class TestReleaseAndAddPlayer:
         new_roster = ef.get_team_roster(101)
         assert new_roster.roster_size == 40
         assert 9999 in new_roster.roster
-        # The deepest reserve (slot 39) is released, not the lowest OVR.
+        # The deepest reserve (slot 39) is released.
         assert 1039 not in new_roster.roster
     
     def test_overflow_uses_game_plan_depth_over_roster_slot(self):
@@ -968,7 +966,7 @@ class TestReleaseAndAddPlayer:
         to_entry = ef._find_team_player_entry_offset(101)
         for slot in range(39):
             ef._write_player_slot(to_entry, slot, 1000 + slot, slot + 1)
-        ef._write_player_slot(to_entry, 39, CREATED_PLAYER_ID_MIN, 40)
+        ef._write_player_slot(to_entry, 39, RESERVED_PLAYER_ID_MIN, 40)
 
         slot, player_id = ef.find_overflow_release_candidate(101)
 

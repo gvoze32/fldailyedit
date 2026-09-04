@@ -29,7 +29,7 @@ def test_current_catalog_covers_rosters_without_reintroducing_stale_free_agents(
         current_path=current,
         legacy_csv_path=legacy,
         edited_players={
-            1: PlayerInfo(1, "Abbreviated", position="CM", overall_rating=82),
+            1: PlayerInfo(1, "Abbreviated", position="CM"),
             4: PlayerInfo(4, "Edited Player"),
         },
         roster_ids={1, 3, 4},
@@ -41,7 +41,6 @@ def test_current_catalog_covers_rosters_without_reintroducing_stale_free_agents(
     assert report.legacy_roster_fallbacks == 1
     assert report.missing_roster_ids == ()
     assert report.positions == 1
-    assert report.overall_ratings == 1
 
 
 def test_catalog_uses_save_players_without_external_reference():

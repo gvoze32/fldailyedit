@@ -9,63 +9,24 @@ on:
 
 jobs:
   test:
-    name: Test on ${{ matrix.os }} / Python ${{ matrix.python-version }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            python-version: "3.12"
-          - os: windows-latest
-            python-version: "3.12"
+    name: Test on Ubuntu / Python 3.12
+    runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python 3.12
         uses: actions/setup-python@v7
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
           cache: "pip"
 
-      - name: Compile pesXdecrypter binaries on Unix
-        if: runner.os != 'Windows'
+      - name: Compile pesXdecrypter binaries on Ubuntu
         run: |
           make -C vendor/pesXdecrypter clean
           make -C vendor/pesXdecrypter
           chmod +x vendor/pesXdecrypter/decrypter21 vendor/pesXdecrypter/encrypter21
 
-      - name: Prepare Windows crypto tools
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $archive = Join-Path $env:RUNNER_TEMP "pesXdecrypter_2021.7z"
-          $expected = "201800b731a8c90109b30afeef26fb0cdcd552d2910b322bbc253b000d6aa3a6"
-          Invoke-WebRequest `
-            -Uri "https://github.com/the4chancup/pesXdecrypter/releases/download/6.0.0/pesXdecrypter_2021.7z" `
-            -OutFile $archive
-          $actual = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actual -ne $expected) {
-            throw "pesXdecrypter archive checksum mismatch: $actual"
-          }
-          $extract = Join-Path $env:RUNNER_TEMP "pesXdecrypter"
-          New-Item -ItemType Directory -Force -Path $extract | Out-Null
-          $sevenZip = Join-Path $env:ProgramFiles "7-Zip\7z.exe"
-          if (-not (Test-Path $sevenZip)) {
-            throw "7-Zip was not found at $sevenZip"
-          }
-          & $sevenZip x $archive "-o$extract" -y | Out-Null
-          if ($LASTEXITCODE -ne 0) {
-            throw "Could not extract pesXdecrypter archive"
-          }
-          foreach ($name in @("decrypter21.exe", "encrypter21.exe")) {
-            $source = Join-Path $extract $name
-            if (-not (Test-Path $source)) {
-              throw "Missing crypto binary after extraction: $name"
-            }
-            Copy-Item -Force $source (Join-Path "vendor\pesXdecrypter" $name)
-          }
 
       - name: Install dependencies
         run: |
@@ -73,9 +34,6 @@ jobs:
           pip install -e .
           pip install pytest
 
-      - name: Validate Player Updates
-        run: |
-          python run.py players validate
 
       - name: Run Test Suite
         run: |

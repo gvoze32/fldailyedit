@@ -13,9 +13,6 @@ _CPK_DATA_BASE = 0x800
 DATABASE_FILES = {
     "Player.bin": "common/etc/pesdb/Player.bin",
     "PlayerAssignment.bin": "common/etc/pesdb/PlayerAssignment.bin",
-    "PlayerAppearance.bin": (
-        "common/character0/model/character/appearance/PlayerAppearance.bin"
-    ),
     "Team.bin": "common/etc/pesdb/Team.bin",
 }
 

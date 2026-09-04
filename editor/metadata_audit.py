@@ -45,13 +45,6 @@ class MetadataAuditReport:
     as_of: str
     save_roster_teams: int
     save_roster_players: int
-    save_players_with_ovr: int | None
-    save_players_missing_ovr: int | None
-    save_players_missing_ovr_preview: tuple[int, ...]
-    save_players_with_secondary_positions: int | None
-    save_secondary_position_entries: int | None
-    save_players_missing_position_profile: int | None
-    save_players_secondary_positions_preview: tuple[int, ...]
     playerbin_entries: int | None
     teambin_entries: int | None
     assignment_entries: int | None
@@ -104,40 +97,6 @@ def audit_metadata(
         if player_id
     }
 
-    player_loader = getattr(edit_file, "get_all_players", None)
-    ovr_player_ids: set[int] | None = None
-    save_missing_ovr: set[int] = set()
-    secondary_position_ids: set[int] | None = None
-    secondary_position_entries: int | None = None
-    missing_position_profile: set[int] | None = None
-    if callable(player_loader):
-        player_infos = player_loader(include_base_db=False)
-        ovr_player_ids = {
-            player_id
-            for player_id in save_player_ids
-            if getattr(player_infos.get(player_id), "overall_rating", 0) > 0
-        }
-        save_missing_ovr = save_player_ids - ovr_player_ids
-        secondary_position_ids = set()
-        secondary_position_entries = 0
-        missing_position_profile = set()
-        for player_id in save_player_ids:
-            player_info = player_infos.get(player_id)
-            proficiency = getattr(player_info, "position_proficiency", None)
-            if proficiency is None:
-                missing_position_profile.add(player_id)
-                continue
-            registered_position = str(
-                getattr(player_info, "position", "")
-            ).strip().upper()
-            secondary_positions = {
-                position
-                for position, grade in proficiency.items()
-                if position.strip().upper() != registered_position and grade > 0
-            }
-            if secondary_positions:
-                secondary_position_ids.add(player_id)
-                secondary_position_entries += len(secondary_positions)
 
     missing_sources = tuple(
         source
@@ -224,27 +183,6 @@ def audit_metadata(
         as_of=report_date.isoformat(),
         save_roster_teams=len(rosters),
         save_roster_players=len(save_player_ids),
-        save_players_with_ovr=(
-            len(ovr_player_ids) if ovr_player_ids is not None else None
-        ),
-        save_players_missing_ovr=(
-            len(save_missing_ovr) if ovr_player_ids is not None else None
-        ),
-        save_players_missing_ovr_preview=_preview(save_missing_ovr),
-        save_players_with_secondary_positions=(
-            len(secondary_position_ids)
-            if secondary_position_ids is not None
-            else None
-        ),
-        save_secondary_position_entries=secondary_position_entries,
-        save_players_missing_position_profile=(
-            len(missing_position_profile)
-            if missing_position_profile is not None
-            else None
-        ),
-        save_players_secondary_positions_preview=_preview(
-            secondary_position_ids or set()
-        ),
         playerbin_entries=len(playerbin_db) if playerbin_db is not None else None,
         teambin_entries=len(teambin_db) if teambin_db is not None else None,
         assignment_entries=(
@@ -331,16 +269,8 @@ def _preview_text(values: tuple[int, ...] | tuple[tuple[int, int], ...]) -> str:
 def format_metadata_audit(report: MetadataAuditReport) -> str:
     """Format a bounded human-readable metadata audit."""
     lines = [
-        "--- Player Metadata Audit ---",
+        "--- Save Metadata Audit ---",
         f"As of: {report.as_of}",
-        f"Verified save OVR: {_count(report.save_players_with_ovr)} / "
-        f"{report.save_roster_players:,} roster players",
-        f"Missing save OVR: {_count(report.save_players_missing_ovr)} "
-        f"({_preview_text(report.save_players_missing_ovr_preview)})",
-        f"Secondary positions: {_count(report.save_players_with_secondary_positions)} "
-        f"players / {_count(report.save_secondary_position_entries)} entries "
-        f"({_preview_text(report.save_players_secondary_positions_preview)})",
-        f"Missing position profiles: {_count(report.save_players_missing_position_profile)}",
         "",
         "Consistency:",
         f"  Save players missing from Player.bin: "

@@ -1,286 +1,176 @@
-"""Report regression tests."""
+"""Contract tests for transfer and squad-number logging."""
 
-import pytest
+from __future__ import annotations
 
-from editor.logger import (
-    generate_html_report,
-    generate_markdown_report,
-    log_transfer,
-    read_log,
-)
+import json
+from pathlib import Path
+
+import config
+from editor import logger as transfer_logger
 
 
-def _entries():
-    return [
-        {
-            "player_name": "Transfer Player",
-            "position": "CM",
-            "from_team": "Old Club",
-            "to_team": "New Club",
-            "transfer_type": "loan",
-            "fee": "on loan",
-            "confidence": 98.0,
-            "dry_run": False,
-        },
-        {
-            "player_name": "Number Player",
-            "from_team": "Same Club",
-            "to_team": "Same Club",
-            "transfer_type": "shirt_number_update",
-            "previous_shirt_number": 18,
-            "shirt_number": 8,
-            "confidence": 100.0,
-            "dry_run": False,
-        },
-    ]
-
-def _player_release_entry():
-    return {
-        "player_name": "Released Player",
-        "position": "GK",
+def _entry(**overrides: object) -> dict:
+    entry = {
+        "timestamp": "2026-08-10T12:00:00+00:00",
+        "player_name": "Player One",
+        "player_id": 1,
         "from_team": "Old Club",
-        "to_team": "",
+        "from_team_id": 10,
+        "to_team": "New Club",
+        "to_team_id": 20,
+        "confidence": 96.0,
         "transfer_type": "transfer",
-        "confidence": 100.0,
-        "roster_action": "release",
-        "dry_run": False,
-    }
-
-
-def test_reports_and_json_logs_include_native_metadata(monkeypatch, tmp_path):
-    import config
-
-    entry = _entries()[0]
-    entry["native_metadata"] = {
-        "player_bin": {
-            "found": True,
-            "name": "Native Player",
-            "registered_position": "RB",
-        },
-        "player_assignment": {
-            "teams": [{"abbreviation": "NAT"}],
-        },
-    }
-    assert "Native Player (RB)" in generate_markdown_report([entry])
-    assert "Native Player (RB)" in generate_html_report([entry])
-
-    monkeypatch.setattr(config, "TRANSFER_LOG_FILE", tmp_path / "transfers.jsonl")
-    log_transfer(
-        player_name="Native Player",
-        player_id=162196,
-        from_team="Old Club",
-        from_team_id=1,
-        to_team="New Club",
-        to_team_id=2,
-        native_metadata=entry["native_metadata"],
-    )
-    assert read_log()[0]["native_metadata"]["player_bin"]["name"] == "Native Player"
-
-
-
-
-def _player_spec_create_entry():
-    return {
-        "player_name": "Dastan Satpaev",
         "position": "CF",
-        "from_team": "Missing from FL26 database",
-        "to_team": "Chelsea FC",
-        "transfer_type": "player_spec_create",
-        "shirt_number": 36,
-        "confidence": 100.0,
-        "roster_action": "create",
+        "fee": "€1m",
+        "transfer_date": "2026-08-01",
         "dry_run": False,
+        "previous_shirt_number": None,
+        "shirt_number": None,
+        "roster_action": "move",
+        "save_scope": "",
+        "sources": ["fotmob"],
+        "source_urls": [],
+        "proof_urls": [],
+        "native_metadata": {},
     }
+    entry.update(overrides)
+    return entry
 
 
+def test_log_transfer_persists_sources_and_native_metadata(monkeypatch, tmp_path: Path):
+    log_path = tmp_path / "transfer_log.jsonl"
+    monkeypatch.setattr(config, "TRANSFER_LOG_FILE", log_path)
 
-def test_markdown_separates_transfers_from_shirt_numbers():
-    report = generate_markdown_report(_entries())
+    transfer_logger.log_transfer(
+        "Ada Player",
+        42,
+        "Old Club",
+        10,
+        "New Club",
+        20,
+        confidence=94.26,
+        transfer_date="2026-08-01",
+        sources=("fotmob", "transfermarkt"),
+        source_urls=("https://example.test/source",),
+        proof_urls=("https://example.test/proof",),
+        native_metadata={"player_bin": {"found": True, "name": "Ada Player"}},
+    )
 
-    assert "Club transfers (1)" in report
-    assert "Shirt-number changes (1)" in report
-    assert "| #18 | #8 |" in report
-    assert "They never move a player between clubs" in report
-
-
-def test_reports_list_player_releases_separately():
-    entry = _player_release_entry()
-
-    markdown = generate_markdown_report([entry])
-    html = generate_html_report([entry])
-
-    assert "Roster actions: 0 direct moves · 0 signings · 1 releases" in markdown
-    assert "### Player releases (1)" in markdown
-    assert "Released Player" in markdown
-    assert "Club transfers (" not in markdown
-    assert "Player releases" in html
-    assert "Released Player" in html
-    assert 'badge-release">Released' in html
-
-
-
-def test_github_summary_keeps_detailed_metrics_without_tables():
-    report = generate_markdown_report(_entries(), include_table=False)
-
-    assert "| **2** | **1** | **0** | **0** | 0 | 1 | **1** | 0 |" in report
-    assert "Club transfers (1)" not in report
+    entries = transfer_logger.read_log()
+    assert len(entries) == 1
+    assert entries[0]["confidence"] == 94.3
+    assert entries[0]["sources"] == ["fotmob", "transfermarkt"]
+    assert entries[0]["native_metadata"]["player_bin"]["found"] is True
 
 
-def test_html_report_has_distinct_sections_and_escapes_values():
-    entries = _entries()
-    entries[0]["player_name"] = "Player <script>"
-    report = generate_html_report(entries)
-
-    assert "Club transfers" in report
-    assert "Shirt-number changes" in report
-    assert "Kit numbers only. No club movement." in report
-    assert "Player &lt;script&gt;" in report
-    assert "Player <script>" not in report
-
-
-def test_reports_label_current_player_spec_creation_consistently():
-    entries = _entries() + [_player_spec_create_entry()]
-
-    markdown = generate_markdown_report(entries)
-    html = generate_html_report(entries)
-
-    assert "Club transfers (1)" in markdown
-    assert "Player creations (1)" in markdown
-    assert "Dastan Satpaev" in markdown
-    assert "Reviewed Player Update" in markdown
-    assert "Reviewed Player Update" in html
-    assert "Reviewed player spec" not in markdown
-    assert "Reviewed player spec" not in html
-    assert "Reviewed manifest" not in markdown
-    assert "Reviewed manifest" not in html
-
-
-def test_retired_curated_creation_alias_is_not_classified_as_player_spec():
-    legacy = _player_spec_create_entry()
-    legacy["transfer_type"] = "curated_player_creation"
-
-    markdown = generate_markdown_report([legacy])
-
-    assert "### Player creations (" not in markdown
-    assert "Club transfers (1)" in markdown
-
-
-def test_transfer_history_is_scoped_per_output_save(monkeypatch, tmp_path):
-    import config
-
-    monkeypatch.setattr(config, "TRANSFER_LOG_FILE", tmp_path / "transfers.jsonl")
-    common = {
-        "player_name": "Player",
-        "player_id": 10,
-        "from_team": "A",
-        "from_team_id": 1,
-        "to_team": "B",
-        "to_team_id": 2,
-    }
-    try:
-        log_transfer(
-            **common,
-            save_scope="save-a",
-            fotmob_player_id=777,
-            sortitoutsi_player_id=888,
-            transfermarkt_player_id=999,
-            transfermarkt_from_club_id=111,
-            transfermarkt_to_club_id=222,
-            transfermarkt_transfer_id=333,
-            sources=("fotmob", "wikipedia", "sortitoutsi", "transfermarkt"),
-            source_urls=("https://example.test/source",),
-            proof_urls=("https://example.test/proof",),
+def test_read_log_isolates_save_scope_and_ignores_removed_feature_history(
+    monkeypatch, tmp_path: Path
+):
+    log_path = tmp_path / "transfer_log.jsonl"
+    monkeypatch.setattr(config, "TRANSFER_LOG_FILE", log_path)
+    log_path.write_text(
+        "\n".join(
+            [
+                json.dumps(_entry(player_name="Scoped", save_scope="save-a")),
+                json.dumps(_entry(player_name="Other", save_scope="save-b")),
+                json.dumps(
+                    _entry(
+                        player_name="Old contribution",
+                        transfer_type="player_spec_update",
+                    )
+                ),
+            ]
         )
-    except TypeError:
-        pytest.fail("Transfermarkt audit fields are not implemented")
-    log_transfer(**common, save_scope="save-b")
-    log_transfer(**common)
-
-    assert len(read_log(save_scope="save-a")) == 1
-    assert len(read_log(save_scope="save-a", include_legacy=True)) == 2
-    assert len(read_log()) == 3
-    assert read_log(save_scope="save-a")[0]["fotmob_player_id"] == 777
-    assert read_log(save_scope="save-a")[0]["sortitoutsi_player_id"] == 888
-    assert read_log(save_scope="save-a")[0]["transfermarkt_player_id"] == 999
-    assert read_log(save_scope="save-a")[0]["transfermarkt_from_club_id"] == 111
-    assert read_log(save_scope="save-a")[0]["transfermarkt_to_club_id"] == 222
-    assert read_log(save_scope="save-a")[0]["transfermarkt_transfer_id"] == 333
-    assert read_log(save_scope="save-a")[0]["sources"] == [
-        "fotmob",
-        "wikipedia",
-        "sortitoutsi",
-        "transfermarkt",
-    ]
-    assert read_log(save_scope="save-a")[0]["proof_urls"] == [
-        "https://example.test/proof"
-    ]
-
-
-def test_reports_classify_player_specs_separately_from_club_transfers():
-    player_spec_entries = [
-        {
-            "player_name": "Dastan Satpaev",
-            "position": "CF",
-            "from_team": "Missing from FL26 database",
-            "to_team": "Chelsea FC",
-            "transfer_type": "player_spec_create",
-            "shirt_number": 36,
-            "confidence": 100.0,
-            "roster_action": "create",
-            "dry_run": False,
-        },
-        {
-            "player_name": "Marco Palestra",
-            "from_team": "",
-            "to_team": "",
-            "transfer_type": "player_spec_update",
-            "field_changes": [
-                {"field": "speed", "from": 77, "to": 80},
-                {"field": "acceleration", "from": 75, "to": 77},
-            ],
-            "confidence": 100.0,
-            "roster_action": "update",
-            "dry_run": False,
-        },
-    ]
-    entries = _entries() + player_spec_entries
-
-    markdown = generate_markdown_report(entries)
-    html = generate_html_report(entries)
-
-    assert "Club transfers (1)" in markdown
-    assert "Player creations (1)" in markdown
-    assert "Player updates (1)" in markdown
-    assert "| **4** | **1** | **1** | **1** | 0 | 1 | **1** | 0 |" in markdown
-    assert "speed: 77 -> 80" in markdown
-    assert "acceleration: 75 -> 77" in markdown
-    assert "Player creations" in html
-    assert "Player updates" in html
-    assert "speed: 77 -> 80" in html
-    assert "Marco Palestra" not in markdown.split("### Club transfers (1)", 1)[1].split("###", 1)[0]
-
-
-def test_log_transfer_persists_player_spec_field_changes(monkeypatch, tmp_path):
-    import config
-
-    monkeypatch.setattr(config, "TRANSFER_LOG_FILE", tmp_path / "transfers.jsonl")
-    changes = [{"field": "speed", "from": 77, "to": 80}]
-
-    log_transfer(
-        player_name="Marco Palestra",
-        player_id=162196,
-        from_team="",
-        from_team_id=0,
-        to_team="",
-        to_team_id=0,
-        transfer_type="player_spec_update",
-        roster_action="update",
-        field_changes=changes,
-        pes_retro_stats_player_id="0ce2dbde-9cd9-423c-a90a-35b07df6a967",
+        + "\n",
+        encoding="utf-8",
     )
 
-    entry = read_log()[0]
-    assert entry["field_changes"] == changes
-    assert entry["pes_retro_stats_player_id"] == (
-        "0ce2dbde-9cd9-423c-a90a-35b07df6a967"
+    assert [entry["player_name"] for entry in transfer_logger.read_log()] == [
+        "Scoped",
+        "Other",
+    ]
+    assert [
+        entry["player_name"]
+        for entry in transfer_logger.read_log(save_scope="save-a")
+    ] == ["Scoped"]
+    assert transfer_logger.read_log(save_scope="save-a", include_legacy=True) == [
+        _entry(player_name="Scoped", save_scope="save-a")
+    ]
+
+
+def test_markdown_report_contains_only_transfers_releases_and_shirt_changes():
+    entries = [
+        _entry(player_name="Moved Player"),
+        _entry(
+            player_name="Loan Player",
+            transfer_type="loan",
+            roster_action="add",
+        ),
+        _entry(
+            player_name="Released Player",
+            transfer_type="release",
+            roster_action="release",
+            to_team="Free Agency",
+        ),
+        _entry(
+            player_name="Number Player",
+            transfer_type="shirt_number_update",
+            roster_action="squad_update",
+            previous_shirt_number=8,
+            shirt_number=10,
+        ),
+        _entry(
+            player_name="Old contribution",
+            transfer_type="player_spec_create",
+        ),
+    ]
+
+    report = transfer_logger.generate_markdown_report(entries)
+
+    assert "Club transfers (2)" in report
+    assert "Player releases (1)" in report
+    assert "Shirt-number changes (1)" in report
+    assert "Moved Player" in report
+    assert "Number Player" in report
+    assert "Old contribution" not in report
+    assert "Player creations" not in report
+    assert "Player updates" not in report
+    assert "Reviewed Player Update" not in report
+
+
+def test_html_report_escapes_transfer_names_without_contribution_sections():
+    report = transfer_logger.generate_html_report(
+        [_entry(player_name="<script>alert('x')</script>")]
     )
+
+    assert "&lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt;" in report
+    assert "<script>alert('x')</script>" not in report
+    assert "Player creations" not in report
+    assert "Player updates" not in report
+    assert "Club transfers" in report
+
+
+def test_save_reports_writes_transfer_only_cards(monkeypatch, tmp_path: Path):
+    summary_path = tmp_path / "github-summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
+    entries = [
+        _entry(player_name="Applied Transfer"),
+        _entry(
+            player_name="Dry Number",
+            transfer_type="shirt_number_update",
+            roster_action="squad_update",
+            dry_run=True,
+            previous_shirt_number=7,
+            shirt_number=11,
+        ),
+    ]
+
+    transfer_logger.save_reports(entries, output_dir=tmp_path)
+
+    markdown = (tmp_path / "transfer_summary.md").read_text(encoding="utf-8")
+    html = (tmp_path / "transfer_summary.html").read_text(encoding="utf-8")
+    summary = summary_path.read_text(encoding="utf-8")
+    assert "Applied Transfer" in markdown
+    assert "Dry Number" in html
+    assert "Player creations" not in summary
+    assert "Player updates" not in summary

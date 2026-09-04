@@ -37,12 +37,9 @@ CURRENT_TEAMS_FILE = DATA_DIR / "FL262_teams.txt"
 PLAYER_BIN_FILE = DATA_DIR / "Player.bin"
 TEAM_BIN_FILE = DATA_DIR / "Team.bin"
 PLAYER_ASSIGNMENT_FILE = DATA_DIR / "PlayerAssignment.bin"
-PLAYER_APPEARANCE_FILE = DATA_DIR / "PlayerAppearance.bin"
 RELEASE_POLICY_FILE = DATA_DIR / "release_policy.json"
 GAME_ROOT: Path | None = None
 
-BASE_MANIFEST_FILE = DATA_DIR / "base_manifest.json"
-PLAYER_SPECS_DIR = PROJECT_ROOT / "players"
 
 # --- Logging ---
 TRANSFER_LOG_FILE = DATA_DIR / "transfer_log.jsonl"

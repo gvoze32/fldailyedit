@@ -4,14 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Update SP Football Life 2026 and eFootball PES 2021 `EDIT00000000` saves with
-verified real-world transfers and reviewed player updates.
-
-> **Beta:** Releases and save compatibility are still being tested.
->
-> **New-player creation is disabled for now.** Transfers and reviewed updates
-> for players already in the save are supported. Missing or ambiguous players
-> are skipped. Full destination squads release a role-safe reserve by default;
-> use `--no-allow-overflow-release` to leave full squads unchanged.
+verified real-world transfers and squad-number updates.
 
 ## Compatibility
 
@@ -102,38 +95,15 @@ python run.py run --edit-file /path/to/EDIT00000000 --in-place
 # Validate a save
 python run.py validate --edit-file /path/to/EDIT00000000
 
-# Validate Player Updates
-python run.py players validate
-
-# Apply reviewed Player Updates
-python run.py players apply \
-  --base-revision fl26-u2.2-national-squads \
-  --edit-file /path/to/EDIT00000000 \
-  --in-place
 
 # Show command options
 python run.py run --help
 ```
 
-`run` applies transfers only. `players apply` is separate. To combine both,
-run the transfer command first, then apply Player Updates to the same save.
-Use `python run.py <command> --help` for audit, comparison, logging, and repair
-tools.
+`run` applies verified transfers, releases, loans, returns, and squad-number
+updates. Use `python run.py <command> --help` for audit, comparison, logging,
+and repair tools.
 
-## Player Updates
-
-Reviewed updates live as one JSON file per player in `players/`. Existing-player
-`update` records can be applied. New-player `create` records are review-only and
-are currently rejected by `players apply` with
-`create_temporarily_unavailable`.
-
-To propose an update:
-
-1. Open the [player update issue form](.github/ISSUE_TEMPLATE/player-update.yml).
-2. Enter the player's name exactly as shown on the Pes Retro Stats profile and
-   include proof URLs.
-3. Review the generated draft, run `python run.py players validate`, and submit
-   one player JSON file.
 
 ## Safety
 
@@ -141,7 +111,13 @@ To propose an update:
 - Local runs create rolling backups and use atomic, verified encryption.
 - A process lock prevents concurrent writes to the same output.
 - Incomplete source data aborts the run; ambiguous matches are skipped.
-- FotMob is the primary source. Other sources only supplement or confirm it.
+- FotMob is the primary source for current transfer events.
+- Wikipedia's confirmed seasonal transfer lists help corroborate transfer
+  routes and dated moves.
+- Moderated Sortitoutsi activity provides fast transfer signals that can
+  corroborate or safely enrich a verified event.
+- Transfermarkt provides additional dated transfer details, fees, and stable
+  player/club identifiers.
 
 ## Development
 

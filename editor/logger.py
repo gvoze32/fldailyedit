@@ -10,6 +10,15 @@ from pathlib import Path
 import config
 
 logger = logging.getLogger(__name__)
+_REMOVED_TRANSFER_TYPES = frozenset({"player_spec_create", "player_spec_update"})
+
+
+def _is_removed_feature_entry(entry: dict) -> bool:
+    return str(entry.get("transfer_type", "")).strip().lower() in _REMOVED_TRANSFER_TYPES
+
+
+def _active_entries(entries: list[dict]) -> list[dict]:
+    return [entry for entry in entries if not _is_removed_feature_entry(entry)]
 
 
 def log_transfer(
@@ -32,7 +41,6 @@ def log_transfer(
     save_scope: str = "",
     fotmob_player_id: int | None = None,
     sortitoutsi_player_id: int | None = None,
-    pes_retro_stats_player_id: str | None = None,
     transfermarkt_player_id: int | None = None,
     transfermarkt_from_club_id: int | None = None,
     transfermarkt_to_club_id: int | None = None,
@@ -40,11 +48,10 @@ def log_transfer(
     sources: tuple[str, ...] = (),
     source_urls: tuple[str, ...] = (),
     proof_urls: tuple[str, ...] = (),
-    field_changes: tuple[dict, ...] | list[dict] = (),
     native_metadata: dict[str, object] | None = None,
 ):
     """
-    Append a transfer, shirt-number, or player-spec audit record.
+    Append one transfer or shirt-number audit record.
 
     Each line is a self-contained JSON object for easy parsing.
     """
@@ -69,7 +76,6 @@ def log_transfer(
         "save_scope": save_scope,
         "fotmob_player_id": fotmob_player_id,
         "sortitoutsi_player_id": sortitoutsi_player_id,
-        "pes_retro_stats_player_id": pes_retro_stats_player_id,
         "transfermarkt_player_id": transfermarkt_player_id,
         "transfermarkt_from_club_id": transfermarkt_from_club_id,
         "transfermarkt_to_club_id": transfermarkt_to_club_id,
@@ -77,7 +83,6 @@ def log_transfer(
         "sources": list(sources),
         "source_urls": list(source_urls),
         "proof_urls": list(proof_urls),
-        "field_changes": [dict(change) for change in field_changes],
         "native_metadata": dict(native_metadata or {}),
     }
 
@@ -93,16 +98,6 @@ def log_transfer(
             f"[{action}] {player_name} (id={player_id}) at {to_team}: "
             f"#{previous_shirt_number} → #{shirt_number} (conf={confidence:.0f}%)"
         )
-    elif transfer_type == "player_spec_create":
-        logger.info(
-            f"[{action}] Created {player_name} (id={player_id}) for {to_team}"
-        )
-    elif transfer_type == "player_spec_update":
-        changes = ", ".join(
-            f"{change.get('field')}: {change.get('from')} -> {change.get('to')}"
-            for change in field_changes
-        )
-        logger.info(f"[{action}] Updated {player_name} (id={player_id}): {changes}")
     else:
         logger.info(
             f"[{action}] {player_name} (id={player_id}): "
@@ -115,7 +110,7 @@ def read_log(
     *,
     include_legacy: bool = False,
 ) -> list[dict]:
-    """Read audit records, optionally isolated to one output save."""
+    """Read transfer audit records, optionally isolated to one output save."""
     log_file = config.TRANSFER_LOG_FILE
     if not log_file.exists():
         return []
@@ -124,17 +119,20 @@ def read_log(
     with open(log_file, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
-            if line:
-                try:
-                    entry = json.loads(line)
-                    if save_scope is None:
-                        entries.append(entry)
-                    elif entry.get("save_scope") == save_scope:
-                        entries.append(entry)
-                    elif include_legacy and not entry.get("save_scope"):
-                        entries.append(entry)
-                except json.JSONDecodeError:
-                    continue
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if _is_removed_feature_entry(entry):
+                continue
+            if save_scope is None:
+                entries.append(entry)
+            elif entry.get("save_scope") == save_scope:
+                entries.append(entry)
+            elif include_legacy and not entry.get("save_scope"):
+                entries.append(entry)
     return entries
 
 
@@ -159,13 +157,6 @@ def print_summary(last_n: int = 20):
                 f"#{e.get('shirt_number', '?')} "
                 f"(conf={e.get('confidence', 0):.0f}%){dry}"
             )
-        elif _is_player_creation(e):
-            print(
-                f"  {ts}  Created {e['player_name']} for {e['to_team']}{dry}"
-            )
-        elif _is_player_spec_update(e):
-            changes = _plain_field_changes(e)
-            print(f"  {ts}  Updated {e['player_name']}: {changes}{dry}")
         else:
             print(
                 f"  {ts}  {e['player_name']}: "
@@ -175,30 +166,10 @@ def print_summary(last_n: int = 20):
 
 
 _SHIRT_UPDATE_TYPES = {"shirt_number_update", "squad_update"}
-_PLAYER_CREATION_TYPES = {"player_spec_create"}
-_PLAYER_SPEC_UPDATE_TYPES = {"player_spec_update"}
-
-
-def _is_player_creation(entry: dict) -> bool:
-    """Recognize reviewed player-spec creation audit records."""
-    return str(entry.get("transfer_type", "")) in _PLAYER_CREATION_TYPES
-
-
-def _is_player_spec_update(entry: dict) -> bool:
-    """Recognize field-only player-spec update audit records."""
-    return str(entry.get("transfer_type", "")) in _PLAYER_SPEC_UPDATE_TYPES
-
-
-def _plain_field_changes(entry: dict) -> str:
-    return ", ".join(
-        f"{change.get('field', 'unknown')}: "
-        f"{change.get('from', '-')} -> {change.get('to', '-')}"
-        for change in entry.get("field_changes", ())
-    )
-
 def _is_shirt_number_update(entry: dict) -> bool:
     """Recognize current and legacy shirt-number audit records."""
     return str(entry.get("transfer_type", "")) in _SHIRT_UPDATE_TYPES
+
 
 def _is_roster_release(entry: dict) -> bool:
     """Recognize roster releases for dedicated report rendering."""
@@ -207,40 +178,39 @@ def _is_roster_release(entry: dict) -> bool:
     return action == "release" or transfer_type in {"release", "released"}
 
 
-
 def _report_metrics(entries: list[dict]) -> dict[str, int]:
-    creation_entries = [e for e in entries if _is_player_creation(e)]
-    update_entries = [e for e in entries if _is_player_spec_update(e)]
+    active_entries = _active_entries(entries)
     transfer_entries = [
-        e
-        for e in entries
-        if not _is_shirt_number_update(e)
-        and not _is_player_creation(e)
-        and not _is_player_spec_update(e)
+        entry for entry in active_entries if not _is_shirt_number_update(entry)
     ]
     club_transfer_entries = [
-        e for e in transfer_entries if not _is_roster_release(e)
+        entry for entry in transfer_entries if not _is_roster_release(entry)
     ]
-    shirt_entries = [e for e in entries if _is_shirt_number_update(e)]
+    shirt_entries = [
+        entry for entry in active_entries if _is_shirt_number_update(entry)
+    ]
     loans = sum(
         1
-        for e in club_transfer_entries
-        if "loan" in str(e.get("transfer_type", "")).lower()
+        for entry in club_transfer_entries
+        if "loan" in str(entry.get("transfer_type", "")).lower()
     )
     return {
-        "total_changes": len(entries),
+        "total_changes": len(active_entries),
         "transfers": len(transfer_entries),
         "club_transfers": len(club_transfer_entries),
-        "created_players": len(creation_entries),
-        "updated_players": len(update_entries),
         "permanent": len(club_transfer_entries) - loans,
         "loans": loans,
         "shirt_updates": len(shirt_entries),
-        "dry_run": sum(1 for e in entries if e.get("dry_run")),
-        "moves": sum(1 for e in club_transfer_entries if e.get("roster_action") == "move"),
-        "signings": sum(1 for e in club_transfer_entries if e.get("roster_action") == "add"),
-        "releases": sum(1 for e in transfer_entries if _is_roster_release(e)),
+        "dry_run": sum(1 for entry in active_entries if entry.get("dry_run")),
+        "moves": sum(
+            1 for entry in club_transfer_entries if entry.get("roster_action") == "move"
+        ),
+        "signings": sum(
+            1 for entry in club_transfer_entries if entry.get("roster_action") == "add"
+        ),
+        "releases": sum(1 for entry in transfer_entries if _is_roster_release(entry)),
     }
+
 
 
 
@@ -281,8 +251,9 @@ def generate_markdown_report(
     title: str = "Football Life Live Sync Report",
     include_table: bool = True,
 ) -> str:
-    """Generate a report separating transfers, player specs, and shirt changes."""
+    """Generate a transfer-only report with optional shirt-number changes."""
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    entries = _active_entries(entries)
     if not entries:
         return (
             f"## ⚽ {title}\n\n"
@@ -292,17 +263,13 @@ def generate_markdown_report(
 
     metrics = _report_metrics(entries)
     transfer_entries = [
-        e
-        for e in entries
-        if not _is_shirt_number_update(e)
-        and not _is_player_creation(e)
-        and not _is_player_spec_update(e)
+        entry for entry in entries if not _is_shirt_number_update(entry)
     ]
-    releases = [e for e in transfer_entries if _is_roster_release(e)]
-    club_transfers = [e for e in transfer_entries if not _is_roster_release(e)]
-    created_players = [e for e in entries if _is_player_creation(e)]
-    updated_players = [e for e in entries if _is_player_spec_update(e)]
-    shirts = [e for e in entries if _is_shirt_number_update(e)]
+    releases = [entry for entry in transfer_entries if _is_roster_release(entry)]
+    club_transfers = [
+        entry for entry in transfer_entries if not _is_roster_release(entry)
+    ]
+    shirts = [entry for entry in entries if _is_shirt_number_update(entry)]
 
 
     md = [
@@ -311,11 +278,10 @@ def generate_markdown_report(
         "",
         "### Run overview",
         "",
-        "| Save changes | Club transfers | Player creations | Player updates | Permanent | Loans / returns | Shirt numbers | Dry-run |",
-        "|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Save changes | Club transfers | Permanent | Loans / returns | Shirt numbers | Dry-run |",
+        "|---:|---:|---:|---:|---:|---:|",
         (
             f"| **{metrics['total_changes']}** | **{metrics['club_transfers']}** | "
-            f"**{metrics['created_players']}** | **{metrics['updated_players']}** | "
             f"{metrics['permanent']} | {metrics['loans']} | "
             f"**{metrics['shirt_updates']}** | {metrics['dry_run']} |"
         ),
@@ -323,8 +289,7 @@ def generate_markdown_report(
         "> Shirt-number updates only change kit numbers. They never move a player between clubs.",
         (
             f"> Roster actions: {metrics['moves']} direct moves · "
-            f"{metrics['signings']} signings · {metrics['releases']} releases · "
-            f"{metrics['created_players']} players created."
+            f"{metrics['signings']} signings · {metrics['releases']} releases."
         ),
         "",
     ]
@@ -368,38 +333,6 @@ def generate_markdown_report(
         md.append("")
 
 
-    if include_table and created_players:
-        md.extend([
-            f"### Player creations ({len(created_players)})",
-            "",
-            "| Status | Player | Pos | Club | Shirt | Source |",
-            "|:---:|---|:---:|---|---:|---|",
-        ])
-        for entry in created_players:
-            status = "Dry-run" if entry.get("dry_run") else "Created"
-            shirt_number = _markdown_cell(entry.get("shirt_number"))
-            md.append(
-                f"| {status} | **{_markdown_cell(entry.get('player_name', 'Unknown'))}** "
-                f"| `{_markdown_cell(entry.get('position'))}` "
-                f"| {_markdown_cell(entry.get('to_team'))} "
-                f"| #{shirt_number} | Reviewed Player Update |"
-            )
-        md.append("")
-    if include_table and updated_players:
-        md.extend([
-            f"### Player updates ({len(updated_players)})",
-            "",
-            "| Status | Player | Field changes | Source |",
-            "|:---:|---|---|---|",
-        ])
-        for entry in updated_players:
-            status = "Dry-run" if entry.get("dry_run") else "Updated"
-            changes = _markdown_cell(_plain_field_changes(entry))
-            md.append(
-                f"| {status} | **{_markdown_cell(entry.get('player_name', 'Unknown'))}** "
-                f"| {changes} | Reviewed Player Update |"
-            )
-        md.append("")
 
 
 
@@ -428,21 +361,18 @@ def generate_html_report(
     entries: list[dict],
     title: str = "Football Life Live Sync Report",
 ) -> str:
-    """Generate a responsive report for transfers, player specs, and shirt changes."""
+    """Generate a responsive transfer-only report with shirt changes."""
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    entries = _active_entries(entries)
     metrics = _report_metrics(entries)
     transfer_entries = [
-        e
-        for e in entries
-        if not _is_shirt_number_update(e)
-        and not _is_player_creation(e)
-        and not _is_player_spec_update(e)
+        entry for entry in entries if not _is_shirt_number_update(entry)
     ]
-    releases = [e for e in transfer_entries if _is_roster_release(e)]
-    club_transfers = [e for e in transfer_entries if not _is_roster_release(e)]
-    created_players = [e for e in entries if _is_player_creation(e)]
-    updated_players = [e for e in entries if _is_player_spec_update(e)]
-    shirts = [e for e in entries if _is_shirt_number_update(e)]
+    releases = [entry for entry in transfer_entries if _is_roster_release(entry)]
+    club_transfers = [
+        entry for entry in transfer_entries if not _is_roster_release(entry)
+    ]
+    shirts = [entry for entry in entries if _is_shirt_number_update(entry)]
 
 
 
@@ -453,8 +383,6 @@ def generate_html_report(
         entry: dict,
         *,
         shirt: bool = False,
-        created: bool = False,
-        updated: bool = False,
         released: bool = False,
     ) -> str:
         if entry.get("dry_run"):
@@ -463,10 +391,6 @@ def generate_html_report(
             return '<span class="badge badge-release">Released</span>'
         if shirt:
             return '<span class="badge badge-number">Number changed</span>'
-        if created:
-            return '<span class="badge badge-created">Player created</span>'
-        if updated:
-            return '<span class="badge badge-updated">Player updated</span>'
         return '<span class="badge badge-applied">Transfer applied</span>'
 
 
@@ -497,30 +421,6 @@ def generate_html_report(
     )
 
 
-    created_rows = "".join(
-        "<tr>"
-        f"<td>{badge(entry, created=True)}</td>"
-        f"<td><strong>{value(entry.get('player_name'), 'Unknown')}</strong></td>"
-        f"<td><span class='position'>{value(entry.get('position'))}</span></td>"
-        f"<td>{value(entry.get('to_team'))}</td>"
-        f"<td class='shirt new'>#{value(entry.get('shirt_number'))}</td>"
-        "<td>Reviewed Player Update</td>"
-        "</tr>"
-        for entry in created_players
-    )
-    updated_rows = "".join(
-        "<tr>"
-        f"<td>{badge(entry, updated=True)}</td>"
-        f"<td><strong>{value(entry.get('player_name'), 'Unknown')}</strong></td>"
-        "<td>"
-        + "<br>".join(
-            f"{value(change.get('field'), 'unknown')}: "
-            f"{value(change.get('from'))} -> {value(change.get('to'))}"
-            for change in entry.get("field_changes", ())
-        )
-        + "</td><td>Reviewed Player Update</td></tr>"
-        for entry in updated_players
-    )
     shirt_rows = "".join(
         "<tr>"
         f"<td>{badge(entry, shirt=True)}</td>"
@@ -551,22 +451,6 @@ def generate_html_report(
     )
 
 
-    created_section = (
-        f"""<section class="report-section created-section">
-        <div class="section-heading"><div><h2>Player creations</h2><p>Reviewed players missing from the FL26 database.</p></div><span class="count">{len(created_players)}</span></div>
-        <div class="table-wrap" role="region" aria-label="Created player details" tabindex="0"><table><thead><tr><th>Status</th><th>Player</th><th>Pos</th><th>Club</th><th>Shirt</th><th>Source</th></tr></thead><tbody>{created_rows}</tbody></table></div>
-      </section>"""
-        if created_players
-        else ""
-    )
-    updated_section = (
-        f"""<section class="report-section updated-section">
-        <div class="section-heading"><div><h2>Player updates</h2><p>Reviewed field-only changes. No club movement.</p></div><span class="count">{len(updated_players)}</span></div>
-        <div class="table-wrap" role="region" aria-label="Player update details" tabindex="0"><table><thead><tr><th>Status</th><th>Player</th><th>Field changes</th><th>Source</th></tr></thead><tbody>{updated_rows}</tbody></table></div>
-      </section>"""
-        if updated_players
-        else ""
-    )
     shirt_section = (
         f"""<section class="report-section number-section">
         <div class="section-heading"><div><h2>Shirt-number changes</h2><p>Kit numbers only. No club movement.</p></div><span class="count">{len(shirts)}</span></div>
@@ -611,7 +495,7 @@ def generate_html_report(
   .table-wrap:focus-visible {{ outline:2px solid var(--cyan); outline-offset:-2px; }}
   th,td {{ padding:.88rem 1rem; text-align:left; border-bottom:1px solid var(--line); }} th {{ color:var(--muted); font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; }} tbody tr:last-child td {{ border-bottom:0; }} tbody tr:hover {{ background:#18291f; }}
   .badge {{ display:inline-flex; align-items:center; white-space:nowrap; padding:.24rem .58rem; border-radius:999px; font-size:.72rem; font-weight:750; }}
-  .badge-applied {{ color:#baf8ce; background:#174b2c; }} .badge-created {{ color:#132008; background:var(--lime); }} .badge-updated {{ color:#071b25; background:var(--cyan); }} .badge-number {{ color:#c9f3ff; background:#124354; }} .badge-release {{ color:#ffd2c8; background:#5b2118; }} .badge-dry {{ color:#ffe5a3; background:#55400e; }}
+  .badge-applied {{ color:#baf8ce; background:#174b2c; }} .badge-number {{ color:#c9f3ff; background:#124354; }} .badge-release {{ color:#ffd2c8; background:#5b2118; }} .badge-dry {{ color:#ffe5a3; background:#55400e; }}
 
 
   .position {{ color:var(--amber); font-weight:750; }} .numeric,.shirt {{ font-variant-numeric:tabular-nums; }} .shirt {{ font-size:1.05rem; font-weight:800; }} .shirt.old {{ color:var(--muted); }} .shirt.new {{ color:var(--cyan); }}
@@ -625,14 +509,14 @@ def generate_html_report(
     <header class="masthead"><p class="kicker">FL26 · verified sync</p><h1>{escape(title)}</h1><p class="generated">Generated {now_str} · {metrics['total_changes']} save changes</p></header>
     <section class="summary" aria-label="Run summary">
       <div class="metric"><strong>{metrics['club_transfers']}</strong><span>Club transfers</span></div>
-      <div class="metric"><strong>{metrics['created_players']}</strong><span>Player creations</span></div>
-      <div class="metric"><strong>{metrics['updated_players']}</strong><span>Player updates</span></div>
+      <div class="metric"><strong>{metrics['releases']}</strong><span>Releases</span></div>
       <div class="metric"><strong>{metrics['permanent']}</strong><span>Permanent moves</span></div>
       <div class="metric"><strong>{metrics['loans']}</strong><span>Loans / returns</span></div>
       <div class="metric"><strong>{metrics['shirt_updates']}</strong><span>Shirt numbers changed</span></div>
+      <div class="metric"><strong>{metrics['dry_run']}</strong><span>Dry-run</span></div>
     </section>
-    <p class="action-line">Roster actions · <strong>{metrics['moves']}</strong> direct moves · <strong>{metrics['signings']}</strong> signings · <strong>{metrics['releases']}</strong> releases · <strong>{metrics['created_players']}</strong> players created</p>
-    {transfer_section}{release_section}{created_section}{updated_section}{shirt_section}{empty_state}
+    <p class="action-line">Roster actions · <strong>{metrics['moves']}</strong> direct moves · <strong>{metrics['signings']}</strong> signings · <strong>{metrics['releases']}</strong> releases</p>
+    {transfer_section}{release_section}{shirt_section}{empty_state}
   </main>
 </body>
 </html>

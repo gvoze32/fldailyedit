@@ -19,27 +19,13 @@ from pathlib import Path
 
 import config
 from editor.models import ManagerInfo, PlayerInfo, TeamData, TeamInfo
-from editor.player_codec import POSITION_NAMES, PlayerAbilityProfile, decode_player_entry
-from editor.player_ovr import (
-    PlayerOvrError,
-    calculate_ovr_tenths,
-    ovr_weak_foot_accuracy,
-)
 from editor.player_assignment import PlayerAssignmentDatabase
 from editor.player_catalog import PlayerCatalogReport, build_player_catalog
-from editor.playerbin import PlayerBinDatabase
+from editor.playerbin import PlayerBinDatabase, POSITION_NAMES
 from editor.release_policy import PlayerUsage, ReleasePolicy
 from editor.teambin import TeamBinDatabase, TeamBinRecord
 logger = logging.getLogger(__name__)
 
-def _profile_overall_rating(profile: PlayerAbilityProfile) -> int:
-    """Calculate the registered-position OVR from one decoded save profile."""
-    return calculate_ovr_tenths(
-        profile.abilities,
-        profile.registered_position,
-        registered_position=profile.registered_position,
-        weak_foot_accuracy=ovr_weak_foot_accuracy(profile.weak_foot_accuracy),
-    ) // 10
 
 # ──────────────────────────────────────────────────────────────
 # Entry sizes (bytes) — same across PES20/21/FL26
@@ -95,6 +81,8 @@ HDR_GAME_PLAN_COUNT = 0x74
 PE_PLAYER_ID = 0x00        # 4 bytes uint32 LE
 PE_PLAYER_NAME = 0x36      # 61 bytes null-terminated string
 PE_PRINT_NAME = 0x73       # 61 bytes null-terminated string
+PE_AGE_BYTE = 0x20         # 6-bit age field starts at bit 7
+PE_REGISTERED_POSITION_BYTE = 0x21  # 4-bit position field starts at bit 5
 
 # Team entry
 TE_TEAM_ID = 0x000         # 4 bytes uint32 LE
@@ -117,9 +105,8 @@ MIN_CLUB_ROSTER_SIZE = 16
 FIRST_TEAM_SLOT_COUNT = 11
 MATCHDAY_SQUAD_SLOT_COUNT = 18
 MIN_GOALKEEPERS = 2
-# Keep the reserved range used by Player Update create IDs out of the
-# overflow pool when a native reserve is available.
-CREATED_PLAYER_ID_MIN = 0x100000
+# Keep high/reserved IDs out of the overflow pool when a native reserve exists.
+RESERVED_PLAYER_ID_MIN = 0x100000
 
 # Game plan entry
 GP_TEAM_ID = 0x000         # 4 bytes uint32 LE
@@ -289,7 +276,6 @@ class EditFile:
         self.teambin_source: str | None = None
         self.player_assignment_db: PlayerAssignmentDatabase | None = None
         self.player_assignment_source: str | None = None
-        self.player_appearance_data: bytes | None = None
         self.release_protected_player_ids: dict[int, frozenset[int]] = {}
         self.release_usage: dict[int, PlayerUsage] = {}
 
@@ -331,13 +317,6 @@ class EditFile:
         database = getattr(self, "player_assignment_db", None)
         return database.team_keys_for(player_id) if database is not None else ()
 
-    def attach_player_appearance(
-        self, data: bytes | bytearray | memoryview | None
-    ) -> None:
-        """Attach raw PlayerAppearance.bin data for opt-in player creation."""
-        if data is not None and not isinstance(data, (bytes, bytearray, memoryview)):
-            raise TypeError("appearance data must be bytes-like or None")
-        self.player_appearance_data = None if data is None else bytes(data)
 
     def attach_release_policy(self, policy: ReleasePolicy | None) -> None:
         """Attach optional protected-player and offline-usage release policy."""
@@ -381,11 +360,9 @@ class EditFile:
                 player_id=player_info.player_id,
                 name=player_info.name or record.name,
                 print_name=player_info.print_name or record.print_name or record.name,
-                overall_rating=player_info.overall_rating,
                 position=player_info.position or record.registered_position,
                 nationality=player_info.nationality,
                 age=player_info.age or record.age,
-                position_proficiency=player_info.position_proficiency,
             )
         if record is None:
             return None
@@ -496,54 +473,6 @@ class EditFile:
         except Exception:
             return raw.decode("latin-1", errors="replace")
 
-    def get_player_ability_profile(
-        self, player_id: int
-    ) -> PlayerAbilityProfile | None:
-        """Decode an edited-player ability record by PES player ID."""
-        for index in range(self.player_count):
-            entry_offset = self.player_start + index * PLAYER_TOTAL_SIZE
-            entry_end = entry_offset + PLAYER_ENTRY_SIZE
-            if entry_end > len(self._data):
-                break
-            current_id = struct.unpack_from(
-                "<I", self._data, entry_offset + PE_PLAYER_ID
-            )[0]
-            if current_id == player_id:
-                return decode_player_entry(self._data[entry_offset:entry_end])
-        return None
-
-    def get_edited_player_entry(self, player_id: int) -> bytes | None:
-        """Return exactly one edited player data record without appearance bytes."""
-        block_end = min(
-            self.player_start + MAX_PLAYERS * PLAYER_TOTAL_SIZE,
-            len(self._data),
-        )
-        for index in range(min(self.player_count, MAX_PLAYERS)):
-            offset = self.player_start + index * PLAYER_TOTAL_SIZE
-            if offset + PLAYER_ENTRY_SIZE > block_end:
-                break
-            if struct.unpack_from("<I", self._data, offset + PE_PLAYER_ID)[0] == player_id:
-                return bytes(self._data[offset : offset + PLAYER_ENTRY_SIZE])
-        return None
-
-    def replace_edited_player_entry(self, player_id: int, entry: bytes) -> None:
-        """Replace one edited player data record without touching its appearance."""
-        if len(entry) != PLAYER_ENTRY_SIZE:
-            raise ValueError(f"player entry must be {PLAYER_ENTRY_SIZE} bytes")
-        block_end = min(
-            self.player_start + MAX_PLAYERS * PLAYER_TOTAL_SIZE,
-            len(self._data),
-        )
-        for index in range(min(self.player_count, MAX_PLAYERS)):
-            offset = self.player_start + index * PLAYER_TOTAL_SIZE
-            if offset + PLAYER_ENTRY_SIZE > block_end:
-                break
-            if struct.unpack_from("<I", self._data, offset + PE_PLAYER_ID)[0] == player_id:
-                self._data[offset : offset + PLAYER_ENTRY_SIZE] = entry
-                if hasattr(self, "_player_cache"):
-                    del self._player_cache
-                return
-        raise ValueError(f"edited-player record {player_id} was not found")
 
     def get_all_players(self, csv_path: Path | None = None, include_base_db: bool = True) -> dict[int, PlayerInfo]:
         """
@@ -572,37 +501,27 @@ class EditFile:
 
             name = self._read_string(entry_offset + PE_PLAYER_NAME, 61)
             print_name = self._read_string(entry_offset + PE_PRINT_NAME, 61)
-            profile: PlayerAbilityProfile | None = None
-            try:
-                profile = decode_player_entry(
-                    self._data[entry_offset : entry_offset + PLAYER_ENTRY_SIZE]
+            raw_entry = self._data[
+                entry_offset : entry_offset + PLAYER_ENTRY_SIZE
+            ]
+            age = (
+                int.from_bytes(
+                    raw_entry[PE_AGE_BYTE : PE_AGE_BYTE + 2], "little"
                 )
-                overall_rating = _profile_overall_rating(profile)
-            except (PlayerOvrError, ValueError) as exc:
-                logger.debug(
-                    "Could not calculate OVR for edited player %s: %s",
-                    player_id,
-                    exc,
-                )
-                overall_rating = 0
-
+                >> 7
+            ) & 0x3F
+            position_id = (raw_entry[PE_REGISTERED_POSITION_BYTE] >> 5) & 0x0F
             position = (
-                profile.registered_position
-                if profile is not None
-                and not profile.registered_position.startswith("UNKNOWN(")
+                POSITION_NAMES[position_id]
+                if position_id < len(POSITION_NAMES)
                 else ""
             )
-            age = profile.age if profile is not None else 0
             edited_players[player_id] = PlayerInfo(
                 player_id=player_id,
                 name=name,
                 print_name=print_name,
-                overall_rating=overall_rating,
                 position=position,
                 age=age,
-                position_proficiency=(
-                    dict(profile.position_proficiency) if profile is not None else None
-                ),
             )
             edited_count += 1
 
@@ -656,11 +575,9 @@ class EditFile:
                         player_id=existing.player_id,
                         name=existing.name or record.name,
                         print_name=existing.print_name or record.print_name or record.name,
-                        overall_rating=existing.overall_rating,
                         position=existing.position or record.registered_position,
                         nationality=existing.nationality,
                         age=existing.age or record.age,
-                        position_proficiency=existing.position_proficiency,
                     )
             report = replace(
                 report,
@@ -671,10 +588,6 @@ class EditFile:
                 ),
                 ages=sum(
                     bool(players.get(player_id) and players[player_id].age)
-                    for player_id in roster_ids
-                ),
-                overall_ratings=sum(
-                    bool(players.get(player_id) and players[player_id].overall_rating)
                     for player_id in roster_ids
                 ),
             )
@@ -930,12 +843,12 @@ class EditFile:
         3. Prefer the deepest native reserve role, which is the least likely to
            play.
         4. Keep at least two goalkeepers when position metadata identifies them.
-        5. Prefer a native reserve over a reserved-range created player when
-           both are otherwise equivalent.
+        5. Prefer a native reserve over a high/reserved-ID player when both
+           are otherwise equivalent.
 
         The game-plan order is used when it is a valid permutation of the
         roster slots; otherwise the persisted roster order is the fallback.
-        Player ability/OVR is deliberately never read or compared here.
+        Player ability values are deliberately never read or compared here.
 
         Returns:
             (roster_slot_index, player_id)
@@ -994,7 +907,7 @@ class EditFile:
             role = role_slots.get(roster_slot, roster_slot)
             player = metadata[pid]
             goalkeeper = is_goalkeeper(roster_slot, player)
-            is_created_player = pid >= CREATED_PLAYER_ID_MIN
+            is_reserved_player = pid >= RESERVED_PLAYER_ID_MIN
             usage = getattr(self, "release_usage", {}).get(pid)
 
             if role < FIRST_TEAM_SLOT_COUNT:
@@ -1003,8 +916,8 @@ class EditFile:
                 tier = 2
             elif goalkeeper and total_gks <= MIN_GOALKEEPERS:
                 tier = 2
-            elif is_created_player:
-                # Created players are preserved over native deep reserves,
+            elif is_reserved_player:
+                # High/reserved IDs are preserved over native deep reserves,
                 # but remain releasable if no native candidate exists.
                 tier = 1
             else:
@@ -1065,7 +978,7 @@ class EditFile:
             "role_group": role_group,
             "player_id": player_id,
             "name": player.name if player is not None else "",
-            "is_created": player_id >= CREATED_PLAYER_ID_MIN,
+            "is_reserved": player_id >= RESERVED_PLAYER_ID_MIN,
             "is_goalkeeper": bool(player and player.is_goalkeeper) or slot == 0,
             "usage": None if usage is None else usage.to_dict(),
             "selection_basis": (
@@ -1075,48 +988,6 @@ class EditFile:
             ),
         }
 
-    def append_created_player(
-        self,
-        player_id: int,
-        player_entry: bytes,
-        appearance_entry: bytes,
-    ) -> None:
-        """Append one fully serialized created player without changing any roster."""
-        if self.player_count >= MAX_PLAYERS:
-            raise ValueError("edited-player block is full")
-        if len(player_entry) != PLAYER_ENTRY_SIZE:
-            raise ValueError(
-                f"player entry must be {PLAYER_ENTRY_SIZE} bytes; got {len(player_entry)}"
-            )
-        if len(appearance_entry) != PLAYER_APPEARANCE_SIZE:
-            raise ValueError(
-                f"appearance entry must be {PLAYER_APPEARANCE_SIZE} bytes; "
-                f"got {len(appearance_entry)}"
-            )
-        if struct.unpack_from("<I", player_entry, PE_PLAYER_ID)[0] != player_id:
-            raise ValueError("serialized player ID does not match requested player ID")
-        if struct.unpack_from("<I", appearance_entry, 0)[0] != player_id:
-            raise ValueError("serialized appearance ID does not match requested player ID")
-
-        for index in range(self.player_count):
-            offset = self.player_start + index * PLAYER_TOTAL_SIZE
-            existing_id = struct.unpack_from(
-                "<I", self._data, offset + PE_PLAYER_ID
-            )[0]
-            if existing_id == player_id:
-                raise ValueError(f"edited-player ID {player_id} already exists")
-
-        target = self.player_start + self.player_count * PLAYER_TOTAL_SIZE
-        target_end = target + PLAYER_TOTAL_SIZE
-        if target_end > self.team_start or target_end > len(self._data):
-            raise ValueError("created-player slot exceeds the allocated player block")
-        if any(self._data[target:target_end]):
-            raise ValueError(f"created-player slot {self.player_count} is not empty")
-
-        self._data[target:target_end] = player_entry + appearance_entry
-        self.player_count += 1
-        struct.pack_into("<H", self._data, HDR_PLAYER_COUNT, self.player_count)
-        self.player_catalog_report = None
 
     def get_player_shirt_number(self, team_id: int, player_id: int) -> int | None:
         """Return a player's current shirt number, or None when not registered."""
