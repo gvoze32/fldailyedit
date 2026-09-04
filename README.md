@@ -59,6 +59,21 @@ used by another squad member.
 Clean PES21 saves may retain shirt numbers in empty roster slots. These are
 reported as non-blocking warnings and do not prevent a local update.
 
+## Transfer sources
+
+FotMob is the primary source for current transfer events. The other sources
+supplement it and help resolve incomplete or ambiguous coverage:
+
+- Wikipedia's confirmed seasonal transfer lists corroborate transfer routes and
+  dated moves.
+- Moderated Sortitoutsi activity provides fast transfer signals that can
+  corroborate or safely enrich a verified event.
+- Transfermarkt provides additional dated transfer details, fees, and stable
+  player/club identifiers.
+
+Events that remain incomplete or ambiguous are skipped rather than forced into
+the save.
+
 ## Run locally
 
 Supported on macOS, Linux, and Windows through WSL. Python 3.10 or newer is
@@ -95,7 +110,6 @@ python run.py run --edit-file /path/to/EDIT00000000 --in-place
 # Validate a save
 python run.py validate --edit-file /path/to/EDIT00000000
 
-
 # Show command options
 python run.py run --help
 ```
@@ -104,20 +118,12 @@ python run.py run --help
 updates. Use `python run.py <command> --help` for audit, comparison, logging,
 and repair tools.
 
-
 ## Safety
 
 - Saves are validated before and after changes.
 - Local runs create rolling backups and use atomic, verified encryption.
 - A process lock prevents concurrent writes to the same output.
 - Incomplete source data aborts the run; ambiguous matches are skipped.
-- FotMob is the primary source for current transfer events.
-- Wikipedia's confirmed seasonal transfer lists help corroborate transfer
-  routes and dated moves.
-- Moderated Sortitoutsi activity provides fast transfer signals that can
-  corroborate or safely enrich a verified event.
-- Transfermarkt provides additional dated transfer details, fees, and stable
-  player/club identifiers.
 
 ## Development
 
