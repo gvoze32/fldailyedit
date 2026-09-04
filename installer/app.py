@@ -17,7 +17,7 @@ ttk: Any = None
 from installer import __version__
 from installer.catalog import Channel, ReleaseRecord
 from installer.install import InstallStage
-from local_update import LocalUpdateStage
+from local_update import LocalUpdateResult, LocalUpdateStage
 from installer.paths import GameTarget, SaveLocation
 from installer.state import (
     CatalogLoaded,

@@ -827,6 +827,50 @@ def test_progress_presentation_switches_mode_and_locks_at_commit() -> None:
     assert commit_view.status == "Finishing installation safely…"
 
 
+def test_release_completion_renders_result_instead_of_leaving_commit_screen(
+    tmp_path: Path,
+) -> None:
+    class ViewDouble:
+        def __init__(self) -> None:
+            self.value = ""
+            self.visible = False
+            self.options: dict[str, str] = {}
+
+        def set(self, value: str) -> None:
+            self.value = value
+
+        def grid(self) -> None:
+            self.visible = True
+
+        def grid_remove(self) -> None:
+            self.visible = False
+
+        def configure(self, **options: str) -> None:
+            self.options.update(options)
+
+    target = tmp_path / "save" / "EDIT00000000"
+    application = object.__new__(installer_app.InstallerApplication)
+    application._progress_running = False
+    application._progress_bar = ViewDouble()
+    application._result_actions = ViewDouble()
+    application._progress_status_var = ViewDouble()
+    application._progress_detail_var = ViewDouble()
+    application._open_folder_button = ViewDouble()
+    application._retry_button = ViewDouble()
+    application._copy_button = ViewDouble()
+    state = InstallerState(
+        step=WizardStep.RESULT,
+        result=InstallResult(target, None, "a" * 64),
+    )
+
+    application._render_result(state)
+
+    assert application._progress_status_var.value == "Your save is ready."
+    assert str(target) in application._progress_detail_var.value
+    assert application._progress_bar.visible is False
+    assert application._result_actions.visible is True
+
+
 def test_close_disposition_cancels_before_commit_and_blocks_during_commit() -> None:
     before_commit = InstallerState(step=WizardStep.PROGRESS)
     at_commit = InstallerState(step=WizardStep.PROGRESS, commit_started=True)
