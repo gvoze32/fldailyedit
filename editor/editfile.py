@@ -1623,6 +1623,34 @@ class EditFile:
                     self._data[position_address] = position_code
                     repaired += 1
         return repaired
+    def _repair_game_plan_changed_player_positions(
+        self,
+        game_plan_offset: int,
+        roster: TeamData,
+        previous_player_roles: dict[int, int],
+        lineup: list[int],
+        *,
+        position_overrides: dict[int, str] | None = None,
+    ) -> int:
+        """Relabel starters whose formation role changed during a mutation."""
+        overrides = position_overrides or {}
+        starter_count = min(FIRST_TEAM_SLOT_COUNT, roster.roster_size)
+        repaired = 0
+        for role, slot in enumerate(lineup[:starter_count]):
+            if not 0 <= slot < TP_MAX_PLAYERS:
+                continue
+            player_id = roster.player_ids[slot]
+            if not player_id or previous_player_roles.get(player_id) == role:
+                continue
+            position = overrides.get(player_id) or self.get_player_position(player_id) or ""
+            repaired += self._repair_game_plan_role_position(
+                game_plan_offset,
+                role,
+                _game_plan_position_code(position),
+            )
+        return repaired
+
+
 
     def _repair_game_plan_goalkeeper_positions(
         self,
@@ -1651,15 +1679,55 @@ class EditFile:
                 )
                 == 0
             )
+        def role_has_goalkeeper_codes(role: int) -> bool:
+            found_code = False
+            for preset_offset in GP_POSITION_PRESETS:
+                for phase_offset in GP_POSITION_PHASE_OFFSETS:
+                    position_address = (
+                        game_plan_offset
+                        + preset_offset
+                        + phase_offset
+                        + role * GP_POSITION_ENTRY_SIZE
+                    )
+                    if position_address >= len(self._data):
+                        return False
+                    found_code = True
+                    if self._data[position_address] != 0:
+                        return False
+            return found_code
+
+
+
+        role0_is_unknown_incumbent = False
+        if starter_count:
+            role0_slot = lineup[0]
+            if 0 <= role0_slot < TP_MAX_PLAYERS:
+                role0_player_id = roster.player_ids[role0_slot]
+                role0_position = _game_plan_position_code(
+                    player_position(role0_player_id)
+                )
+                role0_is_unknown_incumbent = (
+                    bool(role0_player_id)
+                    and role0_position is None
+                    and role_has_goalkeeper_codes(0)
+                )
 
         starter_goalkeeper_roles = [
             role for role in range(starter_count) if is_goalkeeper_role(role)
         ]
-        goalkeeper_roles = starter_goalkeeper_roles or [
+        bench_goalkeeper_roles = [
             role
             for role in range(starter_count, active_count)
             if is_goalkeeper_role(role)
         ]
+        if starter_goalkeeper_roles:
+            goalkeeper_roles = starter_goalkeeper_roles
+        elif role0_is_unknown_incumbent and bench_goalkeeper_roles:
+            # A role-zero player with an unknown label and a valid GK marker
+            # is an incumbent, not a reason to promote an arbitrary reserve.
+            goalkeeper_roles = [0]
+        else:
+            goalkeeper_roles = bench_goalkeeper_roles
         if not goalkeeper_roles:
             return 0, 0
 
@@ -1763,6 +1831,24 @@ class EditFile:
                 "preserving it during removal"
             )
             return
+        def previous_player_id(slot: int) -> int:
+            if slot == removed_idx:
+                return removed_player_id or 0
+            if replacement_idx >= 0 and slot == replacement_idx:
+                return replacement_player_id or 0
+            if 0 <= slot < TP_MAX_PLAYERS:
+                return roster.player_ids[slot]
+            return 0
+
+        previous_player_roles = {
+            player_id: role
+            for role, slot in enumerate(
+                active_order[: min(FIRST_TEAM_SLOT_COUNT, old_active_count)]
+            )
+            if (player_id := previous_player_id(slot))
+        }
+
+
 
         removed_role = active_order.index(removed_idx)
         target_position_code: int | None = None
@@ -1859,25 +1945,12 @@ class EditFile:
             roster,
             new_lineup,
         )
-        if promoted_slot is None and replacement_player_id is not None:
-            replacement_role = next(
-                (
-                    role
-                    for role, slot in enumerate(new_lineup[:FIRST_TEAM_SLOT_COUNT])
-                    if slot == removed_idx
-                ),
-                None,
-            )
-            replacement_position_code = _game_plan_position_code(
-                self.get_player_position(replacement_player_id)
-            )
-            if replacement_role is not None:
-                self._repair_game_plan_role_position(
-                    gp_offset,
-                    replacement_role,
-                    replacement_position_code,
-                )
-
+        self._repair_game_plan_changed_player_positions(
+            gp_offset,
+            roster,
+            previous_player_roles,
+            new_lineup,
+        )
         for role_offset in GP_SINGLE_PLAYER_ROLES:
             target_offset = gp_offset + role_offset
             value = self._data[target_offset]
@@ -1938,6 +2011,15 @@ class EditFile:
         ):
             return
 
+        previous_player_roles = {
+            player_id: role
+            for role, slot in enumerate(
+                active_prefix[: min(FIRST_TEAM_SLOT_COUNT, old_active_count)]
+            )
+            if slot != added_slot
+            and (player_id := roster.player_ids[slot])
+        }
+
         try:
             added_role = lineup.index(added_slot, old_active_count)
         except ValueError:
@@ -1968,22 +2050,13 @@ class EditFile:
             lineup,
             position_overrides=position_overrides,
         )
-        added_role = next(
-            (
-                role
-                for role, slot in enumerate(
-                    lineup[: min(FIRST_TEAM_SLOT_COUNT, roster.roster_size)]
-                )
-                if slot == added_slot
-            ),
-            None,
+        self._repair_game_plan_changed_player_positions(
+            gp_offset,
+            roster,
+            previous_player_roles,
+            lineup,
+            position_overrides=position_overrides,
         )
-        if added_role is not None:
-            self._repair_game_plan_role_position(
-                gp_offset,
-                added_role,
-                _game_plan_position_code(effective_added_position),
-            )
 
     def _find_game_plan_offset(self, team_id: int) -> int | None:
         """Find the byte offset of a team's game plan entry."""

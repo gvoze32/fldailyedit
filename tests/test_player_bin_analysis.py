@@ -667,6 +667,105 @@ def test_removal_syncs_copied_player_to_vacated_game_plan_role():
             )
 
 
+def test_removal_promoted_player_receives_registered_position():
+    from tests.test_editor import _build_mock_data
+
+    data = _build_mock_data(
+        num_players=0,
+        num_teams=1,
+        num_team_player=1,
+        num_game_plans=1,
+        team_player_entries=[
+            (101, list(range(1000, 1013)), list(range(1, 14))),
+        ],
+        league_team_ids=[101],
+    )
+    edit_file = EditFile()
+    edit_file.load_bytes(data)
+    edit_file.attach_playerbin(
+        PlayerBinDatabase(
+            {
+                1001: PlayerBinRecord(1001, "Departed CB", 24, "CB", 0),
+                1011: PlayerBinRecord(1011, "Marco Palestra", 20, "RB", 0),
+                1012: PlayerBinRecord(1012, "Replacement", 24, "LWF", 0),
+            }
+        )
+    )
+    game_plan_offset = edit_file.game_plan_start
+    for preset_offset in GP_POSITION_PRESETS:
+        for phase_offset in GP_POSITION_PHASE_OFFSETS:
+            edit_file._data[
+                game_plan_offset + preset_offset + phase_offset + 1
+            ] = POSITION_NAMES.index("CB")
+
+    assert edit_file.release_player(1001, 101)
+
+    roster = edit_file.get_team_roster(101)
+    assert roster is not None
+    assert roster.player_ids[1] == 1012
+    assert roster.player_ids[11] == 1011
+    lineup = list(
+        edit_file._data[
+            game_plan_offset + GP_LINEUP :
+            game_plan_offset + GP_LINEUP + 40
+        ]
+    )
+    assert lineup[:2] == [0, 11]
+    for preset_offset in GP_POSITION_PRESETS:
+        for phase_offset in GP_POSITION_PHASE_OFFSETS:
+            assert (
+                edit_file._data[
+                    game_plan_offset + preset_offset + phase_offset + 1
+                ]
+                == POSITION_NAMES.index("RB")
+            )
+
+
+def test_unknown_role_zero_keeps_incumbent_over_reserve_goalkeepers():
+    from tests.test_editor import _build_mock_data
+
+    data = _build_mock_data(
+        num_players=0,
+        num_teams=1,
+        num_team_player=1,
+        num_game_plans=1,
+        team_player_entries=[
+            (101, list(range(1000, 1013)), list(range(1, 14))),
+        ],
+        league_team_ids=[101],
+    )
+    edit_file = EditFile()
+    edit_file.load_bytes(data)
+    edit_file.attach_playerbin(
+        PlayerBinDatabase(
+            {
+                151751: PlayerBinRecord(151751, "Mike Penders", 20, "GK", 0),
+                101076: PlayerBinRecord(
+                    101076, "Emiliano Martínez", 33, "GK", 0
+                ),
+            }
+        )
+    )
+    edit_file._player_cache = {
+        1000: PlayerInfo(1000, "Existing incumbent", position="")
+    }
+    roster = edit_file.get_team_roster(101)
+    assert roster is not None
+    roster.player_ids[11] = 151751
+    roster.player_ids[12] = 101076
+    game_plan_offset = edit_file.game_plan_start
+    lineup_offset = game_plan_offset + GP_LINEUP
+    lineup = list(edit_file._data[lineup_offset : lineup_offset + 40])
+
+    edit_file._repair_game_plan_goalkeeper_positions(
+        game_plan_offset,
+        roster,
+        lineup,
+    )
+
+    assert lineup[:2] == [0, 1]
+
+
 def test_goalkeeper_addition_uses_transfer_position_for_game_plan_role():
     from tests.test_editor import _build_mock_data
 
