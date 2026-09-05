@@ -672,6 +672,7 @@ class InstallerApplication:
     def _build_progress_frame(self) -> ttk.Frame:
         frame = ttk.Frame(self._body)
         frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(3, weight=1)
 
         self._progress_status_var = tkinter.StringVar(self.root)
         self._wrapped_label(
@@ -698,9 +699,49 @@ class InstallerApplication:
             textvariable=self._progress_detail_var,
         ).grid(row=2, column=0, sticky="ew")
 
+        self._transfer_log_frame = ttk.Frame(frame)
+        self._transfer_log_frame.grid(
+            row=3,
+            column=0,
+            sticky="nsew",
+            pady=(_SPACE_M, 0),
+        )
+        self._transfer_log_frame.columnconfigure(0, weight=1)
+        self._transfer_log_frame.rowconfigure(1, weight=1)
+        ttk.Label(
+            self._transfer_log_frame,
+            text="Transfer log",
+            style="Wizard.Section.TLabel",
+        ).grid(row=0, column=0, sticky="w", pady=(0, _SPACE_XS))
+        log_view = ttk.Frame(self._transfer_log_frame)
+        log_view.grid(row=1, column=0, sticky="nsew")
+        log_view.columnconfigure(0, weight=1)
+        log_view.rowconfigure(0, weight=1)
+        self._transfer_log_text = tkinter.Text(
+            log_view,
+            height=10,
+            width=1,
+            wrap="word",
+            state="disabled",
+            borderwidth=1,
+            relief="solid",
+            highlightthickness=0,
+        )
+        self._transfer_log_text.grid(row=0, column=0, sticky="nsew")
+        transfer_log_scrollbar = ttk.Scrollbar(
+            log_view,
+            orient="vertical",
+            command=self._transfer_log_text.yview,
+        )
+        transfer_log_scrollbar.grid(row=0, column=1, sticky="ns")
+        self._transfer_log_text.configure(
+            yscrollcommand=transfer_log_scrollbar.set
+        )
+        self._transfer_log_frame.grid_remove()
+
         self._result_actions = ttk.Frame(frame)
         self._result_actions.grid(
-            row=3,
+            row=4,
             column=0,
             sticky="w",
             pady=(_SPACE_L, 0),
@@ -732,6 +773,16 @@ class InstallerApplication:
         self._copy_button.grid(row=0, column=2)
         self._result_actions.grid_remove()
         return frame
+
+    def _set_transfer_log(self, content: str | None) -> None:
+        self._transfer_log_text.configure(state="normal")
+        self._transfer_log_text.delete("1.0", "end")
+        if content is None:
+            self._transfer_log_frame.grid_remove()
+        else:
+            self._transfer_log_text.insert("1.0", content)
+            self._transfer_log_frame.grid()
+        self._transfer_log_text.configure(state="disabled")
 
     def _on_resize(self, event: tkinter.Event[tkinter.Misc]) -> None:
         if event.widget is not self.root:
@@ -1063,6 +1114,7 @@ class InstallerApplication:
             safety_var.set(safety)
 
     def _render_progress(self, state: InstallerState) -> None:
+        self._set_transfer_log(None)
         self._result_actions.grid_remove()
         self._progress_bar.grid()
         presentation = progress_presentation(
@@ -1097,6 +1149,7 @@ class InstallerApplication:
             self._progress_running = False
         self._progress_bar.grid_remove()
         self._result_actions.grid()
+        transfer_log_content: str | None = None
         if state.result is not None:
             if isinstance(state.result, LocalUpdateResult):
                 self._progress_status_var.set("Your local save is ready.")
@@ -1117,11 +1170,25 @@ class InstallerApplication:
                         "\n\nTransfer log created at:\n"
                         f"{state.result.transfer_log_path}"
                     )
+                    try:
+                        transfer_log_content = (
+                            state.result.transfer_log_path.read_text(
+                                encoding="utf-8"
+                            )
+                        )
+                    except (OSError, UnicodeError) as error:
+                        detail += (
+                            "\n\nWarning: Transfer log could not be displayed:\n"
+                            f"{error}"
+                        )
+                    else:
+                        detail += "\n\nTransfer log is shown below."
                 if state.result.diagnostic:
                     detail += f"\n\nWarning:\n{state.result.diagnostic}"
             if state.result.backup_path is not None:
                 detail += f"\n\nBackup created at:\n{state.result.backup_path}"
             self._progress_detail_var.set(detail)
+            self._set_transfer_log(transfer_log_content)
             self._open_folder_button.grid()
             self._open_folder_button.configure(
                 state="normal" if sys.platform == "win32" else "disabled"

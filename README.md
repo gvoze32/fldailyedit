@@ -75,6 +75,7 @@ Each successful updater run records applied changes in
 When the Windows installer applies a prebuilt Fast or Deep release, it writes
 the bundled transfer report as a timestamped Markdown file under
 `FLDailyEditLogs` beside `EDIT00000000`.
+The installer also displays that report directly on its completion screen.
 
 ## Transfer sources
 

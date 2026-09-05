@@ -840,8 +840,25 @@ def test_release_completion_renders_result_instead_of_leaving_commit_screen(
         def configure(self, **options: str) -> None:
             self.options.update(options)
 
+    class TextDouble(ViewDouble):
+        def __init__(self) -> None:
+            super().__init__()
+            self.content = ""
+
+        def delete(self, *_args: str) -> None:
+            self.content = ""
+
+        def insert(self, _index: str, content: str) -> None:
+            self.content += content
+
+
     target = tmp_path / "save" / "EDIT00000000"
     log_path = tmp_path / "save" / "FLDailyEditLogs" / "transfer-log.md"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text(
+        "# FLDailyEdit Option File Transfer Log\n\n- Zidane moved\n",
+        encoding="utf-8",
+    )
     application = object.__new__(installer_app.InstallerApplication)
     application._progress_running = False
     application._progress_bar = ViewDouble()
@@ -851,6 +868,8 @@ def test_release_completion_renders_result_instead_of_leaving_commit_screen(
     application._open_folder_button = ViewDouble()
     application._retry_button = ViewDouble()
     application._copy_button = ViewDouble()
+    application._transfer_log_frame = ViewDouble()
+    application._transfer_log_text = TextDouble()
     state = InstallerState(
         step=WizardStep.RESULT,
         result=InstallResult(target, None, "a" * 64, log_path),
@@ -862,6 +881,8 @@ def test_release_completion_renders_result_instead_of_leaving_commit_screen(
     assert str(target) in application._progress_detail_var.value
     assert str(log_path) in application._progress_detail_var.value
     assert application._result_actions.visible is True
+    assert application._transfer_log_frame.visible is True
+    assert "Zidane moved" in application._transfer_log_text.content
 
 
 def test_close_disposition_cancels_before_commit_and_blocks_during_commit() -> None:
