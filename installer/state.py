@@ -5,7 +5,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable
 
-from installer.catalog import Catalog, ReleaseRecord
+from installer.catalog import Catalog, Channel, ReleaseRecord
 from installer.install import InstallResult
 from installer.paths import GameTarget, SaveLocation
 from local_update import LocalUpdateProgress, LocalUpdateResult
@@ -281,8 +281,42 @@ class InstallerController:
             selected = next(
                 (record for record in catalog.records if record == selected), None
             )
+        if selected is None and self.state.mode is InstallerMode.RELEASE:
+            selected = next(
+                (
+                    record
+                    for record in catalog.records
+                    if (
+                        record.channel is Channel.FAST
+                        and record.target_id != GameTarget.LOCAL.value
+                    )
+                ),
+                None,
+            )
+        selected_location = self.state.selected_location
+        if not self._location_matches(
+            selected_location,
+            mode=self.state.mode,
+            record=selected,
+        ):
+            selected_location = self._first_compatible_location(
+                self.state.locations,
+                mode=self.state.mode,
+                record=selected,
+            )
         return self._publish(
-            replace(self.state, catalog=catalog, selected_record=selected)
+            replace(
+                self.state,
+                catalog=catalog,
+                selected_record=selected,
+                selected_location=selected_location,
+                local_edit_file=(
+                    selected_location.edit_file
+                    if self.state.mode is InstallerMode.LOCAL
+                    and selected_location is not None
+                    else None
+                ),
+            )
         )
 
     def set_local_deep(self, deep: bool) -> bool:

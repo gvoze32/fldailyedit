@@ -116,30 +116,23 @@ def test_state_is_immutable_and_each_change_is_published_once() -> None:
         raise AssertionError("InstallerState must be frozen")
 
 
-def test_update_cannot_continue_without_a_catalog_record_selection() -> None:
+def test_fast_release_is_selected_by_default() -> None:
     controller, fast, _, _, _ = _controller_with_choices()
 
-    assert controller.next() is False
-    assert controller.state.step is WizardStep.UPDATE
-
-    controller.select_record(_record(Channel.FAST))
-    assert controller.next() is True
     assert controller.state.selected_record is fast
+    assert controller.next() is True
     assert controller.state.step is WizardStep.SAVE
 
-
-def test_fast_and_deep_remain_distinct_catalog_choices() -> None:
+def test_fast_is_default_and_deep_remains_selectable() -> None:
     controller, fast, deep, _, _ = _controller_with_choices()
 
-    assert controller.select_record(fast) is True
     assert controller.state.selected_record is fast
     assert controller.select_record(deep) is True
     assert controller.state.selected_record is deep
 
 
 def test_first_compatible_location_is_selected_by_default() -> None:
-    controller, fast, _, fl_location, pes_location = _controller_with_choices()
-    controller.select_record(fast)
+    controller, _, _, fl_location, pes_location = _controller_with_choices()
     controller.next()
 
     assert controller.state.locations == (fl_location, pes_location)
@@ -165,7 +158,7 @@ def test_compatible_future_pes_record_can_continue_fail_closed() -> None:
     controller.set_catalog(Catalog(1, (pes_record,)))
     controller.set_locations((pes_location,))
 
-    assert controller.select_record(pes_record) is True
+    assert controller.state.selected_record is pes_record
     assert controller.next() is True
     assert controller.state.selected_location is pes_location
     assert controller.next() is True
@@ -1320,6 +1313,7 @@ def test_update_view_shows_each_release_generation_in_utc_beside_its_channel() -
         Channel.FAST.value: fast,
         Channel.DEEP.value: deep,
     }
+    assert application._record_var.value == Channel.FAST.value
     assert buttons[Channel.FAST].options == {
         "state": "normal",
         "text": "Fast — Recommended — Generated 2026-08-06 01:02 UTC",
