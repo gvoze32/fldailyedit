@@ -28,7 +28,10 @@ SOCCERWAY_TEAM_TRANSFERS_URL = (
 )
 SOCCERWAY_FEED_SIGNATURE = "SW9D1eZo"
 # Keep optional corroboration bounded; callers can pass a larger value for history.
-SOCCERWAY_DEFAULT_MAX_PAGES = 3
+SOCCERWAY_DEFAULT_MAX_PAGES = 1
+SOCCERWAY_REQUEST_TIMEOUT_SECONDS = 15
+SOCCERWAY_SOURCE_TIMEOUT_SECONDS = 60
+SOCCERWAY_CONCURRENCY = 12
 SOCCERWAY_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -464,8 +467,8 @@ async def _fetch_soccerway_transfers_async(
         )
         return []
 
-    timeout = aiohttp.ClientTimeout(total=45)
-    gate = asyncio.Semaphore(6)
+    timeout = aiohttp.ClientTimeout(total=SOCCERWAY_REQUEST_TIMEOUT_SECONDS)
+    gate = asyncio.Semaphore(SOCCERWAY_CONCURRENCY)
     async with aiohttp.ClientSession(
         headers=SOCCERWAY_HEADERS,
         timeout=timeout,
@@ -494,7 +497,26 @@ async def _fetch_soccerway_transfers_async(
                 )
                 return []
 
-        batches = await asyncio.gather(*(fetch_club(name) for name in targets))
+        tasks = [asyncio.create_task(fetch_club(name)) for name in targets]
+        done, pending = await asyncio.wait(
+            tasks,
+            timeout=SOCCERWAY_SOURCE_TIMEOUT_SECONDS,
+        )
+        if pending:
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            logger.warning(
+                "Soccerway source deadline reached after %ss; skipped %s of %s clubs",
+                SOCCERWAY_SOURCE_TIMEOUT_SECONDS,
+                len(pending),
+                len(targets),
+            )
+        batches = [
+            task.result()
+            for task in tasks
+            if task in done and not task.cancelled() and task.exception() is None
+        ]
 
     unique: list[Transfer] = []
     seen: set[tuple[str, str, str, str]] = set()

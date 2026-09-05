@@ -268,10 +268,13 @@ def _scrape_run_transfers(args):
         )
 
         print("\n🛣️ Adding Soccerway team-page corroboration routes...")
+        # Soccerway is per-club; use only primary targets to avoid a
+        # supplemental-history fan-out of thousands of requests.
+        soccerway_clubs = _supplemental_target_clubs(transfer_batches[:1])
         soccerway_corroborators = fetch_soccerway_transfers(
             since_date=since_date,
             window=window,
-            club_names=supplemental_clubs,
+            club_names=soccerway_clubs,
         )
         corroborators.extend(soccerway_corroborators)
         print(

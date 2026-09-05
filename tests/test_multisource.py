@@ -1063,6 +1063,48 @@ def test_soccerway_fetch_resolves_relevant_club_and_reads_feed(monkeypatch):
     ]
 
 
+def test_soccerway_source_deadline_keeps_completed_routes(monkeypatch):
+    from scraper import soccerway
+
+    async def fake_resolve(_session, team_name):
+        return soccerway._SoccerwayTeam(
+            name=team_name,
+            slug=team_name.casefold(),
+            team_id=team_name.casefold(),
+        )
+
+    async def fake_fetch(_session, team, *, start_date, end_date, max_pages):
+        if team.name == "Slow":
+            await asyncio.sleep(0.05)
+        if team.name != "Fast":
+            return []
+        return [
+            Transfer(
+                "Fast Player",
+                "Old FC",
+                "Fast",
+                date="2026-08-03",
+                sources=("soccerway",),
+                verification_status="corroborator",
+            )
+        ]
+
+    monkeypatch.setattr(soccerway, "_resolve_team", fake_resolve)
+    monkeypatch.setattr(soccerway, "_fetch_team_transfers", fake_fetch)
+    monkeypatch.setattr(soccerway, "SOCCERWAY_SOURCE_TIMEOUT_SECONDS", 0.01)
+
+    transfers = asyncio.run(
+        soccerway._fetch_soccerway_transfers_async(
+            since_date=date(2026, 8, 3),
+            ref_date=date(2026, 8, 4),
+            club_names=["Fast", "Slow"],
+            max_pages=1,
+        )
+    )
+
+    assert [item.player_name for item in transfers] == ["Fast Player"]
+
+
 def test_route_corroborators_merge_provenance_without_creating_events():
     primary = Transfer("Ada Example", "Old FC", "New FC", date="2026-08-03")
     corroborators = [

@@ -93,8 +93,11 @@ supplement it and help resolve incomplete or ambiguous coverage:
 - Sofascore's rendered team pages corroborate dated transfer routes.
 - Soccerway resolves relevant clubs and corroborates their dated transfer routes.
 
-The optional Soccerway corroboration scan reads up to three pages per relevant
-club by default; deeper history can request a larger `max_pages` value.
+The optional Soccerway corroboration scan reads the first transfer page per
+relevant primary club by default; deeper history can request a larger
+`max_pages` value.
+Soccerway has a 60-second source budget so a blocked feed cannot hold the
+pipeline indefinitely.
 
 BeSoccer, Sofascore, and Soccerway can add provenance to an existing verified
 FotMob/Transfermarkt/Wikipedia route, but never create a new transfer event.
