@@ -27,6 +27,8 @@ SOCCERWAY_TEAM_TRANSFERS_URL = (
     "https://www.soccerway.com/team/{slug}/{team_id}/transfers/"
 )
 SOCCERWAY_FEED_SIGNATURE = "SW9D1eZo"
+# Keep optional corroboration bounded; callers can pass a larger value for history.
+SOCCERWAY_DEFAULT_MAX_PAGES = 3
 SOCCERWAY_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -445,13 +447,17 @@ async def _fetch_soccerway_transfers_async(
     window: str = "auto",
     ref_date: date | None = None,
     club_names: Iterable[str] | None = None,
-    max_pages: int = 20,
+    max_pages: int = SOCCERWAY_DEFAULT_MAX_PAGES,
 ) -> list[Transfer]:
     start_date, end_date = resolve_source_date_range(
         since_date, window, ref_date=ref_date
     )
     targets = _club_names(club_names)
-    logger.info("Soccerway scraping %s relevant clubs", len(targets))
+    logger.info(
+        "Soccerway scraping %s relevant clubs (up to %s pages each)",
+        len(targets),
+        max_pages,
+    )
     if not targets:
         logger.debug(
             "Soccerway supplemental source skipped: no relevant transfer clubs"
@@ -515,7 +521,7 @@ def fetch_soccerway_transfers(
     *,
     window: str = "auto",
     club_names: Iterable[str] | None = None,
-    max_pages: int = 20,
+    max_pages: int = SOCCERWAY_DEFAULT_MAX_PAGES,
 ) -> list[Transfer]:
     """Fetch Soccerway routes for clubs already present in verified events."""
     try:
