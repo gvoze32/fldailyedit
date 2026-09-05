@@ -46,6 +46,13 @@ Back up your save, extract `EDIT00000000`, and copy it to:
 For a custom club list or on-demand run, fork the repository and use
 **Run workflow** in the Actions tab.
 
+## Fast vs Deep
+
+- **Fast:** Quicker updates using the live transfer feed.
+- **Deep:** Slower updates that also scan indexed club squads for broader coverage.
+
+Fast is the default. Add `--deep` when you want broader coverage.
+
 ## What it updates
 
 - Transfers, releases, loans, and loan returns
