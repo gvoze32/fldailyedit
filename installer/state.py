@@ -245,18 +245,31 @@ class InstallerController:
     def select_mode(self, mode: InstallerMode) -> bool:
         if self.state.step is not WizardStep.UPDATE:
             return False
+        selected_record = (
+            None
+            if mode is InstallerMode.LOCAL
+            else self.state.selected_record
+        )
+        selected_location = self.state.selected_location
+        if not self._location_matches(
+            selected_location,
+            mode=mode,
+            record=selected_record,
+        ):
+            selected_location = self._first_compatible_location(
+                self.state.locations,
+                mode=mode,
+                record=selected_record,
+            )
         return self._publish(
             replace(
                 self.state,
                 mode=mode,
-                selected_record=(
-                    None
-                    if mode is InstallerMode.LOCAL
-                    else self.state.selected_record
-                ),
+                selected_record=selected_record,
+                selected_location=selected_location,
                 local_edit_file=(
-                    self.state.local_edit_file
-                    if mode is InstallerMode.LOCAL
+                    selected_location.edit_file
+                    if mode is InstallerMode.LOCAL and selected_location is not None
                     else None
                 ),
             )
@@ -281,15 +294,22 @@ class InstallerController:
         return self._publish(replace(self.state, local_deep=bool(deep)))
 
     def set_locations(self, locations: tuple[SaveLocation, ...]) -> bool:
+        available = tuple(locations)
         selected = self.state.selected_location
         if selected is not None:
             selected = next(
-                (location for location in locations if location == selected), None
+                (location for location in available if location == selected), None
+            )
+        if selected is None:
+            selected = self._first_compatible_location(
+                available,
+                mode=self.state.mode,
+                record=self.state.selected_record,
             )
         return self._publish(
             replace(
                 self.state,
-                locations=tuple(locations),
+                locations=available,
                 selected_location=selected,
                 local_edit_file=(
                     selected.edit_file
@@ -318,15 +338,26 @@ class InstallerController:
         )
         if selected is None:
             return False
+        selected_location = self.state.selected_location
+        if not self._location_matches(
+            selected_location,
+            mode=InstallerMode.RELEASE,
+            record=selected,
+        ):
+            selected_location = self._first_compatible_location(
+                self.state.locations,
+                mode=InstallerMode.RELEASE,
+                record=selected,
+            )
         return self._publish(
             replace(
                 self.state,
                 mode=InstallerMode.RELEASE,
                 selected_record=selected,
+                selected_location=selected_location,
                 local_edit_file=None,
             )
         )
-
 
     def select_location(self, location: SaveLocation) -> bool:
         if self.state.step is not WizardStep.SAVE:
@@ -353,6 +384,40 @@ class InstallerController:
             )
         )
 
+    @staticmethod
+    def _location_matches(
+        location: SaveLocation | None,
+        *,
+        mode: InstallerMode,
+        record: ReleaseRecord | None,
+    ) -> bool:
+        if location is None:
+            return False
+        if mode is InstallerMode.LOCAL:
+            return location.edit_file.is_file()
+        return (
+            record is not None
+            and record.target_id != GameTarget.LOCAL.value
+            and location.target.value == record.target_id
+        )
+
+    @classmethod
+    def _first_compatible_location(
+        cls,
+        locations: tuple[SaveLocation, ...],
+        *,
+        mode: InstallerMode,
+        record: ReleaseRecord | None,
+    ) -> SaveLocation | None:
+        return next(
+            (
+                location
+                for location in locations
+                if cls._location_matches(location, mode=mode, record=record)
+            ),
+            None,
+        )
+
     def _has_valid_record(self) -> bool:
         if self.state.mode is InstallerMode.LOCAL:
             return True
@@ -366,22 +431,25 @@ class InstallerController:
 
     def _has_compatible_location(self) -> bool:
         location = self.state.selected_location
+        if (
+            location is None
+            or not any(candidate == location for candidate in self.state.locations)
+        ):
+            return False
         if self.state.mode is InstallerMode.LOCAL:
-            return (
-                location is not None
-                and any(candidate == location for candidate in self.state.locations)
-                and location.edit_file.is_file()
+            return self._location_matches(
+                location,
+                mode=InstallerMode.LOCAL,
+                record=None,
             )
-        record = self.state.selected_record
         return (
             self._has_valid_record()
-            and location is not None
-            and any(candidate == location for candidate in self.state.locations)
-            and record is not None
-            and record.target_id != GameTarget.LOCAL.value
-            and location.target.value == record.target_id
+            and self._location_matches(
+                location,
+                mode=InstallerMode.RELEASE,
+                record=self.state.selected_record,
+            )
         )
-
 
     def next(self) -> bool:
         if self.state.step is WizardStep.UPDATE:

@@ -137,16 +137,15 @@ def test_fast_and_deep_remain_distinct_catalog_choices() -> None:
     assert controller.state.selected_record is deep
 
 
-def test_multiple_locations_remain_visible_and_are_not_auto_selected() -> None:
+def test_first_compatible_location_is_selected_by_default() -> None:
     controller, fast, _, fl_location, pes_location = _controller_with_choices()
     controller.select_record(fast)
     controller.next()
 
     assert controller.state.locations == (fl_location, pes_location)
-    assert controller.state.selected_location is None
-    assert controller.next() is False
-    assert controller.state.step is WizardStep.SAVE
-
+    assert controller.state.selected_location is fl_location
+    assert controller.next() is True
+    assert controller.state.step is WizardStep.REVIEW
 
 def test_incompatible_pes_location_is_visible_but_cannot_continue() -> None:
     controller, fast, _, _, pes_location = _controller_with_choices()
@@ -168,7 +167,7 @@ def test_compatible_future_pes_record_can_continue_fail_closed() -> None:
 
     assert controller.select_record(pes_record) is True
     assert controller.next() is True
-    assert controller.select_location(pes_location) is True
+    assert controller.state.selected_location is pes_location
     assert controller.next() is True
     assert controller.state.step is WizardStep.REVIEW
 
@@ -849,6 +848,7 @@ def test_release_completion_renders_result_instead_of_leaving_commit_screen(
             self.options.update(options)
 
     target = tmp_path / "save" / "EDIT00000000"
+    log_path = tmp_path / "save" / "FLDailyEditLogs" / "transfer-log.md"
     application = object.__new__(installer_app.InstallerApplication)
     application._progress_running = False
     application._progress_bar = ViewDouble()
@@ -860,14 +860,14 @@ def test_release_completion_renders_result_instead_of_leaving_commit_screen(
     application._copy_button = ViewDouble()
     state = InstallerState(
         step=WizardStep.RESULT,
-        result=InstallResult(target, None, "a" * 64),
+        result=InstallResult(target, None, "a" * 64, log_path),
     )
 
     application._render_result(state)
 
     assert application._progress_status_var.value == "Your save is ready."
     assert str(target) in application._progress_detail_var.value
-    assert application._progress_bar.visible is False
+    assert str(log_path) in application._progress_detail_var.value
     assert application._result_actions.visible is True
 
 
@@ -1508,7 +1508,7 @@ def test_local_mode_accepts_a_non_fl26_save_location(tmp_path: Path) -> None:
     assert controller.select_mode(InstallerMode.LOCAL)
     controller.set_locations((location,))
     assert controller.next()
-    assert controller.select_location(location)
+    assert controller.state.selected_location is location
     assert controller.next()
     assert controller.state.step is WizardStep.REVIEW
 

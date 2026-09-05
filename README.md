@@ -66,6 +66,16 @@ used by another squad member.
 Clean PES21 saves may retain shirt numbers in empty roster slots. These are
 reported as non-blocking warnings and do not prevent a local update.
 
+## Transfer logs
+
+Each successful updater run records applied changes in
+`data/transfer_log.jsonl` and refreshes `output/transfer_summary.md` plus
+`output/transfer_summary.html`.
+
+When the Windows installer applies a prebuilt Fast or Deep release, it writes
+the bundled transfer report as a timestamped Markdown file under
+`FLDailyEditLogs` beside `EDIT00000000`.
+
 ## Transfer sources
 
 FotMob is the primary source for current transfer events. The other sources

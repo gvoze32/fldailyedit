@@ -1112,6 +1112,13 @@ class InstallerApplication:
             else:
                 self._progress_status_var.set("Your save is ready.")
                 detail = f"Installed to:\n{state.result.target_path}"
+                if state.result.transfer_log_path is not None:
+                    detail += (
+                        "\n\nTransfer log created at:\n"
+                        f"{state.result.transfer_log_path}"
+                    )
+                if state.result.diagnostic:
+                    detail += f"\n\nWarning:\n{state.result.diagnostic}"
             if state.result.backup_path is not None:
                 detail += f"\n\nBackup created at:\n{state.result.backup_path}"
             self._progress_detail_var.set(detail)

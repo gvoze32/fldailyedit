@@ -17,7 +17,12 @@ import pytest
 from installer import CATALOG_URL
 from installer.catalog import CatalogError, Channel, TRUSTED_ASSET_NAMES, parse_catalog
 from tools import build_release_asset
-from tools.build_release_asset import main, merge_catalog, package_record
+from tools.build_release_asset import (
+    TRANSFER_LOG_MEMBER_NAME,
+    main,
+    merge_catalog,
+    package_record,
+)
 
 
 TARGET_ID = "fl26-u2.2-national-squads"
@@ -76,6 +81,33 @@ def test_package_record_writes_exact_archive_and_metadata(
         "target_name": TARGET_NAME,
     }
     assert record_path.read_bytes().endswith(b"\n")
+
+def test_package_record_includes_transfer_report_in_archive(
+    tmp_path: Path,
+) -> None:
+    save_path = tmp_path / "EDIT00000000"
+    report_path = tmp_path / "transfer_summary.md"
+    save_bytes = b"save with transfer report"
+    report_bytes = b"# Applied transfers\n\n- Zidane: Free Agent -> Real Madrid\n"
+    save_path.write_bytes(save_bytes)
+    report_path.write_bytes(report_bytes)
+
+    archive_path, _ = package_record(
+        save_path,
+        tmp_path / "release",
+        target_id=TARGET_ID,
+        target_name=TARGET_NAME,
+        channel=Channel.FAST,
+        generated_at=GENERATED_AT,
+        transfer_report_path=report_path,
+    )
+
+    with zipfile.ZipFile(archive_path) as archive:
+        assert archive.namelist() == [
+            "EDIT00000000",
+            TRANSFER_LOG_MEMBER_NAME,
+        ]
+        assert archive.read(TRANSFER_LOG_MEMBER_NAME) == report_bytes
 
 
 def test_package_record_is_byte_deterministic(tmp_path: Path) -> None:

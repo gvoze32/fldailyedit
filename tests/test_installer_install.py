@@ -15,7 +15,13 @@ import pytest
 
 import installer.install as install_module
 from installer.catalog import Channel, ReleaseRecord
-from installer.install import InstallError, InstallStage, install_archive
+from installer.install import (
+    InstallError,
+    InstallStage,
+    TRANSFER_LOG_DIRECTORY_NAME,
+    TRANSFER_LOG_MEMBER_NAME,
+    install_archive,
+)
 
 
 SAVE_NAME = "EDIT00000000"
@@ -291,6 +297,48 @@ def test_missing_target_installs_without_backup(tmp_path: Path) -> None:
     assert result.target_path.read_bytes() == new_save
     assert not (destination / "FLDailyEditBackups").exists()
     assert list(destination.glob(".fldailyedit-*.tmp")) == []
+
+def test_prebuilt_install_writes_transfer_log(
+    tmp_path: Path,
+) -> None:
+    new_save = b"new save with transfer report"
+    report = b"# Applied transfers\n\n- Zidane: Free Agent -> Real Madrid\n"
+    archive_bytes = _zip_bytes(
+        [
+            (SAVE_NAME, new_save),
+            (TRANSFER_LOG_MEMBER_NAME, report),
+        ]
+    )
+    archive_path, destination, record = _setup(
+        tmp_path,
+        new_save,
+        archive_bytes=archive_bytes,
+    )
+
+    result = _install(archive_path, destination, record)
+
+    expected_log = (
+        destination
+        / TRANSFER_LOG_DIRECTORY_NAME
+        / "transfer-log-20260806T123456Z-fast.md"
+    )
+    assert result.transfer_log_path == expected_log
+    assert result.diagnostic is None
+    log = expected_log.read_text(encoding="utf-8")
+    assert "Coverage: `fast`" in log
+    assert "Zidane: Free Agent -> Real Madrid" in log
+
+def test_rejects_non_utf8_transfer_log_before_replacing_save(
+    tmp_path: Path,
+) -> None:
+    archive_bytes = _zip_bytes(
+        [
+            (SAVE_NAME, b"save"),
+            (TRANSFER_LOG_MEMBER_NAME, b"\xff"),
+        ]
+    )
+
+    _assert_invalid_archive(tmp_path, archive_bytes)
 
 
 def test_insufficient_space_fails_before_backup_and_preserves_target(

@@ -17,6 +17,10 @@ from installer.catalog import ReleaseRecord
 
 
 SAVE_NAME = "EDIT00000000"
+TRANSFER_LOG_MEMBER_NAME = "FLDailyEdit-transfer-log.md"
+TRANSFER_LOG_DIRECTORY_NAME = "FLDailyEditLogs"
+MAX_TRANSFER_LOG_BYTES = 4 * 1024 * 1024
+
 MAX_SAVE_BYTES = 32 * 1024 * 1024
 _CHUNK_BYTES = 64 * 1024
 _WINDOWS = os.name == "nt"
@@ -37,7 +41,8 @@ class InstallResult:
     target_path: Path
     backup_path: Path | None
     installed_sha256: str
-
+    transfer_log_path: Path | None = None
+    diagnostic: str | None = None
 
 class InstallError(OSError):
     def __init__(self, code: str, message: str, *, stage: InstallStage):
@@ -340,6 +345,13 @@ def _assert_safe_destination(
         ):
             raise OSError("unsafe save target")
         backup_directory = destination / "FLDailyEditBackups"
+        transfer_log_directory = destination / TRANSFER_LOG_DIRECTORY_NAME
+        transfer_log_status = _optional_lstat(transfer_log_directory)
+        if transfer_log_status is not None and (
+            _is_reparse_status(transfer_log_status)
+            or not stat.S_ISDIR(transfer_log_status.st_mode)
+        ):
+            raise OSError("unsafe transfer log directory")
         backup_status = _optional_lstat(backup_directory)
         if backup_status is not None and (
             _is_reparse_status(backup_status)
@@ -462,39 +474,158 @@ def _hash_stream(source: BinaryIO, *, limit: int) -> tuple[int, str]:
     return size, digest.hexdigest()
 
 
-def _validated_member(archive: zipfile.ZipFile) -> zipfile.ZipInfo:
-    members = archive.infolist()
-    if len(members) != 1:
-        raise InstallError(
-            "invalid_archive",
-            "Archive must contain exactly one member",
-            stage=InstallStage.VERIFYING_ARCHIVE,
-        )
+def _archive_member_error(message: str) -> InstallError:
+    return InstallError(
+        "invalid_archive",
+        message,
+        stage=InstallStage.VERIFYING_ARCHIVE,
+    )
 
-    member = members[0]
+
+def _validate_archive_member(
+    member: zipfile.ZipInfo,
+    *,
+    expected_name: str,
+    max_bytes: int,
+    description: str,
+) -> None:
     normalized = PurePosixPath(member.filename)
     mode = member.external_attr >> 16
     file_type = stat.S_IFMT(mode)
     if (
         member.is_dir()
         or normalized.is_absolute()
-        or normalized.parts != (SAVE_NAME,)
-        or member.filename != SAVE_NAME
-        or member.orig_filename != SAVE_NAME
+        or normalized.parts != (expected_name,)
+        or member.filename != expected_name
+        or member.orig_filename != expected_name
         or stat.S_ISLNK(mode)
         or file_type not in (0, stat.S_IFREG)
         or member.flag_bits & (0x1 | 0x40)
-        or member.file_size > MAX_SAVE_BYTES
+        or member.file_size > max_bytes
     ):
-        raise InstallError(
-            "invalid_archive",
-            f"Archive must contain one regular unencrypted {SAVE_NAME} file",
-            stage=InstallStage.VERIFYING_ARCHIVE,
+        raise _archive_member_error(
+            f"Archive contains an invalid {description} member"
+        )
+
+
+def _validated_member(archive: zipfile.ZipFile) -> zipfile.ZipInfo:
+    members = archive.infolist()
+    if len(members) not in (1, 2):
+        raise _archive_member_error(
+            "Archive must contain one regular unencrypted "
+            f"{SAVE_NAME} file and an optional transfer log"
+        )
+
+    allowed_names = {SAVE_NAME, TRANSFER_LOG_MEMBER_NAME}
+    save_members = [member for member in members if member.filename == SAVE_NAME]
+    if len(save_members) != 1 or any(
+        member.filename not in allowed_names for member in members
+    ):
+        raise _archive_member_error(
+            "Archive must contain one regular unencrypted "
+            f"{SAVE_NAME} file and an optional transfer log"
+        )
+
+    save_member = save_members[0]
+    _validate_archive_member(
+        save_member,
+        expected_name=SAVE_NAME,
+        max_bytes=MAX_SAVE_BYTES,
+        description="save",
+    )
+    for member in members:
+        if member is not save_member:
+            _validate_archive_member(
+                member,
+                expected_name=TRANSFER_LOG_MEMBER_NAME,
+                max_bytes=MAX_TRANSFER_LOG_BYTES,
+                description="transfer log",
+            )
+    return save_member
+
+
+def _validated_transfer_log_member(
+    archive: zipfile.ZipFile,
+) -> zipfile.ZipInfo | None:
+    member = next(
+        (
+            candidate
+            for candidate in archive.infolist()
+            if candidate.filename == TRANSFER_LOG_MEMBER_NAME
+        ),
+        None,
+    )
+    if member is not None:
+        _validate_archive_member(
+            member,
+            expected_name=TRANSFER_LOG_MEMBER_NAME,
+            max_bytes=MAX_TRANSFER_LOG_BYTES,
+            description="transfer log",
         )
     return member
 
 
-def _verify_open_archive(source: BinaryIO, record: ReleaseRecord) -> None:
+def _read_transfer_log_member(
+    archive: zipfile.ZipFile,
+) -> bytes | None:
+    member = _validated_transfer_log_member(archive)
+    if member is None:
+        return None
+    with archive.open(member, "r") as source:
+        payload = source.read(MAX_TRANSFER_LOG_BYTES + 1)
+    if len(payload) > MAX_TRANSFER_LOG_BYTES:
+        raise _archive_member_error("Transfer log exceeds the maximum supported size")
+    try:
+        payload.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise _archive_member_error("Transfer log must be valid UTF-8") from error
+    return payload
+
+def _write_transfer_log(
+    destination: Path,
+    record: ReleaseRecord,
+    payload: bytes,
+    applied_at: datetime,
+) -> Path:
+    log_directory = destination / TRANSFER_LOG_DIRECTORY_NAME
+    status = _optional_lstat(log_directory)
+    if status is not None and (
+        _is_reparse_status(status) or not stat.S_ISDIR(status.st_mode)
+    ):
+        raise OSError("unsafe transfer log directory")
+    log_directory.mkdir(exist_ok=True)
+    status = log_directory.lstat()
+    if _is_reparse_status(status) or not stat.S_ISDIR(status.st_mode):
+        raise OSError("unsafe transfer log directory")
+
+    applied_utc = applied_at.astimezone(timezone.utc)
+    generated_utc = record.generated_at.astimezone(timezone.utc)
+    timestamp = applied_utc.strftime("%Y%m%dT%H%M%SZ")
+    header = (
+        "# FLDailyEdit Option File Transfer Log\n\n"
+        f"- Applied: `{applied_utc.isoformat().replace('+00:00', 'Z')}`\n"
+        f"- Release generated: `{generated_utc.isoformat().replace('+00:00', 'Z')}`\n"
+        f"- Coverage: `{record.channel.value}`\n"
+        f"- Target: `{record.target_name}`\n\n"
+        "---\n\n"
+    ).encode("utf-8")
+    content = header + payload
+    stem = f"transfer-log-{timestamp}-{record.channel.value}"
+    for counter in range(1000):
+        suffix = "" if counter == 0 else f"-{counter}"
+        path = log_directory / f"{stem}{suffix}.md"
+        try:
+            with path.open("xb") as output:
+                output.write(content)
+                output.flush()
+                os.fsync(output.fileno())
+            return path
+        except FileExistsError:
+            continue
+    raise OSError("could not allocate a unique transfer log filename")
+
+
+def _verify_open_archive(source: BinaryIO, record: ReleaseRecord) -> bytes | None:
     try:
         source.seek(0)
         archive_size = os.fstat(source.fileno()).st_size
@@ -532,6 +663,7 @@ def _verify_open_archive(source: BinaryIO, record: ReleaseRecord) -> None:
     try:
         with zipfile.ZipFile(source) as archive:
             member = _validated_member(archive)
+            transfer_log_payload = _read_transfer_log_member(archive)
             with archive.open(member, "r") as member_source:
                 save_size, save_sha256 = _hash_stream(
                     member_source, limit=MAX_SAVE_BYTES
@@ -564,12 +696,13 @@ def _verify_open_archive(source: BinaryIO, record: ReleaseRecord) -> None:
             "Save SHA-256 does not match the release catalog",
             stage=InstallStage.VERIFYING_ARCHIVE,
         )
+    return transfer_log_payload
 
 
-def _verify_archive(archive_path: Path, record: ReleaseRecord) -> None:
+def _verify_archive(archive_path: Path, record: ReleaseRecord) -> bytes | None:
     try:
         with archive_path.open("rb") as source:
-            _verify_open_archive(source, record)
+            return _verify_open_archive(source, record)
     except InstallError:
         raise
     except OSError as error:
@@ -936,7 +1069,7 @@ def install_archive(
         ) from error
 
     progress(InstallStage.VERIFYING_ARCHIVE)
-    _verify_archive(archive_path, record)
+    transfer_log_payload = _verify_archive(archive_path, record)
     _raise_if_cancelled(cancelled, InstallStage.VERIFYING_ARCHIVE)
 
     try:
@@ -996,7 +1129,28 @@ def install_archive(
                 installed_size == record.save_size
                 and installed_sha256 == record.save_sha256
             ):
-                return InstallResult(target, backup_path, installed_sha256)
+                transfer_log_path: Path | None = None
+                diagnostic: str | None = None
+                if transfer_log_payload is not None:
+                    try:
+                        transfer_log_path = _write_transfer_log(
+                            destination,
+                            record,
+                            transfer_log_payload,
+                            now(),
+                        )
+                    except OSError as error:
+                        diagnostic = (
+                            "Save installed, but transfer log could not be written: "
+                            f"{error}"
+                        )
+                return InstallResult(
+                    target,
+                    backup_path,
+                    installed_sha256,
+                    transfer_log_path,
+                    diagnostic,
+                )
             verification_error = OSError("installed save verification failed")
 
         try:

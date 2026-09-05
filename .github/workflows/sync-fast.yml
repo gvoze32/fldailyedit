@@ -38,6 +38,7 @@ jobs:
           python run.py validate --edit-file base/EDIT00000000
           mkdir -p output
           cp base/EDIT00000000 output/EDIT00000000
+          rm -f output/transfer_summary.md output/transfer_summary.html
           python run.py run \
             --window auto \
             --edit-file output/EDIT00000000 \
@@ -51,6 +52,7 @@ jobs:
           GENERATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           python tools/build_release_asset.py package \
             --save output/EDIT00000000 \
+            --transfer-report output/transfer_summary.md \
             --output-dir release-payload \
             --target-id fl26-u2.2-national-squads \
             --target-name "Football Life 2026 Update 2.2 + National Squads" \

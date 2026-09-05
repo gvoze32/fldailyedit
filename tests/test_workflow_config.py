@@ -37,6 +37,7 @@ def test_sync_workflows_validate_run_and_package_transfer_only_saves():
         assert "python run.py validate --edit-file output/EDIT00000000" in sync
         assert "cp base/EDIT00000000 output/EDIT00000000" in sync
         assert "python tools/build_release_asset.py package" in text
+        assert "--transfer-report output/transfer_summary.md" in text
         assert f"--channel {channel}" in text
         assert "output/base_roster_audit.json" not in text
         assert "--allow-create" not in text

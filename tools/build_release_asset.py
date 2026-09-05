@@ -29,6 +29,9 @@ from installer.catalog import (
 
 
 _SAVE_MEMBER_NAME = "EDIT00000000"
+TRANSFER_LOG_MEMBER_NAME = "FLDailyEdit-transfer-log.md"
+MAX_TRANSFER_LOG_BYTES = 4 * 1024 * 1024
+
 _ZIP_MINIMUM = datetime(1980, 1, 1, tzinfo=timezone.utc)
 
 
@@ -47,6 +50,25 @@ def _json_bytes(value: object) -> bytes:
         json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False).encode("utf-8")
         + b"\n"
     )
+
+def _archive_member(name: str, generated_utc: datetime) -> zipfile.ZipInfo:
+    zip_timestamp = max(generated_utc, _ZIP_MINIMUM)
+    member = zipfile.ZipInfo(
+        name,
+        date_time=(
+            zip_timestamp.year,
+            zip_timestamp.month,
+            zip_timestamp.day,
+            zip_timestamp.hour,
+            zip_timestamp.minute,
+            zip_timestamp.second,
+        ),
+    )
+    member.create_system = 3
+    member.external_attr = 0o100644 << 16
+    member.compress_type = zipfile.ZIP_DEFLATED
+    return member
+
 
 
 def _new_sibling_temp(destination: Path) -> Path:
@@ -132,6 +154,7 @@ def package_record(
     target_name: str,
     channel: Channel,
     generated_at: datetime,
+    transfer_report_path: Path | None = None,
 ) -> tuple[Path, Path]:
     if not isinstance(channel, Channel):
         raise CatalogError(
@@ -146,6 +169,33 @@ def package_record(
         raise CatalogError("invalid_record", "target_name must be a non-empty string")
 
     generated_utc = _utc_datetime(generated_at)
+    transfer_report: bytes | None = None
+    if transfer_report_path is not None:
+        try:
+            transfer_report = Path(transfer_report_path).read_bytes()
+        except FileNotFoundError:
+            transfer_report = (
+                b"# FLDailyEdit Option File Transfer Log\n\n"
+                b"> No verified transfer changes were applied for this release.\n"
+            )
+        except OSError as error:
+            raise CatalogError(
+                "invalid_record",
+                f"could not read transfer report {transfer_report_path}",
+            ) from error
+        if len(transfer_report) > MAX_TRANSFER_LOG_BYTES:
+            raise CatalogError(
+                "invalid_record",
+                "transfer report exceeds the maximum supported size",
+            )
+        try:
+            transfer_report.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise CatalogError(
+                "invalid_record",
+                "transfer report must be valid UTF-8",
+            ) from error
+
     save_bytes = save_path.read_bytes()
     if not save_bytes:
         raise CatalogError("invalid_record", "save must not be empty")
@@ -156,22 +206,7 @@ def package_record(
         _owned_sibling_temp(archive_path) as staged_archive,
         _owned_sibling_temp(record_path) as staged_record,
     ):
-        member_time = max(generated_utc, _ZIP_MINIMUM)
-        member = zipfile.ZipInfo(
-            _SAVE_MEMBER_NAME,
-            date_time=(
-                member_time.year,
-                member_time.month,
-                member_time.day,
-                member_time.hour,
-                member_time.minute,
-                member_time.second,
-            ),
-        )
-        member.create_system = 3
-        member.external_attr = 0o100644 << 16
-        member.compress_type = zipfile.ZIP_DEFLATED
-
+        member = _archive_member(_SAVE_MEMBER_NAME, generated_utc)
         with zipfile.ZipFile(
             staged_archive,
             "w",
@@ -179,6 +214,11 @@ def package_record(
             compresslevel=9,
         ) as archive:
             archive.writestr(member, save_bytes)
+            if transfer_report is not None:
+                archive.writestr(
+                    _archive_member(TRANSFER_LOG_MEMBER_NAME, generated_utc),
+                    transfer_report,
+                )
         _fsync_file(staged_archive)
 
         archive_bytes = staged_archive.read_bytes()
@@ -287,6 +327,11 @@ def _argument_parser() -> argparse.ArgumentParser:
     package_parser.add_argument(
         "--generated-at", type=_parse_generated_at, required=True
     )
+    package_parser.add_argument(
+        "--transfer-report",
+        type=Path,
+        help="UTF-8 transfer report to include in the release archive",
+    )
 
     merge_parser = subparsers.add_parser("merge")
     merge_parser.add_argument("--existing-url", required=True)
@@ -305,6 +350,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             target_name=arguments.target_name,
             channel=arguments.channel,
             generated_at=arguments.generated_at,
+            transfer_report_path=arguments.transfer_report,
         )
         return 0
 
