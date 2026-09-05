@@ -26,8 +26,11 @@ from scraper.fotmob import (
     fetch_transfers_for_club_names,
     fetch_major_clubs_transfers_safely,
 )
+from scraper.besoccer import fetch_besoccer_transfers
 from scraper.matcher import NameMatcher
 from scraper.sortitoutsi import fetch_sortitoutsi_transfers
+from scraper.soccerway import fetch_soccerway_transfers
+from scraper.sofascore import fetch_sofascore_transfers
 from scraper.sources import reconcile_transfer_sources
 from scraper.wikipedia import fetch_wikipedia_transfers
 from scraper.transfermarkt import fetch_transfermarkt_transfers
@@ -205,6 +208,36 @@ def _scrape_run_transfers(args):
         transfer_batches.append(transfermarkt_events)
         print(
             f"  Transfermarkt found {len(transfermarkt_events)} dated transfers"
+        )
+
+        print("\n🧭 Adding BeSoccer corroboration routes...")
+        besoccer_corroborators = fetch_besoccer_transfers(
+            since_date=since_date,
+            window=window,
+        )
+        corroborators.extend(besoccer_corroborators)
+        print(
+            f"  BeSoccer found {len(besoccer_corroborators)} corroboration routes"
+        )
+
+        print("\n📊 Adding Sofascore corroboration routes...")
+        sofascore_corroborators = fetch_sofascore_transfers(
+            since_date=since_date,
+            window=window,
+        )
+        corroborators.extend(sofascore_corroborators)
+        print(
+            f"  Sofascore found {len(sofascore_corroborators)} corroboration routes"
+        )
+
+        print("\n🛣️ Adding Soccerway team-page corroboration routes...")
+        soccerway_corroborators = fetch_soccerway_transfers(
+            since_date=since_date,
+            window=window,
+        )
+        corroborators.extend(soccerway_corroborators)
+        print(
+            f"  Soccerway found {len(soccerway_corroborators)} corroboration routes"
         )
 
     transfers = (

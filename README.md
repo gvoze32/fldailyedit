@@ -70,7 +70,13 @@ supplement it and help resolve incomplete or ambiguous coverage:
   corroborate or safely enrich a verified event.
 - Transfermarkt provides additional dated transfer details, fees, and stable
   player/club identifiers.
+- BeSoccer corroborates transfer routes, dates, fees, and transfer types.
+- Sofascore corroborates dated transfer routes.
+- Soccerway corroborates transfer routes from mapped team/player pages.
 
+BeSoccer, Sofascore, and Soccerway can add provenance to an existing verified
+FotMob/Transfermarkt/Wikipedia route, but never create a new transfer event.
+Failures or missing data from these optional sources do not block a run.
 Events that remain incomplete or ambiguous are skipped rather than forced into
 the save.
 
@@ -123,7 +129,10 @@ and repair tools.
 - Saves are validated before and after changes.
 - Local runs create rolling backups and use atomic, verified encryption.
 - A process lock prevents concurrent writes to the same output.
-- Incomplete source data aborts the run; ambiguous matches are skipped.
+- FotMob/primary-source failures can abort a run; optional supplemental-source
+  failures are isolated and produce no corroboration instead.
+- Incomplete source data and ambiguous matches are skipped rather than forced
+  into the save.
 - Roster compaction preserves existing tactical game-plan positions while
   updating lineup slot references and goalkeeper placement.
 

@@ -12,7 +12,8 @@ Usage:
     python run.py log                                 # Show recent transfer log
 
 Workflow:
-    1. Collect and reconcile FotMob, Wikipedia, and Sortitoutsi transfers
+    1. Collect and reconcile FotMob with verified and corroboration-only
+       supplemental transfer sources
     2. Decrypt and validate the edit file (pesXdecrypter)
     3. Load the selected save’s current player/roster state
     4. Match identities and plan safe roster actions
@@ -695,7 +696,10 @@ def _add_transfer_feed_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--fotmob-only",
         action="store_true",
-        help="Disable supplemental Wikipedia and Sortitoutsi sources",
+        help=(
+            "Disable all supplemental Wikipedia, Sortitoutsi, Transfermarkt, "
+            "BeSoccer, Sofascore, and Soccerway sources"
+        ),
     )
     parser.add_argument(
         "--allow-overflow-release",

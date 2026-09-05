@@ -50,6 +50,16 @@ def _same_club_name(left_name: str, right_name: str) -> bool:
         or fuzz.token_set_ratio(left_key, right_key) >= 92
     )
 
+def _same_player_name(left_name: str, right_name: str) -> bool:
+    left_key = _normalize(left_name)
+    right_key = _normalize(right_name)
+    if not left_key or not right_key:
+        return False
+    return (
+        left_key == right_key
+        or fuzz.token_sort_ratio(left_key, right_key) >= 95
+    )
+
 
 def _same_destination(left: Transfer, right: Transfer) -> bool:
     return _same_club_name(
@@ -118,7 +128,7 @@ def _merge_verified_batches(
         candidates = [
             existing
             for existing in merged
-            if _normalize(existing.player_name) == _normalize(transfer.player_name)
+            if _same_player_name(existing.player_name, transfer.player_name)
             and _compatible_source(existing, transfer)
             and _same_destination(existing, transfer)
             and _same_or_adjacent_date(existing.date, transfer.date)
@@ -139,9 +149,9 @@ def reconcile_transfer_sources(
     """
     Merge complete routes, then reconcile destination-only community signals.
 
-    A unique Sortitoutsi signal enriches an existing event. An unmatched signal
-    is retained for fail-closed current-roster inference only when its adapter
-    found an explicit effective date; submission-date-only signals are ignored.
+    Sortitoutsi signals may enrich or infer a route under their adapter's
+    explicit-date rules. Other sources are corroboration-only: they can merge
+    provenance into one verified event, but never create a new event.
     """
     verified = _merge_verified_batches(verified_batches)
     inferred_signals = 0
@@ -155,7 +165,7 @@ def reconcile_transfer_sources(
         candidates = [
             transfer
             for transfer in verified
-            if _normalize(transfer.player_name) == _normalize(signal.player_name)
+            if _same_player_name(transfer.player_name, signal.player_name)
             and _same_destination(transfer, signal)
             and _same_or_adjacent_date(transfer.date, signal.date)
             and _compatible_event_type(transfer, signal)
@@ -180,8 +190,8 @@ def reconcile_transfer_sources(
         candidates = [
             transfer
             for transfer in verified
-            if _normalize(transfer.player_name)
-            == _normalize(corroborator.player_name)
+            if _same_player_name(transfer.player_name, corroborator.player_name)
+            and _same_or_adjacent_date(transfer.date, corroborator.date)
             and _same_source(transfer, corroborator)
             and _same_destination(transfer, corroborator)
             and _compatible_event_type(transfer, corroborator)

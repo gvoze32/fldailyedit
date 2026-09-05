@@ -8,8 +8,11 @@ from types import SimpleNamespace
 import pytest
 
 from transfer_planning import _match_transfers_statefully
+from scraper.besoccer import parse_besoccer_transfer_html
 from scraper.matcher import NameMatcher
 from scraper.models import Transfer
+from scraper.soccerway import parse_soccerway_transfer_html
+from scraper.sofascore import parse_sofascore_transfer_payload
 from scraper.sortitoutsi import parse_sortitoutsi_markdown
 from scraper.sources import reconcile_transfer_sources
 from scraper.wikipedia import (
@@ -706,6 +709,163 @@ def test_transfermarkt_network_outage_is_quiet_fallback(monkeypatch, caplog):
     assert not any(record.levelno >= logging.WARNING for record in caplog.records)
 
 
+def test_besoccer_parser_returns_only_dated_official_routes():
+    html = """
+    <div class="panel-title">3 AUG 2026</div>
+    <ul>
+      <li class="sign-list">
+        <a class="item-box" href="/player/ada-example-1">
+          <span class="bold">Ada Example</span>
+          <div class="player-role">MF</div>
+          <span class="action"><strong>Loan</strong> from Old FC</span>
+          <img class="shield" alt="Old FC">
+          <img class="shield" alt="New FC">
+          <div class="money">€1m</div>
+        </a>
+      </li>
+    </ul>
+    <section class="rumours">
+      <div class="panel-title">4 AUG 2026</div>
+      <li class="sign-list">
+        <span class="bold">Rumoured Player</span>
+        <span class="action"><strong>Transfer</strong> from A</span>
+        <img class="shield" alt="A">
+        <img class="shield" alt="B">
+      </li>
+    </section>
+    """
+
+    transfers = parse_besoccer_transfer_html(
+        html,
+        "https://www.besoccer.com/transfers",
+        end_date=date(2026, 8, 3),
+    )
+
+    assert len(transfers) == 1
+    assert transfers[0].player_name == "Ada Example"
+    assert (transfers[0].from_club, transfers[0].to_club) == ("Old FC", "New FC")
+    assert transfers[0].transfer_type == "loan"
+    assert transfers[0].verification_status == "corroborator"
+
+
+def test_sofascore_parser_normalizes_transfer_types_and_dates():
+    transfers = parse_sofascore_transfer_payload(
+        {
+            "transfers": [
+                {
+                    "id": 1,
+                    "player": {"name": "Ada Example", "position": "M"},
+                    "transferFrom": {"name": "Old FC"},
+                    "transferTo": {"name": "New FC"},
+                    "type": 3,
+                    "transferDate": "2026-08-03",
+                    "transferFeeDescription": "€1m",
+                },
+                {
+                    "id": 2,
+                    "player": {"name": "Loan Example", "position": "F"},
+                    "transferFrom": {"name": "Parent FC"},
+                    "transferTo": {"name": "Loan FC"},
+                    "type": 1,
+                    "transferDate": "2026-08-04",
+                },
+            ]
+        },
+        end_date=date(2026, 8, 4),
+    )
+
+    assert [(item.player_name, item.transfer_type, item.is_loan) for item in transfers] == [
+        ("Ada Example", "transfer", False),
+        ("Loan Example", "loan", True),
+    ]
+    assert transfers[0].fee == "€1m"
+    assert transfers[0].verification_status == "corroborator"
+
+
+def test_soccerway_parser_resolves_arrival_and_departure_routes():
+    html = """
+    <div class="transferTab">
+      <div class="transferTab__row transferTab__row--main transferTab__row--team">
+        <div class="transferTab__date">Date</div>
+      </div>
+      <div class="transferTab__row transferTab__row--team">
+        <div class="transferTab__date">03.08.2026</div>
+        <div class="transferTab__player">
+          <a class="transferTab__teamHref" href="/player/ada/1">Ada Example</a>
+        </div>
+        <div class="transferTab__team transferTab__team--to">
+          <svg class="transferTab__typeIcon transferTab__typeIcon--in"></svg>
+          <a class="transferTab__teamHref" href="/team/old/1">Old FC</a>
+        </div>
+        <div class="transferTab__feePrize">€1m</div>
+        <div class="transferTab__feePrizeType">Loan</div>
+      </div>
+      <div class="transferTab__row transferTab__row--team">
+        <div class="transferTab__date">04.08.2026</div>
+        <div class="transferTab__player">
+          <a class="transferTab__teamHref" href="/player/loan/2">Loan Example</a>
+        </div>
+        <div class="transferTab__team transferTab__team--to">
+          <svg class="transferTab__typeIcon transferTab__typeIcon--out"></svg>
+          <a class="transferTab__teamHref" href="/team/new/2">New FC</a>
+        </div>
+        <div class="transferTab__feePrize"></div>
+        <div class="transferTab__feePrizeType">Transfer</div>
+      </div>
+    </div>
+    """
+
+    transfers = parse_soccerway_transfer_html(
+        html,
+        "Current FC",
+        "https://www.soccerway.com/team/current/abc/transfers/",
+        end_date=date(2026, 8, 4),
+    )
+
+    assert [
+        (item.player_name, item.from_club, item.to_club, item.transfer_type)
+        for item in transfers
+    ] == [
+        ("Ada Example", "Old FC", "Current FC", "loan"),
+        ("Loan Example", "Current FC", "New FC", "transfer"),
+    ]
+
+
+def test_route_corroborators_merge_provenance_without_creating_events():
+    primary = Transfer("Ada Example", "Old FC", "New FC", date="2026-08-03")
+    corroborators = [
+        Transfer(
+            "Example Ada",
+            "Old FC",
+            "New FC",
+            date="2026-08-03",
+            sources=("besoccer",),
+            verification_status="corroborator",
+        ),
+        Transfer(
+            "Ada Example",
+            "Old FC",
+            "New FC",
+            date="2026-08-04",
+            sources=("sofascore",),
+            verification_status="corroborator",
+        ),
+        Transfer(
+            "Unmatched Player",
+            "Old FC",
+            "New FC",
+            date="2026-08-03",
+            sources=("soccerway",),
+            verification_status="corroborator",
+        ),
+    ]
+
+    reconciled = reconcile_transfer_sources([[primary]], corroborators=corroborators)
+
+    assert len(reconciled) == 1
+    assert reconciled[0].sources == ("fotmob", "besoccer", "sofascore")
+
+
 def test_reconciliation_enriches_complete_route_with_fast_signal():
     wikipedia = parse_wikipedia_transfer_html(
         WIKIPEDIA_HTML,
@@ -872,6 +1032,9 @@ def test_run_pipeline_accepts_transfermarkt_dated_event_without_other_sources(
     )
     monkeypatch.setattr(run, "fetch_wikipedia_transfers", lambda **_: [])
     monkeypatch.setattr(run, "fetch_sortitoutsi_transfers", lambda **_: [])
+    monkeypatch.setattr(run, "fetch_besoccer_transfers", lambda **_: [])
+    monkeypatch.setattr(run, "fetch_sofascore_transfers", lambda **_: [])
+    monkeypatch.setattr(run, "fetch_soccerway_transfers", lambda **_: [])
     monkeypatch.setattr(
         run,
         "fetch_transfermarkt_transfers",
@@ -925,6 +1088,9 @@ def test_run_pipeline_reconciles_supplemental_sources(monkeypatch):
     )
     monkeypatch.setattr(run, "fetch_wikipedia_transfers", lambda **_: [wikipedia])
     monkeypatch.setattr(run, "fetch_sortitoutsi_transfers", lambda **_: [signal])
+    monkeypatch.setattr(run, "fetch_besoccer_transfers", lambda **_: [])
+    monkeypatch.setattr(run, "fetch_sofascore_transfers", lambda **_: [])
+    monkeypatch.setattr(run, "fetch_soccerway_transfers", lambda **_: [])
     monkeypatch.setattr(
         run,
         "fetch_transfermarkt_transfers",
@@ -949,6 +1115,72 @@ def test_run_pipeline_reconciles_supplemental_sources(monkeypatch):
         "wikipedia",
         "transfermarkt",
         "sortitoutsi",
+    )
+
+
+def test_run_pipeline_merges_three_route_corroborators(monkeypatch):
+    import run_pipeline as run
+
+    fotmob = Transfer(
+        "Ada Example",
+        "Old FC",
+        "New FC",
+        date="2026-08-03",
+    )
+    besoccer = Transfer(
+        "Example Ada",
+        "Old FC",
+        "New FC",
+        date="2026-08-03",
+        sources=("besoccer",),
+        verification_status="corroborator",
+    )
+    sofascore = Transfer(
+        "Ada Example",
+        "Old FC",
+        "New FC",
+        date="2026-08-03",
+        sources=("sofascore",),
+        verification_status="corroborator",
+    )
+    soccerway = Transfer(
+        "Ada Example",
+        "Old FC",
+        "New FC",
+        date="2026-08-04",
+        sources=("soccerway",),
+        verification_status="corroborator",
+    )
+    monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_: [fotmob])
+    monkeypatch.setattr(
+        run,
+        "fetch_major_clubs_transfers_safely",
+        lambda **_: [],
+    )
+    monkeypatch.setattr(run, "fetch_wikipedia_transfers", lambda **_: [])
+    monkeypatch.setattr(run, "fetch_sortitoutsi_transfers", lambda **_: [])
+    monkeypatch.setattr(run, "fetch_transfermarkt_transfers", lambda **_: [])
+    monkeypatch.setattr(run, "fetch_besoccer_transfers", lambda **_: [besoccer])
+    monkeypatch.setattr(run, "fetch_sofascore_transfers", lambda **_: [sofascore])
+    monkeypatch.setattr(run, "fetch_soccerway_transfers", lambda **_: [soccerway])
+
+    transfers = run._scrape_run_transfers(
+        SimpleNamespace(
+            popular=False,
+            window="summer",
+            since=None,
+            club=None,
+            deep=False,
+            fotmob_only=False,
+        )
+    )
+
+    assert len(transfers) == 1
+    assert transfers[0].sources == (
+        "fotmob",
+        "besoccer",
+        "sofascore",
+        "soccerway",
     )
 
 
@@ -977,6 +1209,9 @@ def test_run_pipeline_treats_undated_wikipedia_route_as_corroborator(monkeypatch
     )
     monkeypatch.setattr(run, "fetch_wikipedia_transfers", lambda **_: [wikipedia])
     monkeypatch.setattr(run, "fetch_sortitoutsi_transfers", lambda **_: [])
+    monkeypatch.setattr(run, "fetch_besoccer_transfers", lambda **_: [])
+    monkeypatch.setattr(run, "fetch_sofascore_transfers", lambda **_: [])
+    monkeypatch.setattr(run, "fetch_soccerway_transfers", lambda **_: [])
     monkeypatch.setattr(run, "fetch_transfermarkt_transfers", lambda **_: [])
 
     transfers = run._scrape_run_transfers(
@@ -1024,6 +1259,21 @@ def test_fotmob_only_flag_does_not_call_supplemental_sources(monkeypatch):
         "fetch_transfermarkt_transfers",
         lambda: (_ for _ in ()).throw(AssertionError("Transfermarkt called")),
         raising=False,
+    )
+    monkeypatch.setattr(
+        run,
+        "fetch_besoccer_transfers",
+        lambda **_: (_ for _ in ()).throw(AssertionError("BeSoccer called")),
+    )
+    monkeypatch.setattr(
+        run,
+        "fetch_sofascore_transfers",
+        lambda **_: (_ for _ in ()).throw(AssertionError("Sofascore called")),
+    )
+    monkeypatch.setattr(
+        run,
+        "fetch_soccerway_transfers",
+        lambda **_: (_ for _ in ()).throw(AssertionError("Soccerway called")),
     )
 
     transfers = run._scrape_run_transfers(
