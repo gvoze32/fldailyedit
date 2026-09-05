@@ -88,10 +88,9 @@ supplement it and help resolve incomplete or ambiguous coverage:
   corroborate or safely enrich a verified event.
 - Transfermarkt provides additional dated transfer details, fees, and stable
   player/club identifiers.
-- BeSoccer's current confirmed-transfer feed corroborates transfer routes, dates,
-  fees, and transfer types.
-- Sofascore's team transfer API corroborates dated transfer routes for the
-  relevant clubs.
+- BeSoccer's current confirmed-transfer feed corroborates transfer routes,
+  dates, fees, and transfer types.
+- Sofascore's rendered team pages corroborate dated transfer routes.
 - Soccerway resolves relevant clubs and corroborates their dated transfer routes.
 
 BeSoccer, Sofascore, and Soccerway can add provenance to an existing verified

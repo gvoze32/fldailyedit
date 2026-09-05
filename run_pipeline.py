@@ -109,7 +109,7 @@ def _deep_transfer_since_date(
 
 
 def _supplemental_target_clubs(transfer_batches) -> tuple[str, ...]:
-    """Return one relevant team page per dated verified transfer route."""
+    """Return relevant clubs used to filter supplemental transfer routes."""
     non_clubs = {
         "",
         "career break",

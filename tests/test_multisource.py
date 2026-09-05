@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import date
+import json
 import logging
 from types import SimpleNamespace
 
@@ -864,43 +865,83 @@ def test_sofascore_parser_normalizes_transfer_types_and_dates():
     assert transfers[0].verification_status == "corroborator"
 
 
-def test_sofascore_fetch_resolves_relevant_team_and_uses_transfer_api(monkeypatch):
+def test_sofascore_transfer_page_parser_reads_embedded_transfers():
+    from scraper.sofascore import parse_sofascore_transfer_page
+
+    page_html = (
+        '<script id="__NEXT_DATA__" type="application/json">'
+        + json.dumps(
+            {
+                "props": {
+                    "pageProps": {
+                        "fallbackData": [
+                            {
+                                "transfers": [
+                                    {
+                                        "id": 3697007,
+                                        "player": {
+                                            "name": "Gabriel Martinelli",
+                                            "position": "F",
+                                        },
+                                        "transferFrom": {"name": "Arsenal"},
+                                        "transferTo": {"name": "Al-Hilal"},
+                                        "type": 3,
+                                        "transferDateTimestamp": 1788393600,
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            }
+        )
+        + "</script>"
+    )
+
+    transfers = parse_sofascore_transfer_page(
+        page_html,
+        "https://www.sofascore.com/football/player-transfers",
+        start_date=date(2026, 9, 2),
+        end_date=date(2026, 9, 3),
+    )
+
+    assert [
+        (item.player_name, item.from_club, item.to_club, item.date)
+        for item in transfers
+    ] == [
+        ("Gabriel Martinelli", "Arsenal", "Al-Hilal", "2026-09-03"),
+    ]
+
+
+def test_sofascore_fetch_scrapes_global_page_and_filters_relevant_clubs(monkeypatch):
     from scraper import sofascore
 
     requested = []
 
-    async def fake_api_json(_session, path, *, params=None):
-        requested.append((path, params))
-        if path == sofascore.SOFASCORE_SEARCH_PATH:
-            return {
-                "results": [
-                    {
-                        "type": "team",
-                        "entity": {
-                            "id": 42,
-                            "name": "Arsenal",
-                            "slug": "arsenal",
-                            "gender": "M",
-                            "sport": {"id": 1},
-                        },
-                    }
-                ]
-            }
-        assert path == "/team/42/transfers"
+    async def fake_page_payload(session):
+        requested.append(session)
         return {
-            "transfersOut": [
+            "transfers": [
                 {
-                    "id": 3697007,
+                    "id": 1,
                     "player": {"name": "Gabriel Martinelli", "position": "F"},
                     "transferFrom": {"name": "Arsenal"},
                     "transferTo": {"name": "Al-Hilal"},
                     "type": 3,
                     "transferDate": "2026-09-02",
-                }
+                },
+                {
+                    "id": 2,
+                    "player": {"name": "Other Player", "position": "F"},
+                    "transferFrom": {"name": "Chelsea"},
+                    "transferTo": {"name": "Other Club"},
+                    "type": 3,
+                    "transferDate": "2026-09-02",
+                },
             ]
         }
 
-    monkeypatch.setattr(sofascore, "_api_json", fake_api_json)
+    monkeypatch.setattr(sofascore, "_fetch_transfer_page_payload", fake_page_payload)
     transfers = asyncio.run(
         sofascore._fetch_sofascore_transfers_async(
             since_date=date(2026, 9, 2),
@@ -913,10 +954,48 @@ def test_sofascore_fetch_resolves_relevant_team_and_uses_transfer_api(monkeypatc
         (item.player_name, item.from_club, item.to_club)
         for item in transfers
     ] == [("Gabriel Martinelli", "Arsenal", "Al-Hilal")]
-    assert requested == [
-        (sofascore.SOFASCORE_SEARCH_PATH, {"q": "Arsenal"}),
-        ("/team/42/transfers", None),
+    assert transfers[0].source_urls == (
+        sofascore.SOFASCORE_TRANSFER_PAGE_URL,
+    )
+    assert len(requested) == 1
+
+
+def test_sofascore_transfer_page_falls_back_to_jina_when_direct_page_fails():
+    from scraper import sofascore
+
+    page_html = (
+        '<script id="__NEXT_DATA__" type="application/json">'
+        + json.dumps(
+            {
+                "props": {
+                    "pageProps": {
+                        "fallbackData": [{"transfers": []}],
+                    }
+                }
+            }
+        )
+        + "</script>"
+    )
+    requested = []
+
+    class FakeSession:
+        async def get(self, url, **kwargs):
+            requested.append((url, kwargs))
+            if "r.jina.ai" in url:
+                return SimpleNamespace(status_code=200, text=page_html)
+            return SimpleNamespace(status_code=403, text="")
+
+    payload = asyncio.run(sofascore._fetch_transfer_page_payload(FakeSession()))
+
+    assert payload == {"transfers": []}
+    assert [url for url, _ in requested] == [
+        sofascore.SOFASCORE_TRANSFER_PAGE_URL,
+        sofascore.SOFASCORE_TRANSFER_PAGE_JINA_URL,
     ]
+    assert requested[-1][1] == {
+        "allow_redirects": False,
+        "headers": sofascore.SOFASCORE_JINA_HEADERS,
+    }
 
 
 def test_soccerway_parser_resolves_current_feed_routes():

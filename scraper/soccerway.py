@@ -451,6 +451,7 @@ async def _fetch_soccerway_transfers_async(
         since_date, window, ref_date=ref_date
     )
     targets = _club_names(club_names)
+    logger.info("Soccerway scraping %s relevant clubs", len(targets))
     if not targets:
         logger.debug(
             "Soccerway supplemental source skipped: no relevant transfer clubs"

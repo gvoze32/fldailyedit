@@ -1,14 +1,15 @@
-"""Best-effort Sofascore corroboration from relevant team transfer APIs."""
+"""Best-effort Sofascore corroboration by scraping its global transfer page."""
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable
-from dataclasses import dataclass
-from datetime import date
+import html
+import json
 import logging
 import re
 import unicodedata
+from collections.abc import Iterable
+from datetime import date
 from typing import Any
 
 from curl_cffi import requests
@@ -19,20 +20,24 @@ from scraper.source_utils import date_in_range, parse_external_date, resolve_sou
 
 logger = logging.getLogger(__name__)
 
-SOFASCORE_API_BASES = (
-    ("https://api.sofascore.com/api/v1", "https://dns.google/dns-query"),
-    ("https://api.sofascore.app/api/v1", None),
+SOFASCORE_TRANSFER_PAGE_URL = "https://www.sofascore.com/football/player-transfers"
+SOFASCORE_TRANSFER_PAGE_FALLBACK_URL = (
+    "https://api.sofascore.app/football/player-transfers"
 )
-SOFASCORE_SEARCH_PATH = "/search/all"
-SOFASCORE_TEAM_TRANSFERS_PATH = "/team/{team_id}/transfers"
+SOFASCORE_TRANSFER_PAGE_JINA_URL = (
+    "https://r.jina.ai/https://www.sofascore.com/football/player-transfers"
+)
+SOFASCORE_JINA_HEADERS = {
+    "Accept": "text/html, application/xhtml+xml, text/plain, */*",
+    "X-Respond-With": "html",
+}
 SOFASCORE_HEADERS = {
-    "Accept": "application/json, text/plain, */*",
+    "Accept": "text/html,application/xhtml+xml,application/json, text/plain, */*",
     "Referer": "https://www.sofascore.com/",
 }
-_NON_SENIOR_RE = re.compile(
-    r"\b(?:women|woman|ladies|feminine|femenino|feminino|frauen|academy|"
-    r"youth|reserves?|primavera|u[ -]?\d{2}|ii|b)\b",
-    re.IGNORECASE,
+_NEXT_DATA_RE = re.compile(
+    r"<script\b[^>]*\bid=[\"']__NEXT_DATA__[\"'][^>]*>(.*?)</script>",
+    re.IGNORECASE | re.DOTALL,
 )
 _CLUB_AFFIX_RE = re.compile(
     r"\b(?:fc|cf|sc|ac|cd|ud|fk|sk|as|us|ss|sv|vfl|vfb|afc|club|calcio|sad|kv)\b",
@@ -55,13 +60,6 @@ _TYPE_BY_NUMBER = {
     13: ("free transfer", False),
     14: ("free transfer", False),
 }
-
-
-@dataclass(frozen=True, slots=True)
-class _SofascoreTeam:
-    name: str
-    slug: str
-    team_id: int
 
 
 def _clean(value: Any) -> str:
@@ -239,103 +237,104 @@ def parse_sofascore_transfer_payload(
 parse_sofascore_transfers = parse_sofascore_transfer_payload
 
 
-def _candidate_team(payload: Any, requested_name: str) -> _SofascoreTeam | None:
-    if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+def _next_page_props(page_html: str) -> dict[str, Any] | None:
+    """Extract Next.js page props from rendered HTML."""
+    if not isinstance(page_html, str):
         return None
-    requested_has_category = bool(_NON_SENIOR_RE.search(requested_name))
-    candidates: list[_SofascoreTeam] = []
-    for item in payload["results"]:
-        if not isinstance(item, dict) or item.get("type") != "team":
-            continue
-        entity = item.get("entity")
-        if not isinstance(entity, dict):
-            continue
-        sport = entity.get("sport")
-        name = _clean(entity.get("name"))
-        slug = _clean(entity.get("slug"))
-        team_id = entity.get("id")
-        if (
-            not isinstance(sport, dict)
-            or sport.get("id") != 1
-            or entity.get("gender") not in {None, "M"}
-            or not isinstance(team_id, int)
-            or not name
-            or (not requested_has_category and _NON_SENIOR_RE.search(name))
-        ):
-            continue
-        team = _SofascoreTeam(name=name, slug=slug, team_id=team_id)
-        candidates.append(team)
-        if _normalize(name) == _normalize(requested_name):
-            return team
-        if _club_key(name) == _club_key(requested_name):
-            return team
-    return candidates[0] if candidates else None
+    match = _NEXT_DATA_RE.search(page_html)
+    if match is None:
+        return None
 
-
-async def _fetch_json(
-    session: requests.AsyncSession,
-    url: str,
-    *,
-    params: dict[str, str] | None = None,
-    doh_url: str | None = None,
-) -> Any:
-    options: dict[str, Any] = {}
-    if doh_url is not None:
-        options["doh_url"] = doh_url
-    response = await session.get(url, params=params, **options)
-    if response.status_code != 200:
-        raise RuntimeError(f"HTTP {response.status_code}")
-    return response.json()
-
-
-async def _api_json(
-    session: requests.AsyncSession,
-    path: str,
-    *,
-    params: dict[str, str] | None = None,
-) -> Any:
-    last_error: Exception | None = None
-    for base_url, doh_url in SOFASCORE_API_BASES:
+    raw_payload = match.group(1).strip()
+    try:
+        next_data = json.loads(raw_payload)
+    except json.JSONDecodeError:
         try:
-            return await _fetch_json(
-                session,
-                f"{base_url}{path}",
-                params=params,
-                doh_url=doh_url,
-            )
-        except Exception as exc:
-            last_error = exc
-    raise RuntimeError(f"Sofascore API request failed: {path}") from last_error
+            next_data = json.loads(html.unescape(raw_payload))
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(next_data, dict):
+        return None
+
+    props = next_data.get("props")
+    page_props = props.get("pageProps") if isinstance(props, dict) else None
+    return page_props if isinstance(page_props, dict) else None
 
 
-async def _resolve_team(
-    session: requests.AsyncSession,
-    team_name: str,
-) -> _SofascoreTeam | None:
-    payload = await _api_json(
-        session,
-        SOFASCORE_SEARCH_PATH,
-        params={"q": team_name},
-    )
-    return _candidate_team(payload, team_name)
+def _global_transfer_payload(page_html: str) -> Any:
+    """Extract global transfer data from a rendered Sofascore page."""
+    page_props = _next_page_props(page_html)
+    if page_props is None:
+        return None
+
+    fallback_data = page_props.get("fallbackData")
+    if isinstance(fallback_data, list):
+        containers = fallback_data
+    elif isinstance(fallback_data, dict):
+        containers = [fallback_data]
+    else:
+        containers = []
+    recognized = isinstance(fallback_data, (list, dict))
+
+    transfers: list[dict[str, Any]] = []
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        items = container.get("transfers")
+        if isinstance(items, list):
+            transfers.extend(item for item in items if isinstance(item, dict))
+
+    direct_transfers = page_props.get("transfers")
+    if not transfers and isinstance(direct_transfers, list):
+        transfers.extend(item for item in direct_transfers if isinstance(item, dict))
+        recognized = True
+    return {"transfers": transfers} if recognized else None
 
 
-async def _fetch_team_transfers(
-    session: requests.AsyncSession,
-    team: _SofascoreTeam,
+def parse_sofascore_transfer_page(
+    page_html: str,
+    source_url: str = "",
     *,
-    start_date: date | None,
-    end_date: date | None,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> list[Transfer]:
-    path = SOFASCORE_TEAM_TRANSFERS_PATH.format(team_id=team.team_id)
-    payload = await _api_json(session, path)
-    source_url = f"{SOFASCORE_API_BASES[0][0]}{path}"
+    """Parse dated transfer routes embedded in the global transfer page."""
     return parse_sofascore_transfer_payload(
-        payload,
+        _global_transfer_payload(page_html),
         source_url,
         start_date=start_date,
         end_date=end_date,
     )
+
+
+parse_sofascore_page = parse_sofascore_transfer_page
+
+
+async def _fetch_transfer_page_payload(
+    session: requests.AsyncSession,
+) -> Any:
+    """Fetch the global transfer page and return its embedded payload."""
+    page_requests = (
+        (SOFASCORE_TRANSFER_PAGE_URL, None),
+        (SOFASCORE_TRANSFER_PAGE_JINA_URL, SOFASCORE_JINA_HEADERS),
+        (SOFASCORE_TRANSFER_PAGE_FALLBACK_URL, None),
+    )
+    last_error: Exception | None = None
+    for page_url, request_headers in page_requests:
+        try:
+            options: dict[str, Any] = {"allow_redirects": False}
+            if request_headers is not None:
+                options["headers"] = request_headers
+            response = await session.get(page_url, **options)
+            if response.status_code != 200:
+                raise RuntimeError(f"HTTP {response.status_code}")
+            payload = _global_transfer_payload(response.text)
+            if payload is None:
+                raise RuntimeError("page has no embedded transfers")
+            return payload
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError("Sofascore transfer page unavailable") from last_error
 
 
 def _transfer_key(transfer: Transfer) -> tuple[str, str, str, str]:
@@ -358,52 +357,48 @@ async def _fetch_sofascore_transfers_async(
         since_date, window, ref_date=ref_date
     )
     targets = tuple(dict.fromkeys(_clean(name) for name in club_names if _clean(name)))
+    logger.info(
+        "Sofascore scraping global transfer page for %s relevant clubs",
+        len(targets),
+    )
     if not targets:
         logger.debug(
             "Sofascore supplemental source skipped: no relevant transfer clubs"
         )
         return []
 
-    gate = asyncio.Semaphore(6)
     async with requests.AsyncSession(
         headers=SOFASCORE_HEADERS,
         impersonate="chrome",
         timeout=30,
-        max_clients=6,
+        max_clients=1,
     ) as session:
-        async def fetch_club(team_name: str) -> list[Transfer]:
-            async with gate:
-                try:
-                    team = await _resolve_team(session, team_name)
-                    if team is None:
-                        return []
-                    return await _fetch_team_transfers(
-                        session,
-                        team,
-                        start_date=start_date,
-                        end_date=end_date,
-                    )
-                except Exception as exc:
-                    logger.debug(
-                        "Sofascore skipped %s: %s",
-                        team_name,
-                        exc,
-                    )
-                    return []
+        payload = await _fetch_transfer_page_payload(session)
 
-        batches = await asyncio.gather(*(fetch_club(name) for name in targets))
+    source_url = SOFASCORE_TRANSFER_PAGE_URL
+    target_keys = {_club_key(name) for name in targets}
+    transfers = [
+        transfer
+        for transfer in parse_sofascore_transfer_payload(
+            payload,
+            source_url,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        if _club_key(transfer.from_club) in target_keys
+        or _club_key(transfer.to_club) in target_keys
+    ]
 
-    transfers: list[Transfer] = []
+    unique: list[Transfer] = []
     seen: set[tuple[str, str, str, str]] = set()
-    for batch in batches:
-        for transfer in batch:
-            key = _transfer_key(transfer)
-            if key in seen:
-                continue
-            seen.add(key)
-            transfers.append(transfer)
-    logger.info("Sofascore found %s dated corroboration routes", len(transfers))
-    return transfers
+    for transfer in transfers:
+        key = _transfer_key(transfer)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(transfer)
+    logger.info("Sofascore found %s dated corroboration routes", len(unique))
+    return unique
 
 
 def fetch_sofascore_transfers(
