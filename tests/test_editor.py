@@ -624,6 +624,20 @@ class TestTeamRosters:
         assert roster.shirt_numbers[0] == 10
         assert roster.shirt_numbers[1] == 7
         assert roster.shirt_numbers[2] == 11
+    def test_batch_shirt_updates_support_swaps(self, ef_with_rosters):
+        assert ef_with_rosters.update_player_shirt_numbers(
+            101,
+            [(1001, 7), (1002, 10)],
+        ) is True
+
+        roster = ef_with_rosters.get_team_roster(101)
+        assert roster.shirt_numbers[:3] == [7, 10, 11]
+
+    def test_batch_shirt_updates_reject_unplanned_conflicts(self, ef_with_rosters):
+        assert ef_with_rosters.update_player_shirt_numbers(101, [(1001, 11)]) is False
+
+        roster = ef_with_rosters.get_team_roster(101)
+        assert roster.shirt_numbers[:3] == [10, 7, 11]
 
 
 class TestMovePlayer:

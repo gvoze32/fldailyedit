@@ -531,6 +531,118 @@ def test_real_run_skips_shirt_conflict_without_rolling_back(
     assert "✅ Done!" in output
 
 
+def test_real_run_applies_shirt_number_swaps_as_one_batch(
+    monkeypatch, tmp_path
+):
+    from local_update import CancellationToken, LocalUpdateRequest
+
+    team_id = 100
+    first_player_id, second_player_id = 100527, 168639
+    edit_path = tmp_path / "EDIT00000000"
+    output_path = tmp_path / "updated" / "EDIT00000000"
+    edit_path.write_bytes(b"encrypted-edit")
+
+    first_transfer = Transfer(
+        "First Player",
+        "Club",
+        "Club",
+        transfer_type="shirt_number_update",
+        shirt_number=12,
+    )
+    second_transfer = Transfer(
+        "Second Player",
+        "Club",
+        "Club",
+        transfer_type="shirt_number_update",
+        shirt_number=13,
+    )
+    first_match = MatchedTransfer(
+        first_transfer,
+        player_id=first_player_id,
+        from_team_id=team_id,
+        to_team_id=team_id,
+        player_confidence=100,
+        from_team_confidence=100,
+        to_team_confidence=100,
+        matched_player_name="First Player",
+    )
+    second_match = MatchedTransfer(
+        second_transfer,
+        player_id=second_player_id,
+        from_team_id=team_id,
+        to_team_id=team_id,
+        player_confidence=100,
+        from_team_confidence=100,
+        to_team_confidence=100,
+        matched_player_name="Second Player",
+    )
+    plan = [
+        PlannedRosterAction(first_match, "shirt_update", team_id),
+        PlannedRosterAction(second_match, "shirt_update", team_id),
+    ]
+
+    class FakeEditFile:
+        def __init__(self):
+            self._data = bytearray(b"decrypted-edit")
+            self.shirts = {first_player_id: 13, second_player_id: 12}
+            self.batch_calls = []
+
+        def get_player_shirt_number(self, requested_team, player_id):
+            assert requested_team == team_id
+            return self.shirts.get(player_id)
+
+        def get_team_roster(self, requested_team):
+            assert requested_team == team_id
+            return TeamData(
+                team_id,
+                [first_player_id, second_player_id] + [0] * 38,
+                [self.shirts[first_player_id], self.shirts[second_player_id]]
+                + [0] * 38,
+            )
+
+        def update_player_shirt_numbers(self, requested_team, updates):
+            assert requested_team == team_id
+            self.batch_calls.append(updates)
+            for player_id, shirt_number in updates:
+                self.shirts[player_id] = shirt_number
+            return True
+
+        def validate_integrity(self):
+            return {"valid": True, "errors": [], "warnings": [], "metrics": {}}
+
+    fake_edit_file = FakeEditFile()
+    prepared = SimpleNamespace(
+        edit_file=fake_edit_file,
+        roster_plan=plan,
+        original_data=bytes(fake_edit_file._data),
+        edit_path=edit_path,
+        output_path=output_path,
+        backup_path=None,
+        pending_logs=[],
+        run_records=[],
+    )
+    monkeypatch.setattr(
+        run_pipeline.backup_mod,
+        "create_backup",
+        lambda _: tmp_path / "backup",
+    )
+
+    mutation = run_pipeline._RunLocalUpdateRuntime().apply(
+        LocalUpdateRequest(edit_path, output_path=output_path),
+        prepared,
+        plan,
+        CancellationToken(),
+    )
+
+    assert fake_edit_file.batch_calls == [[
+        (first_player_id, 12),
+        (second_player_id, 13),
+    ]]
+    assert fake_edit_file.shirts == {first_player_id: 12, second_player_id: 13}
+    assert mutation.shirt_numbers_changed == 2
+    assert mutation.safety_skipped == 0
+
+
 
 
 

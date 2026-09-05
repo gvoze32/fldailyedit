@@ -500,6 +500,7 @@ def _print_dry_run(
     would_apply = 0
     already_current = 0
     safety_skipped = 0
+    shirt_statuses = _plan_shirt_number_batch(edit_file, roster_plan)
     for planned_action in roster_plan:
         match = planned_action.match
         action = planned_action.action
@@ -518,24 +519,29 @@ def _print_dry_run(
             print(f"  ALREADY CURRENT: {match}")
             continue
         if action == "shirt_update":
-            current_shirt = edit_file.get_player_shirt_number(
-                match.to_team_id, match.player_id
+            status = shirt_statuses.get(id(planned_action))
+            current_shirt = (
+                status[0]
+                if status is not None
+                else edit_file.get_player_shirt_number(
+                    match.to_team_id, match.player_id
+                )
             )
             if current_shirt == match.transfer.shirt_number:
                 already_current += 1
                 continue
-            conflicting_player = _find_shirt_number_conflict(
-                edit_file,
-                match.to_team_id,
-                match.player_id,
-                match.transfer.shirt_number,
-            )
-            if conflicting_player is not None:
+            conflict_player = status[1] if status is not None else None
+            reason = status[2] if status is not None else ""
+            if conflict_player is not None:
                 safety_skipped += 1
                 print(
-                    f"  SAFETY SKIP (shirt_number_conflict:{conflicting_player}): "
+                    f"  SAFETY SKIP (shirt_number_conflict:{conflict_player}): "
                     f"{match}"
                 )
+                continue
+            if reason:
+                safety_skipped += 1
+                print(f"  SAFETY SKIP ({reason}): {match}")
                 continue
 
         would_apply += 1
@@ -566,6 +572,164 @@ def _print_dry_run(
         f"already current: {already_current}, safety-skipped: {safety_skipped}. "
         "No files were written."
     )
+
+
+def _plan_shirt_number_batch(
+    edit_file: EditFile,
+    actions: list[planning.PlannedRosterAction],
+) -> dict[int, tuple[int | None, int | None, str]]:
+    """Classify shirt updates so planned number swaps can be applied together."""
+    statuses: dict[int, tuple[int | None, int | None, str]] = {}
+    grouped: dict[int, list[planning.PlannedRosterAction]] = {}
+
+    for item in actions:
+        if item.action != "shirt_update":
+            continue
+        match = item.match
+        team_id = match.to_team_id
+        player_id = match.player_id
+        previous = (
+            edit_file.get_player_shirt_number(team_id, player_id)
+            if team_id is not None and player_id is not None
+            else None
+        )
+        statuses[id(item)] = (previous, None, "")
+        if team_id is not None:
+            grouped.setdefault(team_id, []).append(item)
+
+    for team_id, group in grouped.items():
+        candidates: list[planning.PlannedRosterAction] = []
+        by_target: dict[int, list[planning.PlannedRosterAction]] = {}
+        for item in group:
+            match = item.match
+            previous, _, _ = statuses[id(item)]
+            target = match.transfer.shirt_number
+            if target is None or previous == target:
+                continue
+            try:
+                valid_target = 1 <= target <= 999
+            except TypeError:
+                valid_target = False
+            if not valid_target:
+                statuses[id(item)] = (
+                    previous,
+                    None,
+                    "invalid_shirt_number",
+                )
+                continue
+            candidates.append(item)
+            by_target.setdefault(target, []).append(item)
+
+        duplicate_ids = {
+            id(item)
+            for same_target in by_target.values()
+            if len(same_target) > 1
+            for item in same_target
+        }
+        for item_id in duplicate_ids:
+            previous = statuses[item_id][0]
+            requested = next(
+                item.match.transfer.shirt_number
+                for item in candidates
+                if id(item) == item_id
+            )
+            statuses[item_id] = (
+                previous,
+                None,
+                f"duplicate_shirt_number:{requested}",
+            )
+
+        roster = edit_file.get_team_roster(team_id)
+        occupants: dict[int, set[int]] = {}
+        if roster is not None:
+            for player_id, shirt_number in zip(
+                roster.player_ids,
+                roster.shirt_numbers,
+            ):
+                if player_id:
+                    occupants.setdefault(shirt_number, set()).add(player_id)
+
+        survivor_ids = {
+            id(item) for item in candidates if id(item) not in duplicate_ids
+        }
+        while True:
+            survivor_player_ids = {
+                item.match.player_id
+                for item in candidates
+                if id(item) in survivor_ids and item.match.player_id is not None
+            }
+            blocked_ids = set()
+            for item in candidates:
+                item_id = id(item)
+                if item_id not in survivor_ids:
+                    continue
+                player_id = item.match.player_id
+                target = item.match.transfer.shirt_number
+                conflicting_players = occupants.get(target, set()) - {player_id}
+                if conflicting_players and not (
+                    conflicting_players <= survivor_player_ids
+                ):
+                    blocked_ids.add(item_id)
+            if not blocked_ids:
+                break
+            survivor_ids.difference_update(blocked_ids)
+
+        for item in candidates:
+            item_id = id(item)
+            if item_id in duplicate_ids:
+                continue
+            if item_id in survivor_ids:
+                continue
+            player_id = item.match.player_id
+            target = item.match.transfer.shirt_number
+            conflicting_players = sorted(
+                occupants.get(target, set()) - {player_id}
+            )
+            conflict_player = conflicting_players[0] if conflicting_players else None
+            previous = statuses[item_id][0]
+            reason = (
+                f"shirt_number_conflict:{conflict_player}"
+                if conflict_player is not None
+                else f"shirt_number_dependency:{target}"
+            )
+            statuses[item_id] = (previous, conflict_player, reason)
+
+    return statuses
+
+
+def _apply_shirt_number_batch(
+    edit_file: EditFile,
+    team_id: int,
+    actions: list[planning.PlannedRosterAction],
+    statuses: dict[int, tuple[int | None, int | None, str]],
+) -> bool:
+    """Apply one conflict-free team batch after its safety checks pass."""
+    updates = []
+    for item in actions:
+        status = statuses.get(id(item))
+        if status is None or status[1] is not None or status[2]:
+            continue
+        previous, _, _ = status
+        player_id = item.match.player_id
+        target = item.match.transfer.shirt_number
+        if (
+            player_id is not None
+            and target is not None
+            and previous != target
+        ):
+            updates.append((player_id, target))
+    if not updates:
+        return True
+
+    batch_updater = getattr(edit_file, "update_player_shirt_numbers", None)
+    if callable(batch_updater):
+        return bool(batch_updater(team_id, updates))
+
+    return all(
+        edit_file.update_player_shirt_number(team_id, player_id, shirt_number)
+        for player_id, shirt_number in updates
+    )
+
 
 
 def _find_shirt_number_conflict(
@@ -948,6 +1112,10 @@ class _RunLocalUpdateRuntime:
         unchanged = 0
         safety_skipped = 0
         original_data = prepared.original_data
+        shirt_batch_states: dict[
+            int, dict[int, tuple[int | None, int | None, str]]
+        ] = {}
+        shirt_batch_applied: set[int] = set()
 
         for planned_action in prepared.roster_plan:
             token.raise_if_cancelled()
@@ -983,32 +1151,78 @@ class _RunLocalUpdateRuntime:
                 if preferred_shirt is None:
                     unchanged += 1
                     continue
-                previous_shirt = prepared.edit_file.get_player_shirt_number(
-                    to_team_id,
-                    player_id,
+                if (
+                    to_team_id is not None
+                    and to_team_id not in shirt_batch_applied
+                ):
+                    shirt_actions = [
+                        candidate
+                        for candidate in prepared.roster_plan
+                        if (
+                            candidate.action == "shirt_update"
+                            and candidate.match.to_team_id == to_team_id
+                        )
+                    ]
+                    statuses = _plan_shirt_number_batch(
+                        prepared.edit_file,
+                        shirt_actions,
+                    )
+                    if not _apply_shirt_number_batch(
+                        prepared.edit_file,
+                        to_team_id,
+                        shirt_actions,
+                        statuses,
+                    ):
+                        prepared.edit_file._data = bytearray(original_data)
+                        raise LocalUpdateError(
+                            "apply_failed",
+                            f"Failed: {match.matched_player_name or transfer.player_name} "
+                            f"({match.action_type}); entire batch rolled back",
+                            stage=LocalUpdateStage.APPLYING,
+                        )
+                    shirt_batch_states[to_team_id] = statuses
+                    shirt_batch_applied.add(to_team_id)
+
+                status = (
+                    shirt_batch_states.get(to_team_id, {}).get(id(planned_action))
+                    if to_team_id is not None
+                    else None
+                )
+                previous_shirt = (
+                    status[0]
+                    if status is not None
+                    else prepared.edit_file.get_player_shirt_number(
+                        to_team_id,
+                        player_id,
+                    )
                 )
                 if previous_shirt == preferred_shirt:
                     unchanged += 1
                     continue
-                conflicting_player = _find_shirt_number_conflict(
-                    prepared.edit_file,
-                    to_team_id,
-                    player_id,
-                    preferred_shirt,
+                conflict_player = status[1] if status is not None else (
+                    _find_shirt_number_conflict(
+                        prepared.edit_file,
+                        to_team_id,
+                        player_id,
+                        preferred_shirt,
+                    )
                 )
-                if conflicting_player is not None:
+                reason = status[2] if status is not None else ""
+                if conflict_player is not None or reason:
                     safety_skipped += 1
+                    if conflict_player is not None:
+                        detail = (
+                            f"shirt #{preferred_shirt} is already assigned to player "
+                            f"{conflict_player} on team {to_team_id}"
+                        )
+                    else:
+                        detail = reason
                     print(
                         f"  ⚠ Safety skip {match.matched_player_name or transfer.player_name}: "
-                        f"shirt #{preferred_shirt} is already assigned to player "
-                        f"{conflicting_player} on team {to_team_id}"
+                        f"{detail}"
                     )
                     continue
-                ok = prepared.edit_file.update_player_shirt_number(
-                    to_team_id,
-                    player_id,
-                    preferred_shirt,
-                )
+                ok = True
             elif action == "move":
                 ok = prepared.edit_file.move_player(
                     player_id,

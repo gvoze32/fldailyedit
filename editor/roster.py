@@ -373,34 +373,97 @@ class RosterGamePlanMixin:
             return None
         return roster.shirt_numbers[idx]
 
-    def update_player_shirt_number(self, team_id: int, player_id: int, shirt_number: int) -> bool:
-        """Update a player's shirt number directly without transferring."""
-        if not 1 <= shirt_number <= 999:
-            logger.error(f"Invalid shirt number {shirt_number}; expected 1..999")
-            return False
+    def update_player_shirt_numbers(
+        self,
+        team_id: int,
+        updates: list[tuple[int, int]],
+    ) -> bool:
+        """Apply several shirt-number changes without order-dependent conflicts."""
+        if not updates:
+            return True
+
         entry = self._find_team_player_entry_offset(team_id)
         if entry is None:
             return False
-        
-        roster = self._read_team_player_entry(entry)
-        idx = roster.player_index(player_id)
-        if idx == -1:
-            return False
-            
-        # Avoid unnecessary writes
-        if roster.shirt_numbers[idx] == shirt_number:
-            return True
 
-        if any(
-            pid != 0 and slot != idx and number == shirt_number
-            for slot, (pid, number) in enumerate(zip(roster.player_ids, roster.shirt_numbers))
-        ):
-            logger.warning(f"Shirt #{shirt_number} is already used on team {team_id}")
-            return False
-            
-        self._write_player_slot(entry, idx, player_id, shirt_number)
-        logger.debug(f"Updated player {player_id} on team {team_id} to shirt #{shirt_number}")
+        roster = self._read_team_player_entry(entry)
+        indexed_updates: dict[int, tuple[int, int]] = {}
+        requested_numbers: dict[int, int] = {}
+        for player_id, shirt_number in updates:
+            try:
+                valid_number = 1 <= shirt_number <= 999
+            except TypeError:
+                valid_number = False
+            if not valid_number:
+                logger.error(
+                    f"Invalid shirt number {shirt_number}; expected 1..999"
+                )
+                return False
+
+            existing = indexed_updates.get(player_id)
+            if existing is not None:
+                if existing[1] != shirt_number:
+                    logger.warning(
+                        "Conflicting shirt updates requested for player %s on team %s",
+                        player_id,
+                        team_id,
+                    )
+                    return False
+                continue
+
+            slot_idx = roster.player_index(player_id)
+            if slot_idx == -1:
+                return False
+            other_player_id = requested_numbers.get(shirt_number)
+            if other_player_id is not None and other_player_id != player_id:
+                logger.warning(
+                    "Shirt #%s requested by multiple players on team %s",
+                    shirt_number,
+                    team_id,
+                )
+                return False
+            indexed_updates[player_id] = (slot_idx, shirt_number)
+            requested_numbers[shirt_number] = player_id
+
+        update_player_ids = set(indexed_updates)
+        for player_id, (slot_idx, shirt_number) in indexed_updates.items():
+            for other_slot, (other_player_id, other_shirt_number) in enumerate(
+                zip(roster.player_ids, roster.shirt_numbers)
+            ):
+                if (
+                    other_slot != slot_idx
+                    and other_player_id != 0
+                    and other_shirt_number == shirt_number
+                    and other_player_id not in update_player_ids
+                ):
+                    logger.warning(
+                        "Shirt #%s is already used on team %s",
+                        shirt_number,
+                        team_id,
+                    )
+                    return False
+
+        for player_id, (slot_idx, shirt_number) in indexed_updates.items():
+            self._write_player_slot(entry, slot_idx, player_id, shirt_number)
+            logger.debug(
+                "Updated player %s on team %s to shirt #%s",
+                player_id,
+                team_id,
+                shirt_number,
+            )
         return True
+
+    def update_player_shirt_number(
+        self,
+        team_id: int,
+        player_id: int,
+        shirt_number: int,
+    ) -> bool:
+        """Update one player's shirt number without transferring."""
+        return self.update_player_shirt_numbers(
+            team_id,
+            [(player_id, shirt_number)],
+        )
 
     def move_player(
         self,
