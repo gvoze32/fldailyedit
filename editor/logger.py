@@ -527,7 +527,7 @@ def save_reports(
     entries: list[dict],
     output_dir: Path | None = None,
     write_github_summary: bool = True,
-):
+) -> str:
     """Save markdown and HTML save-change report cards."""
     import os
 
@@ -560,3 +560,5 @@ def save_reports(
                 logger.info(f"Appended short markdown report to $GITHUB_STEP_SUMMARY")
             except Exception as e:
                 logger.warning(f"Could not write to $GITHUB_STEP_SUMMARY: {e}")
+
+    return md_report

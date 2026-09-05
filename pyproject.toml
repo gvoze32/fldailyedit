@@ -5,6 +5,7 @@ description = "Daily Football Life save updater powered by real-world transfer s
 requires-python = ">=3.10"
 dependencies = [
     "aiohttp>=3.9.0",
+    "curl-cffi>=0.13.0",
     "rapidfuzz>=3.5.0",
 ]
 

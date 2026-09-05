@@ -818,8 +818,22 @@ def test_progress_presentation_switches_mode_and_locks_at_commit() -> None:
     assert commit_view.controls_locked is True
     assert commit_view.status == "Finishing installation safely…"
 
+    local_progress = InstallerState(
+        mode=InstallerMode.LOCAL,
+        step=WizardStep.PROGRESS,
+        progress_stage=LocalUpdateStage.SCRAPING.value,
+    )
+    assert (
+        installer_app.progress_detail_copy(
+            local_progress,
+            controls_locked=False,
+        )
+        == "Keep this window open. Updating your local save may take some "
+        "time, and the app may appear frozen or flicker while it works."
+    )
 
-def test_release_completion_renders_result_instead_of_leaving_commit_screen(
+
+def test_completion_renders_prebuilt_and_local_transfer_details(
     tmp_path: Path,
 ) -> None:
     class ViewDouble:
@@ -856,7 +870,11 @@ def test_release_completion_renders_result_instead_of_leaving_commit_screen(
     log_path = tmp_path / "save" / "FLDailyEditLogs" / "transfer-log.md"
     log_path.parent.mkdir(parents=True)
     log_path.write_text(
-        "# FLDailyEdit Option File Transfer Log\n\n- Zidane moved\n",
+        "## FLDailyEdit Option File Transfer Log\n\n"
+        "| Save changes | Club transfers | Permanent | Loans / returns | Shirt numbers | Dry-run |\n"
+        "|---:|---:|---:|---:|---:|---:|\n"
+        "| **4** | **3** | 2 | 1 | **1** | 0 |\n\n"
+        "- Zidane moved\n",
         encoding="utf-8",
     )
     application = object.__new__(installer_app.InstallerApplication)
@@ -878,11 +896,41 @@ def test_release_completion_renders_result_instead_of_leaving_commit_screen(
     application._render_result(state)
 
     assert application._progress_status_var.value == "Your save is ready."
-    assert str(target) in application._progress_detail_var.value
-    assert str(log_path) in application._progress_detail_var.value
+    release_detail = application._progress_detail_var.value
+    assert str(target) in release_detail
+    assert str(log_path) not in release_detail
+    assert "Transfer log created at:" not in release_detail
+    assert "Transfer log is shown below." not in release_detail
+    assert "Transfers applied: 3" in release_detail
+    assert "Shirt numbers changed: 1" in release_detail
     assert application._result_actions.visible is True
     assert application._transfer_log_frame.visible is True
     assert "Zidane moved" in application._transfer_log_text.content
+
+    local_log = "## Local update transfer log\n\n- Local player moved\n"
+    local_state = InstallerState(
+        mode=InstallerMode.LOCAL,
+        step=WizardStep.RESULT,
+        result=LocalUpdateResult(
+            target_path=target,
+            backup_path=None,
+            installed_sha256="b" * 64,
+            transfer_applied=2,
+            shirt_numbers_changed=1,
+            unchanged=3,
+            safety_skipped=4,
+            transfer_log_content=local_log,
+        ),
+    )
+
+    application._render_result(local_state)
+
+    assert application._progress_status_var.value == "Your local save is ready."
+    assert "Transfers applied: 2" in application._progress_detail_var.value
+    assert "Shirt numbers changed: 1" in application._progress_detail_var.value
+    assert "Unchanged: 3" in application._progress_detail_var.value
+    assert "Safety skipped: 4" in application._progress_detail_var.value
+    assert application._transfer_log_text.content == local_log
 
 
 def test_close_disposition_cancels_before_commit_and_blocks_during_commit() -> None:

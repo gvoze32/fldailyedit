@@ -165,11 +165,12 @@ def test_save_reports_writes_transfer_only_cards(monkeypatch, tmp_path: Path):
         ),
     ]
 
-    transfer_logger.save_reports(entries, output_dir=tmp_path)
+    returned_markdown = transfer_logger.save_reports(entries, output_dir=tmp_path)
 
     markdown = (tmp_path / "transfer_summary.md").read_text(encoding="utf-8")
     html = (tmp_path / "transfer_summary.html").read_text(encoding="utf-8")
     summary = summary_path.read_text(encoding="utf-8")
+    assert returned_markdown == markdown
     assert "Applied Transfer" in markdown
     assert "Dry Number" in html
     assert "Player creations" not in summary

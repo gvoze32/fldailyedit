@@ -108,6 +108,40 @@ def _deep_transfer_since_date(
     return date.today().replace(month=1, day=1).isoformat()
 
 
+def _supplemental_target_clubs(transfer_batches) -> tuple[str, ...]:
+    """Return one relevant team page per dated verified transfer route."""
+    non_clubs = {
+        "",
+        "career break",
+        "free agent",
+        "retired",
+        "unattached",
+        "without club",
+    }
+    targets: list[str] = []
+    seen: set[str] = set()
+    for batch in transfer_batches:
+        for transfer in batch:
+            if not transfer.date:
+                continue
+            destination = (
+                transfer.to_club_full_name or transfer.to_club
+            ).strip()
+            source = (
+                transfer.from_club_full_name or transfer.from_club
+            ).strip()
+            target = (
+                source
+                if destination.casefold() in non_clubs
+                else destination
+            )
+            key = target.casefold()
+            if key and key not in non_clubs and key not in seen:
+                seen.add(key)
+                targets.append(target)
+    return tuple(targets)
+
+
 def _scrape_run_transfers(args):
     """Fetch, merge, order, and preview transfers for one pipeline run."""
     popular_only = bool(getattr(args, "popular", False))
@@ -210,6 +244,8 @@ def _scrape_run_transfers(args):
             f"  Transfermarkt found {len(transfermarkt_events)} dated transfers"
         )
 
+        supplemental_clubs = _supplemental_target_clubs(transfer_batches)
+
         print("\n🧭 Adding BeSoccer corroboration routes...")
         besoccer_corroborators = fetch_besoccer_transfers(
             since_date=since_date,
@@ -224,6 +260,7 @@ def _scrape_run_transfers(args):
         sofascore_corroborators = fetch_sofascore_transfers(
             since_date=since_date,
             window=window,
+            club_names=supplemental_clubs,
         )
         corroborators.extend(sofascore_corroborators)
         print(
@@ -234,6 +271,7 @@ def _scrape_run_transfers(args):
         soccerway_corroborators = fetch_soccerway_transfers(
             since_date=since_date,
             window=window,
+            club_names=supplemental_clubs,
         )
         corroborators.extend(soccerway_corroborators)
         print(
@@ -1142,6 +1180,7 @@ class _RunLocalUpdateRuntime:
             ) from error
 
         diagnostic: str | None = None
+        transfer_log_content: str | None = None
         try:
             for (match, previous_shirt, action), run_record in zip(
                 prepared.pending_logs,
@@ -1182,7 +1221,7 @@ class _RunLocalUpdateRuntime:
                     proof_urls=transfer.proof_urls,
                     native_metadata=run_record.get("native_metadata"),
                 )
-            transfer_logger.save_reports(prepared.run_records)
+            transfer_log_content = transfer_logger.save_reports(prepared.run_records)
         except Exception as error:
             diagnostic = (
                 "Save published, but transfer logging/report generation failed: "
@@ -1203,6 +1242,7 @@ class _RunLocalUpdateRuntime:
             unchanged=mutation.unchanged,
             safety_skipped=mutation.safety_skipped,
             diagnostic=diagnostic,
+            transfer_log_content=transfer_log_content,
         )
 
     def preview(

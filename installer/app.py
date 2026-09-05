@@ -175,6 +175,57 @@ def progress_presentation(
     )
 
 
+def progress_detail_copy(
+    state: InstallerState,
+    *,
+    controls_locked: bool,
+) -> str:
+    """Return progress guidance tailored to release or local-save work."""
+    if controls_locked:
+        return (
+            "The original save is being replaced and verified. "
+            "Do not close this window."
+        )
+    if state.mode is InstallerMode.LOCAL:
+        return (
+            "Keep this window open. Updating your local save may take some "
+            "time, and the app may appear frozen or flicker while it works."
+        )
+    return "Keep this window open while the save is updated."
+
+
+def _prebuilt_report_counts(markdown: str) -> tuple[int, int] | None:
+    """Read transfer and shirt counts from a packaged markdown report."""
+    lines = markdown.splitlines()
+    for index, line in enumerate(lines):
+        if not line.strip().startswith("|"):
+            continue
+        headers = [
+            cell.strip().strip("*`")
+            for cell in line.strip().strip("|").split("|")
+        ]
+        if "Save changes" not in headers or "Shirt numbers" not in headers:
+            continue
+        for data_line in lines[index + 1 :]:
+            if not data_line.strip().startswith("|"):
+                break
+            cells = [
+                cell.strip().strip("*`")
+                for cell in data_line.strip().strip("|").split("|")
+            ]
+            if len(cells) != len(headers) or all(
+                not cell.strip("-: ") for cell in cells
+            ):
+                continue
+            try:
+                total_changes = int(cells[headers.index("Save changes")])
+                shirt_changes = int(cells[headers.index("Shirt numbers")])
+            except (ValueError, IndexError):
+                return None
+            return max(total_changes - shirt_changes, 0), shirt_changes
+    return None
+
+
 def close_disposition(state: InstallerState) -> CloseDisposition:
     """Describe close behavior without coupling policy to Tk callbacks."""
 
@@ -1124,11 +1175,9 @@ class InstallerApplication:
         )
         self._progress_status_var.set(presentation.status)
         self._progress_detail_var.set(
-            "Keep this window open while the save is updated."
-            if not presentation.controls_locked
-            else (
-                "The original save is being replaced and verified. "
-                "Do not close this window."
+            progress_detail_copy(
+                state,
+                controls_locked=presentation.controls_locked,
             )
         )
         if self._progress_running:
@@ -1154,6 +1203,7 @@ class InstallerApplication:
             if isinstance(state.result, LocalUpdateResult):
                 self._progress_status_var.set("Your local save is ready.")
                 detail = f"Updated in place:\n{state.result.target_path}"
+                transfer_log_content = state.result.transfer_log_content
                 detail += (
                     f"\n\nTransfers applied: {state.result.transfer_applied}"
                     f"\nShirt numbers changed: {state.result.shirt_numbers_changed}"
@@ -1166,23 +1216,25 @@ class InstallerApplication:
                 self._progress_status_var.set("Your save is ready.")
                 detail = f"Installed to:\n{state.result.target_path}"
                 if state.result.transfer_log_path is not None:
-                    detail += (
-                        "\n\nTransfer log created at:\n"
-                        f"{state.result.transfer_log_path}"
-                    )
                     try:
                         transfer_log_content = (
                             state.result.transfer_log_path.read_text(
                                 encoding="utf-8"
                             )
                         )
+                        counts = _prebuilt_report_counts(transfer_log_content)
+                        if counts is not None:
+                            transfers_applied, shirt_numbers_changed = counts
+                            detail += (
+                                f"\n\nTransfers applied: {transfers_applied}"
+                                "\nShirt numbers changed: "
+                                f"{shirt_numbers_changed}"
+                            )
                     except (OSError, UnicodeError) as error:
                         detail += (
                             "\n\nWarning: Transfer log could not be displayed:\n"
                             f"{error}"
                         )
-                    else:
-                        detail += "\n\nTransfer log is shown below."
                 if state.result.diagnostic:
                     detail += f"\n\nWarning:\n{state.result.diagnostic}"
             if state.result.backup_path is not None:

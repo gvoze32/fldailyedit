@@ -1,14 +1,15 @@
-"""Soccerway team-transfer corroboration for explicitly supplied team pages."""
+"""Best-effort Soccerway corroboration from relevant team transfer feeds."""
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date
-from html.parser import HTMLParser
 import logging
 import re
-from collections.abc import Iterable, Mapping
+import unicodedata
+from typing import Any
 
 import aiohttp
 
@@ -18,164 +19,89 @@ from scraper.source_utils import date_in_range, parse_external_date, resolve_sou
 
 logger = logging.getLogger(__name__)
 
-SOCCERWAY_TEAM_TRANSFERS_URL = "https://www.soccerway.com/team/{slug}/{team_id}/transfers/"
+SOCCERWAY_SEARCH_URL = "https://s.livesport.services/api/v2/search/"
+SOCCERWAY_FEED_URL = (
+    "https://global.flashscore.ninja/2020/x/feed/tetr_{team_id}_1_{page}"
+)
+SOCCERWAY_TEAM_TRANSFERS_URL = (
+    "https://www.soccerway.com/team/{slug}/{team_id}/transfers/"
+)
+SOCCERWAY_FEED_SIGNATURE = "SW9D1eZo"
 SOCCERWAY_HEADERS = {
-    "User-Agent": "fldailyedit/0.1 (PES transfer updater; contact via project repository)",
-    "Accept": "text/html, application/xhtml+xml;q=0.9, */*;q=0.5",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://www.soccerway.com/",
 }
-_VOID_TAGS = {
-    "area",
-    "base",
-    "br",
-    "col",
-    "embed",
-    "hr",
-    "img",
-    "input",
-    "link",
-    "meta",
-    "param",
-    "source",
-    "track",
-    "wbr",
+_NON_SENIOR_RE = re.compile(
+    r"\b(?:women|woman|ladies|feminine|femenino|feminino|frauen|academy|"
+    r"youth|reserves?|primavera|u[ -]?\d{2}|ii|b)\b",
+    re.IGNORECASE,
+)
+_CLUB_AFFIX_RE = re.compile(
+    r"\b(?:fc|cf|sc|ac|cd|ud|fk|sk|as|us|ss|sv|vfl|vfb|afc|club|calcio|sad|kv)\b",
+    re.IGNORECASE,
+)
+_NON_CLUB_NAMES = {
+    "",
+    "career break",
+    "free agent",
+    "retired",
+    "unattached",
+    "without club",
 }
+
+
+@dataclass(frozen=True)
+class _SoccerwayTeam:
+    name: str
+    slug: str
+    team_id: str
 
 
 @dataclass
-class _SoccerwayRow:
-    date_text: str = ""
-    player_name: str = ""
-    player_url: str = ""
-    team_links: list[tuple[str, str]] = field(default_factory=list)
+class _SoccerwayFeedTeam:
+    name: str = ""
+    url: str = ""
+
+
+@dataclass
+class _SoccerwayFeedRow:
+    date_value: str = ""
     direction: str = ""
+    transfer_type: str = ""
     fee: str = ""
-    fee_type: str = ""
+    player_name: str = ""
+    teams: list[_SoccerwayFeedTeam] = field(default_factory=list)
 
 
-class _SoccerwayParser(HTMLParser):
-    """Extract the semantic transfer table from a rendered team page."""
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.rows: list[_SoccerwayRow] = []
-        self._row: _SoccerwayRow | None = None
-        self._row_depth = 0
-        self._depth = 0
-        self._capture_kind: str | None = None
-        self._capture_tag: str | None = None
-        self._capture_parts: list[str] = []
-        self._capture_href = ""
-
-    @staticmethod
-    def _tokens(attrs: list[tuple[str, str | None]]) -> set[str]:
-        classes = next((value for key, value in attrs if key == "class"), "")
-        return set((classes or "").split())
-
-    @staticmethod
-    def _attr(attrs: list[tuple[str, str | None]], name: str) -> str:
-        return next((value or "" for key, value in attrs if key == name), "")
-
-    def _start_capture(
-        self,
-        kind: str,
-        tag: str,
-        *,
-        href: str = "",
-    ) -> None:
-        if self._capture_kind is None:
-            self._capture_kind = kind
-            self._capture_tag = tag
-            self._capture_parts = []
-            self._capture_href = href
-
-    def _finish_capture(self) -> None:
-        if self._capture_kind is None:
-            return
-        value = " ".join("".join(self._capture_parts).split()).strip()
-        kind = self._capture_kind
-        if self._row is not None:
-            if kind == "date":
-                self._row.date_text = value
-            elif kind == "player":
-                self._row.player_name = value
-                self._row.player_url = self._capture_href
-            elif kind == "team":
-                self._row.team_links.append((value, self._capture_href))
-            elif kind == "fee":
-                self._row.fee = value
-            elif kind == "fee_type":
-                self._row.fee_type = value
-        self._capture_kind = None
-        self._capture_tag = None
-        self._capture_parts = []
-        self._capture_href = ""
-
-    def _finish_row(self) -> None:
-        if self._row is not None:
-            self.rows.append(self._row)
-        self._row = None
-        self._row_depth = 0
-        self._finish_capture()
-
-    def handle_starttag(
-        self,
-        tag: str,
-        attrs: list[tuple[str, str | None]],
-    ) -> None:
-        self._depth += 1
-        tokens = self._tokens(attrs)
-        if (
-            tag == "div"
-            and "transferTab__row" in tokens
-            and "transferTab__row--team" in tokens
-            and "transferTab__row--main" not in tokens
-        ):
-            if self._row is not None:
-                self._finish_row()
-            self._row = _SoccerwayRow()
-            self._row_depth = self._depth
-        elif self._row is not None:
-            if "transferTab__typeIcon--in" in tokens:
-                self._row.direction = "in"
-            elif "transferTab__typeIcon--out" in tokens:
-                self._row.direction = "out"
-            elif "transferTab__date" in tokens:
-                self._start_capture("date", tag)
-            elif tag == "a" and "transferTab__teamHref" in tokens:
-                href = self._attr(attrs, "href")
-                kind = "player" if not self._row.player_name else "team"
-                self._start_capture(kind, tag, href=href)
-            elif "transferTab__feePrizeType" in tokens:
-                self._start_capture("fee_type", tag)
-            elif "transferTab__feePrize" in tokens:
-                self._start_capture("fee", tag)
-
-        if tag in _VOID_TAGS:
-            self._depth = max(0, self._depth - 1)
-
-    def handle_data(self, data: str) -> None:
-        if self._capture_kind is not None:
-            self._capture_parts.append(data)
-
-    def handle_endtag(self, tag: str) -> None:
-        if self._capture_tag == tag:
-            self._finish_capture()
-        if self._row is not None and tag == "div" and self._depth == self._row_depth:
-            self._finish_row()
-        self._depth = max(0, self._depth - 1)
-
-    def close(self) -> None:
-        super().close()
-        self._finish_row()
-        self._finish_capture()
+def _clean(value: Any) -> str:
+    return " ".join(str(value or "").split()).strip()
 
 
-def _clean(value: str) -> str:
-    return " ".join((value or "").split()).strip()
+def _normalize(value: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", value or "")
+    plain = "".join(
+        character
+        for character in decomposed
+        if not unicodedata.combining(character)
+    )
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", plain.casefold()).split())
 
 
-def _transfer_type(fee_type: str, fee: str) -> tuple[str, bool]:
-    normalized = _clean(f"{fee_type} {fee}").casefold()
+def _club_key(value: str) -> str:
+    return " ".join(_CLUB_AFFIX_RE.sub(" ", _normalize(value)).split())
+
+
+def _is_non_club(value: str) -> bool:
+    return _normalize(value) in _NON_CLUB_NAMES
+
+
+def _transfer_type(label: str, fee: str = "") -> tuple[str, bool]:
+    normalized = _clean(f"{label} {fee}").casefold()
     if "end of loan" in normalized or "return" in normalized:
         return "end of loan", False
     if "loan" in normalized:
@@ -185,67 +111,157 @@ def _transfer_type(fee_type: str, fee: str) -> tuple[str, bool]:
     return "transfer", False
 
 
-def _team_name_from_url(source_url: str) -> str:
-    match = re.search(r"/team/([^/]+)/[^/]+/transfers", source_url)
-    if not match:
-        return ""
-    return match.group(1).replace("-", " ")
+def _participant_id(url: str) -> str:
+    match = re.search(r"/team/[^/]+/([^/]+)/", url or "")
+    return match.group(1) if match else ""
 
 
-def _route(
-    row: _SoccerwayRow,
-    current_team: str,
-    source_url: str,
+def _parse_feed_rows(payload: str) -> list[_SoccerwayFeedRow]:
+    """Decode Soccerway's public team-transfer feed records."""
+    rows: list[_SoccerwayFeedRow] = []
+    row: _SoccerwayFeedRow | None = None
+    team: _SoccerwayFeedTeam | None = None
+    section = ""
+    pending_property = ""
+
+    def finish_row() -> None:
+        nonlocal row, team, section, pending_property
+        if row is not None:
+            rows.append(row)
+        row = None
+        team = None
+        section = ""
+        pending_property = ""
+
+    for raw_token in (payload or "").split("¬"):
+        token = raw_token.lstrip("~")
+        if "÷" not in token:
+            continue
+        code, value = token.split("÷", 1)
+
+        if code == "TS":
+            pending_property = ""
+            if value == "RTT":
+                finish_row()
+                row = _SoccerwayFeedRow()
+            elif row is not None and value == "TEA":
+                section = "team"
+                team = _SoccerwayFeedTeam()
+                row.teams.append(team)
+            elif row is not None and value == "PLA":
+                section = "player"
+                team = None
+            continue
+
+        if code == "TE":
+            pending_property = ""
+            if value == "RTT":
+                finish_row()
+            elif value in {"TEA", "PLA"}:
+                section = ""
+                team = None
+            continue
+
+        if row is None:
+            continue
+        if code == "PT":
+            pending_property = value
+            continue
+        if code != "PV" or not pending_property:
+            continue
+
+        if section == "team" and team is not None:
+            if pending_property == "VA":
+                team.name = _clean(value)
+            elif pending_property == "TURL":
+                team.url = _clean(value)
+        elif section == "player":
+            if pending_property == "VA":
+                row.player_name = _clean(value)
+        elif pending_property == "DATE":
+            row.date_value = _clean(value)
+        elif pending_property == "TD":
+            row.direction = _clean(value).casefold()
+        elif pending_property == "TT":
+            row.transfer_type = _clean(value)
+        elif pending_property == "TJ":
+            row.fee = _clean(value)
+        pending_property = ""
+
+    finish_row()
+    return rows
+
+
+def _row_date(row: _SoccerwayFeedRow) -> date | None:
+    if row.date_value.isdigit():
+        # Soccerway encodes a date-only value as local midnight. Moving it to
+        # noon before UTC conversion keeps positive-offset dates on that day.
+        return parse_external_date(int(row.date_value) + 12 * 60 * 60)
+    return parse_external_date(row.date_value)
+
+
+def _row_route(
+    row: _SoccerwayFeedRow,
+    current_team: _SoccerwayTeam,
+    transfer_type: str,
 ) -> tuple[str, str] | None:
-    current = _clean(current_team) or _team_name_from_url(source_url)
-    links = []
-    seen: set[str] = set()
-    for name, href in row.team_links:
-        clean = _clean(name)
-        if clean and clean.casefold() not in seen:
-            links.append((clean, href))
-            seen.add(clean.casefold())
-    if not current or not row.direction or not links:
+    if row.direction not in {"in", "out"}:
         return None
 
-    current_key = current.casefold()
-    other = next((name for name, _ in links if name.casefold() != current_key), "")
-    if not other:
-        other = links[0][0]
+    other_team = next(
+        (
+            team.name
+            for team in row.teams
+            if team.name and _participant_id(team.url) != current_team.team_id
+        ),
+        "",
+    )
+    if not other_team:
+        other_team = next(
+            (
+                team.name
+                for team in row.teams
+                if team.name
+                and _club_key(team.name) != _club_key(current_team.name)
+            ),
+            "",
+        )
+    if not other_team and transfer_type == "free transfer":
+        other_team = "Free Agent"
+    if not other_team:
+        return None
+
     if row.direction == "in":
-        return other, current
-    return current, other
+        return other_team, current_team.name
+    return current_team.name, other_team
 
 
-def parse_soccerway_transfer_html(
-    html: str,
-    team_name: str,
+def _transfers_from_rows(
+    rows: Iterable[_SoccerwayFeedRow],
+    current_team: _SoccerwayTeam,
     source_url: str,
     *,
     start_date: date | None = None,
     end_date: date | None = None,
 ) -> list[Transfer]:
-    """Parse one Soccerway team transfer tab as corroboration-only routes."""
-    parser = _SoccerwayParser()
-    try:
-        parser.feed(html)
-        parser.close()
-    except (TypeError, ValueError):
-        return []
-
     transfers: list[Transfer] = []
     seen: set[tuple[str, str, str, str]] = set()
-    for row in parser.rows:
-        event_date = parse_external_date(row.date_text)
+    for row in rows:
+        event_date = _row_date(row)
         if not date_in_range(event_date, start_date, end_date):
             continue
-        route = _route(row, team_name, source_url)
-        if route is None or not row.player_name:
+        player_name = _clean(row.player_name)
+        if not player_name:
             continue
-        transfer_type, is_loan = _transfer_type(row.fee_type, row.fee)
+        transfer_type, is_loan = _transfer_type(row.transfer_type, row.fee)
+        route = _row_route(row, current_team, transfer_type)
+        if route is None:
+            continue
         from_club, to_club = route
+        if _club_key(from_club) == _club_key(to_club):
+            continue
         key = (
-            _clean(row.player_name).casefold(),
+            player_name.casefold(),
             from_club.casefold(),
             to_club.casefold(),
             event_date.isoformat(),
@@ -255,7 +271,7 @@ def parse_soccerway_transfer_html(
         seen.add(key)
         transfers.append(
             Transfer(
-                player_name=_clean(row.player_name),
+                player_name=player_name,
                 from_club=from_club,
                 to_club=to_club,
                 date=event_date.isoformat(),
@@ -270,24 +286,157 @@ def parse_soccerway_transfer_html(
     return transfers
 
 
-parse_soccerway_transfers = parse_soccerway_transfer_html
+def parse_soccerway_transfer_feed(
+    payload: str,
+    team_name: str,
+    team_id: str,
+    source_url: str,
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> list[Transfer]:
+    """Parse one current Soccerway team feed as corroboration-only routes."""
+    current_team = _SoccerwayTeam(
+        name=_clean(team_name),
+        slug="",
+        team_id=_clean(team_id),
+    )
+    return _transfers_from_rows(
+        _parse_feed_rows(payload),
+        current_team,
+        source_url,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
-async def _fetch_text(session: aiohttp.ClientSession, url: str) -> str:
-    async with session.get(url) as response:
+def _candidate_team(payload: Any, requested_name: str) -> _SoccerwayTeam | None:
+    if not isinstance(payload, list):
+        return None
+    requested_has_category = bool(_NON_SENIOR_RE.search(requested_name))
+    candidates: list[_SoccerwayTeam] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        item_type = item.get("type")
+        sport = item.get("sport")
+        gender = item.get("gender")
+        if (
+            not isinstance(item_type, dict)
+            or item_type.get("id") != 2
+            or not isinstance(sport, dict)
+            or sport.get("id") != 1
+            or (isinstance(gender, dict) and gender.get("id") not in {None, 1})
+        ):
+            continue
+        name = _clean(item.get("name"))
+        team_id = _clean(item.get("id"))
+        slug = _clean(item.get("url"))
+        if (
+            not name
+            or not team_id
+            or (not requested_has_category and _NON_SENIOR_RE.search(name))
+        ):
+            continue
+        candidates.append(_SoccerwayTeam(name=requested_name, slug=slug, team_id=team_id))
+        if _normalize(name) == _normalize(requested_name):
+            return candidates[-1]
+        if _club_key(name) == _club_key(requested_name):
+            return candidates[-1]
+    return candidates[0] if candidates else None
+
+
+async def _fetch_json(
+    session: aiohttp.ClientSession,
+    url: str,
+    *,
+    params: dict[str, Any] | None = None,
+) -> Any:
+    async with session.get(url, params=params) as response:
+        if response.status != 200:
+            raise RuntimeError(f"HTTP {response.status}")
+        return await response.json(content_type=None)
+
+
+async def _fetch_text(
+    session: aiohttp.ClientSession,
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+) -> str:
+    async with session.get(url, headers=headers) as response:
         if response.status != 200:
             raise RuntimeError(f"HTTP {response.status}")
         return await response.text()
 
 
-def _team_targets(
-    team_urls: Mapping[str, str] | Iterable[tuple[str, str]] | None,
-) -> list[tuple[str, str]]:
-    if team_urls is None:
-        return []
-    if isinstance(team_urls, Mapping):
-        return [(str(name), str(url)) for name, url in team_urls.items()]
-    return [(str(name), str(url)) for name, url in team_urls]
+async def _resolve_team(
+    session: aiohttp.ClientSession,
+    team_name: str,
+) -> _SoccerwayTeam | None:
+    payload = await _fetch_json(
+        session,
+        SOCCERWAY_SEARCH_URL,
+        params={
+            "q": team_name,
+            "lang-id": 1,
+            "type-ids": 2,
+            "project-id": 2020,
+            "project-type-id": 1,
+            "sport-ids": 1,
+        },
+    )
+    return _candidate_team(payload, team_name)
+
+
+async def _fetch_team_transfers(
+    session: aiohttp.ClientSession,
+    team: _SoccerwayTeam,
+    *,
+    start_date: date | None,
+    end_date: date | None,
+    max_pages: int,
+) -> list[Transfer]:
+    source_url = SOCCERWAY_TEAM_TRANSFERS_URL.format(
+        slug=team.slug,
+        team_id=team.team_id,
+    )
+    feed_headers = {"X-Fsign": SOCCERWAY_FEED_SIGNATURE}
+    transfers: list[Transfer] = []
+    for page in range(1, max_pages + 1):
+        payload = await _fetch_text(
+            session,
+            SOCCERWAY_FEED_URL.format(team_id=team.team_id, page=page),
+            headers=feed_headers,
+        )
+        rows = _parse_feed_rows(payload)
+        if not rows:
+            break
+        transfers.extend(
+            _transfers_from_rows(
+                rows,
+                team,
+                source_url,
+                start_date=start_date,
+                end_date=end_date,
+            )
+        )
+        row_dates = [event_date for row in rows if (event_date := _row_date(row))]
+        if start_date is not None and row_dates and min(row_dates) < start_date:
+            break
+    return transfers
+
+
+def _club_names(club_names: Iterable[str] | None) -> list[str]:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for value in club_names or ():
+        name = _clean(value)
+        key = _normalize(name)
+        if name and key not in seen and not _is_non_club(name):
+            seen.add(key)
+            unique.append(name)
+    return unique
 
 
 async def _fetch_soccerway_transfers_async(
@@ -295,44 +444,54 @@ async def _fetch_soccerway_transfers_async(
     *,
     window: str = "auto",
     ref_date: date | None = None,
-    team_urls: Mapping[str, str] | Iterable[tuple[str, str]] | None = None,
+    club_names: Iterable[str] | None = None,
+    max_pages: int = 20,
 ) -> list[Transfer]:
     start_date, end_date = resolve_source_date_range(
         since_date, window, ref_date=ref_date
     )
-    targets = _team_targets(team_urls)
+    targets = _club_names(club_names)
     if not targets:
         logger.debug(
-            "Soccerway supplemental source skipped: no team transfer URL mapping"
+            "Soccerway supplemental source skipped: no relevant transfer clubs"
         )
         return []
 
-    timeout = aiohttp.ClientTimeout(total=30)
-    transfers: list[Transfer] = []
+    timeout = aiohttp.ClientTimeout(total=45)
+    gate = asyncio.Semaphore(6)
     async with aiohttp.ClientSession(
         headers=SOCCERWAY_HEADERS,
         timeout=timeout,
+        cookie_jar=aiohttp.DummyCookieJar(),
     ) as session:
-        for team_name, source_url in targets:
+        async def fetch_club(team_name: str) -> list[Transfer]:
             try:
-                document = await _fetch_text(session, source_url)
-                transfers.extend(
-                    parse_soccerway_transfer_html(
-                        document,
-                        team_name,
-                        source_url,
+                async with gate:
+                    team = await _resolve_team(session, team_name)
+                if team is None:
+                    logger.debug("Soccerway could not resolve team %r", team_name)
+                    return []
+                async with gate:
+                    return await _fetch_team_transfers(
+                        session,
+                        team,
                         start_date=start_date,
                         end_date=end_date,
+                        max_pages=max_pages,
                     )
-                )
             except Exception as exc:
-                logger.warning(
-                    "Soccerway team page unavailable (%s): %s", source_url, exc
+                logger.debug(
+                    "Soccerway team unavailable (%s): %s",
+                    team_name,
+                    exc,
                 )
+                return []
+
+        batches = await asyncio.gather(*(fetch_club(name) for name in targets))
 
     unique: list[Transfer] = []
     seen: set[tuple[str, str, str, str]] = set()
-    for transfer in transfers:
+    for transfer in (item for batch in batches for item in batch):
         key = (
             transfer.player_name.casefold(),
             transfer.from_club.casefold(),
@@ -342,7 +501,11 @@ async def _fetch_soccerway_transfers_async(
         if key not in seen:
             seen.add(key)
             unique.append(transfer)
-    logger.info("Soccerway found %s dated corroboration routes", len(unique))
+    logger.info(
+        "Soccerway found %s dated corroboration routes across %s relevant clubs",
+        len(unique),
+        len(targets),
+    )
     return unique
 
 
@@ -350,15 +513,17 @@ def fetch_soccerway_transfers(
     since_date: str | date | None = None,
     *,
     window: str = "auto",
-    team_urls: Mapping[str, str] | Iterable[tuple[str, str]] | None = None,
+    club_names: Iterable[str] | None = None,
+    max_pages: int = 20,
 ) -> list[Transfer]:
-    """Fetch configured Soccerway team pages without a global-feed assumption."""
+    """Fetch Soccerway routes for clubs already present in verified events."""
     try:
         return asyncio.run(
             _fetch_soccerway_transfers_async(
                 since_date=since_date,
                 window=window,
-                team_urls=team_urls,
+                club_names=club_names,
+                max_pages=max_pages,
             )
         )
     except Exception as exc:

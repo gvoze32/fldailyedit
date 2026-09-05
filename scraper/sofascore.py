@@ -1,16 +1,17 @@
-"""Best-effort Sofascore transfer corroboration from its public web page."""
+"""Best-effort Sofascore corroboration from relevant team transfer APIs."""
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import date
-import html
-import json
 import logging
 import re
+import unicodedata
 from typing import Any
 
-import aiohttp
+from curl_cffi import requests
 
 from scraper.models import Transfer
 from scraper.source_utils import date_in_range, parse_external_date, resolve_source_date_range
@@ -18,11 +19,25 @@ from scraper.source_utils import date_in_range, parse_external_date, resolve_sou
 
 logger = logging.getLogger(__name__)
 
-SOFASCORE_TRANSFERS_URL = "https://www.sofascore.com/football/player-transfers"
+SOFASCORE_API_BASES = (
+    ("https://api.sofascore.com/api/v1", "https://dns.google/dns-query"),
+    ("https://api.sofascore.app/api/v1", None),
+)
+SOFASCORE_SEARCH_PATH = "/search/all"
+SOFASCORE_TEAM_TRANSFERS_PATH = "/team/{team_id}/transfers"
 SOFASCORE_HEADERS = {
-    "User-Agent": "fldailyedit/0.1 (PES transfer updater; contact via project repository)",
-    "Accept": "text/html, application/xhtml+xml;q=0.9, */*;q=0.5",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://www.sofascore.com/",
 }
+_NON_SENIOR_RE = re.compile(
+    r"\b(?:women|woman|ladies|feminine|femenino|feminino|frauen|academy|"
+    r"youth|reserves?|primavera|u[ -]?\d{2}|ii|b)\b",
+    re.IGNORECASE,
+)
+_CLUB_AFFIX_RE = re.compile(
+    r"\b(?:fc|cf|sc|ac|cd|ud|fk|sk|as|us|ss|sv|vfl|vfb|afc|club|calcio|sad|kv)\b",
+    re.IGNORECASE,
+)
 
 _TYPE_BY_NUMBER = {
     1: ("loan", True),
@@ -42,10 +57,31 @@ _TYPE_BY_NUMBER = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class _SofascoreTeam:
+    name: str
+    slug: str
+    team_id: int
+
+
 def _clean(value: Any) -> str:
     if value is None:
         return ""
     return " ".join(str(value).split()).strip()
+
+
+def _normalize(value: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", value or "")
+    plain = "".join(
+        character
+        for character in decomposed
+        if not unicodedata.combining(character)
+    )
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", plain.casefold()).split())
+
+
+def _club_key(value: str) -> str:
+    return " ".join(_CLUB_AFFIX_RE.sub(" ", _normalize(value)).split())
 
 
 def _name(value: Any) -> str:
@@ -64,7 +100,10 @@ def _transfer_type(value: Any) -> tuple[str, bool] | None:
         return "end of loan", False
     if normalized == "loan" or "loan" in normalized:
         return "loan", True
-    if any(token in normalized for token in ("released", "waived", "retired", "contractexpired")):
+    if any(
+        token in normalized
+        for token in ("released", "waived", "retired", "contractexpired")
+    ):
         return "free transfer", False
     if "transfer" in normalized or "traded" in normalized or "draft" in normalized:
         return "transfer", False
@@ -73,26 +112,7 @@ def _transfer_type(value: Any) -> tuple[str, bool] | None:
     return None
 
 
-def _payload_from_html(document: str) -> Any:
-    match = re.search(
-        r"<script[^>]+id=[\"']__NEXT_DATA__[\"'][^>]*>(.*?)</script>",
-        document,
-        re.IGNORECASE | re.DOTALL,
-    )
-    if not match:
-        return None
-    try:
-        return json.loads(html.unescape(match.group(1)))
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return None
-
-
 def _transfer_items(payload: Any) -> list[dict[str, Any]]:
-    if isinstance(payload, str):
-        try:
-            payload = json.loads(payload)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            payload = _payload_from_html(payload)
     if payload is None:
         return []
 
@@ -102,17 +122,13 @@ def _transfer_items(payload: Any) -> list[dict[str, Any]]:
 
     def walk(value: Any) -> None:
         if isinstance(value, dict):
-            transfers = value.get("transfers")
-            if isinstance(transfers, list) and id(transfers) not in visited_containers:
-                visited_containers.add(id(transfers))
-                for item in transfers:
-                    if isinstance(item, dict) and id(item) not in visited_items:
-                        visited_items.add(id(item))
-                        result.append(item)
             for child in value.values():
                 if isinstance(child, (dict, list)):
                     walk(child)
         elif isinstance(value, list):
+            if id(value) in visited_containers:
+                return
+            visited_containers.add(id(value))
             if value and all(isinstance(item, dict) for item in value):
                 for item in value:
                     if (
@@ -163,7 +179,7 @@ def _item_fee(item: dict[str, Any]) -> str:
 
 def parse_sofascore_transfer_payload(
     payload: Any,
-    source_url: str = SOFASCORE_TRANSFERS_URL,
+    source_url: str = "",
     *,
     start_date: date | None = None,
     end_date: date | None = None,
@@ -213,37 +229,122 @@ def parse_sofascore_transfer_payload(
                 position=position,
                 is_loan=is_loan,
                 sources=("sofascore",),
-                source_urls=(source_url,),
+                source_urls=(source_url,) if source_url else (),
                 verification_status="corroborator",
             )
         )
     return transfers
 
 
-def parse_sofascore_transfer_html(
-    document: str,
-    source_url: str = SOFASCORE_TRANSFERS_URL,
+parse_sofascore_transfers = parse_sofascore_transfer_payload
+
+
+def _candidate_team(payload: Any, requested_name: str) -> _SofascoreTeam | None:
+    if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+        return None
+    requested_has_category = bool(_NON_SENIOR_RE.search(requested_name))
+    candidates: list[_SofascoreTeam] = []
+    for item in payload["results"]:
+        if not isinstance(item, dict) or item.get("type") != "team":
+            continue
+        entity = item.get("entity")
+        if not isinstance(entity, dict):
+            continue
+        sport = entity.get("sport")
+        name = _clean(entity.get("name"))
+        slug = _clean(entity.get("slug"))
+        team_id = entity.get("id")
+        if (
+            not isinstance(sport, dict)
+            or sport.get("id") != 1
+            or entity.get("gender") not in {None, "M"}
+            or not isinstance(team_id, int)
+            or not name
+            or (not requested_has_category and _NON_SENIOR_RE.search(name))
+        ):
+            continue
+        team = _SofascoreTeam(name=name, slug=slug, team_id=team_id)
+        candidates.append(team)
+        if _normalize(name) == _normalize(requested_name):
+            return team
+        if _club_key(name) == _club_key(requested_name):
+            return team
+    return candidates[0] if candidates else None
+
+
+async def _fetch_json(
+    session: requests.AsyncSession,
+    url: str,
     *,
-    start_date: date | None = None,
-    end_date: date | None = None,
+    params: dict[str, str] | None = None,
+    doh_url: str | None = None,
+) -> Any:
+    options: dict[str, Any] = {}
+    if doh_url is not None:
+        options["doh_url"] = doh_url
+    response = await session.get(url, params=params, **options)
+    if response.status_code != 200:
+        raise RuntimeError(f"HTTP {response.status_code}")
+    return response.json()
+
+
+async def _api_json(
+    session: requests.AsyncSession,
+    path: str,
+    *,
+    params: dict[str, str] | None = None,
+) -> Any:
+    last_error: Exception | None = None
+    for base_url, doh_url in SOFASCORE_API_BASES:
+        try:
+            return await _fetch_json(
+                session,
+                f"{base_url}{path}",
+                params=params,
+                doh_url=doh_url,
+            )
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError(f"Sofascore API request failed: {path}") from last_error
+
+
+async def _resolve_team(
+    session: requests.AsyncSession,
+    team_name: str,
+) -> _SofascoreTeam | None:
+    payload = await _api_json(
+        session,
+        SOFASCORE_SEARCH_PATH,
+        params={"q": team_name},
+    )
+    return _candidate_team(payload, team_name)
+
+
+async def _fetch_team_transfers(
+    session: requests.AsyncSession,
+    team: _SofascoreTeam,
+    *,
+    start_date: date | None,
+    end_date: date | None,
 ) -> list[Transfer]:
-    """Parse the server-rendered ``__NEXT_DATA__`` transfer payload."""
+    path = SOFASCORE_TEAM_TRANSFERS_PATH.format(team_id=team.team_id)
+    payload = await _api_json(session, path)
+    source_url = f"{SOFASCORE_API_BASES[0][0]}{path}"
     return parse_sofascore_transfer_payload(
-        document,
+        payload,
         source_url,
         start_date=start_date,
         end_date=end_date,
     )
 
 
-parse_sofascore_transfers = parse_sofascore_transfer_payload
-
-
-async def _fetch_text(session: aiohttp.ClientSession, url: str) -> str:
-    async with session.get(url) as response:
-        if response.status != 200:
-            raise RuntimeError(f"HTTP {response.status}")
-        return await response.text()
+def _transfer_key(transfer: Transfer) -> tuple[str, str, str, str]:
+    return (
+        _normalize(transfer.player_name),
+        _club_key(transfer.from_club),
+        _club_key(transfer.to_club),
+        transfer.date,
+    )
 
 
 async def _fetch_sofascore_transfers_async(
@@ -251,23 +352,56 @@ async def _fetch_sofascore_transfers_async(
     *,
     window: str = "auto",
     ref_date: date | None = None,
-    source_url: str = SOFASCORE_TRANSFERS_URL,
+    club_names: Iterable[str] = (),
 ) -> list[Transfer]:
     start_date, end_date = resolve_source_date_range(
         since_date, window, ref_date=ref_date
     )
-    timeout = aiohttp.ClientTimeout(total=30)
-    async with aiohttp.ClientSession(
+    targets = tuple(dict.fromkeys(_clean(name) for name in club_names if _clean(name)))
+    if not targets:
+        logger.debug(
+            "Sofascore supplemental source skipped: no relevant transfer clubs"
+        )
+        return []
+
+    gate = asyncio.Semaphore(6)
+    async with requests.AsyncSession(
         headers=SOFASCORE_HEADERS,
-        timeout=timeout,
+        impersonate="chrome",
+        timeout=30,
+        max_clients=6,
     ) as session:
-        document = await _fetch_text(session, source_url)
-    transfers = parse_sofascore_transfer_html(
-        document,
-        source_url,
-        start_date=start_date,
-        end_date=end_date,
-    )
+        async def fetch_club(team_name: str) -> list[Transfer]:
+            async with gate:
+                try:
+                    team = await _resolve_team(session, team_name)
+                    if team is None:
+                        return []
+                    return await _fetch_team_transfers(
+                        session,
+                        team,
+                        start_date=start_date,
+                        end_date=end_date,
+                    )
+                except Exception as exc:
+                    logger.debug(
+                        "Sofascore skipped %s: %s",
+                        team_name,
+                        exc,
+                    )
+                    return []
+
+        batches = await asyncio.gather(*(fetch_club(name) for name in targets))
+
+    transfers: list[Transfer] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for batch in batches:
+        for transfer in batch:
+            key = _transfer_key(transfer)
+            if key in seen:
+                continue
+            seen.add(key)
+            transfers.append(transfer)
     logger.info("Sofascore found %s dated corroboration routes", len(transfers))
     return transfers
 
@@ -276,11 +410,16 @@ def fetch_sofascore_transfers(
     since_date: str | date | None = None,
     *,
     window: str = "auto",
+    club_names: Iterable[str] = (),
 ) -> list[Transfer]:
-    """Fetch Sofascore's public page without making it load-bearing."""
+    """Fetch Sofascore without making the optional source load-bearing."""
     try:
         return asyncio.run(
-            _fetch_sofascore_transfers_async(since_date=since_date, window=window)
+            _fetch_sofascore_transfers_async(
+                since_date=since_date,
+                window=window,
+                club_names=club_names,
+            )
         )
     except Exception as exc:
         logger.warning("Sofascore supplemental source unavailable: %s", exc)

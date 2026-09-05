@@ -8,10 +8,10 @@ from types import SimpleNamespace
 import pytest
 
 from transfer_planning import _match_transfers_statefully
-from scraper.besoccer import parse_besoccer_transfer_html
+from scraper.besoccer import parse_besoccer_transfer_markdown
 from scraper.matcher import NameMatcher
 from scraper.models import Transfer
-from scraper.soccerway import parse_soccerway_transfer_html
+from scraper.soccerway import parse_soccerway_transfer_feed
 from scraper.sofascore import parse_sofascore_transfer_payload
 from scraper.sortitoutsi import parse_sortitoutsi_markdown
 from scraper.sources import reconcile_transfer_sources
@@ -132,6 +132,15 @@ SORTITOUTSI_SUBMISSION_ONLY_MARKDOWN = """
 [Proof (chelseafc.com)](https://www.chelseafc.com/fast-player-joins)
 """
 
+BESOCCER_MARKDOWN = """
+02 SEP 2026
+
+*   [![Image 1: Cesión Carlos Martín](https://cdn.example/player.jpg) ![Image 2: es](https://cdn.example/es.png)Carlos Martín DC **Cesión** desde Atlético de Madrid ![Image 3: Atlético de Madrid](https://cdn.example/atletico.png) ![Image 4: HNK Hajduk Split](https://cdn.example/hajduk.png) M.€](https://www.besoccer.es/jugador/c-martin-776234)
+01 SEP 2026
+
+*   [![Image 5: Agente libre Dani Ceballos](https://cdn.example/ceballos.jpg) ![Image 6: es](https://cdn.example/es.png)Dani Ceballos MC **Agente libre** **Libre** ![Image 7: Real Betis](https://cdn.example/betis.png) M.€](https://www.besoccer.es/jugador/d-ceballos-204716)
+"""
+
 
 TRANSFERMARKT_MARKDOWN = """
 | Player | Age | Nat. | Left | Joined | Transfer date | Market value | Fee |
@@ -154,6 +163,64 @@ TRANSFERMARKT_LOCALIZED_MARKDOWN = """
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | [Max Mustermann](https://www.transfermarkt.de/max-mustermann/profil/spieler/123 "Max Mustermann") Innenverteidiger | 24 |  | [Old FC](https://www.transfermarkt.de/old-fc/startseite/verein/10/saison_id/2026 "Old FC") | [New FC](https://www.transfermarkt.de/new-fc/startseite/verein/20/saison_id/2026 "New FC") | 04.09.2026 | €1,20m | [Leihgebühr](https://www.transfermarkt.de/jumplist/transfers/spieler/123/transfer_id/999 "Leihgebühr") |
 """
+
+
+SOCCERWAY_FEED = "¬".join(
+    (
+        "TS÷RTT",
+        "PT÷DATE",
+        "PV÷1785708000",
+        "PT÷TD",
+        "PV÷in",
+        "PT÷TT",
+        "PV÷Loan",
+        "PT÷TJ",
+        "PV÷€1m",
+        "TS÷TEA",
+        "PT÷VA",
+        "PV÷Old FC",
+        "PT÷TURL",
+        "PV÷/team/old-fc/old-id/",
+        "TE÷TEA",
+        "TS÷TEA",
+        "PT÷VA",
+        "PV÷Current FC",
+        "PT÷TURL",
+        "PV÷/team/current-fc/current-id/",
+        "TE÷TEA",
+        "TS÷PLA",
+        "PT÷VA",
+        "PV÷Ada Example",
+        "TE÷PLA",
+        "TE÷RTT",
+        "TS÷RTT",
+        "PT÷DATE",
+        "PV÷1785794400",
+        "PT÷TD",
+        "PV÷out",
+        "PT÷TT",
+        "PV÷Transfer",
+        "PT÷TJ",
+        "PV÷",
+        "TS÷TEA",
+        "PT÷VA",
+        "PV÷Current FC",
+        "PT÷TURL",
+        "PV÷/team/current-fc/current-id/",
+        "TE÷TEA",
+        "TS÷TEA",
+        "PT÷VA",
+        "PV÷New FC",
+        "PT÷TURL",
+        "PV÷/team/new-fc/new-id/",
+        "TE÷TEA",
+        "TS÷PLA",
+        "PT÷VA",
+        "PV÷Loan Example",
+        "TE÷PLA",
+        "TE÷RTT",
+    )
+)
 
 
 def test_wikipedia_parser_handles_rowspan_types_and_effective_date_filter():
@@ -709,43 +776,58 @@ def test_transfermarkt_network_outage_is_quiet_fallback(monkeypatch, caplog):
     assert not any(record.levelno >= logging.WARNING for record in caplog.records)
 
 
-def test_besoccer_parser_returns_only_dated_official_routes():
-    html = """
-    <div class="panel-title">3 AUG 2026</div>
-    <ul>
-      <li class="sign-list">
-        <a class="item-box" href="/player/ada-example-1">
-          <span class="bold">Ada Example</span>
-          <div class="player-role">MF</div>
-          <span class="action"><strong>Loan</strong> from Old FC</span>
-          <img class="shield" alt="Old FC">
-          <img class="shield" alt="New FC">
-          <div class="money">€1m</div>
-        </a>
-      </li>
-    </ul>
-    <section class="rumours">
-      <div class="panel-title">4 AUG 2026</div>
-      <li class="sign-list">
-        <span class="bold">Rumoured Player</span>
-        <span class="action"><strong>Transfer</strong> from A</span>
-        <img class="shield" alt="A">
-        <img class="shield" alt="B">
-      </li>
-    </section>
-    """
-
-    transfers = parse_besoccer_transfer_html(
-        html,
-        "https://www.besoccer.com/transfers",
-        end_date=date(2026, 8, 3),
+def test_besoccer_parser_returns_current_dated_confirmed_routes():
+    transfers = parse_besoccer_transfer_markdown(
+        BESOCCER_MARKDOWN,
+        "https://www.besoccer.es/fichajes",
+        start_date=date(2026, 9, 1),
+        end_date=date(2026, 9, 2),
     )
 
-    assert len(transfers) == 1
-    assert transfers[0].player_name == "Ada Example"
-    assert (transfers[0].from_club, transfers[0].to_club) == ("Old FC", "New FC")
-    assert transfers[0].transfer_type == "loan"
-    assert transfers[0].verification_status == "corroborator"
+    assert [
+        (
+            item.player_name,
+            item.from_club,
+            item.to_club,
+            item.transfer_type,
+            item.position,
+        )
+        for item in transfers
+    ] == [
+        (
+            "Carlos Martín",
+            "Atlético de Madrid",
+            "HNK Hajduk Split",
+            "loan",
+            "DC",
+        ),
+        ("Dani Ceballos", "Free Agent", "Real Betis", "free transfer", "MC"),
+    ]
+    assert transfers[0].proof_urls == (
+        "https://www.besoccer.es/jugador/c-martin-776234",
+    )
+    assert all(item.verification_status == "corroborator" for item in transfers)
+
+
+def test_besoccer_fetch_uses_working_spanish_reader_route(monkeypatch):
+    from scraper import besoccer
+
+    requested = []
+
+    async def fake_fetch(_session, url):
+        requested.append(url)
+        return BESOCCER_MARKDOWN
+
+    monkeypatch.setattr(besoccer, "_fetch_text", fake_fetch)
+    transfers = asyncio.run(
+        besoccer._fetch_besoccer_transfers_async(
+            since_date=date(2026, 9, 2),
+            ref_date=date(2026, 9, 2),
+        )
+    )
+
+    assert [item.player_name for item in transfers] == ["Carlos Martín"]
+    assert requested == [besoccer.BESOCCER_READER_URL]
 
 
 def test_sofascore_parser_normalizes_transfer_types_and_dates():
@@ -782,43 +864,67 @@ def test_sofascore_parser_normalizes_transfer_types_and_dates():
     assert transfers[0].verification_status == "corroborator"
 
 
-def test_soccerway_parser_resolves_arrival_and_departure_routes():
-    html = """
-    <div class="transferTab">
-      <div class="transferTab__row transferTab__row--main transferTab__row--team">
-        <div class="transferTab__date">Date</div>
-      </div>
-      <div class="transferTab__row transferTab__row--team">
-        <div class="transferTab__date">03.08.2026</div>
-        <div class="transferTab__player">
-          <a class="transferTab__teamHref" href="/player/ada/1">Ada Example</a>
-        </div>
-        <div class="transferTab__team transferTab__team--to">
-          <svg class="transferTab__typeIcon transferTab__typeIcon--in"></svg>
-          <a class="transferTab__teamHref" href="/team/old/1">Old FC</a>
-        </div>
-        <div class="transferTab__feePrize">€1m</div>
-        <div class="transferTab__feePrizeType">Loan</div>
-      </div>
-      <div class="transferTab__row transferTab__row--team">
-        <div class="transferTab__date">04.08.2026</div>
-        <div class="transferTab__player">
-          <a class="transferTab__teamHref" href="/player/loan/2">Loan Example</a>
-        </div>
-        <div class="transferTab__team transferTab__team--to">
-          <svg class="transferTab__typeIcon transferTab__typeIcon--out"></svg>
-          <a class="transferTab__teamHref" href="/team/new/2">New FC</a>
-        </div>
-        <div class="transferTab__feePrize"></div>
-        <div class="transferTab__feePrizeType">Transfer</div>
-      </div>
-    </div>
-    """
+def test_sofascore_fetch_resolves_relevant_team_and_uses_transfer_api(monkeypatch):
+    from scraper import sofascore
 
-    transfers = parse_soccerway_transfer_html(
-        html,
+    requested = []
+
+    async def fake_api_json(_session, path, *, params=None):
+        requested.append((path, params))
+        if path == sofascore.SOFASCORE_SEARCH_PATH:
+            return {
+                "results": [
+                    {
+                        "type": "team",
+                        "entity": {
+                            "id": 42,
+                            "name": "Arsenal",
+                            "slug": "arsenal",
+                            "gender": "M",
+                            "sport": {"id": 1},
+                        },
+                    }
+                ]
+            }
+        assert path == "/team/42/transfers"
+        return {
+            "transfersOut": [
+                {
+                    "id": 3697007,
+                    "player": {"name": "Gabriel Martinelli", "position": "F"},
+                    "transferFrom": {"name": "Arsenal"},
+                    "transferTo": {"name": "Al-Hilal"},
+                    "type": 3,
+                    "transferDate": "2026-09-02",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(sofascore, "_api_json", fake_api_json)
+    transfers = asyncio.run(
+        sofascore._fetch_sofascore_transfers_async(
+            since_date=date(2026, 9, 2),
+            ref_date=date(2026, 9, 2),
+            club_names=["Arsenal"],
+        )
+    )
+
+    assert [
+        (item.player_name, item.from_club, item.to_club)
+        for item in transfers
+    ] == [("Gabriel Martinelli", "Arsenal", "Al-Hilal")]
+    assert requested == [
+        (sofascore.SOFASCORE_SEARCH_PATH, {"q": "Arsenal"}),
+        ("/team/42/transfers", None),
+    ]
+
+
+def test_soccerway_parser_resolves_current_feed_routes():
+    transfers = parse_soccerway_transfer_feed(
+        SOCCERWAY_FEED,
         "Current FC",
-        "https://www.soccerway.com/team/current/abc/transfers/",
+        "current-id",
+        "https://www.soccerway.com/team/current-fc/current-id/transfers/",
         end_date=date(2026, 8, 4),
     )
 
@@ -828,6 +934,53 @@ def test_soccerway_parser_resolves_arrival_and_departure_routes():
     ] == [
         ("Ada Example", "Old FC", "Current FC", "loan"),
         ("Loan Example", "Current FC", "New FC", "transfer"),
+    ]
+
+
+def test_soccerway_fetch_resolves_relevant_club_and_reads_feed(monkeypatch):
+    from scraper import soccerway
+
+    requested_feeds = []
+
+    async def fake_fetch_json(_session, _url, *, params=None):
+        assert params["q"] == "Current FC"
+        return [
+            {
+                "id": "current-id",
+                "url": "current-fc",
+                "name": "Current FC",
+                "type": {"id": 2},
+                "sport": {"id": 1},
+                "gender": {"id": 1},
+            }
+        ]
+
+    async def fake_fetch_text(_session, url, *, headers=None):
+        requested_feeds.append((url, headers))
+        return SOCCERWAY_FEED
+
+    monkeypatch.setattr(soccerway, "_fetch_json", fake_fetch_json)
+    monkeypatch.setattr(soccerway, "_fetch_text", fake_fetch_text)
+
+    transfers = asyncio.run(
+        soccerway._fetch_soccerway_transfers_async(
+            since_date=date(2026, 8, 3),
+            ref_date=date(2026, 8, 4),
+            club_names=["Current FC"],
+            max_pages=1,
+        )
+    )
+
+    assert [item.player_name for item in transfers] == [
+        "Ada Example",
+        "Loan Example",
+    ]
+    assert requested_feeds == [
+        (
+            "https://global.flashscore.ninja/2020/x/feed/"
+            "tetr_current-id_1_1",
+            {"X-Fsign": soccerway.SOCCERWAY_FEED_SIGNATURE},
+        )
     ]
 
 
@@ -1161,8 +1314,24 @@ def test_run_pipeline_merges_three_route_corroborators(monkeypatch):
     monkeypatch.setattr(run, "fetch_sortitoutsi_transfers", lambda **_: [])
     monkeypatch.setattr(run, "fetch_transfermarkt_transfers", lambda **_: [])
     monkeypatch.setattr(run, "fetch_besoccer_transfers", lambda **_: [besoccer])
-    monkeypatch.setattr(run, "fetch_sofascore_transfers", lambda **_: [sofascore])
-    monkeypatch.setattr(run, "fetch_soccerway_transfers", lambda **_: [soccerway])
+    monkeypatch.setattr(
+        run,
+        "fetch_sofascore_transfers",
+        lambda **kwargs: (
+            [sofascore]
+            if kwargs.get("club_names") == ("New FC",)
+            else []
+        ),
+    )
+    monkeypatch.setattr(
+        run,
+        "fetch_soccerway_transfers",
+        lambda **kwargs: (
+            [soccerway]
+            if kwargs.get("club_names") == ("New FC",)
+            else []
+        ),
+    )
 
     transfers = run._scrape_run_transfers(
         SimpleNamespace(
