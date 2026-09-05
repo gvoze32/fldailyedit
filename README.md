@@ -66,7 +66,7 @@ supplement it and help resolve incomplete or ambiguous coverage:
 
 - Wikipedia's confirmed seasonal transfer lists corroborate transfer routes and
   dated moves.
-- Moderated Sortitoutsi activity provides fast transfer signals that can
+- Sortitoutsi activity provides fast transfer signals that can
   corroborate or safely enrich a verified event.
 - Transfermarkt provides additional dated transfer details, fees, and stable
   player/club identifiers.
