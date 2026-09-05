@@ -48,8 +48,8 @@ For a custom club list or on-demand run, fork the repository and use
 
 ## Fast vs Deep
 
-- **Fast:** Quicker updates using the live transfer feed.
-- **Deep:** Slower updates that also scan indexed club squads for broader coverage.
+- **Fast:** Quicker, but only checks the most recent transfers.
+- **Deep:** Takes longer, but checks every team's full roster to make sure nothing is missed.
 
 Fast is the default. Add `--deep` when you want broader coverage.
 
