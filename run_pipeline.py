@@ -244,7 +244,7 @@ def _scrape_run_transfers(args):
             f"  Transfermarkt found {len(transfermarkt_events)} dated transfers"
         )
 
-        supplemental_clubs = _supplemental_target_clubs(transfer_batches)
+        primary_target_clubs = _supplemental_target_clubs(transfer_batches[:1])
 
         print("\n🧭 Adding BeSoccer corroboration routes...")
         besoccer_corroborators = fetch_besoccer_transfers(
@@ -260,7 +260,7 @@ def _scrape_run_transfers(args):
         sofascore_corroborators = fetch_sofascore_transfers(
             since_date=since_date,
             window=window,
-            club_names=supplemental_clubs,
+            club_names=primary_target_clubs,
         )
         corroborators.extend(sofascore_corroborators)
         print(
@@ -268,9 +268,8 @@ def _scrape_run_transfers(args):
         )
 
         print("\n🛣️ Adding Soccerway team-page corroboration routes...")
-        # Soccerway is per-club; use only primary targets to avoid a
-        # supplemental-history fan-out of thousands of requests.
-        soccerway_clubs = _supplemental_target_clubs(transfer_batches[:1])
+        # Both optional route sources only corroborate primary events.
+        soccerway_clubs = primary_target_clubs
         soccerway_corroborators = fetch_soccerway_transfers(
             since_date=since_date,
             window=window,

@@ -98,6 +98,8 @@ relevant primary club by default; deeper history can request a larger
 `max_pages` value.
 Soccerway has a 60-second source budget so a blocked feed cannot hold the
 pipeline indefinitely.
+Sofascore and Soccerway are filtered to primary-source clubs because they only
+add corroboration and never create transfer events.
 
 BeSoccer, Sofascore, and Soccerway can add provenance to an existing verified
 FotMob/Transfermarkt/Wikipedia route, but never create a new transfer event.

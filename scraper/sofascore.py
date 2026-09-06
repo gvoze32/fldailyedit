@@ -24,6 +24,7 @@ SOFASCORE_TRANSFER_PAGE_URL = "https://www.sofascore.com/football/player-transfe
 SOFASCORE_TRANSFER_PAGE_FALLBACK_URL = (
     "https://api.sofascore.app/football/player-transfers"
 )
+SOFASCORE_TRANSFER_PAGE_RETRIES = 2
 SOFASCORE_TRANSFER_PAGE_JINA_URL = (
     "https://r.jina.ai/https://www.sofascore.com/football/player-transfers"
 )
@@ -288,6 +289,10 @@ def _global_transfer_payload(page_html: str) -> Any:
     if not transfers and isinstance(direct_transfers, list):
         transfers.extend(item for item in direct_transfers if isinstance(item, dict))
         recognized = True
+    if not recognized:
+        embedded_transfers = _transfer_items(page_props)
+        if embedded_transfers:
+            return {"transfers": embedded_transfers}
     return {"transfers": transfers} if recognized else None
 
 
@@ -315,26 +320,41 @@ async def _fetch_transfer_page_payload(
 ) -> Any:
     """Fetch the global transfer page and return its embedded payload."""
     page_requests = (
-        (SOFASCORE_TRANSFER_PAGE_URL, None),
-        (SOFASCORE_TRANSFER_PAGE_JINA_URL, SOFASCORE_JINA_HEADERS),
-        (SOFASCORE_TRANSFER_PAGE_FALLBACK_URL, None),
+        (SOFASCORE_TRANSFER_PAGE_URL, 1, None),
+        (
+            SOFASCORE_TRANSFER_PAGE_JINA_URL,
+            1,
+            SOFASCORE_JINA_HEADERS,
+        ),
+        (
+            SOFASCORE_TRANSFER_PAGE_FALLBACK_URL,
+            SOFASCORE_TRANSFER_PAGE_RETRIES,
+            None,
+        ),
     )
     last_error: Exception | None = None
-    for page_url, request_headers in page_requests:
-        try:
-            options: dict[str, Any] = {"allow_redirects": False}
-            if request_headers is not None:
-                options["headers"] = request_headers
-            response = await session.get(page_url, **options)
-            if response.status_code != 200:
-                raise RuntimeError(f"HTTP {response.status_code}")
-            payload = _global_transfer_payload(response.text)
-            if payload is None:
-                raise RuntimeError("page has no embedded transfers")
-            return payload
-        except Exception as exc:
-            last_error = exc
-    raise RuntimeError("Sofascore transfer page unavailable") from last_error
+    errors: list[str] = []
+    for page_url, attempts, request_headers in page_requests:
+        for attempt in range(attempts):
+            try:
+                options: dict[str, Any] = {"allow_redirects": False}
+                if request_headers is not None:
+                    options["headers"] = request_headers
+                response = await session.get(page_url, **options)
+                if response.status_code != 200:
+                    raise RuntimeError(f"HTTP {response.status_code}")
+                payload = _global_transfer_payload(response.text)
+                if payload is None:
+                    raise RuntimeError("page has no embedded transfers")
+                return payload
+            except Exception as exc:
+                last_error = exc
+                errors.append(
+                    f"{page_url} attempt {attempt + 1}: "
+                    f"{type(exc).__name__}: {str(exc)[:160]}"
+                )
+    detail = "; ".join(errors)
+    raise RuntimeError(f"Sofascore transfer page unavailable: {detail}") from last_error
 
 
 def _transfer_key(transfer: Transfer) -> tuple[str, str, str, str]:
