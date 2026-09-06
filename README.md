@@ -116,7 +116,8 @@ then Wikipedia; corroboration sources never override a primary route.
   player/club identifiers.
 - BeSoccer's current confirmed-transfer feed corroborates transfer routes,
   dates, fees, and transfer types.
-- Sofascore's global rendered transfer page corroborates dated transfer routes.
+- Sofascore's global transfer page and JSON backing endpoint corroborate dated
+  transfer routes.
 - Soccerway resolves relevant clubs and corroborates their dated transfer routes.
 
 The optional Soccerway corroboration scan reads the first transfer page per

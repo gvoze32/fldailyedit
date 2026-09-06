@@ -21,8 +21,11 @@ from scraper.source_utils import date_in_range, parse_external_date, resolve_sou
 logger = logging.getLogger(__name__)
 
 SOFASCORE_TRANSFER_PAGE_URL = "https://www.sofascore.com/football/player-transfers"
-SOFASCORE_TRANSFER_PAGE_FALLBACK_URL = (
-    "https://api.sofascore.app/football/player-transfers"
+SOFASCORE_TRANSFER_API_URL = (
+    "https://api.sofascore.app/api/v1/transfer?page=1&sort=-transferFee"
+)
+SOFASCORE_TRANSFER_API_APP_URL = (
+    "https://sofascore.app/api/v1/transfer?page=1&sort=-transferFee"
 )
 SOFASCORE_TRANSFER_PAGE_APP_URL = "https://sofascore.app/football/player-transfers"
 SOFASCORE_TRANSFER_PAGE_APP_WWW_URL = (
@@ -322,7 +325,7 @@ parse_sofascore_page = parse_sofascore_transfer_page
 async def _fetch_transfer_page_payload(
     session: requests.AsyncSession,
 ) -> Any:
-    """Fetch the global transfer page and return its embedded payload."""
+    """Fetch the global transfer page or its JSON backing endpoint."""
     page_requests = (
         (SOFASCORE_TRANSFER_PAGE_URL, 1, None),
         (
@@ -336,11 +339,8 @@ async def _fetch_transfer_page_payload(
             None,
         ),
         (SOFASCORE_TRANSFER_PAGE_APP_WWW_URL, 1, None),
-        (
-            SOFASCORE_TRANSFER_PAGE_FALLBACK_URL,
-            1,
-            None,
-        ),
+        (SOFASCORE_TRANSFER_API_URL, 1, None),
+        (SOFASCORE_TRANSFER_API_APP_URL, 1, None),
     )
     last_error: Exception | None = None
     errors: list[str] = []
@@ -353,9 +353,14 @@ async def _fetch_transfer_page_payload(
                 response = await session.get(page_url, **options)
                 if response.status_code != 200:
                     raise RuntimeError(f"HTTP {response.status_code}")
-                payload = _global_transfer_payload(response.text)
-                if payload is None:
-                    raise RuntimeError("page has no embedded transfers")
+                if "/api/v1/transfer" in page_url:
+                    payload = response.json()
+                    if not isinstance(payload, (dict, list)):
+                        raise RuntimeError("API response has no transfer payload")
+                else:
+                    payload = _global_transfer_payload(response.text)
+                    if payload is None:
+                        raise RuntimeError("page has no embedded transfers")
                 return payload
             except Exception as exc:
                 last_error = exc

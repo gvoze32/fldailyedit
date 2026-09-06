@@ -1054,6 +1054,46 @@ def test_sofascore_transfer_page_falls_back_to_app_hostname_after_blocks():
         sofascore.SOFASCORE_TRANSFER_PAGE_APP_URL,
     ]
 
+def test_sofascore_transfer_page_falls_back_to_json_api_after_html_blocks():
+    from scraper import sofascore
+
+    api_payload = {
+        "transfers": [
+            {
+                "id": 42,
+                "player": {"name": "API Player", "position": "M"},
+                "transferFrom": {"name": "Old FC"},
+                "transferTo": {"name": "New FC"},
+                "type": 3,
+                "transferDate": "2026-09-02",
+            }
+        ]
+    }
+    requested = []
+
+    class FakeSession:
+        async def get(self, url, **kwargs):
+            requested.append((url, kwargs))
+            if url == sofascore.SOFASCORE_TRANSFER_API_URL:
+                return SimpleNamespace(
+                    status_code=200,
+                    text="",
+                    json=lambda: api_payload,
+                )
+            return SimpleNamespace(status_code=403, text="")
+
+    payload = asyncio.run(sofascore._fetch_transfer_page_payload(FakeSession()))
+
+    assert payload == api_payload
+    assert [url for url, _ in requested] == [
+        sofascore.SOFASCORE_TRANSFER_PAGE_URL,
+        sofascore.SOFASCORE_TRANSFER_PAGE_JINA_URL,
+        sofascore.SOFASCORE_TRANSFER_PAGE_APP_URL,
+        sofascore.SOFASCORE_TRANSFER_PAGE_APP_URL,
+        sofascore.SOFASCORE_TRANSFER_PAGE_APP_WWW_URL,
+        sofascore.SOFASCORE_TRANSFER_API_URL,
+    ]
+
 
 
 
