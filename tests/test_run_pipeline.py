@@ -141,6 +141,101 @@ def test_match_database_uses_save_team_names_without_external_catalog(
     assert matcher.match_team("Vanilla FC")[0] == 101
 
 
+def test_match_database_uses_verified_native_player_alias(
+    monkeypatch, tmp_path
+):
+    import run_pipeline as run
+    from editor.models import PlayerInfo, TeamInfo
+    from editor.playerbin import PlayerBinDatabase, PlayerBinRecord
+
+    legacy = tmp_path / "players.csv"
+    legacy.write_text(
+        "PlayerID,PlayerName\n1001,Cole Palmer\n",
+        encoding="utf-8",
+    )
+    native = PlayerBinDatabase(
+        {
+            1001: PlayerBinRecord(
+                1001,
+                "コール パーマー",
+                23,
+                "AMF",
+                0,
+                "PALMER",
+            )
+        }
+    )
+
+    class Save:
+        is_pes21_save = True
+        player_catalog_report = SimpleNamespace(
+            current_entries=0,
+            missing_roster_ids=(),
+        )
+        playerbin_db = native
+
+        def attach_playerbin(self, database):
+            self.playerbin_db = database
+
+        def attach_teambin(self, _database):
+            pass
+
+        def attach_player_assignment(self, _database):
+            pass
+
+        def get_all_players(self):
+            return {
+                1001: PlayerInfo(
+                    1001,
+                    "コール パーマー",
+                    "PALMER",
+                    position="AMF",
+                    age=23,
+                )
+            }
+
+        def get_all_team_info(self):
+            return {101: TeamInfo(101, "Chelsea FC")}
+
+        def get_club_team_ids(self):
+            return {101}
+
+        def get_all_rosters(self):
+            from editor.models import TeamData
+
+            return {101: TeamData(101, [1001] + [0] * 39)}
+
+    monkeypatch.setattr(run.config, "PLAYERS_CSV_FILE", legacy)
+    monkeypatch.setattr(
+        run.native_metadata,
+        "_load_playerbin_database",
+        lambda **_kwargs: (native, "fixture::Player.bin"),
+    )
+    monkeypatch.setattr(
+        run.native_metadata,
+        "_load_teambin_database",
+        lambda **_kwargs: (None, None),
+    )
+    monkeypatch.setattr(
+        run.native_metadata,
+        "_load_player_assignment_database",
+        lambda **_kwargs: (None, None),
+    )
+
+    matcher, _, team_player_map, _ = run._load_match_database(Save())
+
+    player_id, _, confidence = matcher.match_player(
+        "Cole Palmer",
+        threshold=80,
+        from_team_id=101,
+        team_player_map=team_player_map,
+        position="AMF",
+    )
+
+    assert player_id == 1001
+    assert confidence == 100.0
+
+
 def test_match_database_keeps_external_team_catalog_strict_for_reference_save(
     monkeypatch, tmp_path
 ):

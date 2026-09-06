@@ -18,7 +18,12 @@ from editor.editfile import EditFile
 from editor.save_metadata import read_save_header
 from editor import logger as transfer_logger
 from editor.locking import EditFileLock
-from editor.player_catalog import PlayerCatalogError, load_id_name_text
+from editor.player_catalog import (
+    PlayerCatalogError,
+    legacy_name_matches_native,
+    load_id_name_text,
+    load_legacy_player_names,
+)
 from editor.release_policy import ReleasePolicyError, load_release_policy
 from scraper.fotmob import (
     IncompleteScrapeError,
@@ -465,6 +470,10 @@ def _load_match_database(
         )
     teams_info = edit_file.get_all_team_info()
     club_ids = edit_file.get_club_team_ids()
+    all_rosters = edit_file.get_all_rosters()
+    team_player_map = {
+        team_id: roster.roster for team_id, roster in all_rosters.items()
+    }
 
     current_catalog_entries = (
         getattr(catalog_report, "current_entries", None)
@@ -493,9 +502,44 @@ def _load_match_database(
         for team_id, team in teams_info.items()
         if team_id in club_ids
     }
+
+    # T99 stores localized full names and often surname-only print names.
+    # Reuse legacy English names only after native ID and display agreement;
+    # never let a stale catalog invent a player outside the native roster.
+    player_records = [
+        (player.name, player_id) for player_id, player in players.items()
+    ]
+    native_aliases: dict[int, str] = {}
+    native_playerbin = getattr(edit_file, "playerbin_db", None)
+    if is_pes21_save and native_playerbin is not None:
+        roster_ids = {
+            player_id
+            for roster in all_rosters.values()
+            for player_id in roster.roster
+        }
+        legacy_names = load_legacy_player_names(
+            config.PLAYERS_CSV_FILE,
+            roster_ids,
+        )
+        for player_id, legacy_name in legacy_names.items():
+            native_record = native_playerbin.get(player_id)
+            if native_record is None or not legacy_name_matches_native(
+                legacy_name,
+                native_record.name,
+                native_record.print_name,
+            ):
+                continue
+            native_aliases[player_id] = legacy_name
+            player_records.append((legacy_name, player_id))
+        if native_aliases:
+            print(
+                "  Loaded "
+                f"{len(native_aliases)} verified native player-name aliases"
+            )
+
     matcher = NameMatcher()
     matcher.load_player_db(
-        [(player.name, player_id) for player_id, player in players.items()],
+        player_records,
         positions={
             player_id: player.position
             for player_id, player in players.items()
@@ -515,11 +559,6 @@ def _load_match_database(
     # The save's league memberships already filter national teams. Numeric
     # club-ID heuristics are invalid for FL26 (some real clubs have low IDs).
     matcher.load_team_db(team_name_to_id, clubs_only=False)
-
-    all_rosters = edit_file.get_all_rosters()
-    team_player_map = {
-        team_id: roster.roster for team_id, roster in all_rosters.items()
-    }
     if current_catalog_entries == 0:
         print("  ⚠ External player catalog unavailable; using names from selected save")
     print(

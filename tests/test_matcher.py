@@ -285,9 +285,10 @@ class TestTeamMatching:
         assert matched_name == ""
         assert conf == 100.0
 
-    def test_alias_match(self, matcher):
-        """'Man Utd' should resolve via aliases to 'Manchester United'."""
-        tid, name, conf = matcher.match_team("Man Utd")
+    @pytest.mark.parametrize("alias", ["Man Utd", "Man United"])
+    def test_alias_match(self, matcher, alias):
+        """Short Manchester United names resolve to the canonical club."""
+        tid, name, conf = matcher.match_team(alias)
         assert tid == 2001
         assert conf == 100.0
 

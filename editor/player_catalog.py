@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import csv
+import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +29,65 @@ class PlayerCatalogReport:
     nationalities: int
     ages: int
 
+
+_NAME_TRANSLITERATIONS = str.maketrans(
+    {
+        "Æ": "AE",
+        "æ": "ae",
+        "Ð": "D",
+        "ð": "d",
+        "Đ": "D",
+        "đ": "d",
+        "Ł": "L",
+        "ł": "l",
+        "Ø": "O",
+        "ø": "o",
+        "Œ": "OE",
+        "œ": "oe",
+        "Þ": "TH",
+        "þ": "th",
+        "ß": "ss",
+    }
+)
+
+
+def _name_tokens(value: str) -> tuple[str, ...]:
+    """Return ASCII-ish name tokens for conservative cross-reference checks."""
+    translated = (value or "").translate(_NAME_TRANSLITERATIONS)
+    decomposed = unicodedata.normalize("NFKD", translated)
+    ascii_text = decomposed.encode("ascii", errors="ignore").decode("ascii").casefold()
+    return tuple(re.findall(r"[a-z0-9]+", ascii_text))
+
+
+def legacy_name_matches_native(
+    legacy_name: str,
+    native_name: str,
+    native_print_name: str,
+) -> bool:
+    """Check that a legacy full name agrees with native display metadata."""
+    legacy_tokens = {token for token in _name_tokens(legacy_name) if len(token) >= 4}
+    native_tokens = {
+        token
+        for token in (*_name_tokens(native_name), *_name_tokens(native_print_name))
+        if len(token) >= 4
+    }
+    if not legacy_tokens or not native_tokens:
+        return False
+    if legacy_tokens & native_tokens:
+        return True
+
+    # Native print names often collapse initials and punctuation (e.g. M BOMA,
+    # JSCHMIDT). Accept only a matching suffix, never a loose prefix.
+    return any(
+        len(legacy_token) >= 4
+        and len(native_token) >= 4
+        and (
+            legacy_token.endswith(native_token)
+            or native_token.endswith(legacy_token)
+        )
+        for legacy_token in legacy_tokens
+        for native_token in native_tokens
+    )
 
 
 def load_id_name_text(
@@ -104,6 +165,21 @@ def _load_legacy_roster_fallbacks(
     except OSError as exc:
         raise PlayerCatalogError(f"Could not read legacy player CSV {csv_path}: {exc}") from exc
     return fallbacks
+
+
+def load_legacy_player_names(
+    csv_path: Path | None,
+    player_ids: set[int],
+) -> dict[int, str]:
+    """Load legacy names for an explicit set of caller-validated IDs."""
+    return {
+        player_id: player.name
+        for player_id, player in _load_legacy_roster_fallbacks(
+            csv_path,
+            set(player_ids),
+            set(),
+        ).items()
+    }
 
 
 def build_player_catalog(
