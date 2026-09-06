@@ -25,6 +25,7 @@ _GAME_ROOT_ENVIRONMENT = (
 _GAME_ROOT_PARENT_ENVIRONMENT = ("PROGRAMFILES(X86)", "PROGRAMFILES", "LOCALAPPDATA")
 _GAME_ROOT_NAMES = ("SP Football Life 2026", "Football Life 2026", "PES 2021")
 _DATABASE_ARCHIVE_NAMES = ("data_s2526.cpk", "data_extra.cpk")
+_DATABASE_ARCHIVE_PATTERNS = ("*liveupd*.cpk", "*datapack*.cpk", "*.cpk")
 _ENVIRONMENT_ROOTS = ("USERPROFILE", "OneDrive", "OneDriveConsumer")
 _GAME_NAMES = {
     "fl26-u2.2-national-squads": "Football Life 2026",
@@ -122,29 +123,60 @@ def reject_game_root_save(path: Path) -> None:
     )
 
 
+def find_game_cpks(
+    game_root: Path,
+    *,
+    archive_names: tuple[str, ...] = _DATABASE_ARCHIVE_NAMES,
+) -> tuple[Path, ...]:
+    """Find database CPKs below one game root in safe precedence order."""
+    root = Path(game_root).expanduser()
+    download = root if root.name.casefold() == "download" else root / "download"
+    if not download.is_dir() and root.is_dir():
+        download = root
+
+    candidates: list[Path] = []
+    seen: set[str] = set()
+
+    def add(candidate: Path) -> None:
+        key = _deduplication_key(candidate)
+        if key in seen:
+            return
+        try:
+            if candidate.is_file():
+                seen.add(key)
+                candidates.append(candidate)
+        except OSError:
+            return
+
+    for archive_name in archive_names:
+        add(download / archive_name)
+
+    for pattern in _DATABASE_ARCHIVE_PATTERNS:
+        try:
+            discovered = sorted(
+                download.glob(pattern),
+                key=lambda path: (str(path).casefold(), str(path)),
+            )
+        except OSError:
+            discovered = []
+        for candidate in discovered:
+            add(candidate)
+    return tuple(candidates)
+
+
 def find_game_cpk(
     game_root: Path,
     *,
     archive_names: tuple[str, ...] = _DATABASE_ARCHIVE_NAMES,
 ) -> Path | None:
     """Find the preferred database CPK below one game installation root."""
-    root = Path(game_root).expanduser()
-    download = root if root.name.casefold() == "download" else root / "download"
-    for archive_name in archive_names:
-        candidate = download / archive_name
-        try:
-            if candidate.is_file():
-                return candidate
-        except OSError:
-            continue
-    return None
+    return next(iter(find_game_cpks(game_root, archive_names=archive_names)), None)
 
 
-def discover_game_cpk(
-    game_root: Path | None = None,
-    environment: Mapping[str, str] | None = None,
-) -> Path | None:
-    """Discover a Football Life/PES database CPK without scanning arbitrary files."""
+def _candidate_game_roots(
+    game_root: Path | None,
+    environment: Mapping[str, str] | None,
+) -> tuple[Path, ...]:
     source = os.environ if environment is None else environment
     roots: list[Path] = []
     if game_root is not None:
@@ -159,17 +191,34 @@ def discover_game_cpk(
             continue
         parent = Path(value)
         roots.extend(parent / name for name in _GAME_ROOT_NAMES)
+    return tuple(roots)
 
+
+def discover_game_cpks(
+    game_root: Path | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> tuple[Path, ...]:
+    """Discover database CPKs without scanning outside known game roots."""
     seen: set[str] = set()
-    for root in roots:
+    for root in _candidate_game_roots(game_root, environment):
         key = _deduplication_key(root)
         if key in seen:
             continue
         seen.add(key)
-        cpk = find_game_cpk(root)
-        if cpk is not None:
-            return cpk
-    return None
+        cpks = find_game_cpks(root)
+        if cpks:
+            return cpks
+    return ()
+
+
+def discover_game_cpk(
+    game_root: Path | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> Path | None:
+    """Discover the preferred Football Life/PES database CPK."""
+    return next(iter(discover_game_cpks(game_root, environment)), None)
+
+
 
 
 def discover_save_locations(

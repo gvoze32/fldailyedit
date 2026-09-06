@@ -28,6 +28,24 @@ from editor.roster import (
 )
 from editor.models import TeamData, PlayerInfo
 
+from editor.save_metadata import FILE_HEADER_SIZE, parse_save_header
+
+
+def test_parse_save_header_identifies_pes2021_profile():
+    raw = bytearray(FILE_HEADER_SIZE)
+    raw[144 : 144 + 4] = b"EDIT"
+    raw[176 : 176 + len(b"eFootball PES 2021 SEASON UPDATE")] = (
+        b"eFootball PES 2021 SEASON UPDATE"
+    )
+    struct.pack_into("<I", raw, 64, 10_995_800)
+
+    header = parse_save_header(raw)
+
+    assert header.file_type == "EDIT"
+    assert header.game_version == "eFootball PES 2021 SEASON UPDATE"
+    assert header.data_size == 10_995_800
+    assert header.is_pes21
+
 
 def _build_mock_data(
     num_players=3,

@@ -414,6 +414,20 @@ def _load_match_database(
         )
     players = edit_file.get_all_players()
     edit_file._player_cache = players
+    is_pes21_save = bool(getattr(edit_file, "is_pes21_save", False))
+    catalog_report = getattr(edit_file, "player_catalog_report", None)
+    if is_pes21_save:
+        missing_roster_ids = tuple(
+            getattr(catalog_report, "missing_roster_ids", ()) or ()
+        )
+        if missing_roster_ids:
+            source = getattr(edit_file, "playerbin_source", None) or "unavailable"
+            sample = ", ".join(str(player_id) for player_id in missing_roster_ids[:8])
+            raise PlayerCatalogError(
+                "PES 2021/T99 save requires matching native Player.bin metadata; "
+                f"{len(missing_roster_ids)} roster IDs are missing "
+                f"(source: {source}; first IDs: {sample})"
+            )
     try:
         release_policy = load_release_policy(release_policy_file)
     except ReleasePolicyError as exc:
@@ -430,7 +444,6 @@ def _load_match_database(
     teams_info = edit_file.get_all_team_info()
     club_ids = edit_file.get_club_team_ids()
 
-    catalog_report = getattr(edit_file, "player_catalog_report", None)
     current_catalog_entries = (
         getattr(catalog_report, "current_entries", None)
         if catalog_report is not None
@@ -440,7 +453,8 @@ def _load_match_database(
     # SPFL catalog is unavailable, ignore any bundled team file as well: it
     # may describe a different base than a ULM/vanilla save.
     use_external_team_names = (
-        current_catalog_entries is None or current_catalog_entries > 0
+        not is_pes21_save
+        and (current_catalog_entries is None or current_catalog_entries > 0)
     )
     current_team_names = (
         load_id_name_text(
@@ -516,7 +530,11 @@ def _match_and_plan_transfers(
         save_scope=save_scope,
         include_legacy=(output_path.resolve() == config.OUTPUT_FILE_PATH.resolve()),
     )
-    validated_fotmob_teams = _load_represented_fotmob_club_map()
+    represented_fotmob_teams = _load_represented_fotmob_club_map()
+    is_pes21_save = bool(getattr(edit_file, "is_pes21_save", False))
+    validated_fotmob_teams = (
+        None if is_pes21_save else represented_fotmob_teams
+    )
     matched = planning._match_transfers_statefully(
         transfers,
         matcher,
@@ -524,7 +542,9 @@ def _match_and_plan_transfers(
         team_player_map,
         club_ids,
         historical_entries=historical_entries,
-        validated_fotmob_ids=set(validated_fotmob_teams),
+        validated_fotmob_ids=(
+            None if is_pes21_save else set(represented_fotmob_teams)
+        ),
         validated_fotmob_teams=validated_fotmob_teams,
     )
     matched, duplicate_shirt_matches = planning._dedupe_shirt_number_matches(matched)
@@ -573,13 +593,21 @@ def _plan_captain_updates(
     matcher: NameMatcher,
     team_player_map: dict[int, list[int]],
     club_ids: set[int],
-    validated_fotmob_teams: dict[int, int],
+    validated_fotmob_teams: dict[int, int] | None,
     threshold: float,
 ) -> tuple[_PlannedCaptainUpdate, ...]:
     """Resolve live captain markers to fail-closed local roster targets."""
     by_team: dict[int, CaptainUpdate] = {}
     for source in captain_updates:
-        team_id = validated_fotmob_teams.get(source.team_id_fotmob)
+        if validated_fotmob_teams is not None:
+            team_id = validated_fotmob_teams.get(source.team_id_fotmob)
+        else:
+            team_id, _, team_confidence = matcher.match_team(
+                source.club_name,
+                threshold=98.0,
+            )
+            if team_confidence < 98.0:
+                team_id = None
         if team_id is None or team_id not in club_ids:
             logger.warning(
                 "Skipping captain for %s (%s): club identity is not represented",
@@ -1121,6 +1149,17 @@ class _RunLocalUpdateRuntime:
 
             edit_file = EditFile()
             edit_file.load(data_dat)
+            header_path = temp_dir / "header.dat"
+            if header_path.is_file():
+                try:
+                    edit_file.attach_save_header(read_save_header(header_path))
+                except (OSError, ValueError) as error:
+                    raise LocalUpdateError(
+                        "invalid_save",
+                        f"Invalid decrypted save header: {error}",
+                        stage=LocalUpdateStage.VALIDATING,
+                    ) from error
+
             integrity = edit_file.validate_integrity()
             if not integrity["valid"]:
                 details = [
@@ -1209,12 +1248,17 @@ class _RunLocalUpdateRuntime:
             )
             captain_sources = getattr(transfers, "captain_updates", ())
             if captain_sources:
+                captain_team_map = (
+                    None
+                    if bool(getattr(prepared.edit_file, "is_pes21_save", False))
+                    else _load_represented_fotmob_club_map()
+                )
                 prepared.captain_plan = _plan_captain_updates(
                     captain_sources,
                     matcher,
                     team_player_map,
                     club_ids,
-                    _load_represented_fotmob_club_map(),
+                    captain_team_map,
                     match_threshold,
                 )
             prepared.roster_plan = roster_plan

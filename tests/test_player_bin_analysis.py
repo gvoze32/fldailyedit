@@ -34,6 +34,7 @@ from tools.cpk_extract import extract_file, extract_game_databases, list_files
 
 CPK_PATH = Path("reference/data_s2526.cpk")
 EXTRA_CPK_PATH = Path("reference/download/data_extra.cpk")
+T99_CPK_PATH = Path("reference/T99 Patch V10/t99p21_v10_liveupd.cpk")
 
 
 
@@ -61,6 +62,37 @@ def test_cpk_extracts_and_indexes_player_bin(tmp_path: Path):
         loan_until=0,
         caps=0,
     )
+@pytest.mark.skipif(
+    not T99_CPK_PATH.exists(), reason="T99 live update CPK fixture is not available"
+)
+def test_t99_mode5_cpk_extracts_native_databases(tmp_path: Path):
+    files = list_files(T99_CPK_PATH)
+    assert "common/etc/pesdb/Player.bin" in files
+    assert "common/etc/pesdb/Team.bin" in files
+    assert "common/etc/pesdb/PlayerAssignment.bin" in files
+
+    player_path = tmp_path / "Player.bin"
+    team_path = tmp_path / "Team.bin"
+    assignment_path = tmp_path / "PlayerAssignment.bin"
+    assert extract_file(T99_CPK_PATH, "Player.bin", player_path) > 1_000_000
+    assert extract_file(T99_CPK_PATH, "Team.bin", team_path) > 10_000
+    assert (
+        extract_file(
+            T99_CPK_PATH,
+            "PlayerAssignment.bin",
+            assignment_path,
+        )
+        > 100_000
+    )
+
+    players = PlayerBinDatabase.load(player_path)
+    teams = TeamBinDatabase.load(team_path)
+    assignments = PlayerAssignmentDatabase.load(assignment_path)
+    assert len(players) == 21_962
+    assert len(teams) == 698
+    assert len(assignments) == 21_172
+    assert players.get(38439) is not None
+
 
 def test_playerbin_invalid_position_is_not_misclassified_as_goalkeeper():
     raw = bytearray(RECORD_SIZE)

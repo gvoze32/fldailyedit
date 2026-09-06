@@ -21,8 +21,9 @@ import config
 from editor.models import ManagerInfo, PlayerInfo, TeamData, TeamInfo
 from editor.player_assignment import PlayerAssignmentDatabase
 from editor.player_catalog import PlayerCatalogReport, build_player_catalog
-from editor.playerbin import PlayerBinDatabase, POSITION_NAMES
+from editor.playerbin import POSITION_NAMES, PlayerBinDatabase
 from editor.release_policy import PlayerUsage, ReleasePolicy
+from editor.save_metadata import SaveHeader
 from editor.teambin import TeamBinDatabase, TeamBinRecord
 from editor.roster import (
     COMPETITION_SECTION_SIZE,
@@ -160,6 +161,7 @@ class EditFile(RosterGamePlanMixin):
         self.team_player_start: int = 0
         self.competition_entry_start: int = 0
         self.game_plan_start: int = 0
+        self.save_header: SaveHeader | None = None
         self.player_catalog_report: PlayerCatalogReport | None = None
         self.playerbin_db: PlayerBinDatabase | None = None
         self.playerbin_source: str | None = None
@@ -172,6 +174,18 @@ class EditFile(RosterGamePlanMixin):
 
         # Track players transferred in the current session to protect them from overflow auto-release
         self.transferred_player_ids: set[int] = set()
+    def attach_save_header(self, header: SaveHeader | None) -> None:
+        """Attach decrypted container metadata for profile-aware catalog loading."""
+        if header is not None and not isinstance(header, SaveHeader):
+            raise TypeError("header must be a SaveHeader or None")
+        self.save_header = header
+
+    @property
+    def is_pes21_save(self) -> bool:
+        """Return whether this EditFile belongs to vanilla PES 2021."""
+        header = getattr(self, "save_header", None)
+        return bool(header is not None and header.is_pes21)
+
 
     def attach_playerbin(self, database: PlayerBinDatabase | None) -> None:
         """Attach the master Player.bin metadata used by roster fallbacks."""
@@ -448,11 +462,21 @@ class EditFile(RosterGamePlanMixin):
             for player_id in roster.player_ids
             if player_id
         }
-        current_path = (
-            config.CURRENT_PLAYERS_FILE
-            if config.CURRENT_PLAYERS_FILE.is_file()
-            else None
-        )
+        if self.is_pes21_save:
+            # PES 2021/T99 IDs come from the matching native Player.bin. The
+            # bundled FL26 text catalog uses a different ID universe.
+            current_path = None
+            legacy_path = None
+        else:
+            current_path = (
+                config.CURRENT_PLAYERS_FILE
+                if config.CURRENT_PLAYERS_FILE.is_file()
+                else None
+            )
+            legacy_path = csv_path or (
+                config.PLAYERS_CSV_FILE if current_path is not None else None
+            )
+
         database = getattr(self, "playerbin_db", None)
         playerbin_roster_ids = {
             player_id
@@ -460,9 +484,6 @@ class EditFile(RosterGamePlanMixin):
             if database is not None and database.get(player_id) is not None
         }
         catalog_roster_ids = roster_ids - playerbin_roster_ids
-        legacy_path = csv_path or (
-            config.PLAYERS_CSV_FILE if current_path is not None else None
-        )
         players, report = build_player_catalog(
             current_path=current_path,
             legacy_csv_path=legacy_path,
@@ -709,7 +730,10 @@ class EditFile(RosterGamePlanMixin):
         lineup: list[int],
         errors: list[str],
     ) -> int:
-        """Validate known starter position-code invariants when metadata is attached."""
+        if self.is_pes21_save:
+            # The FL26 position-code invariant is not portable to PES 2021
+            # native metadata; roster/table integrity remains validated below.
+            return 0
         if getattr(self, "playerbin_db", None) is None:
             return 0
         starter_slots = lineup[: min(FIRST_TEAM_SLOT_COUNT, roster.roster_size)]

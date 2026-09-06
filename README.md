@@ -20,6 +20,26 @@ It is not compatible with UML, older FL26 versions, or installations without
 the national-squad update. Start a new Master League or Become a Legend career
 after installing it.
 
+### PES 2021/T99 patch saves
+
+`run` also supports vanilla PES 2021 and T99 patch `EDIT00000000` files when
+the matching native database CPKs are available. Point `--game-root` at either
+the PES installation (with its `download` directory) or a directory containing
+the patch CPKs:
+
+```bash
+python run.py run \
+  --edit-file "/path/to/T99/EDIT00000000" \
+  --game-root "/path/to/T99 Patch V10" \
+  --dry-run
+```
+
+Use the `EDIT00000000` and CPKs from the same patch generation. The updater
+reads `Player.bin`, `Team.bin`, and `PlayerAssignment.bin` from the native
+PES 2021 database; it never substitutes the bundled FL26 player catalog. A
+missing or mismatched native `Player.bin` is rejected before any save mutation.
+
+
 ## Install on Windows
 
 The installer is the easiest option:

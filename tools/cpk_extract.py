@@ -6,7 +6,7 @@ import argparse
 import struct
 from pathlib import Path
 
-from installer.paths import find_game_cpk
+from installer.paths import find_game_cpks
 
 
 _CPK_DATA_BASE = 0x800
@@ -94,19 +94,15 @@ def _read_utf(data: bytes, offset: int) -> tuple[list[dict[str, object]], list[t
         _require_bounds(table, column_offset, 5, "@UTF column descriptor")
         flags = table[column_offset]
         column_offset += 1
-        if flags == 0:
-            _require_bounds(table, column_offset, 1, "@UTF column storage flag")
-            flags = table[column_offset]
-            column_offset += 1
         name_offset = struct.unpack_from(">I", table, column_offset)[0]
         column_offset += 4
-        storage = flags >> 4
+        storage = flags & 0xF0
         content_type = flags & 0x0F
         constant: object = None
-        if storage == 3:
+        if storage == 0x30:
             constant, column_offset = read_value(column_offset, content_type)
-        elif storage not in (0, 1, 2, 4, 5, 6, 7):
-            raise ValueError(f"Unsupported @UTF storage type {storage}")
+        elif storage not in (0x00, 0x10, 0x50):
+            raise ValueError(f"Unsupported @UTF storage type 0x{storage:02X}")
         columns.append((read_string(name_offset), content_type, storage, constant))
 
     rows: list[dict[str, object]] = []
@@ -116,10 +112,12 @@ def _read_utf(data: bytes, offset: int) -> tuple[list[dict[str, object]], list[t
         row: dict[str, object] = {}
         cursor = row_offset
         for name, content_type, storage, constant in columns:
-            if storage == 3:
-                row[name] = constant
-            elif storage == 0:
+            if storage == 0x00:
                 row[name] = None
+            elif storage == 0x10:
+                row[name] = 0
+            elif storage == 0x30:
+                row[name] = constant
             else:
                 value, cursor = read_value(cursor, content_type)
                 row[name] = value
@@ -128,12 +126,115 @@ def _read_utf(data: bytes, offset: int) -> tuple[list[dict[str, object]], list[t
     return rows, columns
 
 
-def _parse_toc_rows(cpk_data: bytes) -> tuple[int, list[dict[str, object]]]:
-    toc_offset = cpk_data.find(b"TOC ")
+def _read_cpk_header(cpk_data: bytes) -> dict[str, object]:
+    """Read the root CPK header, including archives with encrypted chunk IDs."""
+    rows, _columns = _read_utf(cpk_data, 16)
+    if len(rows) != 1:
+        raise ValueError(f"CPK header must contain one row; got {len(rows)}")
+    return rows[0]
+
+
+def _parse_mode5_toc_rows(
+    cpk_data: bytes,
+    toc_offset: int,
+) -> list[dict[str, object]]:
+    """Read the compact TOC used by PES CPK mode 5 archives.
+
+    PES 2021 patch archives keep the row data and string table in normal UTF
+    form, but protect the TOC schema descriptor. The row shape is stable:
+    directory, filename, packed size, extract size, 64-bit offset, ID,
+    an omitted/zero user string column, and CRC.
+    """
+    utf_offset = toc_offset + 16
+    _require_bounds(cpk_data, utf_offset, 24, "CPK mode 5 TOC")
+    if cpk_data[utf_offset : utf_offset + 4] != b"@UTF":
+        raise ValueError("CPK mode 5 TOC does not contain an @UTF table")
+
+    table_size = struct.unpack_from(">I", cpk_data, utf_offset + 4)[0]
+    table_start = utf_offset + 8
+    _require_bounds(cpk_data, table_start, table_size, "CPK mode 5 TOC table")
+    table = cpk_data[table_start : table_start + table_size]
+    if len(table) < 24:
+        raise ValueError("CPK mode 5 TOC table header is truncated")
+
+    rows_offset, strings_offset, data_offset = struct.unpack_from(">III", table, 0)
+    number_columns, row_length = struct.unpack_from(">HH", table, 16)
+    number_rows = struct.unpack_from(">I", table, 20)[0]
+    if (number_columns, row_length) != (8, 32):
+        raise ValueError(
+            "Unsupported protected CPK TOC shape: "
+            f"{number_columns} columns, {row_length}-byte rows"
+        )
+    if strings_offset > len(table) or data_offset > len(table):
+        raise ValueError("CPK mode 5 TOC string/data section is out of bounds")
+
+    def read_string(string_offset: int) -> str:
+        start = strings_offset + string_offset
+        if not 0 <= start < len(table):
+            raise ValueError(
+                f"CPK mode 5 TOC string offset {string_offset} is out of bounds"
+            )
+        end = table.find(b"\0", start)
+        if end < 0:
+            raise ValueError(
+                f"CPK mode 5 TOC string at offset {string_offset} is unterminated"
+            )
+        return table[start:end].decode("utf-8", errors="replace")
+
+    rows: list[dict[str, object]] = []
+    for row_number in range(number_rows):
+        row_offset = rows_offset + row_number * row_length
+        _require_bounds(table, row_offset, row_length, "CPK mode 5 TOC row")
+        directory_offset, filename_offset, file_size, extract_size = struct.unpack_from(
+            ">IIII", table, row_offset
+        )
+        file_offset = struct.unpack_from(">Q", table, row_offset + 16)[0]
+        file_id = struct.unpack_from(">I", table, row_offset + 24)[0]
+        crc = struct.unpack_from(">I", table, row_offset + 28)[0]
+        rows.append(
+            {
+                "DirName": read_string(directory_offset),
+                "FileName": read_string(filename_offset),
+                "FileSize": file_size,
+                "ExtractSize": extract_size,
+                "FileOffset": file_offset,
+                "ID": file_id,
+                "UserString": None,
+                "CRC": crc,
+            }
+        )
+    return rows
+
+
+def _toc_location(cpk_data: bytes, header: dict[str, object]) -> int:
+    try:
+        toc_offset = int(header["TocOffset"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("CPK header has no valid TocOffset") from exc
+    if toc_offset == 0xFFFFFFFFFFFFFFFF:
+        toc_offset = cpk_data.find(b"TOC ")
     if toc_offset < 0:
         raise ValueError("TOC marker not found in CPK")
-    rows, _columns = _read_utf(cpk_data, toc_offset + 16)
+    _require_bounds(cpk_data, toc_offset, 16, "CPK TOC chunk")
+    return toc_offset
+
+
+def _parse_toc_rows(cpk_data: bytes) -> tuple[int, list[dict[str, object]]]:
+    header = _read_cpk_header(cpk_data)
+    toc_offset = _toc_location(cpk_data, header)
+    try:
+        rows, _columns = _read_utf(cpk_data, toc_offset + 16)
+    except ValueError as standard_error:
+        try:
+            rows = _parse_mode5_toc_rows(cpk_data, toc_offset)
+        except ValueError as mode5_error:
+            raise ValueError(
+                f"Could not parse CPK TOC at 0x{toc_offset:X}: {standard_error}"
+            ) from mode5_error
+    for row in rows:
+        row["_ContentOffset"] = int(header.get("ContentOffset", _CPK_DATA_BASE))
     return toc_offset, rows
+
 
 
 def _full_name(row: dict[str, object]) -> str:
@@ -172,9 +273,19 @@ def _select_row(rows: list[dict[str, object]], filename: str) -> dict[str, objec
     return basename_matches[0]
 
 
-def _payload_start(data: bytes, toc_offset: int, file_offset: int, file_size: int) -> int:
-    candidates = (file_offset + _CPK_DATA_BASE, file_offset + toc_offset)
-    for start in candidates:
+def _payload_start(
+    data: bytes,
+    toc_offset: int,
+    file_offset: int,
+    file_size: int,
+    content_offset: int,
+) -> int:
+    candidates = (
+        file_offset + content_offset,
+        file_offset + _CPK_DATA_BASE,
+        file_offset + toc_offset,
+    )
+    for start in dict.fromkeys(candidates):
         if 0 <= start <= len(data) and start + file_size <= len(data):
             return start
     raise ValueError(
@@ -190,13 +301,19 @@ def read_file(cpk_path: Path, filename: str) -> bytes:
     try:
         file_offset = int(row["FileOffset"])
         file_size = int(row.get("FileSize", row.get("ExtractSize", 0)))
+        content_offset = int(row.get("_ContentOffset", _CPK_DATA_BASE))
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"CPK row for {filename!r} has invalid offset/size") from exc
     if file_offset < 0 or file_size < 0:
         raise ValueError(f"CPK row for {filename!r} has negative offset/size")
-    start = _payload_start(data, toc_offset, file_offset, file_size)
+    start = _payload_start(
+        data,
+        toc_offset,
+        file_offset,
+        file_size,
+        content_offset,
+    )
     return data[start : start + file_size]
-
 
 def extract_file(cpk_path: Path, filename: str, output_path: Path) -> int:
     """Extract a named file from a CPK archive and return bytes written."""
@@ -207,9 +324,8 @@ def extract_file(cpk_path: Path, filename: str, output_path: Path) -> int:
     return len(payload)
 
 def _database_cpk_candidates(game_root: Path) -> tuple[Path, ...]:
-    """Return the one selected game database archive."""
-    cpk_path = find_game_cpk(game_root)
-    return (cpk_path,) if cpk_path is not None else ()
+    """Return database archives in the game's overlay precedence order."""
+    return find_game_cpks(game_root)
 
 
 def extract_game_databases(
@@ -220,7 +336,8 @@ def extract_game_databases(
     cpk_paths = _database_cpk_candidates(game_root)
     if not cpk_paths:
         raise FileNotFoundError(
-            f"no data_s2526.cpk or data_extra.cpk found below {Path(game_root)}"
+            "no database CPK archives found below "
+            f"{Path(game_root)}"
         )
     output_directory = Path(output_directory)
     extracted: dict[str, Path] = {}
