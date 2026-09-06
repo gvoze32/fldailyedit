@@ -31,6 +31,7 @@ class LocalUpdateRequest:
     allow_overflow_release: bool = True
     release_policy_file: Path | None = None
     dry_run: bool = False
+    game_root: Path | None = None
 
     @property
     def target_path(self) -> Path:

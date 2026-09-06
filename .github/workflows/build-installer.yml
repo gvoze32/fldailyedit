@@ -22,6 +22,9 @@ on:
       - "config.py"
       - "local_update.py"
       - "run.py"
+      - "run_pipeline.py"
+      - "native_metadata.py"
+      - "transfer_planning.py"
       - "editor/**"
       - "scraper/**"
 

@@ -260,6 +260,56 @@ def test_local_runtime_accepts_non_blocking_roster_warnings(
         runtime.cleanup(prepared)
 
 
+def test_local_runtime_attaches_save_header_profile(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import run_pipeline as run
+    from editor.save_metadata import FILE_HEADER_SIZE
+    from local_update import CancellationToken, LocalUpdateRequest
+
+    edit_path = tmp_path / "EDIT00000000"
+    edit_path.write_bytes(b"encrypted-save")
+    game_root = tmp_path / "pes2021"
+    decrypted = tmp_path / "decrypted-profile"
+    decrypted.mkdir()
+    (decrypted / "data.dat").write_bytes(b"decrypted")
+    header = bytearray(FILE_HEADER_SIZE)
+    header[144:148] = b"EDIT"
+    header[176 : 176 + len(b"eFootball PES 2021 SEASON UPDATE")] = (
+        b"eFootball PES 2021 SEASON UPDATE"
+    )
+    (decrypted / "header.dat").write_bytes(header)
+
+    class ProfileEditFile:
+        def __init__(self) -> None:
+            self.header = None
+
+        def load(self, _path: Path) -> None:
+            pass
+
+        def attach_save_header(self, value) -> None:
+            self.header = value
+
+        def validate_integrity(self) -> dict[str, object]:
+            return {"valid": True, "errors": [], "warnings": [], "metrics": {}}
+
+    monkeypatch.setattr(run, "EditFile", ProfileEditFile)
+    monkeypatch.setattr(run.crypto, "decrypt", lambda _path: decrypted)
+    monkeypatch.setattr(run.crypto, "cleanup_temp", lambda _path: None)
+
+    runtime = run._RunLocalUpdateRuntime()
+    prepared = runtime.validate_and_prepare(
+        LocalUpdateRequest(edit_path, game_root=game_root),
+        (),
+        CancellationToken(),
+    )
+    try:
+        assert prepared.edit_file.header.is_pes21
+        assert prepared.edit_file.game_root == game_root
+    finally:
+        runtime.cleanup(prepared)
+
+
 def test_local_runtime_uses_selected_input(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

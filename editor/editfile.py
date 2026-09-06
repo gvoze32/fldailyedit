@@ -162,6 +162,7 @@ class EditFile(RosterGamePlanMixin):
         self.competition_entry_start: int = 0
         self.game_plan_start: int = 0
         self.save_header: SaveHeader | None = None
+        self.game_root: Path | None = None
         self.player_catalog_report: PlayerCatalogReport | None = None
         self.playerbin_db: PlayerBinDatabase | None = None
         self.playerbin_source: str | None = None

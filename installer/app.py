@@ -64,7 +64,13 @@ UI_COPY = {
     "release_mode": "Install a prebuilt SP Football Life 2026 release",
     "local_description": (
         "Use Local Run for vanilla PES 2021, T99, or another patch. "
-        "Do not install a prebuilt release."
+        "Choose its PES 2021 game folder below so the matching native database "
+        "files are used. Do not install a prebuilt release."
+    ),
+    "local_game_root": "Native game folder (contains download/*.cpk):",
+    "choose_game_folder": "Choose game folder…",
+    "native_game_root_unselected": (
+        "Not selected — required for vanilla PES 2021 / T99 unless configured elsewhere."
     ),
     "local_safety": (
         "The original save is backed up before an in-place replacement."
@@ -287,6 +293,7 @@ def diagnostic_details(
     state: InstallerState,
     *,
     error_code: str | None,
+    game_root: Path | None = None,
 ) -> str:
     """Build a deliberately narrow diagnostic summary safe for clipboard use."""
 
@@ -296,12 +303,16 @@ def diagnostic_details(
         if state.selected_location is not None
         else "not selected"
     )
-    return (
+    details = (
         f"FLDailyEdit Installer {__version__}\n"
         f"Stage: {stage}\n"
         f"Code: {error_code or 'none'}\n"
         f"Selected path: {path}"
     )
+    if game_root is not None:
+        details += f"\nNative game root: {game_root}"
+    return details
+
 
 
 def open_save_folder(path: Path) -> bool:
@@ -376,6 +387,7 @@ class InstallerApplication:
         self._progress_running = False
         self._records_by_channel: dict[str, ReleaseRecord] = {}
         self._locations_by_key: dict[str, SaveLocation] = {}
+        self._local_game_root: Path | None = None
         self._wrapped_labels: list[ttk.Label] = []
 
         self._configure_root()
@@ -647,6 +659,34 @@ class InstallerApplication:
             padx=(_RADIO_DESCRIPTION_INDENT, 0),
             pady=(_SPACE_XS, _SPACE_S),
         )
+        game_root_frame = ttk.Frame(local_group)
+        game_root_frame.grid(
+            row=2,
+            column=0,
+            sticky="ew",
+            padx=(_RADIO_DESCRIPTION_INDENT, 0),
+            pady=(0, _SPACE_XS),
+        )
+        game_root_frame.columnconfigure(0, weight=1)
+        self._local_game_root_var = tkinter.StringVar(
+            self.root,
+            value=UI_COPY["native_game_root_unselected"],
+        )
+        self._wrapped_label(
+            game_root_frame,
+            textvariable=self._local_game_root_var,
+        ).grid(row=0, column=0, sticky="ew")
+        self._local_game_root_button = ttk.Button(
+            game_root_frame,
+            text=UI_COPY["choose_game_folder"],
+            command=self._browse_game_root,
+        )
+        self._local_game_root_button.grid(
+            row=0,
+            column=1,
+            sticky="e",
+            padx=(_SPACE_S, 0),
+        )
         self._local_deep_var = tkinter.BooleanVar(self.root, value=False)
         self._local_deep_button = ttk.Checkbutton(
             local_group,
@@ -655,7 +695,7 @@ class InstallerApplication:
             command=self._select_local_deep,
         )
         self._local_deep_button.grid(
-            row=2,
+            row=3,
             column=0,
             sticky="w",
             padx=(_RADIO_DESCRIPTION_INDENT, 0),
@@ -1045,6 +1085,15 @@ class InstallerApplication:
             self._local_deep_button.configure(
                 state="normal" if local_mode else "disabled"
             )
+            local_game_root_button = getattr(
+                self,
+                "_local_game_root_button",
+                None,
+            )
+            if local_game_root_button is not None:
+                local_game_root_button.configure(
+                    state="normal" if local_mode else "disabled"
+                )
         if local_mode and mode_var is not None:
             self._catalog_status_var.set(
                 "Choose Fast or Deep coverage for your existing local save."
@@ -1438,6 +1487,19 @@ class InstallerApplication:
         if location is not None:
             self.controller.select_location(location)
 
+    def _browse_game_root(self) -> None:
+        selected = filedialog.askdirectory(
+            parent=self.root,
+            title="Choose PES 2021 / T99 game folder",
+            mustexist=True,
+        )
+        if not selected:
+            return
+        self._local_game_root = Path(selected)
+        self._local_game_root_var.set(
+            f"{UI_COPY['local_game_root']} {self._local_game_root}"
+        )
+
     def _browse(self) -> None:
         state = self.controller.state
         if self._browse_pending:
@@ -1482,6 +1544,13 @@ class InstallerApplication:
         self._browse_error_var.set("")
         self.controller.back()
 
+    def _start_local_update(self, location: SaveLocation, *, deep: bool) -> None:
+        kwargs: dict[str, Any] = {}
+        game_root = getattr(self, "_local_game_root", None)
+        if game_root is not None:
+            kwargs["game_root"] = game_root
+        self.worker.start_local_update(location, deep=deep, **kwargs)
+
     def _next(self) -> None:
         previous = self.controller.state.step
         if not self.controller.next():
@@ -1496,7 +1565,7 @@ class InstallerApplication:
             self._commit_lock_observed = False
             try:
                 if state.mode is InstallerMode.LOCAL:
-                    self.worker.start_local_update(
+                    self._start_local_update(
                         location,
                         deep=state.local_deep,
                     )
@@ -1533,7 +1602,7 @@ class InstallerApplication:
         self._commit_lock_observed = False
         try:
             if state.mode is InstallerMode.LOCAL:
-                self.worker.start_local_update(
+                self._start_local_update(
                     location,
                     deep=state.local_deep,
                 )
@@ -1586,6 +1655,7 @@ class InstallerApplication:
         details = diagnostic_details(
             self.controller.state,
             error_code=self._error_code,
+            game_root=getattr(self, "_local_game_root", None),
         )
         self.root.clipboard_clear()
         self.root.clipboard_append(details)

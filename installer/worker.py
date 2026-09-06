@@ -82,6 +82,8 @@ class _SelectLocal:
 class _StartLocalUpdate:
     location: SaveLocation
     deep: bool
+    game_root: Path | None = None
+
 
 
 
@@ -202,6 +204,7 @@ class InstallerWorker:
         location: SaveLocation,
         *,
         deep: bool = False,
+        game_root: Path | None = None,
     ) -> None:
         self.start()
         with self._state_lock:
@@ -211,7 +214,10 @@ class InstallerWorker:
             self._commit_started = False
             self._cancel_requested.clear()
             self._local_token = CancellationToken()
-        self._commands.put(_StartLocalUpdate(location, bool(deep)))
+        self._commands.put(
+            _StartLocalUpdate(location, bool(deep), game_root)
+        )
+
 
     def cancel(self) -> bool:
         with self._state_lock:
@@ -323,17 +329,23 @@ class InstallerWorker:
         self,
         location: SaveLocation,
         deep: bool,
+        game_root: Path | None = None,
     ) -> LocalUpdateResult:
         with self._state_lock:
             token = self._local_token
         if token is None:
             raise RuntimeError("local update cancellation token is unavailable")
-        request = LocalUpdateRequest(edit_path=location.edit_file, deep=deep)
+        request = LocalUpdateRequest(
+            edit_path=location.edit_file,
+            deep=deep,
+            game_root=game_root,
+        )
         return self._local_service().execute(
             request,
             progress=self._emit_local_progress,
             token=token,
         )
+
 
     def _run(self) -> None:
         while True:
@@ -404,6 +416,7 @@ class InstallerWorker:
                     result = self._perform_local_update(
                         command.location,
                         command.deep,
+                        command.game_root,
                     )
                 except Exception as error:
                     terminal_event: LocalUpdateCompleted | WorkerFailed = WorkerFailed(

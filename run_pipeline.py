@@ -15,6 +15,7 @@ import transfer_planning as planning
 from editor import backup as backup_mod
 from editor import crypto
 from editor.editfile import EditFile
+from editor.save_metadata import read_save_header
 from editor import logger as transfer_logger
 from editor.locking import EditFileLock
 from editor.player_catalog import PlayerCatalogError, load_id_name_text
@@ -390,21 +391,34 @@ def _scrape_run_transfers(args):
 def _load_match_database(
     edit_file: EditFile,
     release_policy_file: str | Path | None = None,
+    *,
+    game_root: str | Path | None = None,
 ):
     """Build roster-aware player and club indexes from one validated save."""
+    selected_game_root = game_root
+    if selected_game_root is None:
+        selected_game_root = getattr(edit_file, "game_root", None)
     print("\n📋 Reading selected save database...")
-    playerbin_database, playerbin_source = native_metadata._load_playerbin_database()
+    playerbin_database, playerbin_source = native_metadata._load_playerbin_database(
+        game_root=selected_game_root
+    )
     edit_file.playerbin_source = playerbin_source
     attach_playerbin = getattr(edit_file, "attach_playerbin", None)
     if playerbin_database is not None and callable(attach_playerbin):
         attach_playerbin(playerbin_database)
         print(f"  Loaded Player.bin metadata from {playerbin_source}")
-    teambin_database, teambin_source = native_metadata._load_teambin_database()
+    teambin_database, teambin_source = native_metadata._load_teambin_database(
+        game_root=selected_game_root
+    )
     edit_file.teambin_source = teambin_source
     if teambin_database is not None:
         edit_file.attach_teambin(teambin_database)
         print(f"  Loaded Team.bin metadata from {teambin_source}")
-    assignment_database, assignment_source = native_metadata._load_player_assignment_database()
+    assignment_database, assignment_source = (
+        native_metadata._load_player_assignment_database(
+            game_root=selected_game_root
+        )
+    )
     edit_file.player_assignment_source = assignment_source
     if assignment_database is not None:
         edit_file.attach_player_assignment(assignment_database)
@@ -423,10 +437,18 @@ def _load_match_database(
         if missing_roster_ids:
             source = getattr(edit_file, "playerbin_source", None) or "unavailable"
             sample = ", ".join(str(player_id) for player_id in missing_roster_ids[:8])
+            root_hint = (
+                f" Selected game root: {selected_game_root}."
+                if selected_game_root is not None
+                else (
+                    " In Local Run, choose the PES 2021/T99 game folder "
+                    "containing download/*.cpk."
+                )
+            )
             raise PlayerCatalogError(
                 "PES 2021/T99 save requires matching native Player.bin metadata; "
                 f"{len(missing_roster_ids)} roster IDs are missing "
-                f"(source: {source}; first IDs: {sample})"
+                f"(source: {source}; first IDs: {sample}).{root_hint}"
             )
     try:
         release_policy = load_release_policy(release_policy_file)
@@ -505,6 +527,7 @@ def _load_match_database(
         "(national teams excluded)"
     )
     return matcher, all_rosters, team_player_map, club_ids
+
 
 
 def _match_and_plan_transfers(
@@ -1149,6 +1172,7 @@ class _RunLocalUpdateRuntime:
 
             edit_file = EditFile()
             edit_file.load(data_dat)
+            edit_file.game_root = request.game_root
             header_path = temp_dir / "header.dat"
             if header_path.is_file():
                 try:

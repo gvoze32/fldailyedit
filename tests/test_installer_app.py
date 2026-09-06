@@ -770,7 +770,13 @@ def test_exact_english_ui_copy_is_available_without_rendering() -> None:
         "Install a prebuilt SP Football Life 2026 release",
         (
             "Use Local Run for vanilla PES 2021, T99, or another patch. "
-            "Do not install a prebuilt release."
+            "Choose its PES 2021 game folder below so the matching native database "
+            "files are used. Do not install a prebuilt release."
+        ),
+        "Native game folder (contains download/*.cpk):",
+        "Choose game folder…",
+        (
+            "Not selected — required for vanilla PES 2021 / T99 unless configured elsewhere."
         ),
         "Download and install",
         "Close the game before continuing.",
@@ -1645,6 +1651,8 @@ def test_local_worker_accepts_non_fl26_location_and_reaches_service(
     save.mkdir(parents=True)
     (save / "EDIT00000000").write_bytes(b"standard-edit")
     location = SaveLocation(GameTarget.PES2021, "PES 2021", save)
+    game_root = tmp_path / "pes2021"
+
     calls: list[tuple[LocalUpdateRequest, CancellationToken]] = []
 
     class FakeService:
@@ -1668,17 +1676,51 @@ def test_local_worker_accepts_non_fl26_location_and_reaches_service(
 
     worker = InstallerWorker(local_update_factory=lambda: FakeService())
     try:
-        worker.start_local_update(location, deep=True)
+        worker.start_local_update(
+            location,
+            deep=True,
+            game_root=game_root,
+        )
         event = _next_event(worker, LocalUpdateCompleted)
         assert isinstance(event, LocalUpdateCompleted)
         assert len(calls) == 1
         assert calls[0][0] == LocalUpdateRequest(
             edit_path=location.edit_file,
             deep=True,
+            game_root=game_root,
         )
         assert isinstance(calls[0][1], CancellationToken)
     finally:
         worker.close()
+
+def test_local_app_forwards_selected_game_root(
+    tmp_path: Path,
+) -> None:
+    save = tmp_path / "save"
+    save.mkdir()
+    (save / "EDIT00000000").write_bytes(b"standard-edit")
+    location = SaveLocation(GameTarget.LOCAL, "Selected local save", save)
+    game_root = tmp_path / "pes2021"
+    calls: list[tuple[SaveLocation, bool, dict[str, object]]] = []
+
+    class FakeWorker:
+        def start_local_update(
+            self,
+            selected_location: SaveLocation,
+            *,
+            deep: bool,
+            **kwargs: object,
+        ) -> None:
+            calls.append((selected_location, deep, kwargs))
+
+    application = object.__new__(installer_app.InstallerApplication)
+    application.worker = FakeWorker()
+    application._local_game_root = game_root
+
+    application._start_local_update(location, deep=True)
+
+    assert calls == [(location, True, {"game_root": game_root})]
+
 
 def test_local_mode_rejects_missing_edit_file_before_review(
     tmp_path: Path,
