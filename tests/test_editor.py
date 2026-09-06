@@ -624,6 +624,18 @@ class TestTeamRosters:
         assert roster.shirt_numbers[0] == 10
         assert roster.shirt_numbers[1] == 7
         assert roster.shirt_numbers[2] == 11
+
+    def test_captain_role_reads_and_writes_active_roster_slot(self, ef_with_rosters):
+        game_plan_base = ef_with_rosters._find_game_plan_offset(101)
+
+        assert ef_with_rosters.get_team_captain_player(101) == 1001
+        assert ef_with_rosters.set_team_captain(101, 1003) is True
+        assert ef_with_rosters.get_team_captain_player(101) == 1003
+        assert ef_with_rosters._data[game_plan_base + GP_CAPTAIN] == 2
+
+        assert ef_with_rosters.set_team_captain(101, 9999) is False
+        assert ef_with_rosters.get_team_captain_player(101) == 1003
+
     def test_batch_shirt_updates_support_swaps(self, ef_with_rosters):
         assert ef_with_rosters.update_player_shirt_numbers(
             101,

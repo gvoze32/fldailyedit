@@ -9,7 +9,7 @@ import pytest
 import run_pipeline
 
 from editor.models import TeamData
-from scraper.models import MatchedTransfer, Transfer
+from scraper.models import CaptainUpdate, MatchedTransfer, Transfer
 from transfer_planning import PlannedRosterAction
 
 
@@ -641,6 +641,72 @@ def test_real_run_applies_shirt_number_swaps_as_one_batch(
     assert fake_edit_file.shirts == {first_player_id: 12, second_player_id: 13}
     assert mutation.shirt_numbers_changed == 2
     assert mutation.safety_skipped == 0
+
+def test_real_run_applies_captain_update_without_transfer_actions(
+    monkeypatch, tmp_path
+):
+    from local_update import CancellationToken, LocalUpdateRequest
+
+    class FakeEditFile:
+        def __init__(self):
+            self._data = bytearray(b"original")
+            self.captain = 1001
+            self.calls = []
+
+        def get_team_captain_player(self, team_id):
+            assert team_id == 101
+            return self.captain
+
+        def set_team_captain(self, team_id, player_id):
+            assert team_id == 101
+            self.calls.append((team_id, player_id))
+            self.captain = player_id
+            return True
+
+    edit_path = tmp_path / "EDIT00000000"
+    output_path = tmp_path / "output" / "EDIT00000000"
+    fake_edit_file = FakeEditFile()
+    prepared = SimpleNamespace(
+        edit_file=fake_edit_file,
+        roster_plan=(),
+        captain_plan=(
+            run_pipeline._PlannedCaptainUpdate(
+                source=CaptainUpdate(
+                    club_name="Example FC",
+                    team_id_fotmob=42,
+                    player_name="Captain Player",
+                    player_id_fotmob=987,
+                ),
+                team_id=101,
+                player_id=1002,
+                matched_player_name="Captain Player",
+                confidence=100.0,
+            ),
+        ),
+        captain_records=[],
+        original_data=bytes(fake_edit_file._data),
+        edit_path=edit_path,
+        output_path=output_path,
+        backup_path=None,
+    )
+    monkeypatch.setattr(
+        run_pipeline.backup_mod,
+        "create_backup",
+        lambda _: tmp_path / "backup",
+    )
+
+    mutation = run_pipeline._RunLocalUpdateRuntime().apply(
+        LocalUpdateRequest(edit_path, output_path=output_path),
+        prepared,
+        (),
+        CancellationToken(),
+    )
+
+    assert fake_edit_file.calls == [(101, 1002)]
+    assert fake_edit_file.captain == 1002
+    assert mutation.transfer_applied == 0
+    assert mutation.captains_changed == 1
+    assert prepared.captain_records[0]["transfer_type"] == "captain_update"
 
 
 

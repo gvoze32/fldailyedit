@@ -138,6 +138,31 @@ def test_markdown_report_contains_only_transfers_releases_and_shirt_changes():
     assert "Reviewed Player Update" not in report
 
 
+
+def test_reports_render_captain_changes_separately():
+    captain = _entry(
+        player_name="Captain Player",
+        player_id=1002,
+        from_team="Example FC",
+        from_team_id=101,
+        to_team="Example FC",
+        to_team_id=101,
+        transfer_type="captain_update",
+        roster_action="captain",
+        native_metadata={"previous_captain_player_id": 1001},
+    )
+
+    markdown = transfer_logger.generate_markdown_report([captain])
+    html = transfer_logger.generate_html_report([captain])
+
+    assert "Captains |" in markdown
+    assert "Captain changes (1)" in markdown
+    assert "Captain Player" in markdown
+    assert "Club transfers (" not in markdown
+    assert "Captains changed" in html
+    assert "Captain changes" in html
+    assert "Captain Player" in html
+
 def test_html_report_escapes_transfer_names_without_contribution_sections():
     report = transfer_logger.generate_html_report(
         [_entry(player_name="<script>alert('x')</script>")]

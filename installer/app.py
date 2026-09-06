@@ -222,8 +222,8 @@ def progress_detail_copy(
     return "Keep this window open while the save is updated."
 
 
-def _prebuilt_report_counts(markdown: str) -> tuple[int, int] | None:
-    """Read transfer and shirt counts from a packaged markdown report."""
+def _prebuilt_report_counts(markdown: str) -> tuple[int, int, int] | None:
+    """Read transfer, shirt, and captain counts from a packaged report."""
     lines = markdown.splitlines()
     for index, line in enumerate(lines):
         if not line.strip().startswith("|"):
@@ -234,6 +234,13 @@ def _prebuilt_report_counts(markdown: str) -> tuple[int, int] | None:
         ]
         if "Save changes" not in headers or "Shirt numbers" not in headers:
             continue
+        captain_header = (
+            "Captains"
+            if "Captains" in headers
+            else "Captain changes"
+            if "Captain changes" in headers
+            else None
+        )
         for data_line in lines[index + 1 :]:
             if not data_line.strip().startswith("|"):
                 break
@@ -248,9 +255,18 @@ def _prebuilt_report_counts(markdown: str) -> tuple[int, int] | None:
             try:
                 total_changes = int(cells[headers.index("Save changes")])
                 shirt_changes = int(cells[headers.index("Shirt numbers")])
+                captain_changes = (
+                    int(cells[headers.index(captain_header)])
+                    if captain_header is not None
+                    else 0
+                )
             except (ValueError, IndexError):
                 return None
-            return max(total_changes - shirt_changes, 0), shirt_changes
+            return (
+                max(total_changes - shirt_changes - captain_changes, 0),
+                shirt_changes,
+                captain_changes,
+            )
     return None
 
 
@@ -1253,6 +1269,7 @@ class InstallerApplication:
                 detail += (
                     f"\n\nTransfers applied: {state.result.transfer_applied}"
                     f"\nShirt numbers changed: {state.result.shirt_numbers_changed}"
+                    f"\nCaptains changed: {state.result.captains_changed}"
                     f"\nUnchanged: {state.result.unchanged}"
                     f"\nSafety skipped: {state.result.safety_skipped}"
                 )
@@ -1270,11 +1287,17 @@ class InstallerApplication:
                         )
                         counts = _prebuilt_report_counts(transfer_log_content)
                         if counts is not None:
-                            transfers_applied, shirt_numbers_changed = counts
+                            (
+                                transfers_applied,
+                                shirt_numbers_changed,
+                                captains_changed,
+                            ) = counts
                             detail += (
                                 f"\n\nTransfers applied: {transfers_applied}"
                                 "\nShirt numbers changed: "
                                 f"{shirt_numbers_changed}"
+                                "\nCaptains changed: "
+                                f"{captains_changed}"
                             )
                     except (OSError, UnicodeError) as error:
                         detail += (

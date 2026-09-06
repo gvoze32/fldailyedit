@@ -15,7 +15,7 @@ from typing import Optional, Union
 import aiohttp
 
 import config
-from scraper.models import Transfer
+from scraper.models import CaptainUpdate, ScrapeResult, Transfer
 
 logger = logging.getLogger(__name__)
 
@@ -514,15 +514,81 @@ class FotmobScraper:
 
         return results
 
+    def _extract_captain_from_team_data(
+        self,
+        data: dict,
+        team_id: int,
+        team_name: str,
+    ) -> list[CaptainUpdate]:
+        """Extract the captain marker from the latest available lineup."""
+        overview = data.get("overview")
+        last_lineup = (
+            overview.get("lastLineupStats")
+            if isinstance(overview, dict)
+            else None
+        )
+        if not isinstance(last_lineup, dict):
+            return []
+
+        candidates: list[dict] = []
+        for group_name in ("starters", "subs"):
+            members = last_lineup.get(group_name, [])
+            if not isinstance(members, list):
+                continue
+            candidates.extend(
+                member
+                for member in members
+                if isinstance(member, dict) and member.get("isCaptain") is True
+            )
+
+        if len(candidates) != 1:
+            if candidates:
+                logger.warning(
+                    "Skipping ambiguous captain data for %s (%s): %s markers",
+                    team_name or team_id,
+                    team_id,
+                    len(candidates),
+                )
+            return []
+
+        member = candidates[0]
+        player_name = str(member.get("name") or "").strip()
+        player_id = _optional_positive_int(member.get("id"))
+        if not player_name or player_id is None:
+            logger.warning(
+                "Skipping incomplete captain data for %s (%s)",
+                team_name or team_id,
+                team_id,
+            )
+            return []
+
+        try:
+            age = int(member.get("age") or 0)
+        except (TypeError, ValueError):
+            age = 0
+
+        return [
+            CaptainUpdate(
+                club_name=team_name.strip(),
+                team_id_fotmob=team_id,
+                player_name=player_name,
+                player_id_fotmob=player_id,
+                age=age,
+                nationality=str(member.get("countryName") or "").strip(),
+                source_url=f"https://www.fotmob.com/api/data/teams?id={team_id}",
+            )
+        ]
+
     async def fetch_major_clubs_transfers_safely_async(
         self,
         since_date: Optional[Union[str, date]] = None,
         window: str = "auto",
-    ) -> list[Transfer]:
-        """Fetch transfers for all major global clubs sequentially with a delay to avoid rate limits."""
+    ) -> ScrapeResult:
+        """Fetch current transfers, squads, and captains for every indexed club."""
         start_date, end_date = _resolve_date_range(since_date, window)
 
         all_transfers: list[Transfer] = []
+        captain_updates: list[CaptainUpdate] = []
         timeout = aiohttp.ClientTimeout(total=15)
         
         deep_clubs = get_deep_clubs()
@@ -540,18 +606,27 @@ class FotmobScraper:
                         f"Deep scrape incomplete at {club_name} ({tid}): {e}"
                     ) from e
 
-                # 1. Extract Transfers
+                # 1. Extract transfers
                 club_transfers = self._extract_transfers_from_team_data(data, start_date, end_date)
                 all_transfers.extend(club_transfers)
 
-                # 2. Extract Squad (Shirt Numbers)
+                # 2. Extract current squad numbers
                 club_squad = self._extract_squad_from_team_data(data, tid, club_name)
                 all_transfers.extend(club_squad)
+
+                # 3. Extract the latest-lineup captain marker
+                captain_updates.extend(
+                    self._extract_captain_from_team_data(data, tid, club_name)
+                )
                 
                 # Sleep to prevent Cloudflare ban
                 await asyncio.sleep(0.5)
 
-        return merge_transfers([all_transfers])
+        return ScrapeResult(
+            merge_transfers([all_transfers]),
+            captain_updates,
+        )
+
 
 
 
@@ -791,8 +866,8 @@ def fetch_fotmob_transfers(
 def fetch_major_clubs_transfers_safely(
     since_date: Optional[Union[str, date]] = None,
     window: str = "auto",
-) -> list[Transfer]:
-    """Deep fetch of transfers and squad data from all Major Global clubs."""
+) -> ScrapeResult:
+    """Deep-fetch transfers, squad numbers, and captains for indexed clubs."""
     scraper = FotmobScraper()
     return asyncio.run(
         scraper.fetch_major_clubs_transfers_safely_async(
@@ -802,27 +877,28 @@ def fetch_major_clubs_transfers_safely(
     )
 
 
-def fetch_squads_for_club_names(club_names: list[str]) -> list[Transfer]:
-    """Fetch only current squad shirt numbers for specific clubs."""
+def fetch_squads_for_club_names(club_names: list[str]) -> ScrapeResult:
+    """Fetch current squad numbers and captains for specific clubs."""
     requested = [name.strip() for name in club_names if name.strip()]
     if not requested:
-        return []
+        return ScrapeResult()
 
     try:
         available_clubs = get_deep_clubs()
     except IncompleteScrapeError as error:
         logger.warning("Skipping targeted squad sync: %s", error)
-        return []
+        return ScrapeResult()
 
     targets = _resolve_club_targets(requested, available_clubs)
     if not targets:
         logger.warning(
             "Skipping targeted squad sync; no requested clubs resolved safely"
         )
-        return []
+        return ScrapeResult()
 
     scraper = FotmobScraper()
     all_squads: list[Transfer] = []
+    captain_updates: list[CaptainUpdate] = []
 
     async def fetch_subset():
         async with aiohttp.ClientSession(
@@ -849,20 +925,27 @@ def fetch_squads_for_club_names(club_names: list[str]) -> list[Transfer]:
                             team_name,
                         )
                     )
+                    captain_updates.extend(
+                        scraper._extract_captain_from_team_data(
+                            data,
+                            team_id,
+                            team_name,
+                        )
+                    )
 
     asyncio.run(fetch_subset())
-    return merge_transfers([all_squads])
-
-
-
+    return ScrapeResult(
+        merge_transfers([all_squads]),
+        captain_updates,
+    )
 
 
 def fetch_transfers_for_club_names(
     club_names: list[str],
     since_date: Optional[Union[str, date]] = None,
     window: str = "auto",
-) -> list[Transfer]:
-    """Fetch transfers for specific club names or FotMob IDs."""
+) -> ScrapeResult:
+    """Fetch transfers, squad numbers, and captains for specific clubs."""
     requested = {name.strip().casefold() for name in club_names if name.strip()}
     targets = _resolve_club_targets(club_names, get_deep_clubs())
     if not targets or len(targets) < len(requested):
@@ -875,15 +958,41 @@ def fetch_transfers_for_club_names(
     start_date, end_date = _resolve_date_range(since_date, window)
 
     all_t: list[Transfer] = []
+    captain_updates: list[CaptainUpdate] = []
 
     async def fetch_subset():
-        async with aiohttp.ClientSession(headers=scraper.headers, timeout=aiohttp.ClientTimeout(total=15)) as sess:
+        async with aiohttp.ClientSession(
+            headers=scraper.headers,
+            timeout=aiohttp.ClientTimeout(total=15),
+        ) as sess:
             for requested_name, tid in targets:
                 data = await scraper._fetch_club_data_async(sess, tid)
                 if data:
-                    all_t.extend(scraper._extract_transfers_from_team_data(data, start_date, end_date))
+                    all_t.extend(
+                        scraper._extract_transfers_from_team_data(
+                            data,
+                            start_date,
+                            end_date,
+                        )
+                    )
                     team_name = _payload_team_name(data, requested_name)
-                    all_t.extend(scraper._extract_squad_from_team_data(data, tid, team_name))
+                    all_t.extend(
+                        scraper._extract_squad_from_team_data(
+                            data,
+                            tid,
+                            team_name,
+                        )
+                    )
+                    captain_updates.extend(
+                        scraper._extract_captain_from_team_data(
+                            data,
+                            tid,
+                            team_name,
+                        )
+                    )
 
     asyncio.run(fetch_subset())
-    return merge_transfers([all_t])
+    return ScrapeResult(
+        merge_transfers([all_t]),
+        captain_updates,
+    )

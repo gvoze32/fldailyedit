@@ -45,6 +45,35 @@ class Transfer:
         return f"{self.player_name}{pos_badge}: {self.from_club} → {self.to_club}{type_badge}"
 
 
+@dataclass(frozen=True, slots=True)
+class CaptainUpdate:
+    """Current captain marker extracted from a club's live team payload."""
+
+    club_name: str
+    team_id_fotmob: int
+    player_name: str
+    player_id_fotmob: Optional[int]
+    age: int = 0
+    nationality: str = ""
+    source: str = "fotmob"
+    source_url: str = ""
+
+
+class ScrapeResult(list[Transfer]):
+    """Transfer-compatible scrape result with optional captain updates."""
+
+    def __init__(
+        self,
+        transfers: list[Transfer] | tuple[Transfer, ...] = (),
+        captain_updates: list[CaptainUpdate] | tuple[CaptainUpdate, ...] = (),
+    ) -> None:
+        super().__init__(transfers)
+        self.captain_updates = tuple(captain_updates)
+
+    def __bool__(self) -> bool:
+        return bool(len(self) or self.captain_updates)
+
+
 @dataclass
 class MatchedTransfer:
     """A transfer matched to FL26 database IDs."""

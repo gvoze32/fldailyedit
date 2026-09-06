@@ -4,7 +4,7 @@ Tests for the FotMob scraper and transfer models.
 import asyncio
 
 import pytest
-from scraper.models import Transfer
+from scraper.models import CaptainUpdate, ScrapeResult, Transfer
 
 
 class TestTransferModel:
@@ -544,6 +544,19 @@ class TestScraperSafety:
 
         payload = {
             "details": {"name": "Example FC"},
+            "overview": {
+                "lastLineupStats": {
+                    "starters": [
+                        {
+                            "id": 987,
+                            "name": "Captain Player",
+                            "age": 29,
+                            "countryName": "Exampleland",
+                            "isCaptain": True,
+                        }
+                    ]
+                }
+            },
             "squad": {
                 "squad": [
                     {
@@ -593,6 +606,68 @@ class TestScraperSafety:
         assert result[0].player_name == "Squad Player"
         assert result[0].shirt_number == 7
         assert result[0].to_club_id_fotmob == 42
+        assert len(result.captain_updates) == 1
+        captain = result.captain_updates[0]
+        assert captain.player_name == "Captain Player"
+        assert captain.player_id_fotmob == 987
+        assert captain.club_name == "Example FC"
+        assert captain.nationality == "Exampleland"
+
+    def test_deep_fetch_collects_captains_for_every_indexed_club(self, monkeypatch):
+        from scraper import fotmob
+
+        indexed_clubs = {"Alpha FC": 1, "Beta FC": 2}
+        calls = []
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+        async def fake_fetch(_scraper, _session, team_id):
+            calls.append(team_id)
+            return {
+                "details": {
+                    "name": "Alpha FC" if team_id == 1 else "Beta FC"
+                },
+                "overview": {
+                    "lastLineupStats": {
+                        "starters": [
+                            {
+                                "id": team_id + 100,
+                                "name": f"Captain {team_id}",
+                                "isCaptain": True,
+                            }
+                        ]
+                    }
+                },
+            }
+
+        async def no_sleep(_delay):
+            return None
+
+        monkeypatch.setattr(fotmob, "get_deep_clubs", lambda: indexed_clubs)
+        monkeypatch.setattr(fotmob.aiohttp, "ClientSession", lambda **_: FakeSession())
+        monkeypatch.setattr(
+            fotmob.FotmobScraper,
+            "_fetch_club_data_async",
+            fake_fetch,
+        )
+        monkeypatch.setattr(fotmob.asyncio, "sleep", no_sleep)
+
+        result = asyncio.run(
+            fotmob.FotmobScraper().fetch_major_clubs_transfers_safely_async(
+                window="all"
+            )
+        )
+
+        assert calls == [1, 2]
+        assert [captain.player_id_fotmob for captain in result.captain_updates] == [
+            101,
+            102,
+        ]
 
     def test_merge_normalizes_diacritics_and_enriches_duplicate(self):
         from scraper.fotmob import merge_transfers

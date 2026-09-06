@@ -921,9 +921,9 @@ def test_completion_renders_prebuilt_and_local_transfer_details(
     log_path.parent.mkdir(parents=True)
     log_path.write_text(
         "## FLDailyEdit Option File Transfer Log\n\n"
-        "| Save changes | Club transfers | Permanent | Loans / returns | Shirt numbers | Dry-run |\n"
-        "|---:|---:|---:|---:|---:|---:|\n"
-        "| **4** | **3** | 2 | 1 | **1** | 0 |\n\n"
+        "| Save changes | Club transfers | Permanent | Loans / returns | Shirt numbers | Captains | Dry-run |\n"
+        "|---:|---:|---:|---:|---:|---:|---:|\n"
+        "| **5** | **3** | 2 | 1 | **1** | **1** | 0 |\n\n"
         "- Zidane moved\n",
         encoding="utf-8",
     )
@@ -967,6 +967,7 @@ def test_completion_renders_prebuilt_and_local_transfer_details(
             installed_sha256="b" * 64,
             transfer_applied=2,
             shirt_numbers_changed=1,
+            captains_changed=1,
             unchanged=3,
             safety_skipped=4,
             transfer_log_content=local_log,
@@ -978,6 +979,7 @@ def test_completion_renders_prebuilt_and_local_transfer_details(
     assert application._progress_status_var.value == "Your local save is ready."
     assert "Transfers applied: 2" in application._progress_detail_var.value
     assert "Shirt numbers changed: 1" in application._progress_detail_var.value
+    assert "Captains changed: 1" in application._progress_detail_var.value
     assert "Unchanged: 3" in application._progress_detail_var.value
     assert "Safety skipped: 4" in application._progress_detail_var.value
     assert application._transfer_log_text.content == local_log

@@ -58,6 +58,7 @@ class LocalUpdateResult:
     no_changes: bool = False
     diagnostic: str | None = None
     transfer_log_content: str | None = None
+    captains_changed: int = 0
 
 class LocalUpdateError(RuntimeError):
     """Stable service error suitable for CLI and beginner-facing GUI copy."""

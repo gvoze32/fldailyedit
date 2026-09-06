@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from dataclasses import dataclass
 from datetime import date
 import hashlib
 import json
@@ -33,6 +34,7 @@ from scraper.sortitoutsi import fetch_sortitoutsi_transfers
 from scraper.soccerway import fetch_soccerway_transfers
 from scraper.sofascore import fetch_sofascore_transfers
 from scraper.sources import reconcile_transfer_sources
+from scraper.models import CaptainUpdate, ScrapeResult
 from scraper.wikipedia import fetch_wikipedia_transfers
 from scraper.transfermarkt import fetch_transfermarkt_transfers
 from local_update import (
@@ -46,6 +48,17 @@ from local_update import (
 
 logger = logging.getLogger(__name__)
 _FAST_SQUAD_CLUB_LIMIT = 32
+
+
+@dataclass(frozen=True, slots=True)
+class _PlannedCaptainUpdate:
+    """Captain source record resolved to a local team and player."""
+
+    source: CaptainUpdate
+    team_id: int
+    player_id: int
+    matched_player_name: str
+    confidence: float
 
 
 def _sha256_file(path: Path) -> str:
@@ -203,28 +216,33 @@ def _scrape_run_transfers(args):
         else f"window '{window}' ({start_date} to {end_date or 'latest'})"
     )
     transfer_batches = []
+    captain_updates: list[CaptainUpdate] = []
     if club_filter:
         clubs = [club.strip() for club in club_filter.split(",") if club.strip()]
         print(
             f"\n🎯 Scraping club-focused transfers for: {', '.join(clubs)} "
             f"({cutoff_info})..."
         )
-        transfer_batches.append(
-            fetch_transfers_for_club_names(
-                clubs, since_date=since_date, window=window
-            )
+        club_batch = fetch_transfers_for_club_names(
+            clubs,
+            since_date=since_date,
+            window=window,
         )
+        transfer_batches.append(club_batch)
+        captain_updates.extend(getattr(club_batch, "captain_updates", ()))
     elif deep_mode:
         print(
             "\n🌪️ Deep Mode: Scraping transfers and squads for indexed clubs "
             f"({cutoff_info})..."
         )
-        deep_since_date = scrape_since_date
-        transfer_batches.append(
-            fetch_major_clubs_transfers_safely(
-                since_date=deep_since_date, window=window
-            )
+        deep_batch = fetch_major_clubs_transfers_safely(
+            since_date=scrape_since_date,
+            window=window,
         )
+        transfer_batches.append(deep_batch)
+        deep_captains = getattr(deep_batch, "captain_updates", ())
+        captain_updates.extend(deep_captains)
+        print(f"  Deep captain sync found {len(deep_captains)} markers")
         print(
             "\n📡 Adding Live Global Feed to catch other minor leagues "
             f"({cutoff_info}, automatic pagination)..."
@@ -251,7 +269,7 @@ def _scrape_run_transfers(args):
         squad_targets = _fast_squad_target_clubs((live_transfers,))
         if squad_targets:
             print(
-                "\n👕 Fast Mode: Refreshing current squad numbers for "
+                "\n👕 Fast Mode: Refreshing current squad numbers and captains for "
                 f"{len(squad_targets)} affected clubs..."
             )
             try:
@@ -260,8 +278,10 @@ def _scrape_run_transfers(args):
                 logger.warning("Fast squad sync skipped: %s", error)
                 squad_updates = []
             transfer_batches.append(squad_updates)
+            fast_captains = getattr(squad_updates, "captain_updates", ())
+            captain_updates.extend(fast_captains)
             print(f"  Squad sync found {len(squad_updates)} shirt numbers")
-
+            print(f"  Captain sync found {len(fast_captains)} markers")
     fast_signals = []
     corroborators = []
     if not club_filter and not fotmob_only:
@@ -364,7 +384,8 @@ def _scrape_run_transfers(args):
         print(f"  {transfer}")
     if len(transfers) > 5:
         print(f"  ... and {len(transfers) - 5} more")
-    return transfers
+    print(f"Current captain markers to process: {len(captain_updates)}")
+    return ScrapeResult(transfers, captain_updates)
 
 def _load_match_database(
     edit_file: EditFile,
@@ -547,6 +568,68 @@ def _match_and_plan_transfers(
             print(f"    {match}")
     return roster_plan, fully_matched, save_scope
 
+def _plan_captain_updates(
+    captain_updates: list[CaptainUpdate] | tuple[CaptainUpdate, ...],
+    matcher: NameMatcher,
+    team_player_map: dict[int, list[int]],
+    club_ids: set[int],
+    validated_fotmob_teams: dict[int, int],
+    threshold: float,
+) -> tuple[_PlannedCaptainUpdate, ...]:
+    """Resolve live captain markers to fail-closed local roster targets."""
+    by_team: dict[int, CaptainUpdate] = {}
+    for source in captain_updates:
+        team_id = validated_fotmob_teams.get(source.team_id_fotmob)
+        if team_id is None or team_id not in club_ids:
+            logger.warning(
+                "Skipping captain for %s (%s): club identity is not represented",
+                source.club_name or source.team_id_fotmob,
+                source.team_id_fotmob,
+            )
+            continue
+
+        previous = by_team.get(team_id)
+        if previous is not None and (
+            previous.player_id_fotmob != source.player_id_fotmob
+        ):
+            logger.warning(
+                "Skipping conflicting captain markers for team %s: %s vs %s",
+                team_id,
+                previous.player_name,
+                source.player_name,
+            )
+            by_team.pop(team_id, None)
+            continue
+        by_team[team_id] = source
+
+    planned: list[_PlannedCaptainUpdate] = []
+    for team_id, source in by_team.items():
+        player_id, player_name, confidence = matcher.match_player(
+            source.player_name,
+            threshold=max(float(threshold), 90.0),
+            to_team_id=team_id,
+            team_player_map=team_player_map,
+            nationality=source.nationality or None,
+            age=source.age or None,
+        )
+        if player_id is None:
+            logger.warning(
+                "Skipping captain for %s: could not safely match %s",
+                source.club_name or team_id,
+                source.player_name,
+            )
+            continue
+        planned.append(
+            _PlannedCaptainUpdate(
+                source=source,
+                team_id=team_id,
+                player_id=player_id,
+                matched_player_name=player_name or source.player_name,
+                confidence=confidence,
+            )
+        )
+    return tuple(planned)
+
 
 
 
@@ -555,8 +638,10 @@ def _match_and_plan_transfers(
 def _print_dry_run(
     edit_file: EditFile,
     roster_plan,
+    captain_plan=(),
 ) -> None:
-    """Render planned roster actions without mutating."""
+    """Render planned roster and captain actions without mutating."""
+
     print("\n🔍 DRY-RUN — checking each match against the current roster:")
     would_apply = 0
     already_current = 0
@@ -628,6 +713,32 @@ def _print_dry_run(
                 f"from team {match.to_team_id}"
             )
         print(f"  WOULD {action.upper()}: {match}")
+    for planned_captain in captain_plan:
+        current_player_id = edit_file.get_team_captain_player(
+            planned_captain.team_id
+        )
+        if current_player_id == planned_captain.player_id:
+            already_current += 1
+            print(
+                f"  ALREADY CURRENT CAPTAIN: {planned_captain.source.club_name} "
+                f"→ {planned_captain.matched_player_name}"
+            )
+            continue
+
+        roster = edit_file.get_team_roster(planned_captain.team_id)
+        if roster is None or roster.player_ids.count(planned_captain.player_id) != 1:
+            safety_skipped += 1
+            print(
+                f"  SAFETY SKIP CAPTAIN ({planned_captain.source.club_name}): "
+                f"{planned_captain.matched_player_name} is not in the current roster"
+            )
+            continue
+
+        would_apply += 1
+        print(
+            f"  WOULD SET CAPTAIN: {planned_captain.source.club_name} → "
+            f"{planned_captain.matched_player_name}"
+        )
     print(
         f"\nDry-run complete. Would apply: {would_apply}, "
         f"already current: {already_current}, safety-skipped: {safety_skipped}. "
@@ -893,6 +1004,7 @@ class _RunPrepared:
         self.output_digest = output_digest
         self.output_lock: EditFileLock | None = None
         self.roster_plan = ()
+        self.captain_plan: tuple[_PlannedCaptainUpdate, ...] = ()
         self.save_scope = str(output_path.resolve())
         self.backup_path: Path | None = None
         self.original_data = bytes(
@@ -903,6 +1015,7 @@ class _RunPrepared:
         # transfer is rejected only when it introduces a new integrity error.
         self.pre_mutation_integrity_errors: tuple[str, ...] = ()
         self.pending_logs = []
+        self.captain_records = []
         self.run_records = []
 
 
@@ -914,11 +1027,13 @@ class _RunMutation:
         shirt_numbers_changed: int,
         unchanged: int,
         safety_skipped: int,
+        captains_changed: int = 0,
     ) -> None:
         self.transfer_applied = transfer_applied
         self.shirt_numbers_changed = shirt_numbers_changed
         self.unchanged = unchanged
         self.safety_skipped = safety_skipped
+        self.captains_changed = captains_changed
 
 
 class _RunLocalUpdateRuntime:
@@ -1080,10 +1195,11 @@ class _RunLocalUpdateRuntime:
             prepared.pre_mutation_integrity_errors = tuple(
                 str(error) for error in baseline_integrity.get("errors", [])
             )
+            match_threshold = request.threshold or config.MATCH_THRESHOLD_PLAYER
             roster_plan, fully_matched, save_scope = _match_and_plan_transfers(
                 transfers,
                 matcher,
-                request.threshold or config.MATCH_THRESHOLD_PLAYER,
+                match_threshold,
                 team_player_map,
                 all_rosters,
                 club_ids,
@@ -1091,6 +1207,16 @@ class _RunLocalUpdateRuntime:
                 prepared.output_path,
                 allow_overflow_release=request.allow_overflow_release,
             )
+            captain_sources = getattr(transfers, "captain_updates", ())
+            if captain_sources:
+                prepared.captain_plan = _plan_captain_updates(
+                    captain_sources,
+                    matcher,
+                    team_player_map,
+                    club_ids,
+                    _load_represented_fotmob_club_map(),
+                    match_threshold,
+                )
             prepared.roster_plan = roster_plan
             prepared.save_scope = save_scope
             return roster_plan, fully_matched
@@ -1110,6 +1236,19 @@ class _RunLocalUpdateRuntime:
         _plan,
         token: CancellationToken,
     ):
+        captain_plan = tuple(getattr(prepared, "captain_plan", ()))
+        captain_getter = getattr(
+            prepared.edit_file,
+            "get_team_captain_player",
+            None,
+        )
+        captain_actionable = bool(captain_plan) and (
+            not callable(captain_getter)
+            or any(
+                captain_getter(item.team_id) != item.player_id
+                for item in captain_plan
+            )
+        )
         actionable_roster = any(
             item.action in {"move", "add", "release", "shirt_update"}
             for item in prepared.roster_plan
@@ -1129,14 +1268,14 @@ class _RunLocalUpdateRuntime:
                 "reset_roles",
             )
         )
-        if not actionable_roster and not gameplan_changed:
+        if not actionable_roster and not gameplan_changed and not captain_actionable:
             unchanged = sum(
                 item.action == "noop" for item in prepared.roster_plan
             )
             safety_skipped = sum(
                 item.action == "skip" for item in prepared.roster_plan
             )
-            print("\nNo effective transfer or shirt-number changes to apply. Exiting.")
+            print("\nNo effective transfer, shirt-number, or captain changes to apply. Exiting.")
             return LocalUpdateResult(
                 target_path=prepared.output_path,
                 backup_path=None,
@@ -1167,9 +1306,10 @@ class _RunLocalUpdateRuntime:
             ) from error
         print(f"  Backup: {prepared.backup_path}")
 
-        print("\n⚡ Applying verified transfers and shirt-number changes...")
+        print("\n⚡ Applying verified transfers, shirt-number, and captain changes...")
         transfer_applied = 0
         shirt_numbers_applied = 0
+        captains_changed = 0
         unchanged = 0
         safety_skipped = 0
         original_data = prepared.original_data
@@ -1345,6 +1485,7 @@ class _RunLocalUpdateRuntime:
             )
 
 
+
         if callable(repair_game_plans) and actionable_roster:
             repair_metrics = repair_game_plans()
         if actionable_roster:
@@ -1357,10 +1498,74 @@ class _RunLocalUpdateRuntime:
                     f"{repaired_lineups} lineups, {repaired_roles} goalkeeper roles, "
                     f"{repaired_positions} position bytes"
                 )
+        captain_setter = getattr(prepared.edit_file, "set_team_captain", None)
+        for planned_captain in captain_plan:
+            token.raise_if_cancelled()
+            current_player_id = (
+                captain_getter(planned_captain.team_id)
+                if callable(captain_getter)
+                else None
+            )
+            if current_player_id == planned_captain.player_id:
+                continue
+            if not callable(captain_setter) or not captain_setter(
+                planned_captain.team_id,
+                planned_captain.player_id,
+            ):
+                safety_skipped += 1
+                print(
+                    "  ⚠ Captain safety skip "
+                    f"{planned_captain.source.club_name}: "
+                    f"{planned_captain.matched_player_name} is not in the "
+                    "current roster or game plan"
+                )
+                continue
+
+            captains_changed += 1
+            print(
+                f"  Captain updated: {planned_captain.source.club_name} → "
+                f"{planned_captain.matched_player_name}"
+            )
+            prepared.captain_records.append(
+                {
+                    "player_name": planned_captain.matched_player_name,
+                    "player_id": planned_captain.player_id,
+                    "from_team": planned_captain.source.club_name,
+                    "from_team_id": planned_captain.team_id,
+                    "to_team": planned_captain.source.club_name,
+                    "to_team_id": planned_captain.team_id,
+                    "team_name": planned_captain.source.club_name,
+                    "team_id": planned_captain.team_id,
+                    "previous_player_id": current_player_id,
+                    "confidence": planned_captain.confidence,
+                    "transfer_type": "captain_update",
+                    "dry_run": False,
+                    "position": "",
+                    "fee": "",
+                    "roster_action": "captain",
+                    "sources": [planned_captain.source.source],
+                    "source_urls": (
+                        [planned_captain.source.source_url]
+                        if planned_captain.source.source_url
+                        else []
+                    ),
+                    "proof_urls": [],
+                    "native_metadata": {
+                        "previous_captain_player_id": current_player_id,
+                    },
+                    "source": planned_captain.source.source,
+                    "source_url": planned_captain.source.source_url,
+                    "fotmob_player_id": planned_captain.source.player_id_fotmob,
+                }
+            )
+
+        if captains_changed:
+            print(f"  Captains changed: {captains_changed}")
 
         print(
             f"\n  Transfers applied: {transfer_applied}, "
             f"shirt numbers changed: {shirt_numbers_applied}, "
+            f"captains changed: {captains_changed}, "
             f"already current: {unchanged}, safety-skipped: {safety_skipped}"
         )
         return _RunMutation(
@@ -1368,6 +1573,7 @@ class _RunLocalUpdateRuntime:
             shirt_numbers_changed=shirt_numbers_applied,
             unchanged=unchanged,
             safety_skipped=safety_skipped,
+            captains_changed=captains_changed,
         )
 
     def verify(
@@ -1496,7 +1702,36 @@ class _RunLocalUpdateRuntime:
                     proof_urls=transfer.proof_urls,
                     native_metadata=run_record.get("native_metadata"),
                 )
-            transfer_log_content = transfer_logger.save_reports(prepared.run_records)
+            captain_records = list(getattr(prepared, "captain_records", ()))
+            for record in captain_records:
+                source_url = str(record.get("source_url") or "")
+                source = str(record.get("source") or "fotmob")
+                transfer_logger.log_transfer(
+                    player_name=str(record["player_name"]),
+                    player_id=int(record["player_id"]),
+                    from_team=str(record["team_name"]),
+                    from_team_id=int(record["team_id"]),
+                    to_team=str(record["team_name"]),
+                    to_team_id=int(record["team_id"]),
+                    confidence=float(record.get("confidence") or 0),
+                    transfer_type="captain_update",
+                    dry_run=False,
+                    roster_action="captain",
+                    save_scope=prepared.save_scope,
+                    fotmob_player_id=record.get("fotmob_player_id"),
+                    sources=(source,),
+                    source_urls=(source_url,) if source_url else (),
+                    native_metadata={
+                        "previous_captain_player_id": record.get(
+                            "previous_player_id"
+                        )
+                    },
+                )
+            report_records = [
+                *prepared.run_records,
+                *captain_records,
+            ]
+            transfer_log_content = transfer_logger.save_reports(report_records)
         except Exception as error:
             diagnostic = (
                 "Save published, but transfer logging/report generation failed: "
@@ -1518,6 +1753,7 @@ class _RunLocalUpdateRuntime:
             safety_skipped=mutation.safety_skipped,
             diagnostic=diagnostic,
             transfer_log_content=transfer_log_content,
+            captains_changed=mutation.captains_changed,
         )
 
     def preview(
@@ -1527,7 +1763,11 @@ class _RunLocalUpdateRuntime:
         plan,
         _token: CancellationToken,
     ) -> LocalUpdateResult:
-        _print_dry_run(prepared.edit_file, plan[0] if isinstance(plan, tuple) else plan)
+        _print_dry_run(
+            prepared.edit_file,
+            plan[0] if isinstance(plan, tuple) else plan,
+            getattr(prepared, "captain_plan", ()),
+        )
         return LocalUpdateResult(
             target_path=prepared.output_path,
             backup_path=None,

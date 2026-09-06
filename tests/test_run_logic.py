@@ -18,6 +18,7 @@ from run_pipeline import (
     _find_shirt_number_conflict,
     _load_represented_fotmob_club_ids,
     _match_and_plan_transfers,
+    _plan_captain_updates,
 )
 from transfer_planning import (
     PlannedRosterAction,
@@ -29,7 +30,7 @@ from transfer_planning import (
     _plan_roster_actions,
     _transfer_sort_key,
 )
-from scraper.models import MatchedTransfer, Transfer
+from scraper.models import CaptainUpdate, MatchedTransfer, ScrapeResult, Transfer
 from editor.models import TeamData
 
 
@@ -875,12 +876,21 @@ def test_transfer_run_syncs_squad_numbers_in_fast_mode(monkeypatch):
         transfer_type="shirt_number_update",
         shirt_number=7,
     )
+    captain = CaptainUpdate(
+        club_name="B",
+        team_id_fotmob=42,
+        player_name="Captain Player",
+        player_id_fotmob=987,
+    )
     calls = []
     monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_kwargs: [transfer])
     monkeypatch.setattr(
         run,
         "fetch_squads_for_club_names",
-        lambda clubs: calls.append(tuple(clubs)) or [shirt],
+        lambda clubs: calls.append(tuple(clubs)) or ScrapeResult(
+            [shirt],
+            [captain],
+        ),
     )
 
     def fail_deep_fetch(**_kwargs):
@@ -902,15 +912,74 @@ def test_transfer_run_syncs_squad_numbers_in_fast_mode(monkeypatch):
     assert calls == [("B", "A")]
     assert [item.player_name for item in result] == ["Player Two", "Squad Player"]
 
+    assert len(result.captain_updates) == 1
+    assert result.captain_updates[0].player_name == "Captain Player"
+
+def test_fast_captain_sync_keeps_existing_squad_club_limit(monkeypatch):
+    import run_pipeline as run
+
+    live_transfers = [
+        Transfer(f"Player {index}", f"Source {index}", f"Destination {index}")
+        for index in range(40)
+    ]
+    captain = CaptainUpdate(
+        club_name="Destination 0",
+        team_id_fotmob=42,
+        player_name="Captain Player",
+        player_id_fotmob=987,
+    )
+    calls = []
+    monkeypatch.setattr(
+        run,
+        "fetch_fotmob_transfers",
+        lambda **_kwargs: live_transfers,
+    )
+    monkeypatch.setattr(
+        run,
+        "fetch_squads_for_club_names",
+        lambda clubs: calls.append(tuple(clubs)) or ScrapeResult(
+            [],
+            [captain],
+        ),
+    )
+    monkeypatch.setattr(
+        run,
+        "fetch_major_clubs_transfers_safely",
+        lambda **_kwargs: pytest.fail("fast mode must not use deep fetch"),
+    )
+
+    result = run._scrape_run_transfers(
+        argparse.Namespace(
+            club=None,
+            deep=False,
+            fotmob_only=True,
+            popular=False,
+            window="auto",
+            since=None,
+        )
+    )
+
+    assert len(calls) == 1
+    assert len(calls[0]) == run._FAST_SQUAD_CLUB_LIMIT
+    assert len(result.captain_updates) == 1
 
 def test_deep_auto_restricts_club_history_to_current_year(monkeypatch):
     import run_pipeline as run
 
     calls = {}
+    captain = CaptainUpdate(
+        club_name="Indexed FC",
+        team_id_fotmob=42,
+        player_name="Deep Captain",
+        player_id_fotmob=987,
+    )
     monkeypatch.setattr(
         run,
         "fetch_major_clubs_transfers_safely",
-        lambda **kwargs: calls.update(kwargs) or [],
+        lambda **kwargs: calls.update(kwargs) or ScrapeResult(
+            [],
+            [captain],
+        ),
     )
     monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_kwargs: [])
 
@@ -926,10 +995,40 @@ def test_deep_auto_restricts_club_history_to_current_year(monkeypatch):
     )
 
     assert transfers == []
+    assert len(transfers.captain_updates) == 1
+    assert transfers.captain_updates[0].player_name == "Deep Captain"
     assert calls["window"] == "auto"
     assert calls["since_date"] == (
         run.date.today().replace(month=1, day=1).isoformat()
     )
+
+def test_captain_planner_requires_validated_club_and_roster_match():
+    from scraper.matcher import NameMatcher
+
+    matcher = NameMatcher()
+    matcher.load_player_db([("Captain Player", 1002)])
+    matcher.load_team_db({"Example FC": 101})
+
+    planned = _plan_captain_updates(
+        [
+            CaptainUpdate(
+                club_name="Example FC",
+                team_id_fotmob=42,
+                player_name="Captain Player",
+                player_id_fotmob=987,
+            )
+        ],
+        matcher,
+        {101: [1002]},
+        {101},
+        {42: 101},
+        80,
+    )
+
+    assert len(planned) == 1
+    assert planned[0].team_id == 101
+    assert planned[0].player_id == 1002
+    assert planned[0].matched_player_name == "Captain Player"
 
 
 

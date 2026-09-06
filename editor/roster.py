@@ -171,6 +171,53 @@ class RosterGamePlanMixin:
                     break
         return teams
 
+    def get_team_captain_player(self, team_id: int) -> int | None:
+        """Return the player currently stored as a team's captain."""
+        game_plan_offset = self._find_game_plan_offset(team_id)
+        if (
+            game_plan_offset is None
+            or game_plan_offset + GAME_PLAN_ENTRY_SIZE > len(self._data)
+        ):
+            return None
+
+        roster = self.get_team_roster(team_id)
+        if roster is None:
+            return None
+        slot = self._data[game_plan_offset + GP_CAPTAIN]
+        if (
+            slot == 0xFF
+            or slot >= TP_MAX_PLAYERS
+            or slot >= len(roster.player_ids)
+            or roster.player_ids[slot] == 0
+        ):
+            return None
+        return roster.player_ids[slot]
+
+    def set_team_captain(self, team_id: int, player_id: int) -> bool:
+        """Set a team's captain using the player's active roster slot."""
+        game_plan_offset = self._find_game_plan_offset(team_id)
+        if (
+            game_plan_offset is None
+            or game_plan_offset + GAME_PLAN_ENTRY_SIZE > len(self._data)
+            or player_id <= 0
+        ):
+            return False
+
+        roster = self.get_team_roster(team_id)
+        if roster is None:
+            return False
+        matching_slots = [
+            slot
+            for slot, roster_player_id in enumerate(roster.player_ids)
+            if roster_player_id == player_id
+        ]
+        if len(matching_slots) != 1:
+            return False
+
+        self._data[game_plan_offset + GP_CAPTAIN] = matching_slots[0]
+        return True
+
+
     def _overflow_role_slots(
         self, team_id: int, player_ids: list[int]
     ) -> dict[int, int]:

@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Update SP Football Life 2026 and eFootball PES 2021 `EDIT00000000` saves with
-verified real-world transfers and squad-number updates.
+verified real-world transfers, squad-number updates, and current captain roles.
 
 ## Compatibility
 
@@ -49,9 +49,9 @@ For a custom club list or on-demand run, fork the repository and use
 ## Fast vs Deep
 
 - **Fast:** Standard daily update from the live transfer feed. It also refreshes
-  current squad numbers for clubs found in that feed.
-- **Deep:** Broader update that checks every indexed club and refreshes its current
-  squad.
+  current squad numbers and captain roles for up to 32 clubs found in that feed.
+- **Deep:** Broader update that checks every indexed club, refreshing its current
+  squad numbers and captain role.
 
 Fast is the default. Add `--deep` when you want broader coverage.
 
@@ -59,6 +59,7 @@ Fast is the default. Add `--deep` when you want broader coverage.
 
 - Transfers, releases, loans, and loan returns
 - Shirt numbers, lineups, and game plans affected by roster changes
+- Current captain roles from each club's latest verified lineup marker
 - Transfer reports and audit logs
 - Daily prebuilt saves through GitHub Actions
 
@@ -152,9 +153,9 @@ python run.py validate --edit-file /path/to/EDIT00000000
 python run.py run --help
 ```
 
-`run` applies verified transfers, releases, loans, returns, and squad-number
-updates. Use `python run.py <command> --help` for audit, comparison, logging,
-and repair tools.
+`run` applies verified transfers, releases, loans, returns, squad-number updates,
+and captain roles. Use `python run.py <command> --help` for audit, comparison,
+logging, and repair tools.
 
 ## Safety
 

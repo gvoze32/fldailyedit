@@ -14,6 +14,7 @@ from local_update import (
     LocalUpdateService,
     LocalUpdateStage,
 )
+from scraper.models import CaptainUpdate, ScrapeResult
 
 
 class FakeRuntime:
@@ -183,6 +184,48 @@ def test_empty_scrape_returns_without_backup_or_publish() -> None:
     assert runtime.apply_calls == 0
     assert runtime.publish_calls == 0
     assert runtime.cleaned == 0
+
+def test_captain_only_scrape_is_not_treated_as_empty() -> None:
+    class CaptainOnlyRuntime(FakeRuntime):
+        def scrape(self, request, token):
+            return ScrapeResult(
+                [],
+                [
+                    CaptainUpdate(
+                        club_name="Example FC",
+                        team_id_fotmob=42,
+                        player_name="Captain Player",
+                        player_id_fotmob=987,
+                    )
+                ],
+            )
+
+        def apply(self, request, prepared, plan, token):
+            self.apply_calls += 1
+            return {"captains_changed": 1}
+
+        def publish(self, request, prepared, mutation, token):
+            self.publish_calls += 1
+            return LocalUpdateResult(
+                target_path=request.target_path,
+                backup_path=Path("backup/EDIT00000000.bak"),
+                installed_sha256="a" * 64,
+                transfer_applied=0,
+                shirt_numbers_changed=0,
+                unchanged=0,
+                safety_skipped=0,
+                captains_changed=1,
+            )
+
+    runtime = CaptainOnlyRuntime()
+    result = LocalUpdateService(runtime).execute(
+        LocalUpdateRequest(Path("save/EDIT00000000"))
+    )
+
+    assert result.no_changes is False
+    assert result.captains_changed == 1
+    assert runtime.apply_calls == 1
+    assert runtime.publish_calls == 1
 
 
 def test_dry_run_uses_preview_without_mutating() -> None:
