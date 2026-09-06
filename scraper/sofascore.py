@@ -24,6 +24,10 @@ SOFASCORE_TRANSFER_PAGE_URL = "https://www.sofascore.com/football/player-transfe
 SOFASCORE_TRANSFER_PAGE_FALLBACK_URL = (
     "https://api.sofascore.app/football/player-transfers"
 )
+SOFASCORE_TRANSFER_PAGE_APP_URL = "https://sofascore.app/football/player-transfers"
+SOFASCORE_TRANSFER_PAGE_APP_WWW_URL = (
+    "https://www.sofascore.app/football/player-transfers"
+)
 SOFASCORE_TRANSFER_PAGE_RETRIES = 2
 SOFASCORE_TRANSFER_PAGE_JINA_URL = (
     "https://r.jina.ai/https://www.sofascore.com/football/player-transfers"
@@ -327,8 +331,14 @@ async def _fetch_transfer_page_payload(
             SOFASCORE_JINA_HEADERS,
         ),
         (
-            SOFASCORE_TRANSFER_PAGE_FALLBACK_URL,
+            SOFASCORE_TRANSFER_PAGE_APP_URL,
             SOFASCORE_TRANSFER_PAGE_RETRIES,
+            None,
+        ),
+        (SOFASCORE_TRANSFER_PAGE_APP_WWW_URL, 1, None),
+        (
+            SOFASCORE_TRANSFER_PAGE_FALLBACK_URL,
+            1,
             None,
         ),
     )

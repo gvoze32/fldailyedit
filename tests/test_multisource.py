@@ -724,6 +724,29 @@ def test_transfermarkt_fetch_refreshes_empty_reader_response(monkeypatch):
     assert "fldailyedit_refresh=" in requested[1]
 
 
+def test_transfermarkt_fetch_retries_unparseable_first_page(monkeypatch):
+    from scraper import transfermarkt
+
+    requested = []
+
+    async def fake_fetch(_session, reader_url):
+        requested.append(reader_url)
+        return TRANSFERMARKT_MARKDOWN if len(requested) == 4 else "not a table"
+
+    monkeypatch.setattr(transfermarkt, "_fetch_text", fake_fetch)
+    transfers = asyncio.run(
+        transfermarkt._fetch_transfermarkt_transfers_async(
+            max_pages=1,
+            since_date=date(2026, 8, 3),
+            ref_date=date(2026, 8, 3),
+        )
+    )
+
+    assert len(transfers) == 3
+    assert len(requested) == 4
+
+
+
 def test_transfermarkt_fetch_falls_back_to_german_reader_domain(monkeypatch):
     from scraper import transfermarkt
 
@@ -996,6 +1019,42 @@ def test_sofascore_transfer_page_falls_back_to_jina_when_direct_page_fails():
         "allow_redirects": False,
         "headers": sofascore.SOFASCORE_JINA_HEADERS,
     }
+
+def test_sofascore_transfer_page_falls_back_to_app_hostname_after_blocks():
+    from scraper import sofascore
+
+    page_html = (
+        '<script id="__NEXT_DATA__" type="application/json">'
+        + json.dumps(
+            {
+                "props": {
+                    "pageProps": {
+                        "fallbackData": [{"transfers": []}],
+                    }
+                }
+            }
+        )
+        + "</script>"
+    )
+    requested = []
+
+    class FakeSession:
+        async def get(self, url, **kwargs):
+            requested.append((url, kwargs))
+            if url == sofascore.SOFASCORE_TRANSFER_PAGE_APP_URL:
+                return SimpleNamespace(status_code=200, text=page_html)
+            return SimpleNamespace(status_code=403, text="")
+
+    payload = asyncio.run(sofascore._fetch_transfer_page_payload(FakeSession()))
+
+    assert payload == {"transfers": []}
+    assert [url for url, _ in requested] == [
+        sofascore.SOFASCORE_TRANSFER_PAGE_URL,
+        sofascore.SOFASCORE_TRANSFER_PAGE_JINA_URL,
+        sofascore.SOFASCORE_TRANSFER_PAGE_APP_URL,
+    ]
+
+
 
 
 def test_soccerway_parser_resolves_current_feed_routes():

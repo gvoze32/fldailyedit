@@ -17,6 +17,7 @@ from scraper.models import Transfer
 
 TRANSFERMARKT_URL = "https://www.transfermarkt.com/transfers/neuestetransfers/statistik"
 AUTO_PAGE_LIMIT = 250
+TRANSFERMARKT_FIRST_PAGE_RETRIES = 2
 
 TRANSFERMARKT_READER_PREFIX = "https://r.jina.ai/"
 TRANSFERMARKT_FALLBACK_DOMAIN = "www.transfermarkt.de"
@@ -339,45 +340,57 @@ async def _fetch_transfermarkt_transfers_async(
             if page > 1:
                 params["page"] = page
             source_url = f"{TRANSFERMARKT_URL}?{urlencode(params)}"
-            reader_candidates = [
-                (source_url, f"{TRANSFERMARKT_READER_PREFIX}{source_url}"),
-                (source_url, _fresh_reader_url(source_url)),
-            ]
-            fallback_source_url = _fallback_source_url(source_url)
-            if fallback_source_url is not None:
-                reader_candidates.append(
-                    (
-                        fallback_source_url,
-                        _fresh_reader_url(fallback_source_url),
-                    )
-                )
-
+            fetch_attempts = (
+                TRANSFERMARKT_FIRST_PAGE_RETRIES if page == 1 else 1
+            )
             batch: list[Transfer] = []
             fetched_response = False
             last_fetch_error: Exception | None = None
-            for candidate_source_url, candidate_reader_url in reader_candidates:
-                try:
-                    markdown = await _fetch_text(session, candidate_reader_url)
-                except (
-                    TransfermarktUnavailableError,
-                    aiohttp.ClientError,
-                    TimeoutError,
-                ) as exc:
-                    last_fetch_error = exc
-                    continue
-                fetched_response = True
-                batch = parse_transfermarkt_markdown(
-                    markdown,
-                    candidate_source_url,
-                )
-                if batch:
-                    if candidate_source_url != source_url:
-                        logger.info(
-                            "Transfermarkt primary reader empty; "
-                            "using fallback domain for page %s",
-                            page,
+            for fetch_attempt in range(fetch_attempts):
+                reader_candidates = [
+                    (source_url, f"{TRANSFERMARKT_READER_PREFIX}{source_url}"),
+                    (source_url, _fresh_reader_url(source_url)),
+                ]
+                fallback_source_url = _fallback_source_url(source_url)
+                if fallback_source_url is not None:
+                    reader_candidates.append(
+                        (
+                            fallback_source_url,
+                            _fresh_reader_url(fallback_source_url),
                         )
+                    )
+
+                for candidate_source_url, candidate_reader_url in reader_candidates:
+                    try:
+                        markdown = await _fetch_text(session, candidate_reader_url)
+                    except (
+                        TransfermarktUnavailableError,
+                        aiohttp.ClientError,
+                        TimeoutError,
+                    ) as exc:
+                        last_fetch_error = exc
+                        continue
+                    fetched_response = True
+                    batch = parse_transfermarkt_markdown(
+                        markdown,
+                        candidate_source_url,
+                    )
+                    if batch:
+                        if candidate_source_url != source_url:
+                            logger.info(
+                                "Transfermarkt primary reader empty; "
+                                "using fallback domain for page %s",
+                                page,
+                            )
+                        break
+                if batch:
                     break
+                if fetch_attempt + 1 < fetch_attempts:
+                    logger.info(
+                        "Transfermarkt page %s had no parseable rows; "
+                        "refreshing reader response",
+                        page,
+                    )
 
             if not batch:
                 if last_fetch_error is not None and not fetched_response:

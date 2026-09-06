@@ -90,7 +90,7 @@ supplement it and help resolve incomplete or ambiguous coverage:
   player/club identifiers.
 - BeSoccer's current confirmed-transfer feed corroborates transfer routes,
   dates, fees, and transfer types.
-- Sofascore's rendered team pages corroborate dated transfer routes.
+- Sofascore's global rendered transfer page corroborates dated transfer routes.
 - Soccerway resolves relevant clubs and corroborates their dated transfer routes.
 
 The optional Soccerway corroboration scan reads the first transfer page per
