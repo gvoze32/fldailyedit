@@ -1247,6 +1247,31 @@ def test_transfermarkt_dated_routes_merge_with_matching_wikipedia_event():
     assert jordan.infer_from_current_roster is False
 
 
+def test_primary_source_wins_conflicting_same_day_route():
+    fotmob = Transfer(
+        "Rolando Mandragora",
+        "ACF Fiorentina",
+        "Torino FC",
+        date="2026-09-01T20:46:40Z",
+    )
+    wikipedia = Transfer(
+        "Rolando Mandragora",
+        "Torino FC",
+        "ACF Fiorentina",
+        date="2026-09-01",
+        sources=("wikipedia",),
+    )
+
+    reconciled = reconcile_transfer_sources([[fotmob], [wikipedia]])
+
+    assert len(reconciled) == 1
+    assert (reconciled[0].from_club, reconciled[0].to_club) == (
+        "ACF Fiorentina",
+        "Torino FC",
+    )
+    assert reconciled[0].sources == ("fotmob",)
+
+
 def test_free_transfer_merges_free_agent_and_previous_club_routes():
     fotmob = Transfer(
         "Jordan Henderson",
@@ -1345,6 +1370,7 @@ def test_run_pipeline_accepts_transfermarkt_dated_event_without_other_sources(
     monkeypatch,
 ):
     import run_pipeline as run
+    monkeypatch.setattr(run, "fetch_squads_for_club_names", lambda *_: [])
 
     transfermarkt = Transfer(
         "Jordan Henderson",
@@ -1390,6 +1416,7 @@ def test_run_pipeline_accepts_transfermarkt_dated_event_without_other_sources(
 
 def test_run_pipeline_reconciles_supplemental_sources(monkeypatch):
     import run_pipeline as run
+    monkeypatch.setattr(run, "fetch_squads_for_club_names", lambda *_: [])
 
     fotmob = Transfer(
         "Jordan Henderson", "Brentford", "Chelsea", date="2026-08-03"
@@ -1453,6 +1480,7 @@ def test_run_pipeline_reconciles_supplemental_sources(monkeypatch):
 
 def test_run_pipeline_merges_three_route_corroborators(monkeypatch):
     import run_pipeline as run
+    monkeypatch.setattr(run, "fetch_squads_for_club_names", lambda *_: [])
 
     fotmob = Transfer(
         "Ada Example",
@@ -1535,6 +1563,7 @@ def test_run_pipeline_merges_three_route_corroborators(monkeypatch):
 
 def test_run_pipeline_treats_undated_wikipedia_route_as_corroborator(monkeypatch):
     import run_pipeline as run
+    monkeypatch.setattr(run, "fetch_squads_for_club_names", lambda *_: [])
 
     fotmob = Transfer(
         "Nathaniel Brown",
@@ -1582,6 +1611,7 @@ def test_run_pipeline_treats_undated_wikipedia_route_as_corroborator(monkeypatch
 
 def test_fotmob_only_flag_does_not_call_supplemental_sources(monkeypatch):
     import run_pipeline as run
+    monkeypatch.setattr(run, "fetch_squads_for_club_names", lambda *_: [])
 
     monkeypatch.setattr(
         run,

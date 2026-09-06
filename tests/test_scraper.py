@@ -539,6 +539,61 @@ class TestScraperSafety:
         with pytest.raises(fotmob.IncompleteScrapeError, match="every requested club"):
             fotmob.fetch_transfers_for_club_names(["Manchester"])
 
+    def test_targeted_squad_fetch_returns_current_numbers(self, monkeypatch):
+        from scraper import fotmob
+
+        payload = {
+            "details": {"name": "Example FC"},
+            "squad": {
+                "squad": [
+                    {
+                        "members": [
+                            {
+                                "id": 123,
+                                "name": "Squad Player",
+                                "shirtNumber": 7,
+                            }
+                        ]
+                    }
+                ]
+            },
+        }
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+        async def fake_fetch(_scraper, _session, team_id):
+            assert team_id == 42
+            return payload
+
+        monkeypatch.setattr(
+            fotmob,
+            "get_deep_clubs",
+            lambda: {"Example FC": 42},
+        )
+        monkeypatch.setattr(
+            fotmob.aiohttp,
+            "ClientSession",
+            lambda **_kwargs: FakeSession(),
+        )
+        monkeypatch.setattr(
+            fotmob.FotmobScraper,
+            "_fetch_club_data_async",
+            fake_fetch,
+        )
+
+        result = fotmob.fetch_squads_for_club_names(["Example FC"])
+
+        assert len(result) == 1
+        assert result[0].transfer_type == "shirt_number_update"
+        assert result[0].player_name == "Squad Player"
+        assert result[0].shirt_number == 7
+        assert result[0].to_club_id_fotmob == 42
+
     def test_merge_normalizes_diacritics_and_enriches_duplicate(self):
         from scraper.fotmob import merge_transfers
 

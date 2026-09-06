@@ -776,6 +776,21 @@ def _shirt_match(number: int, confidence: float) -> MatchedTransfer:
     )
 
 
+def test_shirt_number_matches_are_eligible_for_roster_planning():
+    match = _shirt_match(7, 100)
+    planned = _plan_roster_actions(
+        [match],
+        {10: TeamData(10, [100] + [0] * 39)},
+        {10},
+        object(),
+        {},
+    )
+
+    assert match.is_fully_matched
+    assert planned[0].action == "shirt_update"
+    assert planned[0].current_team_id == 10
+
+
 def test_duplicate_shirt_matches_keep_stronger_observation():
     matches, skipped = _dedupe_shirt_number_matches([
         _shirt_match(7, 100),
@@ -849,14 +864,27 @@ def test_runtime_club_identity_index_must_be_one_to_one(monkeypatch, tmp_path):
     with pytest.raises(IncompleteScrapeError, match="not one-to-one"):
         _load_represented_fotmob_club_ids()
     
-def test_transfer_run_skips_squad_number_sync_in_fast_mode(monkeypatch):
+def test_transfer_run_syncs_squad_numbers_in_fast_mode(monkeypatch):
     import run_pipeline as run
 
     transfer = Transfer("Player Two", "A", "B")
+    shirt = Transfer(
+        "Squad Player",
+        "B",
+        "B",
+        transfer_type="shirt_number_update",
+        shirt_number=7,
+    )
+    calls = []
     monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_kwargs: [transfer])
+    monkeypatch.setattr(
+        run,
+        "fetch_squads_for_club_names",
+        lambda clubs: calls.append(tuple(clubs)) or [shirt],
+    )
 
     def fail_deep_fetch(**_kwargs):
-        raise AssertionError("Fast mode must not fetch indexed clubs")
+        raise AssertionError("Fast mode must not fetch every indexed club")
 
     monkeypatch.setattr(run, "fetch_major_clubs_transfers_safely", fail_deep_fetch)
 
@@ -870,7 +898,9 @@ def test_transfer_run_skips_squad_number_sync_in_fast_mode(monkeypatch):
             since=None,
         )
     )
-    assert result == [transfer]
+
+    assert calls == [("B", "A")]
+    assert [item.player_name for item in result] == ["Player Two", "Squad Player"]
 
 
 def test_deep_auto_restricts_club_history_to_current_year(monkeypatch):
@@ -901,3 +931,31 @@ def test_deep_auto_restricts_club_history_to_current_year(monkeypatch):
         run.date.today().replace(month=1, day=1).isoformat()
     )
 
+
+
+def test_fast_auto_restricts_live_feed_to_current_year(monkeypatch):
+    import run_pipeline as run
+
+    calls = {}
+    monkeypatch.setattr(
+        run,
+        "fetch_fotmob_transfers",
+        lambda **kwargs: calls.update(kwargs) or [],
+    )
+
+    transfers = run._scrape_run_transfers(
+        argparse.Namespace(
+            club=None,
+            deep=False,
+            fotmob_only=True,
+            popular=False,
+            window="auto",
+            since=None,
+        )
+    )
+
+    assert transfers == []
+    assert calls["window"] == "auto"
+    assert calls["since_date"] == (
+        run.date.today().replace(month=1, day=1).isoformat()
+    )

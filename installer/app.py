@@ -46,10 +46,12 @@ from installer.worker import InstallerWorker
 
 UI_COPY = {
     "fast_title": "Fast — Recommended",
-    "fast_description": "Standard daily update from the live transfer feed.",
+    "fast_description": (
+        "Standard daily update from the live transfer feed."
+    ),
     "deep_title": "Deep — Expanded coverage",
     "deep_description": (
-        "Checks every locally indexed FotMob club for maximum coverage."
+        "Broader update that checks every indexed club and refreshes its current squad."
     ),
     "coverage_note": (
         "Beta: FL Daily Edit, its repository data, and generated releases are "
@@ -98,6 +100,22 @@ _LOCAL_STAGE_COPY = {
     LocalUpdateStage.ENCRYPTING.value: "Finishing the in-place update safely…",
     LocalUpdateStage.COMPLETE.value: "Local update complete.",
 }
+
+_LOCAL_PROGRESS_ORDER = (
+    LocalUpdateStage.SCRAPING.value,
+    LocalUpdateStage.VALIDATING.value,
+    LocalUpdateStage.MATCHING.value,
+    LocalUpdateStage.APPLYING.value,
+    LocalUpdateStage.VERIFYING.value,
+    LocalUpdateStage.ENCRYPTING.value,
+    LocalUpdateStage.COMPLETE.value,
+)
+_LOCAL_STAGE_PROGRESS = {
+    stage: index
+    for index, stage in enumerate(_LOCAL_PROGRESS_ORDER, start=1)
+}
+_LOCAL_PROGRESS_TOTAL = len(_LOCAL_PROGRESS_ORDER)
+
 
 @dataclass(frozen=True, slots=True)
 class ProgressPresentation:
@@ -151,6 +169,16 @@ def progress_presentation(
             value=0,
             controls_locked=False,
         )
+    if local:
+        stage_value = _LOCAL_STAGE_PROGRESS.get(state.progress_stage)
+        if stage_value is not None:
+            return ProgressPresentation(
+                mode="determinate",
+                status=_LOCAL_STAGE_COPY[state.progress_stage],
+                maximum=_LOCAL_PROGRESS_TOTAL,
+                value=stage_value,
+                controls_locked=False,
+            )
     if state.progress_stage == "downloading":
         total = max(state.progress_total, 1)
         downloaded = min(max(state.progress_downloaded, 0), total)
@@ -188,8 +216,8 @@ def progress_detail_copy(
         )
     if state.mode is InstallerMode.LOCAL:
         return (
-            "Keep this window open. Updating your local save may take some "
-            "time, and the app may appear frozen or flicker while it works."
+            "Keep this window open while the update checks transfers, "
+            "matches players, and prepares your save."
         )
     return "Keep this window open while the save is updated."
 
@@ -326,6 +354,8 @@ class InstallerApplication:
         self._commit_lock_observed = False
         self._poll_after_id: str | None = None
         self._rendered_step: WizardStep | None = None
+        self._rendered_visible_step: WizardStep | None = None
+        self._progress_mode: str | None = None
         self._progress_running = False
         self._records_by_channel: dict[str, ReleaseRecord] = {}
         self._locations_by_key: dict[str, SaveLocation] = {}
@@ -925,9 +955,11 @@ class InstallerApplication:
             if state.step is WizardStep.RESULT
             else state.step
         )
-        for frame in self._frames.values():
-            frame.grid_remove()
-        self._frames[visible_step].grid()
+        if self._rendered_visible_step is not visible_step:
+            for frame in self._frames.values():
+                frame.grid_remove()
+            self._frames[visible_step].grid()
+            self._rendered_visible_step = visible_step
 
         step_number = {
             WizardStep.UPDATE: 1,
@@ -1165,8 +1197,12 @@ class InstallerApplication:
             safety_var.set(safety)
 
     def _render_progress(self, state: InstallerState) -> None:
-        self._set_transfer_log(None)
-        self._result_actions.grid_remove()
+        previous_step = getattr(self, "_rendered_step", None)
+        if previous_step is None:
+            previous_step = getattr(self, "_rendered_visible_step", None)
+        if previous_step is not WizardStep.PROGRESS:
+            self._set_transfer_log(None)
+            self._result_actions.grid_remove()
         self._progress_bar.grid()
         presentation = progress_presentation(
             state,
@@ -1180,22 +1216,32 @@ class InstallerApplication:
                 controls_locked=presentation.controls_locked,
             )
         )
-        if self._progress_running:
-            self._progress_bar.stop()
-            self._progress_running = False
-        self._progress_bar.configure(
-            mode=presentation.mode,
-            maximum=presentation.maximum,
-            value=presentation.value,
-        )
-        if presentation.mode == "indeterminate":
-            self._progress_bar.start(_PROGRESS_PULSE_MS)
-            self._progress_running = True
+
+        mode_changed = presentation.mode != getattr(self, "_progress_mode", None)
+        if mode_changed:
+            if self._progress_running:
+                self._progress_bar.stop()
+                self._progress_running = False
+            self._progress_bar.configure(
+                mode=presentation.mode,
+                maximum=presentation.maximum,
+                value=presentation.value,
+            )
+            self._progress_mode = presentation.mode
+            if presentation.mode == "indeterminate":
+                self._progress_bar.start(_PROGRESS_PULSE_MS)
+                self._progress_running = True
+        elif presentation.mode == "determinate":
+            self._progress_bar.configure(
+                maximum=presentation.maximum,
+                value=presentation.value,
+            )
 
     def _render_result(self, state: InstallerState) -> None:
         if self._progress_running:
             self._progress_bar.stop()
             self._progress_running = False
+        self._progress_mode = None
         self._progress_bar.grid_remove()
         self._result_actions.grid()
         transfer_log_content: str | None = None

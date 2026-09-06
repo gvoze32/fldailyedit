@@ -802,6 +802,61 @@ def fetch_major_clubs_transfers_safely(
     )
 
 
+def fetch_squads_for_club_names(club_names: list[str]) -> list[Transfer]:
+    """Fetch only current squad shirt numbers for specific clubs."""
+    requested = [name.strip() for name in club_names if name.strip()]
+    if not requested:
+        return []
+
+    try:
+        available_clubs = get_deep_clubs()
+    except IncompleteScrapeError as error:
+        logger.warning("Skipping targeted squad sync: %s", error)
+        return []
+
+    targets = _resolve_club_targets(requested, available_clubs)
+    if not targets:
+        logger.warning(
+            "Skipping targeted squad sync; no requested clubs resolved safely"
+        )
+        return []
+
+    scraper = FotmobScraper()
+    all_squads: list[Transfer] = []
+
+    async def fetch_subset():
+        async with aiohttp.ClientSession(
+            headers=scraper.headers,
+            timeout=aiohttp.ClientTimeout(total=15),
+        ) as session:
+            for club_name, team_id in targets:
+                try:
+                    data = await scraper._fetch_club_data_async(session, team_id)
+                except IncompleteScrapeError as error:
+                    logger.warning(
+                        "Skipping squad sync for %s (%s): %s",
+                        club_name,
+                        team_id,
+                        error,
+                    )
+                    continue
+                if data:
+                    team_name = _payload_team_name(data, club_name)
+                    all_squads.extend(
+                        scraper._extract_squad_from_team_data(
+                            data,
+                            team_id,
+                            team_name,
+                        )
+                    )
+
+    asyncio.run(fetch_subset())
+    return merge_transfers([all_squads])
+
+
+
+
+
 def fetch_transfers_for_club_names(
     club_names: list[str],
     since_date: Optional[Union[str, date]] = None,

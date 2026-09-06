@@ -48,8 +48,10 @@ For a custom club list or on-demand run, fork the repository and use
 
 ## Fast vs Deep
 
-- **Fast:** Quicker, but only checks the most recent transfers.
-- **Deep:** Takes longer, but checks every team's full roster to make sure nothing is missed.
+- **Fast:** Standard daily update from the live transfer feed. It also refreshes
+  current squad numbers for clubs found in that feed.
+- **Deep:** Broader update that checks every indexed club and refreshes its current
+  squad.
 
 Fast is the default. Add `--deep` when you want broader coverage.
 
@@ -81,6 +83,9 @@ The installer also displays that report directly on its completion screen.
 
 FotMob is the primary source for current transfer events. The other sources
 supplement it and help resolve incomplete or ambiguous coverage:
+
+For dated same-day route conflicts, precedence is FotMob, then Transfermarkt,
+then Wikipedia; corroboration sources never override a primary route.
 
 - Wikipedia's confirmed seasonal transfer lists corroborate transfer routes and
   dated moves.
@@ -131,11 +136,11 @@ cd ../..
 # Preview transfers without writing a save
 python run.py run --dry-run --edit-file base/EDIT00000000
 
-# Apply all available transfers
+# Apply current-cycle transfers (default auto)
 python run.py run --window auto
 
-# Rebuild from the bundled base
-python run.py run --from-base --window auto
+# Replay the full available transfer history explicitly
+python run.py run --window all
 
 # Update a specific save in place
 python run.py run --edit-file /path/to/EDIT00000000 --in-place

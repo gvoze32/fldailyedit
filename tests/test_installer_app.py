@@ -760,7 +760,7 @@ def test_exact_english_ui_copy_is_available_without_rendering() -> None:
         "Fast — Recommended",
         "Standard daily update from the live transfer feed.",
         "Deep — Expanded coverage",
-        "Checks every locally indexed FotMob club for maximum coverage.",
+        "Broader update that checks every indexed club and refreshes its current squad.",
         "Fast and Deep describe update coverage, not download speed.",
         "Download and install",
         "Close the game before continuing.",
@@ -823,14 +823,64 @@ def test_progress_presentation_switches_mode_and_locks_at_commit() -> None:
         step=WizardStep.PROGRESS,
         progress_stage=LocalUpdateStage.SCRAPING.value,
     )
+    local_view = installer_app.progress_presentation(local_progress)
+    assert local_view.mode == "determinate"
+    assert local_view.maximum == 7
+    assert local_view.value == 1
     assert (
         installer_app.progress_detail_copy(
             local_progress,
             controls_locked=False,
         )
-        == "Keep this window open. Updating your local save may take some "
-        "time, and the app may appear frozen or flicker while it works."
+        == "Keep this window open while the update checks transfers, "
+        "matches players, and prepares your save."
     )
+
+
+def test_progress_render_does_not_restart_animation_for_same_mode() -> None:
+    class Bar:
+        def __init__(self) -> None:
+            self.starts = 0
+            self.stops = 0
+            self.configures = 0
+
+        def grid(self) -> None:
+            pass
+
+        def start(self, _interval: int) -> None:
+            self.starts += 1
+
+        def stop(self) -> None:
+            self.stops += 1
+
+        def configure(self, **_options: object) -> None:
+            self.configures += 1
+
+    class Variable:
+        def set(self, _value: str) -> None:
+            pass
+
+    application = object.__new__(installer_app.InstallerApplication)
+    application._rendered_visible_step = WizardStep.PROGRESS
+    application._rendered_step = WizardStep.PROGRESS
+    application._progress_mode = "indeterminate"
+    application._progress_running = True
+    application._progress_bar = Bar()
+    application._progress_status_var = Variable()
+    application._progress_detail_var = Variable()
+    application._cancel_requested = False
+    application._commit_lock_observed = False
+
+    application._render_progress(
+        InstallerState(
+            step=WizardStep.PROGRESS,
+            progress_stage=InstallStage.STAGING.value,
+        )
+    )
+
+    assert application._progress_bar.starts == 0
+    assert application._progress_bar.stops == 0
+    assert application._progress_bar.configures == 0
 
 
 def test_completion_renders_prebuilt_and_local_transfer_details(
@@ -1746,7 +1796,9 @@ def test_local_progress_presentation_covers_stages_and_commit_lock() -> None:
         progress_stage=LocalUpdateStage.MATCHING.value,
     )
     matching = installer_app.progress_presentation(progress)
-    assert matching.mode == "indeterminate"
+    assert matching.mode == "determinate"
+    assert matching.maximum == 7
+    assert matching.value == 3
     assert "Matching players" in matching.status
     assert matching.controls_locked is False
 

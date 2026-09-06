@@ -38,6 +38,7 @@ _NON_CLUB_NAMES = {
     "career break",
     "retired",
 }
+_CONTEXT_PLAYER_MIN_CONFIDENCE = 90.0
 
 # Position categorization maps
 _POS_GK = {"GK", "GOALKEEPER", "KEEPER", "GOALIE"}
@@ -523,6 +524,12 @@ class NameMatcher:
             contextual_scores.sort(reverse=True, key=lambda item: item[0])
             if contextual_scores and contextual_scores[0][0] >= threshold:
                 top = contextual_scores[0]
+                if top[0] < _CONTEXT_PLAYER_MIN_CONFIDENCE:
+                    logger.warning(
+                        f"Rejecting weak {context_label} roster match "
+                        f"'{scraped_name}': '{top[1]}' ({top[0]:.1f})"
+                    )
+                    return None, "", top[0]
                 runner_up = next(
                     (item for item in contextual_scores[1:] if item[2] != top[2]),
                     None,

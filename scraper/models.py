@@ -75,8 +75,17 @@ class MatchedTransfer:
 
     @property
     def is_fully_matched(self) -> bool:
-        """True if player and at least one valid transfer action can be taken."""
-        return self.is_club_transfer or self.is_release or self.is_sign
+        """True if player and at least one valid roster action can be taken."""
+        return (
+            self.is_club_transfer
+            or self.is_release
+            or self.is_sign
+            or (
+                self.transfer.transfer_type == "shirt_number_update"
+                and self.player_id is not None
+                and self._has_valid_to_team
+            )
+        )
 
     @property
     def is_club_transfer(self) -> bool:

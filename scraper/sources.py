@@ -21,6 +21,73 @@ _NON_CLUB_LABELS = {
     "retired",
 }
 
+_SOURCE_PRIORITY = {
+    "fotmob": 0,
+    "transfermarkt": 1,
+    "wikipedia": 2,
+}
+
+
+def _source_priority(transfer: Transfer) -> int:
+    """Return the strongest provenance rank carried by an event."""
+    return min(
+        (_SOURCE_PRIORITY.get(source.casefold(), 3) for source in transfer.sources),
+        default=3,
+    )
+
+
+
+
+def _same_route(left: Transfer, right: Transfer) -> bool:
+    return _same_source(left, right) and _same_destination(left, right)
+
+
+def _prefer_primary_routes(transfers: list[Transfer]) -> list[Transfer]:
+    """Drop lower-trust routes that contradict a stronger same-day event."""
+    groups: dict[tuple[str, object], list[Transfer]] = {}
+    ungrouped: list[Transfer] = []
+    for transfer in transfers:
+        event_date = parse_iso_date(transfer.date)
+        if event_date is None:
+            ungrouped.append(transfer)
+            continue
+        groups.setdefault((_normalize(transfer.player_name), event_date), []).append(
+            transfer
+        )
+
+    selected = list(ungrouped)
+    for group in groups.values():
+        distinct_routes: list[Transfer] = []
+        for transfer in group:
+            if not any(_same_route(transfer, route) for route in distinct_routes):
+                distinct_routes.append(transfer)
+        if len(distinct_routes) <= 1:
+            selected.extend(group)
+            continue
+
+        strongest = min(_source_priority(transfer) for transfer in distinct_routes)
+        preferred_routes = [
+            transfer
+            for transfer in distinct_routes
+            if _source_priority(transfer) == strongest
+        ]
+        preferred = [
+            transfer
+            for transfer in group
+            if any(_same_route(transfer, route) for route in preferred_routes)
+        ]
+        discarded = len(group) - len(preferred)
+        if discarded:
+            example = group[0]
+            logger.warning(
+                "Discarding %s lower-priority conflicting route(s) for %s on %s",
+                discarded,
+                example.player_name,
+                parse_iso_date(example.date),
+            )
+        selected.extend(preferred)
+    return selected
+
 
 def _normalize(value: str) -> str:
     decomposed = unicodedata.normalize("NFKD", value or "")
@@ -138,7 +205,7 @@ def _merge_verified_batches(
             _merge_provenance(candidates[0], transfer)
         else:
             merged.append(transfer)
-    return merged
+    return _prefer_primary_routes(merged)
 
 
 def reconcile_transfer_sources(

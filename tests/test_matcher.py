@@ -125,6 +125,24 @@ class TestPlayerMatching:
         assert pid == 3001
         assert conf == 100.0
 
+    def test_roster_context_rejects_near_name_collision(self):
+        """Roster context must not turn a weak name similarity into identity."""
+        m = NameMatcher()
+        m.load_player_db({
+            "Diney Borges": 58182,
+            "Diego Torres": 58183,
+        })
+
+        pid, name, confidence = m.match_player(
+            "Diego Borges",
+            threshold=80,
+            from_team_id=1667,
+            team_player_map={1667: [58182]},
+        )
+
+        assert (pid, name) == (None, "")
+        assert confidence < 90
+
     def test_identical_names_require_context(self):
         """Duplicate normalized names must never be resolved by insertion order."""
         m = NameMatcher()

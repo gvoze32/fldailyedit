@@ -24,6 +24,7 @@ from scraper.fotmob import (
     get_transfer_window_range,
     merge_transfers,
     fetch_transfers_for_club_names,
+    fetch_squads_for_club_names,
     fetch_major_clubs_transfers_safely,
 )
 from scraper.besoccer import fetch_besoccer_transfers
@@ -44,6 +45,8 @@ from local_update import (
 )
 
 logger = logging.getLogger(__name__)
+_FAST_SQUAD_CLUB_LIMIT = 32
+
 
 def _sha256_file(path: Path) -> str:
     """Return a stable digest without loading a large EDIT file into memory."""
@@ -98,11 +101,12 @@ def _load_represented_fotmob_club_map() -> dict[int, int]:
 def _load_represented_fotmob_club_ids() -> set[int]:
     """Return the validated FotMob club IDs used by the transfer guard."""
     return set(_load_represented_fotmob_club_map())
-def _deep_transfer_since_date(
+
+def _default_transfer_since_date(
     window: str,
     since_date: str | None,
 ) -> str | None:
-    """Avoid replaying stale club-history events against the current base."""
+    """Avoid replaying stale history in default global runs."""
     if since_date is not None or (window or "auto").casefold() != "auto":
         return since_date
     return date.today().replace(month=1, day=1).isoformat()
@@ -141,6 +145,42 @@ def _supplemental_target_clubs(transfer_batches) -> tuple[str, ...]:
                 targets.append(target)
     return tuple(targets)
 
+def _fast_squad_target_clubs(transfer_batches) -> tuple[str, ...]:
+    """Return recent transfer clubs whose current squads should be refreshed."""
+    non_clubs = {
+        "",
+        "career break",
+        "free agent",
+        "retired",
+        "unattached",
+        "without club",
+    }
+    targets: list[str] = []
+    seen: set[str] = set()
+    for batch in transfer_batches:
+        for transfer in batch:
+            for candidate in (
+                transfer.to_club_full_name or transfer.to_club,
+                transfer.from_club_full_name or transfer.from_club,
+            ):
+                clean = candidate.strip()
+                key = clean.casefold()
+                if (
+                    not clean
+                    or key in non_clubs
+                    or key in seen
+                ):
+                    continue
+                seen.add(key)
+                targets.append(clean)
+                if len(targets) >= _FAST_SQUAD_CLUB_LIMIT:
+                    return tuple(targets)
+    return tuple(targets)
+
+
+
+
+
 
 def _scrape_run_transfers(args):
     """Fetch, merge, order, and preview transfers for one pipeline run."""
@@ -150,11 +190,16 @@ def _scrape_run_transfers(args):
     club_filter = getattr(args, "club", None)
     deep_mode = bool(getattr(args, "deep", False))
     fotmob_only = bool(getattr(args, "fotmob_only", False))
+    scrape_since_date = (
+        since_date
+        if club_filter
+        else _default_transfer_since_date(window, since_date)
+    )
 
     start_date, end_date = get_transfer_window_range(window)
     cutoff_info = (
-        f"since {since_date}"
-        if since_date
+        f"since {scrape_since_date}"
+        if scrape_since_date
         else f"window '{window}' ({start_date} to {end_date or 'latest'})"
     )
     transfer_batches = []
@@ -174,7 +219,7 @@ def _scrape_run_transfers(args):
             "\n🌪️ Deep Mode: Scraping transfers and squads for indexed clubs "
             f"({cutoff_info})..."
         )
-        deep_since_date = _deep_transfer_since_date(window, since_date)
+        deep_since_date = scrape_since_date
         transfer_batches.append(
             fetch_major_clubs_transfers_safely(
                 since_date=deep_since_date, window=window
@@ -187,7 +232,7 @@ def _scrape_run_transfers(args):
         transfer_batches.append(
             fetch_fotmob_transfers(
                 popular_only=popular_only,
-                since_date=since_date,
+                since_date=scrape_since_date,
                 window=window,
             )
         )
@@ -196,13 +241,26 @@ def _scrape_run_transfers(args):
             f"\n⚡ Fast Mode: Scraping live transfers from FotMob "
             f"({cutoff_info}, automatic pagination)..."
         )
-        transfer_batches.append(
-            fetch_fotmob_transfers(
-                popular_only=popular_only,
-                since_date=since_date,
-                window=window,
-            )
+        live_transfers = fetch_fotmob_transfers(
+            popular_only=popular_only,
+            since_date=scrape_since_date,
+            window=window,
         )
+        transfer_batches.append(live_transfers)
+
+        squad_targets = _fast_squad_target_clubs((live_transfers,))
+        if squad_targets:
+            print(
+                "\n👕 Fast Mode: Refreshing current squad numbers for "
+                f"{len(squad_targets)} affected clubs..."
+            )
+            try:
+                squad_updates = fetch_squads_for_club_names(list(squad_targets))
+            except IncompleteScrapeError as error:
+                logger.warning("Fast squad sync skipped: %s", error)
+                squad_updates = []
+            transfer_batches.append(squad_updates)
+            print(f"  Squad sync found {len(squad_updates)} shirt numbers")
 
     fast_signals = []
     corroborators = []
@@ -212,7 +270,7 @@ def _scrape_run_transfers(args):
             f"({cutoff_info})..."
         )
         wikipedia_transfers = fetch_wikipedia_transfers(
-            since_date=since_date,
+            since_date=scrape_since_date,
             window=window,
         )
         wikipedia_events = [
@@ -232,12 +290,12 @@ def _scrape_run_transfers(args):
         )
 
         print("\n🚦 Adding moderated Sortitoutsi fast signals...")
-        fast_signals = fetch_sortitoutsi_transfers(since_date=since_date)
+        fast_signals = fetch_sortitoutsi_transfers(since_date=scrape_since_date)
         print(f"  Sortitoutsi found {len(fast_signals)} enabled signals")
 
         print("\n🔎 Adding verified Transfermarkt detailed transfers...")
         transfermarkt_events = fetch_transfermarkt_transfers(
-            since_date=since_date or start_date
+            since_date=scrape_since_date or start_date
         )
         transfer_batches.append(transfermarkt_events)
         print(
@@ -248,7 +306,7 @@ def _scrape_run_transfers(args):
 
         print("\n🧭 Adding BeSoccer corroboration routes...")
         besoccer_corroborators = fetch_besoccer_transfers(
-            since_date=since_date,
+            since_date=scrape_since_date,
             window=window,
         )
         corroborators.extend(besoccer_corroborators)
@@ -258,7 +316,7 @@ def _scrape_run_transfers(args):
 
         print("\n📊 Adding Sofascore corroboration routes...")
         sofascore_corroborators = fetch_sofascore_transfers(
-            since_date=since_date,
+            since_date=scrape_since_date,
             window=window,
             club_names=primary_target_clubs,
         )
@@ -271,7 +329,7 @@ def _scrape_run_transfers(args):
         # Both optional route sources only corroborate primary events.
         soccerway_clubs = primary_target_clubs
         soccerway_corroborators = fetch_soccerway_transfers(
-            since_date=since_date,
+            since_date=scrape_since_date,
             window=window,
             club_names=soccerway_clubs,
         )
@@ -307,6 +365,7 @@ def _scrape_run_transfers(args):
     if len(transfers) > 5:
         print(f"  ... and {len(transfers) - 5} more")
     return transfers
+
 def _load_match_database(
     edit_file: EditFile,
     release_policy_file: str | Path | None = None,
