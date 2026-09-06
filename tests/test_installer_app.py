@@ -761,7 +761,17 @@ def test_exact_english_ui_copy_is_available_without_rendering() -> None:
         "Standard daily update from the live transfer feed.",
         "Deep — Expanded coverage",
         "Broader update that checks every indexed club and refreshes its current squad.",
-        "Fast and Deep describe update coverage, not download speed.",
+        (
+            "Prebuilt releases are only for SP Football Life 2026. For vanilla PES 2021, "
+            "T99, or another patch, use Local Run with the matching native game files. "
+            "Fast and Deep describe update coverage, not download speed."
+        ),
+        "Update my local save (vanilla PES 2021 / T99)",
+        "Install a prebuilt SP Football Life 2026 release",
+        (
+            "Use Local Run for vanilla PES 2021, T99, or another patch. "
+            "Do not install a prebuilt release."
+        ),
         "Download and install",
         "Close the game before continuing.",
         "Open save folder",

@@ -54,16 +54,17 @@ UI_COPY = {
         "Broader update that checks every indexed club and refreshes its current squad."
     ),
     "coverage_note": (
-        "Beta: FL Daily Edit, its repository data, and generated releases are "
-        "still being tested and may not work with every game/save setup. Fast "
-        "and Deep describe update coverage, not download speed."
+        "Prebuilt releases are only for SP Football Life 2026. For vanilla PES 2021, "
+        "T99, or another patch, use Local Run with the matching native game files. "
+        "Fast and Deep describe update coverage, not download speed."
     ),
     "coverage_semantics": "Fast and Deep describe update coverage, not download speed.",
     "install": "Download and install",
-    "local_mode": "Update my local save",
-    "release_mode": "Install a prebuilt release",
+    "local_mode": "Update my local save (vanilla PES 2021 / T99)",
+    "release_mode": "Install a prebuilt SP Football Life 2026 release",
     "local_description": (
-        "Update the existing local save on this PC."
+        "Use Local Run for vanilla PES 2021, T99, or another patch. "
+        "Do not install a prebuilt release."
     ),
     "local_safety": (
         "The original save is backed up before an in-place replacement."
