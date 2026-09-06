@@ -137,6 +137,7 @@ _ERROR_TITLES = {
     "input_changed": "The local save changed during the update",
     "insufficient_space": "Not enough free space",
     "invalid_destination": "The save folder is not available",
+    "native_database_missing": "Matching PES 2021/T99 game files were not found",
     "invalid_save": "The local save failed validation",
     "missing_input": "The local save could not be found",
     "not_directory": "The save folder is not available",

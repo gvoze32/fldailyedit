@@ -314,6 +314,14 @@ def test_error_copy_maps_stable_codes_and_keeps_diagnostic_text() -> None:
             ),
             "Could not fetch update data",
         ),
+        (
+            LocalUpdateError(
+                "native_database_missing",
+                "No PES 2021/T99 database CPKs found",
+                stage=LocalUpdateStage.VALIDATING,
+            ),
+            "Matching PES 2021/T99 game files were not found",
+        ),
     )
 
     for error, expected_title in cases:
@@ -808,6 +816,30 @@ def test_entry_point_supports_launch_version_self_test_and_rejects_unknown(
     with pytest.raises(SystemExit) as error:
         entry_point.main(["--unknown"])
     assert error.value.code != 0
+
+
+def test_self_test_checks_local_pipeline_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeRoot:
+        def withdraw(self) -> None:
+            pass
+
+        def update_idletasks(self) -> None:
+            pass
+
+        def destroy(self) -> None:
+            pass
+
+    monkeypatch.setattr(installer_app, "_load_tkinter", lambda: None)
+    monkeypatch.setattr(
+        installer_app,
+        "tkinter",
+        type("FakeTkinter", (), {"Tk": FakeRoot}),
+    )
+
+    assert installer_app.self_test() == 0
+
 
 
 def test_progress_presentation_switches_mode_and_locks_at_commit() -> None:
@@ -1701,6 +1733,8 @@ def test_local_app_forwards_selected_game_root(
     (save / "EDIT00000000").write_bytes(b"standard-edit")
     location = SaveLocation(GameTarget.LOCAL, "Selected local save", save)
     game_root = tmp_path / "pes2021"
+    (game_root / "download").mkdir(parents=True)
+    (game_root / "download" / "t99_liveupd.cpk").write_bytes(b"fixture")
     calls: list[tuple[SaveLocation, bool, dict[str, object]]] = []
 
     class FakeWorker:
@@ -1720,6 +1754,80 @@ def test_local_app_forwards_selected_game_root(
     application._start_local_update(location, deep=True)
 
     assert calls == [(location, True, {"game_root": game_root})]
+
+
+def test_local_app_game_root_picker_requires_database_cpk(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    valid = tmp_path / "pes2021"
+    (valid / "download").mkdir(parents=True)
+    (valid / "download" / "t99_liveupd.cpk").write_bytes(b"fixture")
+
+    class GameRootVar:
+        def __init__(self) -> None:
+            self.value = ""
+
+        def set(self, value: str) -> None:
+            self.value = value
+
+    application = object.__new__(installer_app.InstallerApplication)
+    application.root = None
+    application._local_game_root = None
+    application._local_game_root_var = GameRootVar()
+    selected = {"path": str(empty)}
+    monkeypatch.setattr(
+        installer_app,
+        "filedialog",
+        type(
+            "Dialog",
+            (),
+            {"askdirectory": staticmethod(lambda **_: selected["path"])},
+        ),
+    )
+
+    application._browse_game_root()
+
+    assert application._local_game_root is None
+    assert "No database CPKs found" in application._local_game_root_var.value
+
+    selected["path"] = str(valid)
+    application._browse_game_root()
+
+    assert application._local_game_root == valid
+    assert str(valid) in application._local_game_root_var.value
+
+def test_local_app_rejects_missing_game_database_before_worker_start(
+    tmp_path: Path,
+) -> None:
+    save = tmp_path / "save"
+    save.mkdir()
+    (save / "EDIT00000000").write_bytes(b"standard-edit")
+    location = SaveLocation(GameTarget.LOCAL, "Selected local save", save)
+    calls: list[SaveLocation] = []
+
+    class FakeWorker:
+        def start_local_update(
+            self,
+            selected_location: SaveLocation,
+            *,
+            deep: bool,
+            **_kwargs: object,
+        ) -> None:
+            calls.append(selected_location)
+
+    application = object.__new__(installer_app.InstallerApplication)
+    application.worker = FakeWorker()
+    application._local_game_root = tmp_path / "missing-game"
+
+    with pytest.raises(LocalUpdateError, match="database CPKs"):
+        application._start_local_update(location, deep=False)
+
+    assert calls == []
+
+
 
 
 def test_local_mode_rejects_missing_edit_file_before_review(

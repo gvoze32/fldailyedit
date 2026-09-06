@@ -17,8 +17,8 @@ ttk: Any = None
 from installer import __version__
 from installer.catalog import Channel, ReleaseRecord
 from installer.install import InstallStage
-from local_update import LocalUpdateResult, LocalUpdateStage
-from installer.paths import GameTarget, SaveLocation
+from local_update import LocalUpdateError, LocalUpdateResult, LocalUpdateStage
+from installer.paths import GameTarget, SaveLocation, find_game_cpks
 from installer.state import (
     CatalogLoaded,
     DestinationValidated,
@@ -1495,7 +1495,15 @@ class InstallerApplication:
         )
         if not selected:
             return
-        self._local_game_root = Path(selected)
+        candidate = Path(selected)
+        if not find_game_cpks(candidate):
+            self._local_game_root = None
+            self._local_game_root_var.set(
+                "No database CPKs found. Choose the PES 2021/T99 game folder "
+                "containing download/*.cpk."
+            )
+            return
+        self._local_game_root = candidate
         self._local_game_root_var.set(
             f"{UI_COPY['local_game_root']} {self._local_game_root}"
         )
@@ -1548,6 +1556,14 @@ class InstallerApplication:
         kwargs: dict[str, Any] = {}
         game_root = getattr(self, "_local_game_root", None)
         if game_root is not None:
+            game_root = Path(game_root)
+            if not find_game_cpks(game_root):
+                raise LocalUpdateError(
+                    "native_database_missing",
+                    f"No PES 2021/T99 database CPKs found below {game_root}. "
+                    "Choose the game folder containing download/*.cpk.",
+                    stage=LocalUpdateStage.VALIDATING,
+                )
             kwargs["game_root"] = game_root
         self.worker.start_local_update(location, deep=deep, **kwargs)
 
@@ -1697,6 +1713,31 @@ def run_gui() -> int:
 
 
 def self_test() -> int:
+    import run_pipeline as local_pipeline
+
+    required_data = (
+        "fotmob_teams_validated.json",
+        "major_clubs.json",
+        "name_overrides.json",
+        "team_aliases.json",
+        "FL262_teams.txt",
+        "FL2622wc_players.txt",
+        "players.csv",
+        "release_policy.json",
+    )
+    missing_data = [
+        name
+        for name in required_data
+        if not (local_pipeline.config.DATA_DIR / name).is_file()
+    ]
+    if missing_data:
+        raise RuntimeError(
+            "Installer package is missing local runtime data: "
+            + ", ".join(missing_data)
+        )
+    if not callable(local_pipeline.read_save_header):
+        raise RuntimeError("Installer package is missing save-header parsing support")
+
     _load_tkinter()
     root = tkinter.Tk()
     root.withdraw()

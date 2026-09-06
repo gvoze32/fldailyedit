@@ -17,6 +17,9 @@ RUNTIME_DATA = [
     ("data/name_overrides.json", "data"),
     ("data/team_aliases.json", "data"),
     ("data/FL262_teams.txt", "data"),
+    ("data/FL2622wc_players.txt", "data"),
+    ("data/players.csv", "data"),
+    ("data/release_policy.json", "data"),
 ]
 
 a = Analysis(

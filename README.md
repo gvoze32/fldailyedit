@@ -49,8 +49,10 @@ The installer is the easiest option:
 3. Confirm the Football Life folder, then select **Download and install**.
 
 The installer verifies the release, backs up the current save, and replaces it
-atomically. To update an existing save, choose **Update my local save**, select
-the save, then choose **Apply update**.
+atomically. To update a vanilla PES 2021 or T99 save, choose **Update my local
+save**, select the save, choose the matching PES 2021 game folder containing
+`download/*.cpk`, then choose **Apply update**. Do not use a prebuilt release
+for a non-FL26 save.
 
 The installer is unsigned. Verify `FLDailyEditInstaller.zip` against the
 published `FLDailyEditInstaller.zip.sha256` on the
