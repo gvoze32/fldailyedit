@@ -617,6 +617,7 @@ class TestScraperSafety:
         from scraper import fotmob
 
         indexed_clubs = {"Alpha FC": 1, "Beta FC": 2}
+        progress_events = []
         calls = []
 
         class FakeSession:
@@ -659,11 +660,18 @@ class TestScraperSafety:
 
         result = asyncio.run(
             fotmob.FotmobScraper().fetch_major_clubs_transfers_safely_async(
-                window="all"
+                window="all",
+                progress=lambda detail, current, total: progress_events.append(
+                    (detail, current, total)
+                ),
             )
         )
 
         assert calls == [1, 2]
+        assert progress_events == [
+            ("Deep mode: checking indexed club 1/2 — Alpha FC", 1, 2),
+            ("Deep mode: checking indexed club 2/2 — Beta FC", 2, 2),
+        ]
         assert [captain.player_id_fotmob for captain in result.captain_updates] == [
             101,
             102,

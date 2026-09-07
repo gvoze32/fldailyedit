@@ -11,7 +11,7 @@ from datetime import date, datetime, timezone
 import json
 import logging
 import unicodedata
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 import aiohttp
 
 import config
@@ -583,6 +583,7 @@ class FotmobScraper:
         self,
         since_date: Optional[Union[str, date]] = None,
         window: str = "auto",
+        progress: Callable[[str, int, int], None] | None = None,
     ) -> ScrapeResult:
         """Fetch current transfers, squads, and captains for every indexed club."""
         start_date, end_date = _resolve_date_range(since_date, window)
@@ -598,6 +599,13 @@ class FotmobScraper:
         
         async with aiohttp.ClientSession(headers=self.headers, timeout=timeout) as session:
             for i, (club_name, tid) in enumerate(deep_clubs.items(), 1):
+                if progress is not None:
+                    progress(
+                        f"Deep mode: checking indexed club "
+                        f"{i}/{total_clubs} — {club_name}",
+                        i,
+                        total_clubs,
+                    )
                 logger.info(f"Deep fetching {club_name} (ID: {tid}) [{i}/{total_clubs}]...")
                 try:
                     data = await self._fetch_club_data_async(session, tid)
@@ -866,6 +874,7 @@ def fetch_fotmob_transfers(
 def fetch_major_clubs_transfers_safely(
     since_date: Optional[Union[str, date]] = None,
     window: str = "auto",
+    progress: Callable[[str, int, int], None] | None = None,
 ) -> ScrapeResult:
     """Deep-fetch transfers, squad numbers, and captains for indexed clubs."""
     scraper = FotmobScraper()
@@ -873,6 +882,7 @@ def fetch_major_clubs_transfers_safely(
         scraper.fetch_major_clubs_transfers_safely_async(
             since_date=since_date,
             window=window,
+            progress=progress,
         )
     )
 

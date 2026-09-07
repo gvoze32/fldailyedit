@@ -322,6 +322,15 @@ def test_error_copy_maps_stable_codes_and_keeps_diagnostic_text() -> None:
             ),
             "Matching PES 2021/T99 game files were not found",
         ),
+        (
+            LocalUpdateError(
+                "apply_failed",
+                "Failed: Henrique Araújo (transfer); entire batch rolled back. "
+                "No changes were published.",
+                stage=LocalUpdateStage.APPLYING,
+            ),
+            "The local update could not safely apply all changes",
+        ),
     )
 
     for error, expected_title in cases:
@@ -875,14 +884,32 @@ def test_progress_presentation_switches_mode_and_locks_at_commit() -> None:
     assert local_view.mode == "determinate"
     assert local_view.maximum == 7
     assert local_view.value == 1
-    assert (
-        installer_app.progress_detail_copy(
-            local_progress,
-            controls_locked=False,
-        )
-        == "Keep this window open while the update checks transfers, "
-        "matches players, and prepares your save."
+    local_copy = installer_app.progress_detail_copy(
+        local_progress,
+        controls_locked=False,
     )
+    assert "Updating a local save can take a long time" in local_copy
+    assert "look stuck" in local_copy
+
+    deep_progress = replace(
+        local_progress,
+        local_deep=True,
+        progress_detail="Deep mode: checking indexed club 4/10 — Example FC",
+        progress_downloaded=4,
+        progress_total=10,
+    )
+    deep_view = installer_app.progress_presentation(deep_progress)
+    assert deep_view.mode == "determinate"
+    assert deep_view.maximum == 10
+    assert deep_view.value == 4
+    assert deep_view.status == "Deep mode: checking indexed club 4/10 — Example FC"
+    deep_copy = installer_app.progress_detail_copy(
+        deep_progress,
+        controls_locked=False,
+    )
+    assert "can take a long time" in deep_copy
+    assert deep_copy == local_copy
+    assert "look stuck" in deep_copy
 
 
 def test_progress_render_does_not_restart_animation_for_same_mode() -> None:
@@ -1030,6 +1057,7 @@ def test_completion_renders_prebuilt_and_local_transfer_details(
     assert "Captains changed: 1" in application._progress_detail_var.value
     assert "Unchanged: 3" in application._progress_detail_var.value
     assert "Safety skipped: 4" in application._progress_detail_var.value
+    assert "uncertain changes are never forced" in application._progress_detail_var.value
     assert application._transfer_log_text.content == local_log
 
 
@@ -1880,6 +1908,19 @@ def test_local_progress_marks_commit_and_completion(
     assert controller.next() is True
     assert controller.next() is True
 
+    assert controller.handle_event(
+        LocalProgressChanged(
+            LocalUpdateProgress(
+                LocalUpdateStage.SCRAPING,
+                detail="Deep mode: checking indexed club 3/10 — Example FC",
+                current=3,
+                total=10,
+            )
+        )
+    )
+    assert controller.state.progress_detail == (
+        "Deep mode: checking indexed club 3/10 — Example FC"
+    )
     assert controller.handle_event(
         LocalProgressChanged(
             LocalUpdateProgress(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from dataclasses import dataclass
+from typing import Callable
 from datetime import date
 import hashlib
 import json
@@ -48,12 +49,28 @@ from local_update import (
     LocalUpdateError,
     LocalUpdateRequest,
     LocalUpdateResult,
+    LocalUpdateProgress,
     LocalUpdateService,
     LocalUpdateStage,
+    ProgressCallback,
 )
 
 logger = logging.getLogger(__name__)
 _FAST_SQUAD_CLUB_LIMIT = 32
+_SAFE_MUTATION_FAILURE_CODES = frozenset(
+    {
+        "same_team",
+        "source_team_missing",
+        "destination_team_missing",
+        "source_player_missing",
+        "destination_player_exists",
+        "duplicate_club_registration",
+        "overflow_not_authorized",
+        "overflow_candidate_stale",
+        "no_safe_overflow_candidate",
+        "overflow_release_failed",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,7 +218,11 @@ def _fast_squad_target_clubs(transfer_batches) -> tuple[str, ...]:
 
 
 
-def _scrape_run_transfers(args):
+def _scrape_run_transfers(
+    args,
+    *,
+    progress: Callable[[str, int, int], None] | None = None,
+):
     """Fetch, merge, order, and preview transfers for one pipeline run."""
     popular_only = bool(getattr(args, "popular", False))
     window = getattr(args, "window", "auto") or "auto"
@@ -244,6 +265,7 @@ def _scrape_run_transfers(args):
         deep_batch = fetch_major_clubs_transfers_safely(
             since_date=scrape_since_date,
             window=window,
+            progress=progress,
         )
         transfer_batches.append(deep_batch)
         deep_captains = getattr(deep_batch, "captain_updates", ())
@@ -1129,6 +1151,9 @@ class _RunMutation:
 class _RunLocalUpdateRuntime:
     """Adapter from the shared service lifecycle to the verified edit-file pipeline."""
 
+    def __init__(self, progress: ProgressCallback | None = None) -> None:
+        self._progress = progress
+
     @staticmethod
     def _args(request: LocalUpdateRequest) -> argparse.Namespace:
         return argparse.Namespace(
@@ -1140,6 +1165,22 @@ class _RunLocalUpdateRuntime:
             fotmob_only=request.fotmob_only,
             allow_overflow_release=request.allow_overflow_release,
         )
+
+    def _report_scrape_progress(
+        self,
+        detail: str,
+        current: int,
+        total: int,
+    ) -> None:
+        if self._progress is not None:
+            self._progress(
+                LocalUpdateProgress(
+                    LocalUpdateStage.SCRAPING,
+                    detail=detail,
+                    current=current,
+                    total=total,
+                )
+            )
 
     @staticmethod
     def _release_lock(prepared: _RunPrepared) -> None:
@@ -1158,7 +1199,13 @@ class _RunLocalUpdateRuntime:
                 f"Edit file not found: {request.edit_path}",
                 stage=LocalUpdateStage.SCRAPING,
             )
-        return _scrape_run_transfers(self._args(request))
+        args = self._args(request)
+        if self._progress is None:
+            return _scrape_run_transfers(args)
+        return _scrape_run_transfers(
+            args,
+            progress=self._report_scrape_progress,
+        )
 
     def validate_and_prepare(
         self,
@@ -1451,6 +1498,8 @@ class _RunLocalUpdateRuntime:
                 prepared.edit_file,
                 player_id,
             )
+            prepared.edit_file.last_mutation_error_code = None
+            prepared.edit_file.last_mutation_error = ""
 
             ok = False
             preferred_shirt = transfer.shirt_number
@@ -1485,7 +1534,8 @@ class _RunLocalUpdateRuntime:
                         raise LocalUpdateError(
                             "apply_failed",
                             f"Failed: {match.matched_player_name or transfer.player_name} "
-                            f"({match.action_type}); entire batch rolled back",
+                            f"({match.action_type}); entire batch rolled back. "
+                            "No changes were published.",
                             stage=LocalUpdateStage.APPLYING,
                         )
                     shirt_batch_states[to_team_id] = statuses
@@ -1539,6 +1589,7 @@ class _RunLocalUpdateRuntime:
                     shirt_number=preferred_shirt,
                     position=transfer.position,
                     allow_overflow_release=request.allow_overflow_release,
+                    planned_overflow_player_id=planned_action.overflow_player_id,
                 )
             elif action == "add":
                 ok = prepared.edit_file.add_player(
@@ -1556,11 +1607,31 @@ class _RunLocalUpdateRuntime:
                 )
 
             if not ok:
+                failure_code = getattr(
+                    prepared.edit_file,
+                    "last_mutation_error_code",
+                    None,
+                )
+                failure_detail = getattr(
+                    prepared.edit_file,
+                    "last_mutation_error",
+                    "",
+                )
+                if failure_code in _SAFE_MUTATION_FAILURE_CODES:
+                    safety_skipped += 1
+                    print(
+                        f"  ⚠ Safety skip "
+                        f"{match.matched_player_name or transfer.player_name}: "
+                        f"{failure_detail or failure_code}"
+                    )
+                    continue
                 prepared.edit_file._data = bytearray(original_data)
+                detail = f" Reason: {failure_detail}" if failure_detail else ""
                 raise LocalUpdateError(
                     "apply_failed",
                     f"Failed: {match.matched_player_name or transfer.player_name} "
-                    f"({match.action_type}); entire batch rolled back",
+                    f"({match.action_type}); entire batch rolled back."
+                    f"{detail} No changes were published.",
                     stage=LocalUpdateStage.APPLYING,
                 )
 
@@ -1894,7 +1965,10 @@ class _RunLocalUpdateRuntime:
             prepared.output_lock = None
 
 
-def build_local_update_service() -> LocalUpdateService:
+def build_local_update_service(
+    *,
+    progress: ProgressCallback | None = None,
+) -> LocalUpdateService:
     """Return the shared local update service used by CLI and installer GUI."""
 
-    return LocalUpdateService(_RunLocalUpdateRuntime())
+    return LocalUpdateService(_RunLocalUpdateRuntime(progress=progress))

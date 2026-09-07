@@ -36,6 +36,7 @@ class InstallerState:
     progress_stage: str | None = None
     progress_downloaded: int = 0
     progress_total: int = 0
+    progress_detail: str = ""
     result: InstallResult | LocalUpdateResult | None = None
     error_title: str | None = None
     error_detail: str | None = None
@@ -130,6 +131,7 @@ _INCOMPATIBLE_ERROR_CODES = frozenset(
 )
 
 _ERROR_TITLES = {
+    "apply_failed": "The local update could not safely apply all changes",
     "backup_failed": "The backup could not be created",
     "cancelled": "Installation cancelled",
     "cleanup_failed": "Temporary files could not be removed",
@@ -218,6 +220,7 @@ class InstallerController:
                     progress_stage=progress.stage.value,
                     progress_downloaded=progress.current,
                     progress_total=progress.total,
+                    progress_detail=progress.detail,
                     commit_started=(
                         self.state.commit_started or progress.commit_started
                     ),
@@ -232,6 +235,7 @@ class InstallerController:
                     progress_stage=event.stage,
                     progress_downloaded=event.downloaded,
                     progress_total=event.total,
+                    progress_detail="",
                     commit_started=(
                         self.state.commit_started or event.commit_started
                     ),
@@ -507,6 +511,7 @@ class InstallerController:
                     progress_stage=None,
                     progress_downloaded=0,
                     progress_total=0,
+                    progress_detail="",
                     result=None,
                     error_title=None,
                     error_detail=None,
@@ -561,6 +566,7 @@ class InstallerController:
                 self.state,
                 step=WizardStep.UPDATE,
                 progress_stage=None,
+                progress_detail="",
                 progress_downloaded=0,
                 progress_total=0,
                 result=None,
@@ -583,6 +589,7 @@ class InstallerController:
                 step=WizardStep.PROGRESS,
                 progress_stage=None,
                 progress_downloaded=0,
+                progress_detail="",
                 progress_total=0,
                 result=None,
                 error_title=None,

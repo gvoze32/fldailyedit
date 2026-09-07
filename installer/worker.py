@@ -322,7 +322,9 @@ class InstallerWorker:
             else:
                 from run_pipeline import build_local_update_service
 
-                self._local_update_service = build_local_update_service()
+                self._local_update_service = build_local_update_service(
+                    progress=self._emit_local_progress,
+                )
         return self._local_update_service
 
     def _perform_local_update(

@@ -176,6 +176,16 @@ def progress_presentation(
             value=0,
             controls_locked=False,
         )
+    if local and state.progress_detail and state.progress_total > 0:
+        total = max(state.progress_total, 1)
+        current = min(max(state.progress_downloaded, 0), total)
+        return ProgressPresentation(
+            mode="determinate",
+            status=state.progress_detail,
+            maximum=total,
+            value=current,
+            controls_locked=False,
+        )
     if local:
         stage_value = _LOCAL_STAGE_PROGRESS.get(state.progress_stage)
         if stage_value is not None:
@@ -223,8 +233,9 @@ def progress_detail_copy(
         )
     if state.mode is InstallerMode.LOCAL:
         return (
-            "Keep this window open while the update checks transfers, "
-            "matches players, and prepares your save."
+            "Updating a local save can take a long time. The window may appear "
+            "to freeze, flicker, or look stuck while it checks transfers, "
+            "matches players, and prepares your save. Keep this window open."
         )
     return "Keep this window open while the save is updated."
 
@@ -1323,6 +1334,12 @@ class InstallerApplication:
                     f"\nUnchanged: {state.result.unchanged}"
                     f"\nSafety skipped: {state.result.safety_skipped}"
                 )
+                if state.result.safety_skipped:
+                    detail += (
+                        "\n\nThese entries were left unchanged because the "
+                        "current save did not match the verified source state. "
+                        "This is intentional: uncertain changes are never forced."
+                    )
                 if state.result.diagnostic:
                     detail += f"\n\nWarning:\n{state.result.diagnostic}"
             else:

@@ -175,6 +175,8 @@ class EditFile(RosterGamePlanMixin):
 
         # Track players transferred in the current session to protect them from overflow auto-release
         self.transferred_player_ids: set[int] = set()
+        self.last_mutation_error_code: str | None = None
+        self.last_mutation_error: str = ""
     def attach_save_header(self, header: SaveHeader | None) -> None:
         """Attach decrypted container metadata for profile-aware catalog loading."""
         if header is not None and not isinstance(header, SaveHeader):

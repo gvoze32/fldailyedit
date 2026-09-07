@@ -143,6 +143,11 @@ def assign_smart_shirt_number(
 
 class RosterGamePlanMixin:
     """Roster mutations and tactical repair over an EditFile byte buffer."""
+    def _set_mutation_failure(self, code: str, detail: str) -> None:
+        """Record a non-throwing mutation refusal for the caller."""
+        self.last_mutation_error_code = code
+        self.last_mutation_error = detail
+
 
     # ──────────────────────────────────────────────────────────
     # Write operations
@@ -521,6 +526,7 @@ class RosterGamePlanMixin:
         preferred_shirt_number: int | None = None,
         position: str = "",
         allow_overflow_release: bool = True,
+        planned_overflow_player_id: int | None = None,
     ) -> bool:
         """
         Transfer a player from one team to another.
@@ -539,13 +545,21 @@ class RosterGamePlanMixin:
             shirt_number: Optional preferred kit number.
             preferred_shirt_number: Optional alias for shirt_number.
             position: Player position label (e.g. 'GK', 'ST', 'CB').
+            allow_overflow_release: Whether a full destination may release a reserve.
+            planned_overflow_player_id: Candidate selected by the verified roster plan.
 
         Returns:
             True if transfer succeeded, False otherwise.
         """
         target_shirt = shirt_number if shirt_number is not None else preferred_shirt_number
+        self.last_mutation_error_code = None
+        self.last_mutation_error = ""
 
         if from_team_id == to_team_id:
+            self._set_mutation_failure(
+                "same_team",
+                f"Source and destination are the same team ({from_team_id})",
+            )
             logger.error(f"Source and destination are the same team ({from_team_id})")
             return False
 
@@ -554,9 +568,17 @@ class RosterGamePlanMixin:
         to_entry = self._find_team_player_entry_offset(to_team_id)
 
         if from_entry is None:
+            self._set_mutation_failure(
+                "source_team_missing",
+                f"Source team {from_team_id} not found in Team-Player table",
+            )
             logger.error(f"Source team {from_team_id} not found in Team-Player table")
             return False
         if to_entry is None:
+            self._set_mutation_failure(
+                "destination_team_missing",
+                f"Destination team {to_team_id} not found in Team-Player table",
+            )
             logger.error(f"Destination team {to_team_id} not found in Team-Player table")
             return False
 
@@ -567,10 +589,18 @@ class RosterGamePlanMixin:
         # Validate
         player_idx = from_roster.player_index(player_id)
         if player_idx == -1:
+            self._set_mutation_failure(
+                "source_player_missing",
+                f"Player {player_id} not found on team {from_team_id}",
+            )
             logger.error(f"Player {player_id} not found on team {from_team_id}")
             return False
 
         if to_roster.has_player(player_id):
+            self._set_mutation_failure(
+                "destination_player_exists",
+                f"Player {player_id} already on destination team {to_team_id}",
+            )
             logger.warning(f"Player {player_id} already on destination team {to_team_id}")
             return False
 
@@ -579,10 +609,12 @@ class RosterGamePlanMixin:
         current_clubs = self.find_player_teams(player_id, club_only=True)
         unexpected_clubs = [tid for tid in current_clubs if tid != from_team_id]
         if unexpected_clubs:
-            logger.error(
-                f"Player {player_id} is already registered to club(s) {unexpected_clubs}; "
-                "transfer aborted"
+            detail = (
+                f"Player {player_id} is already registered to club(s) "
+                f"{unexpected_clubs}; transfer aborted"
             )
+            self._set_mutation_failure("duplicate_club_registration", detail)
+            logger.error(detail)
             return False
 
         # If no preferred shirt number was passed, use their existing shirt number from source
@@ -596,16 +628,34 @@ class RosterGamePlanMixin:
         overflow_pid: int | None = None
         if to_roster.is_full:
             if not allow_overflow_release:
-                logger.error(
+                detail = (
                     f"Destination team {to_team_id} is full (40/40); "
                     "overflow release was not authorized"
                 )
+                self._set_mutation_failure("overflow_not_authorized", detail)
+                logger.error(detail)
                 return False
-            _, overflow_pid = self.find_overflow_release_candidate(
-                to_team_id, exclude_player_id=player_id
-            )
+            if planned_overflow_player_id is not None:
+                overflow_pid = planned_overflow_player_id
+                if (
+                    overflow_pid == player_id
+                    or not to_roster.has_player(overflow_pid)
+                ):
+                    detail = (
+                        f"Planned overflow player {overflow_pid} is not present "
+                        f"on destination team {to_team_id}"
+                    )
+                    self._set_mutation_failure("overflow_candidate_stale", detail)
+                    logger.error(detail)
+                    return False
+            else:
+                _, overflow_pid = self.find_overflow_release_candidate(
+                    to_team_id, exclude_player_id=player_id
+                )
             if overflow_pid == 0:
-                logger.error(f"No safe overflow release candidate for team {to_team_id}")
+                detail = f"No safe overflow release candidate for team {to_team_id}"
+                self._set_mutation_failure("no_safe_overflow_candidate", detail)
+                logger.error(detail)
                 return False
 
             logger.warning(
@@ -613,7 +663,12 @@ class RosterGamePlanMixin:
                 f"Auto-releasing deepest reserve player {overflow_pid} to Free Agent."
             )
             if not self.release_player(overflow_pid, to_team_id):
-                logger.error(f"Could not release overflow player {overflow_pid} from team {to_team_id}")
+                detail = (
+                    f"Could not release overflow player {overflow_pid} "
+                    f"from team {to_team_id}"
+                )
+                self._set_mutation_failure("overflow_release_failed", detail)
+                logger.error(detail)
                 return False
             to_roster = self._read_team_player_entry(to_entry)
 
@@ -632,7 +687,9 @@ class RosterGamePlanMixin:
         # --- Step 2: Add to destination with Smart Shirt Number ---
         dest_slot = to_roster.first_empty_slot()
         if dest_slot == -1:
-            logger.error(f"No empty slot in destination team {to_team_id}")
+            detail = f"No empty slot in destination team {to_team_id}"
+            self._set_mutation_failure("destination_no_empty_slot", detail)
+            logger.error(detail)
             return False
 
         is_gk = _game_plan_position_code(effective_pos) == 0

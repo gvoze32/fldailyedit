@@ -293,6 +293,7 @@ def test_local_runtime_apply_forwards_overflow_release_permission(
                 match=_club_match(source=10, destination=20, date="2026-08-02"),
                 action="move",
                 current_team_id=10,
+                overflow_player_id=1030,
             ),
         ),
         run_records=[],
@@ -314,6 +315,7 @@ def test_local_runtime_apply_forwards_overflow_release_permission(
     )
 
     assert edit_file.move_kwargs["allow_overflow_release"] is True
+    assert edit_file.move_kwargs["planned_overflow_player_id"] == 1030
     assert result.transfer_applied == 1
 
 
@@ -580,6 +582,72 @@ def test_apply_counts_partial_skip_alongside_action(monkeypatch, tmp_path):
     assert result.transfer_applied == 1
     assert result.safety_skipped == 1
 
+
+def test_local_runtime_safety_skips_known_move_state_failure(
+    monkeypatch, tmp_path
+):
+    import run as run_module
+    from local_update import CancellationToken, LocalUpdateRequest
+
+    first_match = _club_match(source=10, destination=20, date="2026-08-02")
+    second_match = MatchedTransfer(
+        transfer=Transfer("Second Player", "Source", "Destination"),
+        player_id=2,
+        from_team_id=10,
+        to_team_id=20,
+        player_confidence=100.0,
+        from_team_confidence=100.0,
+        to_team_confidence=100.0,
+    )
+
+    class FakeEditFile:
+        def __init__(self):
+            self._data = bytearray(b"original")
+            self.calls = 0
+            self.last_mutation_error_code = None
+            self.last_mutation_error = ""
+
+        def move_player(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                self.last_mutation_error_code = "source_player_missing"
+                self.last_mutation_error = "Player 115254 not found on team 10"
+                return False
+            self.last_mutation_error_code = None
+            self.last_mutation_error = ""
+            return True
+
+    prepared = SimpleNamespace(
+        edit_file=FakeEditFile(),
+        roster_plan=(
+            PlannedRosterAction(first_match, "move", 10),
+            PlannedRosterAction(second_match, "move", 10),
+        ),
+        output_path=tmp_path / "output",
+        edit_path=tmp_path / "input",
+        original_data=b"original",
+        backup_path=None,
+        pending_logs=[],
+        run_records=[],
+    )
+    monkeypatch.setattr(
+        run_module.backup_mod,
+        "create_backup",
+        lambda path: tmp_path / "backup",
+    )
+
+    result = _RunLocalUpdateRuntime().apply(
+        LocalUpdateRequest(prepared.edit_path),
+        prepared,
+        prepared.roster_plan,
+        CancellationToken(),
+    )
+
+    assert result.transfer_applied == 1
+    assert result.safety_skipped == 1
+    assert prepared.edit_file.calls == 2
+
+
 def test_stateful_matching_keeps_identity_across_loan_chain():
     from scraper.matcher import NameMatcher
 
@@ -612,6 +680,53 @@ def test_stateful_matching_keeps_identity_across_loan_chain():
     )
 
     assert [item.player_id for item in matched] == [3001, 3001]
+
+def test_local_runtime_rolls_back_unexpected_move_failure(
+    monkeypatch, tmp_path
+):
+    import run as run_module
+    from local_update import CancellationToken, LocalUpdateError, LocalUpdateRequest
+
+    class FakeEditFile:
+        def __init__(self):
+            self._data = bytearray(b"mutated-before-failure")
+
+        def move_player(self, *args, **kwargs):
+            return False
+
+    prepared = SimpleNamespace(
+        edit_file=FakeEditFile(),
+        roster_plan=(
+            PlannedRosterAction(
+                _club_match(source=10, destination=20, date="2026-08-02"),
+                "move",
+                10,
+            ),
+        ),
+        output_path=tmp_path / "output",
+        edit_path=tmp_path / "input",
+        original_data=b"original",
+        backup_path=None,
+        pending_logs=[],
+        run_records=[],
+    )
+    monkeypatch.setattr(
+        run_module.backup_mod,
+        "create_backup",
+        lambda path: tmp_path / "backup",
+    )
+
+    with pytest.raises(LocalUpdateError, match="entire batch rolled back"):
+        _RunLocalUpdateRuntime().apply(
+            LocalUpdateRequest(prepared.edit_path),
+            prepared,
+            prepared.roster_plan,
+            CancellationToken(),
+        )
+
+    assert prepared.edit_file._data == bytearray(b"original")
+
+
 
 def test_stateful_matching_reconciles_parent_sale_before_loan():
     from scraper.matcher import NameMatcher

@@ -818,6 +818,34 @@ class TestMovePlayer:
         assert 1001 in dst.roster
         assert 2001 not in dst.roster
 
+    def test_move_player_uses_planned_overflow_candidate(self):
+        data = _build_mock_data(
+            num_players=1,
+            num_teams=2,
+            num_team_player=2,
+            num_game_plans=2,
+            team_player_entries=[
+                (101, [1001], [7]),
+                (102, list(range(2000, 2040)), list(range(1, 41))),
+            ],
+            league_team_ids=[101, 102],
+        )
+        ef = EditFile()
+        ef.load_bytes(data)
+
+        assert ef.move_player(
+            1001,
+            from_team_id=101,
+            to_team_id=102,
+            planned_overflow_player_id=2038,
+        )
+
+        destination = ef.get_team_roster(102)
+        assert destination is not None
+        assert 2038 not in destination.roster
+        assert 2039 in destination.roster
+        assert 1001 in destination.roster
+
 
 class TestTeamDataModel:
     def test_roster_property(self):

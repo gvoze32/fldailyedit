@@ -11,6 +11,12 @@ import run_pipeline
 from editor.models import TeamData
 from scraper.models import CaptainUpdate, MatchedTransfer, Transfer
 from transfer_planning import PlannedRosterAction
+from local_update import (
+    CancellationToken,
+    LocalUpdateProgress,
+    LocalUpdateRequest,
+    LocalUpdateStage,
+)
 
 
 
@@ -44,11 +50,40 @@ def test_transfer_run_skips_save_work_when_no_transfers(
 
     assert "No verified transfers found. Nothing to apply." in capsys.readouterr().out
 
+
     monkeypatch.setattr(run.sys, "argv", ["run.py", "--help"])
     with pytest.raises(SystemExit) as exc:
         run.main()
     assert exc.value.code == 0
     assert "players" not in capsys.readouterr().out.lower()
+
+def test_runtime_forwards_deep_scrape_progress_to_service_callback(
+    monkeypatch, tmp_path
+):
+    edit_path = tmp_path / "EDIT00000000"
+    edit_path.write_bytes(b"encrypted-edit")
+    events = []
+
+    def fake_scrape(_args, *, progress):
+        progress("Deep mode: checking indexed club 3/8 — Example FC", 3, 8)
+        return []
+
+    monkeypatch.setattr(run_pipeline, "_scrape_run_transfers", fake_scrape)
+    runtime = run_pipeline._RunLocalUpdateRuntime(progress=events.append)
+
+    assert runtime.scrape(
+        LocalUpdateRequest(edit_path),
+        CancellationToken(),
+    ) == []
+    assert events == [
+        LocalUpdateProgress(
+            LocalUpdateStage.SCRAPING,
+            detail="Deep mode: checking indexed club 3/8 — Example FC",
+            current=3,
+            total=8,
+        )
+    ]
+
 
 
 def test_cmd_run_routes_through_shared_local_update_service(
