@@ -92,6 +92,15 @@ class TestMatchedTransfer:
 
 
 class TestFotmobScraper:
+    def test_deep_index_prioritizes_canonical_asian_club_names(self):
+        from scraper.fotmob import get_deep_clubs
+
+        clubs = get_deep_clubs()
+
+        assert clubs["Vissel Kobe"] == 4688
+        assert clubs["Lion City Sailors"] == 67366
+        assert "Lion City Sailors Fc" not in clubs
+
     def test_parse_fotmob_item_transfer(self):
         from scraper.fotmob import FotmobScraper
 
@@ -601,11 +610,20 @@ class TestScraperSafety:
 
         result = fotmob.fetch_squads_for_club_names(["Example FC"])
 
-        assert len(result) == 1
-        assert result[0].transfer_type == "shirt_number_update"
-        assert result[0].player_name == "Squad Player"
-        assert result[0].shirt_number == 7
-        assert result[0].to_club_id_fotmob == 42
+        assert len(result) == 2
+        registration = next(
+            item for item in result if item.transfer_type == "squad_registration"
+        )
+        shirt_update = next(
+            item for item in result if item.transfer_type == "shirt_number_update"
+        )
+        assert registration.player_name == "Squad Player"
+        assert registration.to_club_id_fotmob == 42
+        assert registration.infer_from_current_roster is True
+        assert registration.proof_urls
+        assert shirt_update.player_name == "Squad Player"
+        assert shirt_update.shirt_number == 7
+        assert shirt_update.to_club_id_fotmob == 42
         assert len(result.captain_updates) == 1
         captain = result.captain_updates[0]
         assert captain.player_name == "Captain Player"

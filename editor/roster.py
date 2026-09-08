@@ -1064,7 +1064,7 @@ class RosterGamePlanMixin:
         *,
         position_overrides: dict[int, str] | None = None,
     ) -> tuple[int, int]:
-        """Keep known goalkeepers in the goalkeeper lineup role."""
+        """Keep known goalkeepers in role zero and normalize position bytes."""
         active_count = min(TP_MAX_PLAYERS, roster.roster_size)
         starter_count = min(FIRST_TEAM_SLOT_COUNT, active_count)
         if len(lineup) < active_count:
@@ -1074,6 +1074,7 @@ class RosterGamePlanMixin:
 
         def player_position(player_id: int) -> str:
             return overrides.get(player_id) or self.get_player_position(player_id) or ""
+
         def is_goalkeeper_role(role: int) -> bool:
             slot = lineup[role]
             return (
@@ -1083,6 +1084,7 @@ class RosterGamePlanMixin:
                 )
                 == 0
             )
+
         def role_has_goalkeeper_codes(role: int) -> bool:
             found_code = False
             for preset_offset in GP_POSITION_PRESETS:
@@ -1099,8 +1101,6 @@ class RosterGamePlanMixin:
                     if self._data[position_address] != 0:
                         return False
             return found_code
-
-
 
         role0_is_unknown_incumbent = False
         if starter_count:
@@ -1132,7 +1132,12 @@ class RosterGamePlanMixin:
         else:
             goalkeeper_roles = known_goalkeeper_roles
         if not goalkeeper_roles:
-            return 0, 0
+            return 0, self._repair_game_plan_position_lines(
+                game_plan_offset,
+                roster,
+                lineup,
+                position_overrides=overrides,
+            )
 
         repaired_roles = 0
         lineup_changed = False
@@ -1181,7 +1186,134 @@ class RosterGamePlanMixin:
                 game_plan_offset + GP_LINEUP : game_plan_offset + GP_LINEUP + TP_MAX_PLAYERS
             ] = bytes(lineup)
 
-        return repaired_roles, 0
+        position_repairs = self._repair_game_plan_position_arrays(
+            game_plan_offset,
+            roster,
+            lineup,
+            position_overrides=overrides,
+        )
+        position_repairs += self._repair_game_plan_position_lines(
+            game_plan_offset,
+            roster,
+            lineup,
+            position_overrides=overrides,
+        )
+        return repaired_roles, position_repairs
+
+    def _repair_game_plan_position_arrays(
+        self,
+        game_plan_offset: int,
+        roster: TeamData,
+        lineup: list[int],
+        *,
+        position_overrides: dict[int, str] | None = None,
+    ) -> int:
+        """Ensure each non-empty plan has one GK position code per phase."""
+        active_count = min(FIRST_TEAM_SLOT_COUNT, roster.roster_size)
+        if active_count <= 0 or len(lineup) < active_count:
+            return 0
+
+        overrides = position_overrides or {}
+
+        def player_position(role: int) -> str:
+            if not 0 <= role < active_count:
+                return ""
+            slot = lineup[role]
+            if not 0 <= slot < TP_MAX_PLAYERS:
+                return ""
+            player_id = roster.player_ids[slot]
+            return overrides.get(player_id) or self.get_player_position(player_id) or ""
+
+        known_goalkeeper_roles = [
+            role
+            for role in range(active_count)
+            if _game_plan_position_code(player_position(role)) == 0
+        ]
+        # Without player metadata, an invalid all-outfield position array is
+        # ambiguous. Leave it untouched so integrity validation fails closed
+        # instead of inventing a goalkeeper.
+        if 0 not in known_goalkeeper_roles:
+            return 0
+
+        repaired = 0
+        fallback_outfield_code = _game_plan_position_code("CB") or 1
+        for preset_offset in GP_POSITION_PRESETS:
+            for phase_offset in GP_POSITION_PHASE_OFFSETS:
+                position_address = (
+                    game_plan_offset + preset_offset + phase_offset
+                )
+                if position_address + FIRST_TEAM_SLOT_COUNT > len(self._data):
+                    continue
+                for role in range(FIRST_TEAM_SLOT_COUNT):
+                    role_address = (
+                        position_address + role * GP_POSITION_ENTRY_SIZE
+                    )
+                    if role == 0:
+                        expected_code = 0
+                    elif self._data[role_address] != 0:
+                        continue
+                    else:
+                        expected_code = (
+                            _game_plan_position_code(player_position(role))
+                            or fallback_outfield_code
+                        )
+                    if self._data[role_address] != expected_code:
+                        self._data[role_address] = expected_code
+                        repaired += 1
+        return repaired
+
+    def _repair_game_plan_position_lines(
+        self,
+        game_plan_offset: int,
+        roster: TeamData,
+        lineup: list[int],
+        *,
+        position_overrides: dict[int, str] | None = None,
+    ) -> int:
+        """Normalize known starters that cross goalkeeper or outfield lines."""
+        active_count = min(FIRST_TEAM_SLOT_COUNT, roster.roster_size)
+        if active_count <= 0 or len(lineup) < active_count:
+            return 0
+
+        overrides = position_overrides or {}
+        registered_codes: list[int | None] = []
+        for slot in lineup[:active_count]:
+            if not 0 <= slot < TP_MAX_PLAYERS:
+                registered_codes.append(None)
+                continue
+            player_id = roster.player_ids[slot]
+            registered_codes.append(
+                _game_plan_position_code(
+                    overrides.get(player_id) or self.get_player_position(player_id) or ""
+                )
+                if player_id
+                else None
+            )
+        known_goalkeeper = 0 in registered_codes
+        repaired = 0
+        for role, registered_code in enumerate(registered_codes):
+            registered_line = _game_plan_position_line(registered_code)
+            if registered_code is None or registered_line is None:
+                continue
+
+            for preset_offset in GP_POSITION_PRESETS:
+                for phase_offset in GP_POSITION_PHASE_OFFSETS:
+                    position_address = (
+                        game_plan_offset
+                        + preset_offset
+                        + phase_offset
+                        + role * GP_POSITION_ENTRY_SIZE
+                    )
+                    if position_address >= len(self._data):
+                        continue
+                    current_code = self._data[position_address]
+                    if current_code == 0 and not known_goalkeeper:
+                        continue
+                    if _game_plan_position_line(current_code) == registered_line:
+                        continue
+                    self._data[position_address] = registered_code
+                    repaired += 1
+        return repaired
 
     def _update_game_plan_after_removal(
         self,
@@ -1506,8 +1638,8 @@ class RosterGamePlanMixin:
         Existing valid roster-slot references keep their relative order. Missing
         active slots are appended, duplicate/empty references are displaced to
         the inactive tail, and roles pointing outside the active roster are reset
-        to the game's automatic value (0xFF). Position bytes remain attached to
-        their formation roles.
+        to the game's automatic value (0xFF). Known starters keep same-line
+        tactical variants, while cross-line position bytes are normalized.
         """
         rosters = self.get_all_rosters()
         repaired_lineups = 0
@@ -1555,6 +1687,11 @@ class RosterGamePlanMixin:
             )
             repaired_goalkeeper_roles += role_repairs
             repaired_position_bytes += position_repairs
+            repaired_position_bytes += self._repair_game_plan_position_lines(
+                offset,
+                roster,
+                lineup,
+            )
             role_offsets = list(GP_SINGLE_PLAYER_ROLES)
             role_offsets.extend(GP_ATTACK_PLAYERS + index for index in range(3))
             for role_offset in role_offsets:

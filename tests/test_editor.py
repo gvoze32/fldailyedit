@@ -24,6 +24,7 @@ from editor.roster import (
     TP_TEAM_ID, TP_PLAYER_IDS, TP_SHIRT_NUMBERS, TP_MAX_PLAYERS,
     RESERVED_PLAYER_ID_MIN,
     GP_TEAM_ID, GP_LINEUP, GP_CAPTAIN,
+    GP_POSITION_PRESETS, GP_POSITION_PHASE_OFFSETS,
     assign_smart_shirt_number,
 )
 from editor.models import TeamData, PlayerInfo
@@ -135,6 +136,12 @@ def _build_mock_data(
             gp_block[offset + GP_LINEUP:offset + GP_LINEUP + TP_MAX_PLAYERS] = bytes(
                 range(TP_MAX_PLAYERS)
             )
+            for preset_offset in GP_POSITION_PRESETS:
+                for phase_offset in GP_POSITION_PHASE_OFFSETS:
+                    position_offset = offset + preset_offset + phase_offset
+                    gp_block[position_offset : position_offset + 11] = bytes(
+                        [0, 1, 1, 1, 1, 1, 1, 1, 10, 9, 12]
+                    )
 
     # Assemble everything
     data = bytearray()

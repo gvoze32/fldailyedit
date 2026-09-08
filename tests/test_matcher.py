@@ -278,6 +278,16 @@ class TestTeamMatching:
         m.load_team_db({"Juventus FC": 120})
         assert m.match_team("Juve") == (120, "Juventus FC", 100.0)
 
+    def test_lion_city_sailors_alias(self):
+        m = NameMatcher()
+        m.load_team_db({"Lion City Sailors": 71134})
+
+        assert m.match_team("Lion City Sailors FC") == (
+            71134,
+            "Lion City Sailors",
+            100.0,
+        )
+
     @pytest.mark.parametrize("name", ["Free Agent", "Without Club", "Retired", ""])
     def test_non_club_sentinel_is_never_fuzzy_matched(self, matcher, name):
         tid, matched_name, conf = matcher.match_team(name)

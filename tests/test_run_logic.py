@@ -681,6 +681,52 @@ def test_stateful_matching_keeps_identity_across_loan_chain():
 
     assert [item.player_id for item in matched] == [3001, 3001]
 
+
+def test_stateful_matching_moves_unique_current_squad_registration():
+    from scraper.matcher import NameMatcher
+
+    matcher = NameMatcher()
+    matcher.load_player_db([("Anderson Lopes", 3001)])
+    matcher.load_team_db({"Old Club": 10, "Vissel Kobe": 20})
+    source_url = "https://www.fotmob.com/api/data/teams?id=4688"
+    registration = Transfer(
+        "Anderson Lopes",
+        "",
+        "Vissel Kobe",
+        transfer_type="squad_registration",
+        to_club_id_fotmob=4688,
+        player_id_fotmob=498456,
+        source_urls=(source_url,),
+        proof_urls=(source_url,),
+        verification_status="enabled",
+        infer_from_current_roster=True,
+    )
+
+    matched = _match_transfers_statefully(
+        [registration],
+        matcher,
+        80,
+        {10: [3001] + list(range(3002, 3019)), 20: []},
+        {10, 20},
+        validated_fotmob_ids={4688},
+        validated_fotmob_teams={4688: 20},
+    )
+
+    assert matched[0].player_id == 3001
+    assert matched[0].from_team_id == 10
+    assert matched[0].to_team_id == 20
+    plan = _plan_roster_actions(
+        matched,
+        {
+            10: TeamData(10, [3001] + list(range(3002, 3019)) + [0] * 23),
+            20: TeamData(20, [0] * 40),
+        },
+        {10, 20},
+        object(),
+        {},
+    )
+    assert [(item.action, item.current_team_id) for item in plan] == [("move", 10)]
+
 def test_local_runtime_rolls_back_unexpected_move_failure(
     monkeypatch, tmp_path
 ):

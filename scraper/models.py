@@ -12,7 +12,7 @@ class Transfer:
     from_club: str
     to_club: str
     date: str = ""
-    transfer_type: str = "transfer"  # "transfer", "loan", "end of loan", "free transfer"
+    transfer_type: str = "transfer"  # "transfer", "loan", "end of loan", "free transfer", "squad_registration"
     fee: str = ""
     league: str = ""
     season: str = ""

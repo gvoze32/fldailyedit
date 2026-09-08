@@ -71,16 +71,18 @@ For a custom club list or on-demand run, fork the repository and use
 ## Fast vs Deep
 
 - **Fast:** Standard daily update from the live transfer feed. It also refreshes
-  current squad numbers and captain roles for up to 32 clubs found in that feed.
+  current squad membership, shirt numbers, and captain roles for up to 32 clubs
+  found in that feed.
 - **Deep:** Broader update that checks every indexed club, refreshing its current
-  squad numbers and captain role.
+  squad membership, shirt numbers, and captain role.
 
 Fast is the default. Add `--deep` when you want broader coverage.
 
 ## What it updates
 
 - Transfers, releases, loans, and loan returns
-- Shirt numbers, lineups, and game plans affected by roster changes
+- Current indexed-club squad membership, shirt numbers, lineups, and game plans
+  affected by roster changes
 - Current captain roles from each club's latest verified lineup marker
 - Transfer reports and audit logs
 - Daily prebuilt saves through GitHub Actions
@@ -190,7 +192,9 @@ logging, and repair tools.
 - Incomplete source data and ambiguous matches are skipped rather than forced
   into the save.
 - Roster compaction preserves existing tactical game-plan positions while
-  updating lineup slot references and goalkeeper placement.
+  updating lineup slot references and goalkeeper placement. Validation rejects
+  non-empty plans without exactly one goalkeeper marker in each tactical phase;
+  known goalkeeper metadata drives role-zero repair.
 
 ## Development
 

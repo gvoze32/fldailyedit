@@ -464,7 +464,7 @@ class FotmobScraper:
         return results
 
     def _extract_squad_from_team_data(self, data: dict, team_id: int, team_name: str) -> list[Transfer]:
-        """Extract current squad members to sync real shirt numbers."""
+        """Extract current squad membership and shirt-number observations."""
         results: list[Transfer] = []
         if not team_name.strip():
             logger.warning("Skipping squad sync for FotMob team %s without a team name", team_id)
@@ -475,6 +475,7 @@ class FotmobScraper:
         if not isinstance(squad_sections, list):
             return results
 
+        source_url = f"https://www.fotmob.com/api/data/teams?id={team_id}"
         for section in squad_sections:
             if not isinstance(section, dict):
                 continue
@@ -485,8 +486,34 @@ class FotmobScraper:
                 if not isinstance(member, dict):
                     continue
                 name = str(member.get("name") or "").strip()
+                if not name:
+                    continue
+
+                player_id_fotmob = _optional_positive_int(member.get("id"))
+                role = member.get("role")
+                position = role.get("fallback", "") if isinstance(role, dict) else ""
+
+                # A current squad is a verified destination signal even when
+                # FotMob has no dated transfer row.  The planner infers the
+                # source only from a unique current PES roster registration.
+                if player_id_fotmob is not None:
+                    results.append(Transfer(
+                        player_name=name,
+                        from_club="",
+                        to_club=team_name,
+                        transfer_type="squad_registration",
+                        position=position,
+                        to_club_id_fotmob=team_id,
+                        player_id_fotmob=player_id_fotmob,
+                        to_club_full_name=team_name,
+                        source_urls=(source_url,),
+                        proof_urls=(source_url,),
+                        verification_status="enabled",
+                        infer_from_current_roster=True,
+                    ))
+
                 shirt = member.get("shirtNumber")
-                if not name or shirt in (None, ""):
+                if shirt in (None, ""):
                     continue
                 try:
                     shirt_number = int(shirt)
@@ -497,9 +524,6 @@ class FotmobScraper:
                     logger.debug("Ignoring out-of-range shirt number %r for %s", shirt, name)
                     continue
 
-                role = member.get("role")
-                position = role.get("fallback", "") if isinstance(role, dict) else ""
-                player_id_fotmob = _optional_positive_int(member.get("id"))
                 results.append(Transfer(
                     player_name=name,
                     from_club=team_name,
@@ -507,8 +531,10 @@ class FotmobScraper:
                     transfer_type="shirt_number_update",
                     shirt_number=shirt_number,
                     position=position,
-                    to_club_id_fotmob=team_id,
                     from_club_id_fotmob=team_id,
+                    to_club_id_fotmob=team_id,
+                    from_club_full_name=team_name,
+                    to_club_full_name=team_name,
                     player_id_fotmob=player_id_fotmob,
                 ))
 
@@ -618,7 +644,7 @@ class FotmobScraper:
                 club_transfers = self._extract_transfers_from_team_data(data, start_date, end_date)
                 all_transfers.extend(club_transfers)
 
-                # 2. Extract current squad numbers
+                # 2. Extract current squad membership and shirt numbers
                 club_squad = self._extract_squad_from_team_data(data, tid, club_name)
                 all_transfers.extend(club_squad)
 
@@ -876,7 +902,7 @@ def fetch_major_clubs_transfers_safely(
     window: str = "auto",
     progress: Callable[[str, int, int], None] | None = None,
 ) -> ScrapeResult:
-    """Deep-fetch transfers, squad numbers, and captains for indexed clubs."""
+    """Deep-fetch transfers, squad membership, numbers, and captains for indexed clubs."""
     scraper = FotmobScraper()
     return asyncio.run(
         scraper.fetch_major_clubs_transfers_safely_async(
@@ -888,7 +914,7 @@ def fetch_major_clubs_transfers_safely(
 
 
 def fetch_squads_for_club_names(club_names: list[str]) -> ScrapeResult:
-    """Fetch current squad numbers and captains for specific clubs."""
+    """Fetch current squad membership, numbers, and captains for specific clubs."""
     requested = [name.strip() for name in club_names if name.strip()]
     if not requested:
         return ScrapeResult()
@@ -955,7 +981,7 @@ def fetch_transfers_for_club_names(
     since_date: Optional[Union[str, date]] = None,
     window: str = "auto",
 ) -> ScrapeResult:
-    """Fetch transfers, squad numbers, and captains for specific clubs."""
+    """Fetch transfers, squad membership, numbers, and captains for specific clubs."""
     requested = {name.strip().casefold() for name in club_names if name.strip()}
     targets = _resolve_club_targets(club_names, get_deep_clubs())
     if not targets or len(targets) < len(requested):

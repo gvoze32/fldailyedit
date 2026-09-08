@@ -725,6 +725,42 @@ class EditFile(RosterGamePlanMixin):
 
         logger.info(f"Saved {len(self._data):,} bytes to {save_path}")
 
+    def _validate_game_plan_position_arrays(
+        self,
+        offset: int,
+        team_id: int,
+        errors: list[str],
+    ) -> int:
+        """Require exactly one goalkeeper code in every non-empty phase."""
+        checked = 0
+        for preset_offset in GP_POSITION_PRESETS:
+            for phase_offset in GP_POSITION_PHASE_OFFSETS:
+                position_address = offset + preset_offset + phase_offset
+                position_end = position_address + FIRST_TEAM_SLOT_COUNT
+                if position_end > len(self._data):
+                    errors.append(
+                        f"Team {team_id} game-plan position array at "
+                        f"0x{preset_offset + phase_offset:X} exceeds data.dat bounds"
+                    )
+                    continue
+                checked += 1
+                goalkeeper_count = self._data[
+                    position_address:position_end
+                ].count(0)
+                if goalkeeper_count != 1:
+                    phase_label = (
+                        ""
+                        if phase_offset == 0
+                        else f" phase 0x{phase_offset:X}"
+                    )
+                    errors.append(
+                        f"Team {team_id} game-plan preset 0x{preset_offset:X}"
+                        f"{phase_label} has {goalkeeper_count} goalkeeper "
+                        "position codes; expected exactly 1"
+                    )
+        return checked
+
+
     def _validate_game_plan_semantics(
         self,
         offset: int,
@@ -917,6 +953,7 @@ class EditFile(RosterGamePlanMixin):
             errors.append(f"Player {pid} is registered to multiple clubs: {tids}")
 
         checked_game_plans = 0
+        checked_position_arrays = 0
         semantic_position_checks = 0
         seen_game_plan_team_ids: set[int] = set()
         for i in range(min(self.game_plan_count, MAX_GAME_PLANS)):
@@ -949,6 +986,11 @@ class EditFile(RosterGamePlanMixin):
                 slot not in active_slots for slot in starters
             ):
                 errors.append(f"Team {tid} game plan has duplicate or empty starting slots")
+            checked_position_arrays += self._validate_game_plan_position_arrays(
+                offset,
+                tid,
+                errors,
+            )
             semantic_position_checks += self._validate_game_plan_semantics(
                 offset,
                 tid,
@@ -979,6 +1021,7 @@ class EditFile(RosterGamePlanMixin):
             "duplicate_club_players": len(duplicate_club_players),
             "undersized_clubs": len(undersized_clubs),
             "checked_game_plans": checked_game_plans,
+            "checked_position_arrays": checked_position_arrays,
             "semantic_position_checks": semantic_position_checks,
         }
         return {

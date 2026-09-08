@@ -297,7 +297,7 @@ def _scrape_run_transfers(
         squad_targets = _fast_squad_target_clubs((live_transfers,))
         if squad_targets:
             print(
-                "\n👕 Fast Mode: Refreshing current squad numbers and captains for "
+                "\n👕 Fast Mode: Refreshing current squad membership, numbers, and captains for "
                 f"{len(squad_targets)} affected clubs..."
             )
             try:
@@ -308,7 +308,18 @@ def _scrape_run_transfers(
             transfer_batches.append(squad_updates)
             fast_captains = getattr(squad_updates, "captain_updates", ())
             captain_updates.extend(fast_captains)
-            print(f"  Squad sync found {len(squad_updates)} shirt numbers")
+            membership_updates = sum(
+                transfer.transfer_type == "squad_registration"
+                for transfer in squad_updates
+            )
+            shirt_updates = sum(
+                transfer.transfer_type == "shirt_number_update"
+                for transfer in squad_updates
+            )
+            print(
+                "  Squad sync found "
+                f"{membership_updates} memberships and {shirt_updates} shirt numbers"
+            )
             print(f"  Captain sync found {len(fast_captains)} markers")
     fast_signals = []
     corroborators = []
@@ -1460,7 +1471,7 @@ class _RunLocalUpdateRuntime:
             ) from error
         print(f"  Backup: {prepared.backup_path}")
 
-        print("\n⚡ Applying verified transfers, shirt-number, and captain changes...")
+        print("\n⚡ Applying verified transfers, squad membership, shirt-number, and captain changes...")
         transfer_applied = 0
         shirt_numbers_applied = 0
         captains_changed = 0
