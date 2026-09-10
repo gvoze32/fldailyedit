@@ -15,13 +15,20 @@ from typing import Callable, Optional, Union
 import aiohttp
 
 import config
-from scraper.models import CaptainUpdate, ScrapeResult, Transfer
+from scraper.models import (
+    CaptainUpdate,
+    ScrapeResult,
+    SquadMember,
+    SquadSnapshot,
+    Transfer,
+)
 
 logger = logging.getLogger(__name__)
 
 FOTMOB_TRANSFERS_URL = "https://www.fotmob.com/transfers"
 FOTMOB_API_TEMPLATE = "https://www.fotmob.com/api/data/transfers?orderBy=lastModified&page={page}&minFeeCurrency=EUR&popular={popular}"
 AUTO_PAGE_LIMIT = 250
+_MIN_COMPLETE_SQUAD_MEMBERS = 11
 
 DEFAULT_HEADERS = {
     "User-Agent": (
@@ -463,80 +470,162 @@ class FotmobScraper:
 
         return results
 
-    def _extract_squad_from_team_data(self, data: dict, team_id: int, team_name: str) -> list[Transfer]:
-        """Extract current squad membership and shirt-number observations."""
-        results: list[Transfer] = []
+    def _extract_squad_members_from_team_data(
+        self,
+        data: dict,
+        team_id: int,
+        team_name: str,
+    ) -> tuple[SquadMember, ...]:
+        """Extract deduplicated current-squad members from a team payload."""
         if not team_name.strip():
-            logger.warning("Skipping squad sync for FotMob team %s without a team name", team_id)
-            return results
+            logger.warning(
+                "Skipping squad sync for FotMob team %s without a team name",
+                team_id,
+            )
+            return ()
 
         squad = data.get("squad", {})
         squad_sections = squad.get("squad", []) if isinstance(squad, dict) else []
         if not isinstance(squad_sections, list):
-            return results
+            return ()
 
-        source_url = f"https://www.fotmob.com/api/data/teams?id={team_id}"
+        members: list[SquadMember] = []
+        seen: set[tuple[str, int | str]] = set()
         for section in squad_sections:
             if not isinstance(section, dict):
                 continue
-            members = section.get("members", [])
-            if not isinstance(members, list):
+            raw_members = section.get("members", [])
+            if not isinstance(raw_members, list):
                 continue
-            for member in members:
-                if not isinstance(member, dict):
+            for raw_member in raw_members:
+                if not isinstance(raw_member, dict):
                     continue
-                name = str(member.get("name") or "").strip()
+                name = str(raw_member.get("name") or "").strip()
                 if not name:
                     continue
 
-                player_id_fotmob = _optional_positive_int(member.get("id"))
-                role = member.get("role")
-                position = role.get("fallback", "") if isinstance(role, dict) else ""
+                player_id_fotmob = _optional_positive_int(raw_member.get("id"))
+                member_key: tuple[str, int | str] = (
+                    ("id", player_id_fotmob)
+                    if player_id_fotmob is not None
+                    else ("name", name.casefold())
+                )
+                if member_key in seen:
+                    continue
+                seen.add(member_key)
 
-                # A current squad is a verified destination signal even when
-                # FotMob has no dated transfer row.  The planner infers the
-                # source only from a unique current PES roster registration.
-                if player_id_fotmob is not None:
-                    results.append(Transfer(
+                role = raw_member.get("role")
+                position = (
+                    str(role.get("fallback") or "").strip()
+                    if isinstance(role, dict)
+                    else ""
+                )
+                try:
+                    age = int(raw_member.get("age") or 0)
+                except (TypeError, ValueError):
+                    age = 0
+                shirt_number = None
+                shirt = raw_member.get("shirtNumber")
+                if shirt not in (None, ""):
+                    try:
+                        parsed_shirt = int(shirt)
+                    except (TypeError, ValueError):
+                        parsed_shirt = 0
+                    if 1 <= parsed_shirt <= 99:
+                        shirt_number = parsed_shirt
+
+                members.append(
+                    SquadMember(
                         player_name=name,
+                        player_id_fotmob=player_id_fotmob,
+                        position=position,
+                        nationality=str(
+                            raw_member.get("countryName") or ""
+                        ).strip(),
+                        age=age,
+                        shirt_number=shirt_number,
+                    )
+                )
+
+        return tuple(members)
+
+    def _extract_squad_snapshot_from_team_data(
+        self,
+        data: dict,
+        team_id: int,
+        team_name: str,
+    ) -> SquadSnapshot:
+        """Build a current-squad snapshot, marking undersized payloads incomplete."""
+        members = self._extract_squad_members_from_team_data(
+            data,
+            team_id,
+            team_name,
+        )
+        return SquadSnapshot(
+            club_name=team_name.strip(),
+            team_id_fotmob=team_id,
+            members=members,
+            source_url=f"https://www.fotmob.com/api/data/teams?id={team_id}",
+            complete=len(members) >= _MIN_COMPLETE_SQUAD_MEMBERS,
+        )
+
+    def _extract_squad_from_team_data(
+        self,
+        data: dict,
+        team_id: int,
+        team_name: str,
+    ) -> list[Transfer]:
+        """Extract current squad membership and shirt-number observations."""
+        results: list[Transfer] = []
+        members = self._extract_squad_members_from_team_data(
+            data,
+            team_id,
+            team_name,
+        )
+        source_url = f"https://www.fotmob.com/api/data/teams?id={team_id}"
+        for member in members:
+            # A current squad is a verified destination signal even when
+            # FotMob has no dated transfer row.  The planner infers the
+            # source only from a unique current PES roster registration.
+            if member.player_id_fotmob is not None:
+                results.append(
+                    Transfer(
+                        player_name=member.player_name,
                         from_club="",
                         to_club=team_name,
                         transfer_type="squad_registration",
-                        position=position,
+                        position=member.position,
+                        age=member.age,
+                        nationality=member.nationality,
                         to_club_id_fotmob=team_id,
-                        player_id_fotmob=player_id_fotmob,
+                        player_id_fotmob=member.player_id_fotmob,
                         to_club_full_name=team_name,
                         source_urls=(source_url,),
                         proof_urls=(source_url,),
                         verification_status="enabled",
                         infer_from_current_roster=True,
-                    ))
+                    )
+                )
 
-                shirt = member.get("shirtNumber")
-                if shirt in (None, ""):
-                    continue
-                try:
-                    shirt_number = int(shirt)
-                except (TypeError, ValueError):
-                    logger.debug("Ignoring invalid shirt number %r for %s", shirt, name)
-                    continue
-                if not 1 <= shirt_number <= 99:
-                    logger.debug("Ignoring out-of-range shirt number %r for %s", shirt, name)
-                    continue
-
-                results.append(Transfer(
-                    player_name=name,
+            if member.shirt_number is None:
+                continue
+            results.append(
+                Transfer(
+                    player_name=member.player_name,
                     from_club=team_name,
                     to_club=team_name,
                     transfer_type="shirt_number_update",
-                    shirt_number=shirt_number,
-                    position=position,
+                    shirt_number=member.shirt_number,
+                    position=member.position,
+                    age=member.age,
+                    nationality=member.nationality,
                     from_club_id_fotmob=team_id,
                     to_club_id_fotmob=team_id,
                     from_club_full_name=team_name,
                     to_club_full_name=team_name,
-                    player_id_fotmob=player_id_fotmob,
-                ))
+                    player_id_fotmob=member.player_id_fotmob,
+                )
+            )
 
         return results
 
@@ -616,6 +705,7 @@ class FotmobScraper:
 
         all_transfers: list[Transfer] = []
         captain_updates: list[CaptainUpdate] = []
+        squad_snapshots: list[SquadSnapshot] = []
         timeout = aiohttp.ClientTimeout(total=15)
         
         deep_clubs = get_deep_clubs()
@@ -647,6 +737,13 @@ class FotmobScraper:
                 # 2. Extract current squad membership and shirt numbers
                 club_squad = self._extract_squad_from_team_data(data, tid, club_name)
                 all_transfers.extend(club_squad)
+                snapshot = self._extract_squad_snapshot_from_team_data(
+                    data,
+                    tid,
+                    club_name,
+                )
+                if snapshot.complete:
+                    squad_snapshots.append(snapshot)
 
                 # 3. Extract the latest-lineup captain marker
                 captain_updates.extend(
@@ -659,6 +756,7 @@ class FotmobScraper:
         return ScrapeResult(
             merge_transfers([all_transfers]),
             captain_updates,
+            squad_snapshots,
         )
 
 
@@ -935,6 +1033,7 @@ def fetch_squads_for_club_names(club_names: list[str]) -> ScrapeResult:
     scraper = FotmobScraper()
     all_squads: list[Transfer] = []
     captain_updates: list[CaptainUpdate] = []
+    squad_snapshots: list[SquadSnapshot] = []
 
     async def fetch_subset():
         async with aiohttp.ClientSession(
@@ -954,6 +1053,13 @@ def fetch_squads_for_club_names(club_names: list[str]) -> ScrapeResult:
                     continue
                 if data:
                     team_name = _payload_team_name(data, club_name)
+                    snapshot = scraper._extract_squad_snapshot_from_team_data(
+                        data,
+                        team_id,
+                        team_name,
+                    )
+                    if snapshot.complete:
+                        squad_snapshots.append(snapshot)
                     all_squads.extend(
                         scraper._extract_squad_from_team_data(
                             data,
@@ -973,6 +1079,7 @@ def fetch_squads_for_club_names(club_names: list[str]) -> ScrapeResult:
     return ScrapeResult(
         merge_transfers([all_squads]),
         captain_updates,
+        squad_snapshots,
     )
 
 
@@ -995,7 +1102,7 @@ def fetch_transfers_for_club_names(
 
     all_t: list[Transfer] = []
     captain_updates: list[CaptainUpdate] = []
-
+    squad_snapshots: list[SquadSnapshot] = []
     async def fetch_subset():
         async with aiohttp.ClientSession(
             headers=scraper.headers,
@@ -1012,6 +1119,13 @@ def fetch_transfers_for_club_names(
                         )
                     )
                     team_name = _payload_team_name(data, requested_name)
+                    snapshot = scraper._extract_squad_snapshot_from_team_data(
+                        data,
+                        tid,
+                        team_name,
+                    )
+                    if snapshot.complete:
+                        squad_snapshots.append(snapshot)
                     all_t.extend(
                         scraper._extract_squad_from_team_data(
                             data,
@@ -1031,4 +1145,5 @@ def fetch_transfers_for_club_names(
     return ScrapeResult(
         merge_transfers([all_t]),
         captain_updates,
+        squad_snapshots,
     )

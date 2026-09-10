@@ -244,6 +244,7 @@ def _scrape_run_transfers(
     )
     transfer_batches = []
     captain_updates: list[CaptainUpdate] = []
+    squad_snapshots = []
     if club_filter:
         clubs = [club.strip() for club in club_filter.split(",") if club.strip()]
         print(
@@ -256,6 +257,7 @@ def _scrape_run_transfers(
             window=window,
         )
         transfer_batches.append(club_batch)
+        squad_snapshots.extend(getattr(club_batch, "squad_snapshots", ()))
         captain_updates.extend(getattr(club_batch, "captain_updates", ()))
     elif deep_mode:
         print(
@@ -268,6 +270,7 @@ def _scrape_run_transfers(
             progress=progress,
         )
         transfer_batches.append(deep_batch)
+        squad_snapshots.extend(getattr(deep_batch, "squad_snapshots", ()))
         deep_captains = getattr(deep_batch, "captain_updates", ())
         captain_updates.extend(deep_captains)
         print(f"  Deep captain sync found {len(deep_captains)} markers")
@@ -306,6 +309,7 @@ def _scrape_run_transfers(
                 logger.warning("Fast squad sync skipped: %s", error)
                 squad_updates = []
             transfer_batches.append(squad_updates)
+            squad_snapshots.extend(getattr(squad_updates, "squad_snapshots", ()))
             fast_captains = getattr(squad_updates, "captain_updates", ())
             captain_updates.extend(fast_captains)
             membership_updates = sum(
@@ -424,7 +428,7 @@ def _scrape_run_transfers(
     if len(transfers) > 5:
         print(f"  ... and {len(transfers) - 5} more")
     print(f"Current captain markers to process: {len(captain_updates)}")
-    return ScrapeResult(transfers, captain_updates)
+    return ScrapeResult(transfers, captain_updates, squad_snapshots)
 
 def _load_match_database(
     edit_file: EditFile,
@@ -630,6 +634,11 @@ def _match_and_plan_transfers(
     validated_fotmob_teams = (
         None if is_pes21_save else represented_fotmob_teams
     )
+    player_names = {
+        player_id: player.name
+        for player_id, player in getattr(edit_file, "_player_cache", {}).items()
+        if getattr(player, "name", "")
+    }
     matched = planning._match_transfers_statefully(
         transfers,
         matcher,
@@ -641,6 +650,8 @@ def _match_and_plan_transfers(
             None if is_pes21_save else set(represented_fotmob_teams)
         ),
         validated_fotmob_teams=validated_fotmob_teams,
+        squad_snapshots=getattr(transfers, "squad_snapshots", ()),
+        player_names=player_names,
     )
     matched, duplicate_shirt_matches = planning._dedupe_shirt_number_matches(matched)
     superseded_loan_sources = planning._build_superseded_loan_sources(

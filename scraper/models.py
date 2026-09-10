@@ -12,7 +12,7 @@ class Transfer:
     from_club: str
     to_club: str
     date: str = ""
-    transfer_type: str = "transfer"  # "transfer", "loan", "end of loan", "free transfer", "squad_registration"
+    transfer_type: str = "transfer"  # "transfer", "loan", "end of loan", "free transfer", "squad_registration", "squad_release"
     fee: str = ""
     league: str = ""
     season: str = ""
@@ -46,6 +46,31 @@ class Transfer:
 
 
 @dataclass(frozen=True, slots=True)
+class SquadMember:
+    """One player entry from a complete current-squad payload."""
+
+    player_name: str
+    player_id_fotmob: Optional[int] = None
+    position: str = ""
+    nationality: str = ""
+    age: int = 0
+    shirt_number: Optional[int] = None
+
+
+@dataclass(frozen=True, slots=True)
+class SquadSnapshot:
+    """Authoritative current-squad membership for one indexed club."""
+
+    club_name: str
+    team_id_fotmob: int
+    members: tuple[SquadMember, ...]
+    source_url: str
+    complete: bool = False
+
+
+
+
+@dataclass(frozen=True, slots=True)
 class CaptainUpdate:
     """Current captain marker extracted from a club's live team payload."""
 
@@ -60,18 +85,20 @@ class CaptainUpdate:
 
 
 class ScrapeResult(list[Transfer]):
-    """Transfer-compatible scrape result with optional captain updates."""
+    """Transfer-compatible scrape result with current-squad snapshots."""
 
     def __init__(
         self,
         transfers: list[Transfer] | tuple[Transfer, ...] = (),
         captain_updates: list[CaptainUpdate] | tuple[CaptainUpdate, ...] = (),
+        squad_snapshots: list[SquadSnapshot] | tuple[SquadSnapshot, ...] = (),
     ) -> None:
         super().__init__(transfers)
         self.captain_updates = tuple(captain_updates)
+        self.squad_snapshots = tuple(squad_snapshots)
 
     def __bool__(self) -> bool:
-        return bool(len(self) or self.captain_updates)
+        return bool(len(self) or self.captain_updates or self.squad_snapshots)
 
 
 @dataclass

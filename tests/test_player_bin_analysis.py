@@ -14,6 +14,7 @@ from editor.roster import (
     GP_LINEUP,
     GP_PK,
     GP_POSITION_PRESETS,
+    GP_POSITION_COORDINATE_OFFSET,
     GP_POSITION_PHASE_OFFSETS,
     GP_RIGHT_CK,
 )
@@ -575,6 +576,62 @@ def test_repair_game_plans_normalizes_cross_line_starter_positions():
             position_offset = game_plan_offset + preset_offset + phase_offset
             assert edit_file._data[position_offset + 1] == 1
             assert edit_file._data[position_offset + 2] == 12
+
+
+def test_repair_game_plans_corrects_wing_side_without_relabeling_other_roles():
+    from tests.test_editor import _build_mock_data
+
+    data = _build_mock_data(
+        num_players=40,
+        num_teams=1,
+        num_team_player=1,
+        num_game_plans=1,
+        team_player_entries=[
+            (101, list(range(1000, 1040)), list(range(1, 41))),
+        ],
+        league_team_ids=[101],
+    )
+    edit_file = EditFile()
+    edit_file.load_bytes(data)
+    edit_file.attach_playerbin(
+        PlayerBinDatabase(
+            {
+                1000: PlayerBinRecord(1000, "Starting GK", 24, "GK", 0),
+                1007: PlayerBinRecord(1007, "Left winger", 24, "LWF", 0),
+                1008: PlayerBinRecord(1008, "Another winger", 24, "LWF", 0),
+            }
+        )
+    )
+    game_plan_offset = edit_file.game_plan_start
+    lineup_offset = game_plan_offset + GP_LINEUP
+    edit_file._data[lineup_offset : lineup_offset + 40] = bytes(range(40))
+    for preset_offset in GP_POSITION_PRESETS:
+        for phase_offset in GP_POSITION_PHASE_OFFSETS:
+            position_offset = game_plan_offset + preset_offset + phase_offset
+            edit_file._data[position_offset : position_offset + 11] = bytes(
+                [0, 1, 1, 1, 1, 1, 1, 9, 9, 12, 12]
+            )
+            right_wing_coordinate = (
+                position_offset + GP_POSITION_COORDINATE_OFFSET + 7 * 2
+            )
+            left_wing_coordinate = (
+                position_offset + GP_POSITION_COORDINATE_OFFSET + 8 * 2
+            )
+            edit_file._data[right_wing_coordinate : right_wing_coordinate + 2] = bytes(
+                [30, 87]
+            )
+            edit_file._data[left_wing_coordinate : left_wing_coordinate + 2] = bytes(
+                [30, 18]
+            )
+
+    metrics = edit_file.repair_game_plans()
+
+    assert metrics["repaired_position_bytes"] == 9
+    for preset_offset in GP_POSITION_PRESETS:
+        for phase_offset in GP_POSITION_PHASE_OFFSETS:
+            position_offset = game_plan_offset + preset_offset + phase_offset
+            assert edit_file._data[position_offset + 7] == 10
+            assert edit_file._data[position_offset + 8] == 9
 
 
 def test_repair_game_plans_moves_extra_goalkeeper_to_bench_without_relabeling_roles():

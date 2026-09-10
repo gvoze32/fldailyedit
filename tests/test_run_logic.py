@@ -30,7 +30,14 @@ from transfer_planning import (
     _plan_roster_actions,
     _transfer_sort_key,
 )
-from scraper.models import CaptainUpdate, MatchedTransfer, ScrapeResult, Transfer
+from scraper.models import (
+    CaptainUpdate,
+    MatchedTransfer,
+    ScrapeResult,
+    SquadMember,
+    SquadSnapshot,
+    Transfer,
+)
 from editor.models import TeamData
 
 
@@ -727,6 +734,91 @@ def test_stateful_matching_moves_unique_current_squad_registration():
     )
     assert [(item.action, item.current_team_id) for item in plan] == [("move", 10)]
 
+def test_complete_squad_snapshot_releases_stale_current_roster_player():
+    from scraper.matcher import NameMatcher
+
+    current_ids = list(range(3001, 3018))
+    matcher = NameMatcher()
+    matcher.load_player_db(
+        [(f"Player {player_id}", player_id) for player_id in current_ids]
+    )
+    matcher.load_team_db({"Example FC": 10})
+    snapshot = SquadSnapshot(
+        club_name="Example FC",
+        team_id_fotmob=42,
+        members=tuple(
+            SquadMember(
+                player_name=f"Player {player_id}",
+                player_id_fotmob=5000 + index,
+            )
+            for index, player_id in enumerate(current_ids[:-1])
+        ),
+        source_url="https://www.fotmob.com/api/data/teams?id=42",
+        complete=True,
+    )
+
+    matched = _match_transfers_statefully(
+        [],
+        matcher,
+        80,
+        {10: current_ids},
+        {10},
+        validated_fotmob_ids={42},
+        validated_fotmob_teams={42: 10},
+        squad_snapshots=(snapshot,),
+        player_names={player_id: f"Player {player_id}" for player_id in current_ids},
+    )
+
+    assert [
+        (match.player_id, match.transfer.transfer_type)
+        for match in matched
+    ] == [(3017, "squad_release")]
+    plan = _plan_roster_actions(
+        matched,
+        {10: TeamData(10, current_ids + [0] * 23)},
+        {10},
+        object(),
+        {},
+    )
+    assert [(item.action, item.current_team_id) for item in plan] == [
+        ("release", 10)
+    ]
+
+
+def test_incomplete_squad_snapshot_does_not_release_roster_players():
+    from scraper.matcher import NameMatcher
+
+    current_ids = list(range(3101, 3118))
+    matcher = NameMatcher()
+    matcher.load_player_db(
+        [(f"Player {player_id}", player_id) for player_id in current_ids]
+    )
+    matcher.load_team_db({"Example FC": 10})
+    snapshot = SquadSnapshot(
+        club_name="Example FC",
+        team_id_fotmob=42,
+        members=tuple(
+            SquadMember(player_name=f"Player {player_id}")
+            for player_id in current_ids[:10]
+        ),
+        source_url="https://www.fotmob.com/api/data/teams?id=42",
+        complete=False,
+    )
+
+    matched = _match_transfers_statefully(
+        [],
+        matcher,
+        80,
+        {10: current_ids},
+        {10},
+        validated_fotmob_ids={42},
+        validated_fotmob_teams={42: 10},
+        squad_snapshots=(snapshot,),
+    )
+
+    assert matched == []
+
+
 def test_local_runtime_rolls_back_unexpected_move_failure(
     monkeypatch, tmp_path
 ):
@@ -1043,6 +1135,16 @@ def test_transfer_run_syncs_squad_numbers_in_fast_mode(monkeypatch):
         player_name="Captain Player",
         player_id_fotmob=987,
     )
+    snapshot = SquadSnapshot(
+        club_name="B",
+        team_id_fotmob=42,
+        members=tuple(
+            SquadMember(player_name=f"Squad Player {index}")
+            for index in range(11)
+        ),
+        source_url="https://www.fotmob.com/api/data/teams?id=42",
+        complete=True,
+    )
     calls = []
     monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_kwargs: [transfer])
     monkeypatch.setattr(
@@ -1051,6 +1153,7 @@ def test_transfer_run_syncs_squad_numbers_in_fast_mode(monkeypatch):
         lambda clubs: calls.append(tuple(clubs)) or ScrapeResult(
             [shirt],
             [captain],
+            [snapshot],
         ),
     )
 
@@ -1075,6 +1178,7 @@ def test_transfer_run_syncs_squad_numbers_in_fast_mode(monkeypatch):
 
     assert len(result.captain_updates) == 1
     assert result.captain_updates[0].player_name == "Captain Player"
+    assert result.squad_snapshots == (snapshot,)
 
 def test_fast_captain_sync_keeps_existing_squad_club_limit(monkeypatch):
     import run_pipeline as run

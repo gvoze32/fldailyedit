@@ -4,7 +4,7 @@ Tests for the FotMob scraper and transfer models.
 import asyncio
 
 import pytest
-from scraper.models import CaptainUpdate, ScrapeResult, Transfer
+from scraper.models import Transfer
 
 
 class TestTransferModel:
@@ -530,6 +530,39 @@ class TestScraperSafety:
         assert results[0].to_club == "Example FC"
         assert results[0].player_id_fotmob is None
 
+    def test_complete_squad_snapshot_is_emitted_for_full_payload(self):
+        from scraper.fotmob import FotmobScraper
+
+        payload = {
+            "squad": {
+                "squad": [
+                    {
+                        "members": [
+                            {
+                                "id": player_id,
+                                "name": f"Player {player_id}",
+                                "role": {"fallback": "CMF"},
+                                "shirtNumber": player_id - 99,
+                            }
+                            for player_id in range(100, 111)
+                        ]
+                    }
+                ]
+            }
+        }
+
+        snapshot = FotmobScraper()._extract_squad_snapshot_from_team_data(
+            payload,
+            42,
+            "Example FC",
+        )
+
+        assert snapshot.complete is True
+        assert len(snapshot.members) == 11
+        assert snapshot.members[0].player_id_fotmob == 100
+        assert snapshot.members[-1].position == "CMF"
+
+
     def test_club_target_resolution_rejects_ambiguous_substring(self):
         from scraper.fotmob import _resolve_club_targets
 
@@ -611,6 +644,7 @@ class TestScraperSafety:
         result = fotmob.fetch_squads_for_club_names(["Example FC"])
 
         assert len(result) == 2
+        assert result.squad_snapshots == ()
         registration = next(
             item for item in result if item.transfer_type == "squad_registration"
         )

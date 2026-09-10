@@ -3,7 +3,14 @@ Scraper package for FL Daily Edit.
 """
 from scraper.fotmob import FotmobScraper, fetch_fotmob_transfers
 from scraper.matcher import NameMatcher
-from scraper.models import CaptainUpdate, MatchedTransfer, ScrapeResult, Transfer
+from scraper.models import (
+    CaptainUpdate,
+    MatchedTransfer,
+    ScrapeResult,
+    SquadMember,
+    SquadSnapshot,
+    Transfer,
+)
 
 __all__ = [
     "FotmobScraper",
@@ -12,5 +19,7 @@ __all__ = [
     "CaptainUpdate",
     "MatchedTransfer",
     "ScrapeResult",
+    "SquadMember",
+    "SquadSnapshot",
     "Transfer",
 ]

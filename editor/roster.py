@@ -47,6 +47,68 @@ GP_SINGLE_PLAYER_ROLES = (
 GP_POSITION_PRESETS = (0x004, 0x0A4, 0x144)
 GP_POSITION_PHASE_OFFSETS = (0x000, 0x021, 0x042)
 GP_POSITION_ENTRY_SIZE = 1
+GP_POSITION_COORDINATE_OFFSET = 0x00B
+
+# Side-aware correction is limited to registered wingers; a central forward's
+# tactical x-coordinate is not enough evidence to relabel it as a winger.
+_POSITION_SIDE_BY_CODE = {
+    9: -1,  # LWF
+    10: 1,  # RWF
+}
+_POSITION_SIDE_LEFT_MAX = 30
+_POSITION_SIDE_RIGHT_MIN = 70
+
+_POSITION_CODE_BY_LINE_AND_SIDE = {
+    ("FWD", -1): 9,  # LWF
+    ("FWD", 1): 10,  # RWF
+}
+_SIDE_AWARE_FORWARD_CODES = frozenset({9, 10})
+
+
+def _game_plan_position_side(code: int | None) -> int:
+    return _POSITION_SIDE_BY_CODE.get(code, 0)
+
+
+def _game_plan_tactical_side(horizontal: int | None) -> int:
+    if horizontal is None or horizontal <= 0 or horizontal > 100:
+        return 0
+    if horizontal <= _POSITION_SIDE_LEFT_MAX:
+        return -1
+    if horizontal >= _POSITION_SIDE_RIGHT_MIN:
+        return 1
+    return 0
+
+
+def _game_plan_position_for_role(
+    current_code: int,
+    registered_code: int,
+    horizontal: int | None,
+) -> int | None:
+    """Return a safe role code, preserving valid same-line tactical variants."""
+    registered_line = _game_plan_position_line(registered_code)
+    current_line = _game_plan_position_line(current_code)
+    if registered_line is None:
+        return None
+
+    tactical_side = _game_plan_tactical_side(horizontal)
+    current_side = _game_plan_position_side(current_code)
+    side_conflict = (
+        registered_code in _SIDE_AWARE_FORWARD_CODES
+        and tactical_side != 0
+        and current_side != tactical_side
+    )
+    if current_line == registered_line and not side_conflict:
+        return None
+
+    if registered_line == "GK":
+        return 0
+    if (
+        tactical_side
+        and registered_code in _SIDE_AWARE_FORWARD_CODES
+    ):
+        return _POSITION_CODE_BY_LINE_AND_SIDE[("FWD", tactical_side)]
+    return registered_code
+
 
 _GOALKEEPER_POSITION_LABELS = frozenset({"GK", "GOALKEEPER", "KEEPER", "GOALIE"})
 
@@ -1270,7 +1332,7 @@ class RosterGamePlanMixin:
         *,
         position_overrides: dict[int, str] | None = None,
     ) -> int:
-        """Normalize known starters that cross goalkeeper or outfield lines."""
+        """Normalize starter lines and explicit registered-winger side conflicts."""
         active_count = min(FIRST_TEAM_SLOT_COUNT, roster.roster_size)
         if active_count <= 0 or len(lineup) < active_count:
             return 0
@@ -1298,20 +1360,37 @@ class RosterGamePlanMixin:
 
             for preset_offset in GP_POSITION_PRESETS:
                 for phase_offset in GP_POSITION_PHASE_OFFSETS:
+                    position_block_address = (
+                        game_plan_offset + preset_offset + phase_offset
+                    )
                     position_address = (
-                        game_plan_offset
-                        + preset_offset
-                        + phase_offset
+                        position_block_address
                         + role * GP_POSITION_ENTRY_SIZE
+                    )
+                    coordinate_address = (
+                        position_block_address
+                        + GP_POSITION_COORDINATE_OFFSET
+                        + role * 2
+                        + 1
                     )
                     if position_address >= len(self._data):
                         continue
                     current_code = self._data[position_address]
                     if current_code == 0 and not known_goalkeeper:
                         continue
-                    if _game_plan_position_line(current_code) == registered_line:
+                    horizontal = (
+                        self._data[coordinate_address]
+                        if coordinate_address < len(self._data)
+                        else None
+                    )
+                    target_code = _game_plan_position_for_role(
+                        current_code,
+                        registered_code,
+                        horizontal,
+                    )
+                    if target_code is None or target_code == current_code:
                         continue
-                    self._data[position_address] = registered_code
+                    self._data[position_address] = target_code
                     repaired += 1
         return repaired
 

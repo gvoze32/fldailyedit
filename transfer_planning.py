@@ -3,17 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
+from math import ceil
 
 from editor.editfile import EditFile
 from editor.roster import MIN_CLUB_ROSTER_SIZE
 from scraper.fotmob import parse_iso_datetime
 from scraper.matcher import NameMatcher
-from scraper.models import MatchedTransfer
+from scraper.models import MatchedTransfer, SquadSnapshot, Transfer
 
 logger = logging.getLogger(__name__)
 
 UNRESOLVED_TEAM_ID = -1
 _NON_CLUB_LABELS = {"", "free agent", "without club", "unattached", "career break", "retired"}
+_MIN_COMPLETE_SQUAD_MEMBERS = 11
+_MIN_CURRENT_SQUAD_MATCH_RATIO = 0.40
 
 
 @dataclass
@@ -135,6 +138,138 @@ def _transfer_event_order_key(
         index,
     )
 
+
+def _append_current_squad_releases(
+    matched: list[MatchedTransfer],
+    matcher: NameMatcher,
+    threshold: float,
+    virtual_rosters: dict[int, list[int]],
+    club_ids: set[int],
+    squad_snapshots: tuple[SquadSnapshot, ...] | list[SquadSnapshot],
+    fotmob_to_pes: dict[int, int],
+    validated_fotmob_ids: set[int] | None,
+    validated_fotmob_teams: dict[int, int] | None,
+    player_names: dict[int, str] | None,
+) -> None:
+    """Append releases for local players absent from complete live squads."""
+    released_ids = {
+        match.player_id
+        for match in matched
+        if match.is_release and match.player_id is not None
+    }
+    seen_team_ids: set[int] = set()
+    for snapshot in squad_snapshots:
+        if (
+            not snapshot.complete
+            or len(snapshot.members) < _MIN_COMPLETE_SQUAD_MEMBERS
+        ):
+            continue
+
+        fotmob_team_id = _optional_positive_int(snapshot.team_id_fotmob)
+        if fotmob_team_id is None:
+            continue
+        team_id, team_name, team_confidence = _match_transfer_team(
+            matcher,
+            snapshot.club_name,
+            snapshot.club_name,
+            fotmob_team_id,
+            validated_fotmob_ids,
+            validated_fotmob_teams,
+        )
+        if (
+            team_id is None
+            or team_id == UNRESOLVED_TEAM_ID
+            or team_id not in club_ids
+            or team_id in seen_team_ids
+        ):
+            continue
+        seen_team_ids.add(team_id)
+
+        current_ids = {
+            normalized_player_id
+            for raw_player_id in virtual_rosters.get(team_id, ())
+            if (
+                normalized_player_id := _optional_positive_int(raw_player_id)
+            ) is not None
+        }
+        if len(current_ids) <= MIN_CLUB_ROSTER_SIZE:
+            continue
+
+        snapshot_player_ids: set[int] = set()
+        for member in snapshot.members:
+            fotmob_player_id = _optional_positive_int(member.player_id_fotmob)
+            known_player_id = (
+                fotmob_to_pes.get(fotmob_player_id)
+                if fotmob_player_id is not None
+                else None
+            )
+            if known_player_id is not None:
+                if known_player_id in current_ids:
+                    snapshot_player_ids.add(known_player_id)
+                continue
+
+            player_id, _, player_confidence = matcher.match_player(
+                member.player_name,
+                threshold=threshold,
+                from_team_id=team_id,
+                team_player_map=virtual_rosters,
+                position=member.position,
+                nationality=member.nationality,
+                age=member.age,
+            )
+            if (
+                player_id is not None
+                and player_id in current_ids
+                and player_confidence >= max(float(threshold or 0), 95.0)
+            ):
+                snapshot_player_ids.add(player_id)
+
+        matched_member_count = len(snapshot_player_ids)
+        minimum_current_matches = max(
+            _MIN_COMPLETE_SQUAD_MEMBERS,
+            ceil(len(current_ids) * _MIN_CURRENT_SQUAD_MATCH_RATIO),
+        )
+        if matched_member_count < minimum_current_matches:
+            logger.warning(
+                "Skipping stale-player release for %s (%s): only %s/%s "
+                "current roster players matched",
+                team_name or snapshot.club_name,
+                team_id,
+                matched_member_count,
+                len(current_ids),
+            )
+            continue
+
+        for player_id in sorted(current_ids - snapshot_player_ids):
+            if player_id in released_ids:
+                continue
+            player_name = (player_names or {}).get(player_id) or f"Player {player_id}"
+            matched.append(
+                MatchedTransfer(
+                    transfer=Transfer(
+                        player_name=player_name,
+                        from_club=team_name or snapshot.club_name,
+                        to_club="Free Agent",
+                        transfer_type="squad_release",
+                        from_club_id_fotmob=fotmob_team_id,
+                        from_club_full_name=team_name or snapshot.club_name,
+                        source_urls=(snapshot.source_url,),
+                        proof_urls=(snapshot.source_url,),
+                        verification_status="enabled",
+                        infer_from_current_roster=True,
+                    ),
+                    player_id=player_id,
+                    from_team_id=team_id,
+                    from_team_confidence=team_confidence or 100.0,
+                    player_confidence=100.0,
+                    matched_player_name=player_name,
+                    matched_from_team=team_name or snapshot.club_name,
+                )
+            )
+            released_ids.add(player_id)
+
+
+
 def _match_transfers_statefully(
     transfers,
     matcher: NameMatcher,
@@ -144,8 +279,10 @@ def _match_transfers_statefully(
     historical_entries: list[dict] | None = None,
     validated_fotmob_ids: set[int] | None = None,
     validated_fotmob_teams: dict[int, int] | None = None,
+    squad_snapshots: tuple[SquadSnapshot, ...] | list[SquadSnapshot] = (),
+    player_names: dict[int, str] | None = None,
 ) -> list[MatchedTransfer]:
-    """Match transfer events chronologically while advancing virtual rosters."""
+    """Match transfer events and derive releases from complete live squads."""
     virtual_rosters = {
         team_id: list(player_ids)
         for team_id, player_ids in team_player_map.items()
@@ -407,6 +544,18 @@ def _match_transfers_statefully(
         elif ftid is not None:
             loaned_by_parent.get(ftid, set()).discard(pid)
 
+    _append_current_squad_releases(
+        matched,
+        matcher,
+        threshold,
+        virtual_rosters,
+        club_ids,
+        squad_snapshots,
+        fotmob_to_pes,
+        validated_fotmob_ids,
+        validated_fotmob_teams,
+        player_names,
+    )
     return matched
 
 
