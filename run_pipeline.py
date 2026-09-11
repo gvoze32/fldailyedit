@@ -606,6 +606,9 @@ def _load_match_database(
 
 
 
+
+
+
 def _match_and_plan_transfers(
     transfers,
     matcher,
@@ -1625,7 +1628,6 @@ class _RunLocalUpdateRuntime:
                 ok = prepared.edit_file.release_player(
                     player_id,
                     match.from_team_id,
-                    position=transfer.position,
                 )
 
             if not ok:

@@ -130,7 +130,6 @@ def test_installer_spec_is_one_file_windowed_and_excludes_sensitive_payloads():
         "data/team_aliases.json",
         "data/FL2622wc_players.txt",
         "data/players.csv",
-        "data/release_policy.json",
         "data/FL262_teams.txt",
         "vendor/pesXdecrypter/decrypter21.exe",
         "vendor/pesXdecrypter/encrypter21.exe",
@@ -184,7 +183,6 @@ def test_installer_workflow_builds_tests_and_smoke_tests_on_windows():
         "data/FL262_teams.txt",
         "data/FL2622wc_players.txt",
         "data/players.csv",
-        "data/release_policy.json",
     ):
         assert f'      - "{path_filter}"' in text
     assert "pesXdecrypter_2021.7z" in build

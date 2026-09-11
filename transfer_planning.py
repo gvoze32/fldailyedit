@@ -203,10 +203,11 @@ def _append_current_squad_releases(
                 if fotmob_player_id is not None
                 else None
             )
-            if known_player_id is not None:
-                if known_player_id in current_ids:
-                    snapshot_player_ids.add(known_player_id)
+            if known_player_id is not None and known_player_id in current_ids:
+                snapshot_player_ids.add(known_player_id)
                 continue
+            # A stale historical identity must not hide the name-based match.
+            # The save's current roster is the authoritative context here.
 
             player_id, _, player_confidence = matcher.match_player(
                 member.player_name,

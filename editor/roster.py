@@ -41,74 +41,11 @@ GP_SINGLE_PLAYER_ROLES = (
     GP_CAPTAIN,
 )
 
-# Each preset stores three 11-byte player-position arrays before GP_LINEUP:
-# kickoff, in possession, and out of possession. The codes use the same
-# order as Player.bin's registered positions.
+# Each preset stores three 11-byte tactical position arrays before GP_LINEUP.
+# Position codes use the same order as Player.bin's registered positions.
 GP_POSITION_PRESETS = (0x004, 0x0A4, 0x144)
 GP_POSITION_PHASE_OFFSETS = (0x000, 0x021, 0x042)
 GP_POSITION_ENTRY_SIZE = 1
-GP_POSITION_COORDINATE_OFFSET = 0x00B
-
-# Side-aware correction is limited to registered wingers; a central forward's
-# tactical x-coordinate is not enough evidence to relabel it as a winger.
-_POSITION_SIDE_BY_CODE = {
-    9: -1,  # LWF
-    10: 1,  # RWF
-}
-_POSITION_SIDE_LEFT_MAX = 30
-_POSITION_SIDE_RIGHT_MIN = 70
-
-_POSITION_CODE_BY_LINE_AND_SIDE = {
-    ("FWD", -1): 9,  # LWF
-    ("FWD", 1): 10,  # RWF
-}
-_SIDE_AWARE_FORWARD_CODES = frozenset({9, 10})
-
-
-def _game_plan_position_side(code: int | None) -> int:
-    return _POSITION_SIDE_BY_CODE.get(code, 0)
-
-
-def _game_plan_tactical_side(horizontal: int | None) -> int:
-    if horizontal is None or horizontal <= 0 or horizontal > 100:
-        return 0
-    if horizontal <= _POSITION_SIDE_LEFT_MAX:
-        return -1
-    if horizontal >= _POSITION_SIDE_RIGHT_MIN:
-        return 1
-    return 0
-
-
-def _game_plan_position_for_role(
-    current_code: int,
-    registered_code: int,
-    horizontal: int | None,
-) -> int | None:
-    """Return a safe role code, preserving valid same-line tactical variants."""
-    registered_line = _game_plan_position_line(registered_code)
-    current_line = _game_plan_position_line(current_code)
-    if registered_line is None:
-        return None
-
-    tactical_side = _game_plan_tactical_side(horizontal)
-    current_side = _game_plan_position_side(current_code)
-    side_conflict = (
-        registered_code in _SIDE_AWARE_FORWARD_CODES
-        and tactical_side != 0
-        and current_side != tactical_side
-    )
-    if current_line == registered_line and not side_conflict:
-        return None
-
-    if registered_line == "GK":
-        return 0
-    if (
-        tactical_side
-        and registered_code in _SIDE_AWARE_FORWARD_CODES
-    ):
-        return _POSITION_CODE_BY_LINE_AND_SIDE[("FWD", tactical_side)]
-    return registered_code
-
 
 _GOALKEEPER_POSITION_LABELS = frozenset({"GK", "GOALKEEPER", "KEEPER", "GOALIE"})
 
@@ -740,7 +677,6 @@ class RosterGamePlanMixin:
             from_roster,
             player_idx,
             player_id,
-            effective_pos,
         )
 
         # Re-read to_roster in case from_entry == to_entry
@@ -788,7 +724,6 @@ class RosterGamePlanMixin:
         self,
         player_id: int,
         from_team_id: int,
-        position: str = "",
     ) -> bool:
         """
         Release a player to Free Agent (or when moving to an unrepresented club).
@@ -796,11 +731,6 @@ class RosterGamePlanMixin:
         Removes the player from the team's 40-slot roster and compacts the slots.
         In PES21, any registered player not assigned to a club automatically
         becomes a Free Agent.
-
-        Args:
-            player_id: Player ID to release.
-            from_team_id: Team ID to remove player from.
-            position: Optional registered position label for game-plan repair.
 
         Returns:
             True if released successfully, False otherwise.
@@ -815,7 +745,6 @@ class RosterGamePlanMixin:
         if player_idx == -1:
             logger.error(f"Player {player_id} not found on team {from_team_id}")
             return False
-        effective_pos = self._mutation_player_position(player_id, position)
 
         self._remove_roster_player(
             from_team_id,
@@ -823,7 +752,6 @@ class RosterGamePlanMixin:
             from_roster,
             player_idx,
             player_id,
-            effective_pos,
         )
 
         logger.info(f"Released player {player_id} from team {from_team_id} (now Free Agent)")
@@ -960,7 +888,6 @@ class RosterGamePlanMixin:
         roster: TeamData,
         player_index: int,
         player_id: int,
-        position: str,
     ) -> None:
         """Compact one roster slot and preserve its game-plan player mapping."""
         last_index = max(
@@ -983,7 +910,6 @@ class RosterGamePlanMixin:
             player_index,
             replacement_index,
             removed_player_id=player_id,
-            removed_position=position,
         )
 
     def _select_game_plan_promotion_slot(
@@ -1057,67 +983,6 @@ class RosterGamePlanMixin:
         return None
 
 
-
-
-
-    def _repair_game_plan_role_position(
-        self,
-        game_plan_offset: int,
-        role: int,
-        position_code: int | None,
-    ) -> int:
-        """Relabel a starter role when a roster mutation changes its player."""
-        if (
-            not 0 <= role < FIRST_TEAM_SLOT_COUNT
-            or position_code is None
-            or not 0 <= position_code < len(POSITION_NAMES)
-        ):
-            return 0
-
-        repaired = 0
-        for preset_offset in GP_POSITION_PRESETS:
-            for phase_offset in GP_POSITION_PHASE_OFFSETS:
-                position_address = (
-                    game_plan_offset
-                    + preset_offset
-                    + phase_offset
-                    + role * GP_POSITION_ENTRY_SIZE
-                )
-                if position_address >= len(self._data):
-                    continue
-                if self._data[position_address] != position_code:
-                    self._data[position_address] = position_code
-                    repaired += 1
-        return repaired
-
-    def _repair_game_plan_changed_player_positions(
-        self,
-        game_plan_offset: int,
-        roster: TeamData,
-        previous_player_roles: dict[int, int],
-        lineup: list[int],
-        *,
-        position_overrides: dict[int, str] | None = None,
-    ) -> int:
-        """Align changed starter occupants with their registered positions."""
-        overrides = position_overrides or {}
-        starter_count = min(FIRST_TEAM_SLOT_COUNT, roster.roster_size)
-        repaired = 0
-        for role, slot in enumerate(lineup[:starter_count]):
-            if not 0 <= slot < TP_MAX_PLAYERS:
-                continue
-            player_id = roster.player_ids[slot]
-            if not player_id or previous_player_roles.get(player_id) == role:
-                continue
-            position = overrides.get(player_id) or self.get_player_position(player_id) or ""
-            repaired += self._repair_game_plan_role_position(
-                game_plan_offset,
-                role,
-                _game_plan_position_code(position),
-            )
-        return repaired
-
-
     def _repair_game_plan_goalkeeper_positions(
         self,
         game_plan_offset: int,
@@ -1126,7 +991,7 @@ class RosterGamePlanMixin:
         *,
         position_overrides: dict[int, str] | None = None,
     ) -> tuple[int, int]:
-        """Keep known goalkeepers in role zero and normalize position bytes."""
+        """Keep known goalkeepers in role zero and repair missing markers."""
         active_count = min(TP_MAX_PLAYERS, roster.roster_size)
         starter_count = min(FIRST_TEAM_SLOT_COUNT, active_count)
         if len(lineup) < active_count:
@@ -1194,12 +1059,7 @@ class RosterGamePlanMixin:
         else:
             goalkeeper_roles = known_goalkeeper_roles
         if not goalkeeper_roles:
-            return 0, self._repair_game_plan_position_lines(
-                game_plan_offset,
-                roster,
-                lineup,
-                position_overrides=overrides,
-            )
+            return 0, 0
 
         repaired_roles = 0
         lineup_changed = False
@@ -1249,12 +1109,6 @@ class RosterGamePlanMixin:
             ] = bytes(lineup)
 
         position_repairs = self._repair_game_plan_position_arrays(
-            game_plan_offset,
-            roster,
-            lineup,
-            position_overrides=overrides,
-        )
-        position_repairs += self._repair_game_plan_position_lines(
             game_plan_offset,
             roster,
             lineup,
@@ -1324,75 +1178,6 @@ class RosterGamePlanMixin:
                         repaired += 1
         return repaired
 
-    def _repair_game_plan_position_lines(
-        self,
-        game_plan_offset: int,
-        roster: TeamData,
-        lineup: list[int],
-        *,
-        position_overrides: dict[int, str] | None = None,
-    ) -> int:
-        """Normalize starter lines and explicit registered-winger side conflicts."""
-        active_count = min(FIRST_TEAM_SLOT_COUNT, roster.roster_size)
-        if active_count <= 0 or len(lineup) < active_count:
-            return 0
-
-        overrides = position_overrides or {}
-        registered_codes: list[int | None] = []
-        for slot in lineup[:active_count]:
-            if not 0 <= slot < TP_MAX_PLAYERS:
-                registered_codes.append(None)
-                continue
-            player_id = roster.player_ids[slot]
-            registered_codes.append(
-                _game_plan_position_code(
-                    overrides.get(player_id) or self.get_player_position(player_id) or ""
-                )
-                if player_id
-                else None
-            )
-        known_goalkeeper = 0 in registered_codes
-        repaired = 0
-        for role, registered_code in enumerate(registered_codes):
-            registered_line = _game_plan_position_line(registered_code)
-            if registered_code is None or registered_line is None:
-                continue
-
-            for preset_offset in GP_POSITION_PRESETS:
-                for phase_offset in GP_POSITION_PHASE_OFFSETS:
-                    position_block_address = (
-                        game_plan_offset + preset_offset + phase_offset
-                    )
-                    position_address = (
-                        position_block_address
-                        + role * GP_POSITION_ENTRY_SIZE
-                    )
-                    coordinate_address = (
-                        position_block_address
-                        + GP_POSITION_COORDINATE_OFFSET
-                        + role * 2
-                        + 1
-                    )
-                    if position_address >= len(self._data):
-                        continue
-                    current_code = self._data[position_address]
-                    if current_code == 0 and not known_goalkeeper:
-                        continue
-                    horizontal = (
-                        self._data[coordinate_address]
-                        if coordinate_address < len(self._data)
-                        else None
-                    )
-                    target_code = _game_plan_position_for_role(
-                        current_code,
-                        registered_code,
-                        horizontal,
-                    )
-                    if target_code is None or target_code == current_code:
-                        continue
-                    self._data[position_address] = target_code
-                    repaired += 1
-        return repaired
 
     def _update_game_plan_after_removal(
         self,
@@ -1401,7 +1186,6 @@ class RosterGamePlanMixin:
         replacement_idx: int,
         *,
         removed_player_id: int | None = None,
-        removed_position: str = "",
     ) -> None:
         """
         Keep game-plan roles attached to players after roster compaction.
@@ -1456,22 +1240,6 @@ class RosterGamePlanMixin:
             else None
         )
 
-        def previous_player_id(slot: int) -> int:
-            if slot == removed_idx:
-                return removed_player_id or 0
-            if replacement_idx >= 0 and slot == replacement_idx:
-                return replacement_player_id or 0
-            if 0 <= slot < TP_MAX_PLAYERS:
-                return roster.player_ids[slot]
-            return 0
-
-        previous_player_roles = {
-            player_id: role
-            for role, slot in enumerate(
-                active_order[: min(FIRST_TEAM_SLOT_COUNT, old_active_count)]
-            )
-            if (player_id := previous_player_id(slot))
-        }
 
 
         removed_role = active_order.index(removed_idx)
@@ -1582,18 +1350,6 @@ class RosterGamePlanMixin:
             roster,
             new_lineup,
         )
-        position_overrides = (
-            {removed_player_id: removed_position}
-            if removed_player_id is not None and removed_position
-            else None
-        )
-        self._repair_game_plan_changed_player_positions(
-            gp_offset,
-            roster,
-            previous_player_roles,
-            new_lineup,
-            position_overrides=position_overrides,
-        )
         for role_offset in GP_SINGLE_PLAYER_ROLES:
             target_offset = gp_offset + role_offset
             value = self._data[target_offset]
@@ -1653,14 +1409,6 @@ class RosterGamePlanMixin:
             or set(active_prefix) != old_active_slots
         ):
             return
-        previous_player_roles = {
-            player_id: role
-            for role, slot in enumerate(
-                active_prefix[: min(FIRST_TEAM_SLOT_COUNT, old_active_count)]
-            )
-            if (player_id := roster.player_ids[slot])
-        }
-
 
         try:
             added_role = lineup.index(added_slot, old_active_count)
@@ -1677,25 +1425,14 @@ class RosterGamePlanMixin:
             lineup
         )
         added_player_id = roster.player_ids[added_slot]
-        effective_added_position = self._mutation_player_position(
-            added_player_id,
-            added_position,
-        )
         position_overrides = (
-            {added_player_id: effective_added_position}
-            if effective_added_position
+            {added_player_id: added_position}
+            if added_player_id and added_position
             else None
         )
         self._repair_game_plan_goalkeeper_positions(
             gp_offset,
             roster,
-            lineup,
-            position_overrides=position_overrides,
-        )
-        self._repair_game_plan_changed_player_positions(
-            gp_offset,
-            roster,
-            previous_player_roles,
             lineup,
             position_overrides=position_overrides,
         )
@@ -1717,8 +1454,8 @@ class RosterGamePlanMixin:
         Existing valid roster-slot references keep their relative order. Missing
         active slots are appended, duplicate/empty references are displaced to
         the inactive tail, and roles pointing outside the active roster are reset
-        to the game's automatic value (0xFF). Known starters keep same-line
-        tactical variants, while cross-line position bytes are normalized.
+        to the game's automatic value (0xFF). Known goalkeeper markers are
+        repaired without changing valid tactical position assignments.
         """
         rosters = self.get_all_rosters()
         repaired_lineups = 0
@@ -1766,11 +1503,6 @@ class RosterGamePlanMixin:
             )
             repaired_goalkeeper_roles += role_repairs
             repaired_position_bytes += position_repairs
-            repaired_position_bytes += self._repair_game_plan_position_lines(
-                offset,
-                roster,
-                lineup,
-            )
             role_offsets = list(GP_SINGLE_PLAYER_ROLES)
             role_offsets.extend(GP_ATTACK_PLAYERS + index for index in range(3))
             for role_offset in role_offsets:

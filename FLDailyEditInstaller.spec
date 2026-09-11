@@ -19,7 +19,6 @@ RUNTIME_DATA = [
     ("data/FL262_teams.txt", "data"),
     ("data/FL2622wc_players.txt", "data"),
     ("data/players.csv", "data"),
-    ("data/release_policy.json", "data"),
 ]
 
 a = Analysis(

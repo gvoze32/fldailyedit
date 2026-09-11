@@ -1740,7 +1740,6 @@ def self_test() -> int:
         "FL262_teams.txt",
         "FL2622wc_players.txt",
         "players.csv",
-        "release_policy.json",
     )
     missing_data = [
         name

@@ -20,7 +20,6 @@ on:
       - "data/FL262_teams.txt"
       - "data/FL2622wc_players.txt"
       - "data/players.csv"
-      - "data/release_policy.json"
       - "vendor/pesXdecrypter/src/**"
       - "config.py"
       - "local_update.py"

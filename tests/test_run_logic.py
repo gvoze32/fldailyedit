@@ -41,7 +41,6 @@ from scraper.models import (
 from editor.models import TeamData
 
 
-
 def test_local_update_enables_overflow_release_by_default(tmp_path):
     from local_update import LocalUpdateRequest
 
@@ -783,6 +782,51 @@ def test_complete_squad_snapshot_releases_stale_current_roster_player():
     assert [(item.action, item.current_team_id) for item in plan] == [
         ("release", 10)
     ]
+
+def test_squad_snapshot_falls_back_when_historical_identity_is_stale():
+    from scraper.matcher import NameMatcher
+
+    current_ids = list(range(3201, 3218))
+    stale_external_id = 5000
+    matcher = NameMatcher()
+    matcher.load_player_db(
+        [(f"Player {player_id}", player_id) for player_id in current_ids]
+    )
+    matcher.load_team_db({"Example FC": 10})
+    snapshot = SquadSnapshot(
+        club_name="Example FC",
+        team_id_fotmob=42,
+        members=tuple(
+            SquadMember(
+                player_name=f"Player {player_id}",
+                player_id_fotmob=(
+                    stale_external_id
+                    if player_id == current_ids[-1]
+                    else 6000 + index
+                ),
+            )
+            for index, player_id in enumerate(current_ids)
+        ),
+        source_url="https://www.fotmob.com/api/data/teams?id=42",
+        complete=True,
+    )
+
+    matched = _match_transfers_statefully(
+        [],
+        matcher,
+        80,
+        {10: current_ids},
+        {10},
+        historical_entries=[
+            {"player_id": 9999, "fotmob_player_id": stale_external_id}
+        ],
+        validated_fotmob_ids={42},
+        validated_fotmob_teams={42: 10},
+        squad_snapshots=(snapshot,),
+        player_names={player_id: f"Player {player_id}" for player_id in current_ids},
+    )
+
+    assert matched == []
 
 
 def test_incomplete_squad_snapshot_does_not_release_roster_players():
