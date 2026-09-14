@@ -13,8 +13,8 @@ The bundled [base save](base/EDIT00000000) requires:
 - **SP Football Life 2026 Update 2.2**
 - **SmokePatch's National Squads Update**
 
-The bundled base save is based on [Gondowan's latest EDIT file](https://www.reddit.com/r/SPFootballLife/comments/1vvh129/release_gondowans_edit_file_22082026_latest/).
-The Premier League game plans combine [MG-FOXHOUND's Reddit tactics update](https://www.reddit.com/r/SPFootballLife/comments/1vzspt0/download_real_2627_premier_league_tactics_updated/) with [Klashman69's EPL 26/27 tactics release](https://evoweb.uk/threads/pes-2021-tactics-discussion-real-teams-thread.84178/page-29), using Klashman's tactical settings while preserving the base's current FL26 roster data and EPL lineups.
+The bundled base save is based on [Gondowan's final FL26 EDIT file](https://www.reddit.com/r/SPFootballLife/comments/1wfnjz6/release_gondowan_final_edit_file_for_fl26/).
+Its tactical game plans use [Klashman69's PES 2021 real-teams tactics](https://evoweb.uk/threads/pes-2021-tactics-discussion-real-teams-thread.84178/page-29). The release notes describe the EPL as complete, while other top leagues remain playable beta coverage as managerial tactics are still being refined.
 
 It is not compatible with UML, older FL26 versions, or installations without
 the national-squad update. Start a new Master League or Become a Legend career
@@ -38,7 +38,6 @@ Use the `EDIT00000000` and CPKs from the same patch generation. The updater
 reads `Player.bin`, `Team.bin`, and `PlayerAssignment.bin` from the native
 PES 2021 database; it never substitutes the bundled FL26 player catalog. A
 missing or mismatched native `Player.bin` is rejected before any save mutation.
-
 
 ## Install on Windows
 
