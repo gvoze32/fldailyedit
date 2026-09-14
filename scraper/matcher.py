@@ -302,6 +302,35 @@ class NameMatcher:
                     return name
         return ""
 
+    def _is_player_age_compatible(
+        self,
+        candidate_pid: int,
+        age: Optional[int] = None,
+    ) -> bool:
+        if age and age > 0:
+            database_age = self._player_ages.get(candidate_pid, 0)
+            if database_age > 0 and abs(age - database_age) > 4:
+                return False
+        return True
+
+    def _is_player_metadata_compatible(
+        self,
+        candidate_pid: int,
+        position: Optional[str] = None,
+        age: Optional[int] = None,
+    ) -> bool:
+        """Reject a same-name candidate with contradictory identity metadata."""
+        if (
+            position
+            and self._player_positions
+            and not _is_position_compatible(
+                position,
+                self._player_positions.get(candidate_pid, ""),
+            )
+        ):
+            return False
+        return self._is_player_age_compatible(candidate_pid, age)
+
     def _score_player(
         self,
         query_norm: str,
@@ -315,12 +344,18 @@ class NameMatcher:
         Calculate a composite fuzzy score with optional position, nationality,
         and age evidence when those fields are actually available.
         """
-        # Position Compatibility Gate
-        if position and candidate_pid and self._player_positions:
-            pes_pos = self._player_positions.get(candidate_pid, "")
-            if not _is_position_compatible(position, pes_pos):
-                # Severe penalty for position mismatch (e.g. GK matched to striker)
-                return 0.0
+        # Position and age are identity gates when the database has both
+        # values. A same-name player with a materially different age must not
+        # be treated as the local player merely because the names are exact.
+        if (
+            candidate_pid is not None
+            and not self._is_player_metadata_compatible(
+                candidate_pid,
+                position=position,
+                age=age,
+            )
+        ):
+            return 0.0
 
         # 1. token_set_ratio handles extra middle names / substrings cleanly
         s_set = fuzz.token_set_ratio(query_norm, candidate_norm)
@@ -364,8 +399,6 @@ class NameMatcher:
                 diff = abs(age - db_age)
                 if diff <= 1:
                     base_score = min(100.0, base_score + 4.0)
-                elif diff > 4:
-                    base_score = max(0.0, base_score - 10.0)
 
         return min(100.0, float(base_score))
 
@@ -421,13 +454,22 @@ class NameMatcher:
             if roster
         ]
 
-        def resolve_exact(records: list[tuple[str, int]]) -> tuple[str, int] | None:
+        def resolve_exact(
+            records: list[tuple[str, int]],
+            *,
+            enforce_metadata: bool = True,
+        ) -> tuple[str, int] | None:
             compatible = [
                 (orig, pid)
                 for orig, pid in records
-                if not position
-                or not self._player_positions
-                or _is_position_compatible(position, self._player_positions.get(pid, ""))
+                if (
+                    not enforce_metadata
+                    or self._is_player_metadata_compatible(
+                        pid,
+                        position=position,
+                        age=age,
+                    )
+                )
             ]
             for _, roster in context_groups:
                 contextual = [(orig, pid) for orig, pid in compatible if pid in roster]
@@ -460,13 +502,19 @@ class NameMatcher:
 
             return compatible[0] if len(compatible) == 1 else None
 
+        # Metadata is a guard against same-name collisions; explicit aliases
+        # remain authoritative and may intentionally override it.
+
         # Step 1: Check manual overrides
         override_target = self._player_overrides.get(scraped_name)
         if not override_target:
             override_target = self._normalized_player_overrides.get(_normalize(scraped_name))
         if override_target:
             norm_target = _normalize(override_target)
-            selected = resolve_exact(self._player_candidates.get(norm_target, []))
+            selected = resolve_exact(
+                self._player_candidates.get(norm_target, []),
+                enforce_metadata=False,
+            )
             if selected:
                 orig, pid = selected
                 logger.debug(f"Player override: '{scraped_name}' → '{orig}' (id={pid})")
@@ -481,15 +529,31 @@ class NameMatcher:
             if selected:
                 orig, pid = selected
                 return pid, orig, 100.0
-            # If compatible exact candidates remain but context cannot
-            # disambiguate them, choosing one arbitrarily is unsafe.
+            # A material age mismatch must not fall through to fuzzy matching
+            # and re-introduce the same false identity.
             compatible_exact = [
                 (orig, pid)
                 for orig, pid in exact_records
-                if not position
-                or not self._player_positions
-                or _is_position_compatible(position, self._player_positions.get(pid, ""))
+                if self._is_player_metadata_compatible(
+                    pid,
+                    position=position,
+                    age=age,
+                )
             ]
+            if not compatible_exact:
+                if not any(
+                    self._is_player_age_compatible(pid, age)
+                    for _, pid in exact_records
+                ):
+                    logger.warning(
+                        f"Rejecting exact player match '{scraped_name}': "
+                        "age conflicts with every candidate"
+                    )
+                    return None, "", 100.0
+                # A position-only mismatch may still resolve to a longer,
+                # position-compatible fuzzy candidate below.
+            # If compatible exact candidates remain but context cannot
+            # disambiguate them, choosing one arbitrarily is unsafe.
             if len(compatible_exact) > 1:
                 logger.warning(
                     f"Ambiguous exact player name '{scraped_name}' matches "

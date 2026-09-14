@@ -54,6 +54,22 @@ class TestPlayerMatching:
         assert pid == 1001
         assert conf == 100.0
 
+    def test_exact_name_with_conflicting_age_is_rejected(self):
+        matcher = NameMatcher()
+        matcher.load_player_db(
+            {"Reece James": 126046},
+            positions={126046: "RB"},
+            ages={126046: 26},
+        )
+
+        player_id, matched_name, confidence = matcher.match_player(
+            "Reece James",
+            position="Defender",
+            age=32,
+        )
+
+        assert (player_id, matched_name, confidence) == (None, "", 100.0)
+
     def test_diacritics_ignored(self, matcher):
         pid, name, conf = matcher.match_player("Kylian Mbappe")
         assert pid == 1002

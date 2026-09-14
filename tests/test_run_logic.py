@@ -733,6 +733,45 @@ def test_stateful_matching_moves_unique_current_squad_registration():
     )
     assert [(item.action, item.current_team_id) for item in plan] == [("move", 10)]
 
+def test_stateful_matching_rejects_same_name_player_from_another_age_group():
+    from scraper.matcher import NameMatcher
+
+    matcher = NameMatcher()
+    matcher.load_player_db(
+        {"Reece James": 126046},
+        positions={126046: "RB"},
+        ages={126046: 26},
+    )
+    matcher.load_team_db({"Chelsea": 102, "Sheffield Wednesday": 394})
+    registration = Transfer(
+        "Reece James",
+        "",
+        "Sheffield Wednesday",
+        transfer_type="squad_registration",
+        position="Defender",
+        age=32,
+        to_club_id_fotmob=10163,
+        player_id_fotmob=463871,
+        source_urls=("https://www.fotmob.com/api/data/teams?id=10163",),
+        proof_urls=("https://www.fotmob.com/api/data/teams?id=10163",),
+        verification_status="enabled",
+        infer_from_current_roster=True,
+    )
+
+    matched = _match_transfers_statefully(
+        [registration],
+        matcher,
+        80,
+        {102: [126046], 394: []},
+        {102, 394},
+        validated_fotmob_ids={10163},
+        validated_fotmob_teams={10163: 394},
+    )
+
+    assert matched[0].player_id is None
+    assert matched[0].is_fully_matched is False
+
+
 def test_complete_squad_snapshot_releases_stale_current_roster_player():
     from scraper.matcher import NameMatcher
 
