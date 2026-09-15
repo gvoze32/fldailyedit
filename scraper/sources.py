@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 import logging
 import unicodedata
 
-from rapidfuzz import fuzz
+from rapidfuzz import fuzz, process
 
 from scraper.fotmob import merge_transfers, parse_iso_date
 from scraper.models import Transfer
@@ -34,6 +35,207 @@ def _source_priority(transfer: Transfer) -> int:
         (_SOURCE_PRIORITY.get(source.casefold(), 3) for source in transfer.sources),
         default=3,
     )
+
+
+class _FuzzyKeyIndex:
+    """Resolve normalized fuzzy keys once and reuse the matching key set."""
+
+    def __init__(self, values, score_cutoff: int) -> None:
+        choices: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            key = _normalize(value)
+            if key and key not in seen:
+                choices.append(key)
+                seen.add(key)
+        self._choices = tuple(choices)
+        self._score_cutoff = score_cutoff
+        self._matches: dict[str, tuple[str, ...]] = {}
+
+    def matching_keys(self, value: str) -> tuple[str, ...]:
+        query = _normalize(value)
+        if not query:
+            return ()
+
+        cached = self._matches.get(query)
+        if cached is not None:
+            return cached
+
+        matches = tuple(
+            choice
+            for choice, _score, _index in process.extract(
+                query,
+                self._choices,
+                scorer=fuzz.token_set_ratio,
+                score_cutoff=self._score_cutoff,
+                limit=None,
+                processor=None,
+            )
+        )
+        self._matches[query] = matches
+        return matches
+
+
+def _transfer_club_key(transfer: Transfer, *, source: bool) -> str:
+    if source:
+        return _normalize(transfer.from_club_full_name or transfer.from_club)
+    return _normalize(transfer.to_club_full_name or transfer.to_club)
+
+
+class _TransferCandidateIndex:
+    """Index transfers by fuzzy-resolvable source and destination club keys."""
+
+    def __init__(
+        self,
+        transfers: list[Transfer],
+        extra_transfers: list[Transfer] | tuple[Transfer, ...] = (),
+    ) -> None:
+        club_values = [
+            club
+            for transfer in (*transfers, *extra_transfers)
+            for club in (
+                transfer.from_club_full_name or transfer.from_club,
+                transfer.to_club_full_name or transfer.to_club,
+            )
+        ]
+        self._club_index = _FuzzyKeyIndex(club_values, score_cutoff=92)
+        self._by_route: dict[tuple[str, str], list[Transfer]] = defaultdict(list)
+        self._by_destination: dict[str, list[Transfer]] = defaultdict(list)
+        self._free_by_destination: dict[str, list[Transfer]] = defaultdict(list)
+        self._locations: dict[int, tuple[str, str, bool]] = {}
+
+        for transfer in transfers:
+            self.add(transfer)
+
+    @staticmethod
+    def _remove_from_bucket(
+        buckets: dict,
+        key,
+        transfer: Transfer,
+    ) -> None:
+        bucket = buckets.get(key)
+        if not bucket:
+            return
+        for index, candidate in enumerate(bucket):
+            if candidate is transfer:
+                del bucket[index]
+                break
+        if not bucket:
+            buckets.pop(key, None)
+
+    def add(self, transfer: Transfer) -> None:
+        """Add a transfer using its current route fields."""
+        identity = id(transfer)
+        if identity in self._locations:
+            self.remove(transfer)
+
+        source_key = _transfer_club_key(transfer, source=True)
+        destination_key = _transfer_club_key(transfer, source=False)
+        is_free_transfer = transfer.transfer_type == "free transfer"
+        self._locations[identity] = (source_key, destination_key, is_free_transfer)
+
+        if destination_key:
+            self._by_destination[destination_key].append(transfer)
+            if is_free_transfer:
+                self._free_by_destination[destination_key].append(transfer)
+        if source_key and destination_key:
+            self._by_route[(source_key, destination_key)].append(transfer)
+
+    def remove(self, transfer: Transfer) -> None:
+        """Remove a transfer using the route fields captured when it was added."""
+        location = self._locations.pop(id(transfer), None)
+        if location is None:
+            return
+        source_key, destination_key, is_free_transfer = location
+        if destination_key:
+            self._remove_from_bucket(
+                self._by_destination,
+                destination_key,
+                transfer,
+            )
+            if is_free_transfer:
+                self._remove_from_bucket(
+                    self._free_by_destination,
+                    destination_key,
+                    transfer,
+                )
+        if source_key and destination_key:
+            self._remove_from_bucket(
+                self._by_route,
+                (source_key, destination_key),
+                transfer,
+            )
+
+    def refresh(self, transfer: Transfer) -> None:
+        """Refresh an indexed transfer after provenance enrichment."""
+        self.remove(transfer)
+        self.add(transfer)
+
+    @staticmethod
+    def _collect(
+        buckets: dict,
+        keys,
+    ) -> list[Transfer]:
+        collected: list[Transfer] = []
+        seen: set[int] = set()
+        for key in keys:
+            for transfer in buckets.get(key, ()):
+                identity = id(transfer)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                collected.append(transfer)
+        return collected
+
+    def destination_candidates(self, transfer: Transfer) -> list[Transfer]:
+        destination_key = _transfer_club_key(transfer, source=False)
+        if not destination_key:
+            return []
+        destination_keys = self._club_index.matching_keys(destination_key)
+        return self._collect(self._by_destination, destination_keys)
+
+    def route_candidates(self, transfer: Transfer) -> list[Transfer]:
+        source_key = _transfer_club_key(transfer, source=True)
+        destination_key = _transfer_club_key(transfer, source=False)
+        if not destination_key:
+            return []
+
+        free_transfer = transfer.transfer_type == "free transfer"
+        if not source_key and not free_transfer:
+            return []
+
+        destination_keys = self._club_index.matching_keys(destination_key)
+        if not destination_keys:
+            return []
+
+        candidates: list[Transfer] = []
+        seen: set[int] = set()
+        if source_key:
+            source_keys = self._club_index.matching_keys(source_key)
+            for source_match in source_keys:
+                for destination_match in destination_keys:
+                    for candidate in self._by_route.get(
+                        (source_match, destination_match),
+                        (),
+                    ):
+                        identity = id(candidate)
+                        if identity in seen:
+                            continue
+                        seen.add(identity)
+                        candidates.append(candidate)
+
+        if free_transfer:
+            for candidate in self._collect(
+                self._free_by_destination,
+                destination_keys,
+            ):
+                identity = id(candidate)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                candidates.append(candidate)
+
+        return candidates
 
 
 
@@ -191,10 +393,12 @@ def _merge_verified_batches(
     verified_batches: list[list[Transfer]],
 ) -> list[Transfer]:
     merged: list[Transfer] = []
-    for transfer in merge_transfers(verified_batches):
+    incoming = merge_transfers(verified_batches)
+    index = _TransferCandidateIndex([], incoming)
+    for transfer in incoming:
         candidates = [
             existing
-            for existing in merged
+            for existing in index.route_candidates(transfer)
             if _same_player_name(existing.player_name, transfer.player_name)
             and _compatible_source(existing, transfer)
             and _same_destination(existing, transfer)
@@ -202,9 +406,12 @@ def _merge_verified_batches(
             and _compatible_event_type(existing, transfer)
         ]
         if len(candidates) == 1:
-            _merge_provenance(candidates[0], transfer)
+            target = candidates[0]
+            _merge_provenance(target, transfer)
+            index.refresh(target)
         else:
             merged.append(transfer)
+            index.add(transfer)
     return _prefer_primary_routes(merged)
 
 
@@ -227,21 +434,30 @@ def reconcile_transfer_sources(
     ignored_signals = 0
     corroborated_routes = 0
     ignored_routes = 0
+    fast_signals = fast_signals or []
+    corroborators = corroborators or []
+    index = _TransferCandidateIndex(
+        verified,
+        [*fast_signals, *corroborators],
+    )
 
-    for signal in fast_signals or []:
+    for signal in fast_signals:
         candidates = [
             transfer
-            for transfer in verified
+            for transfer in index.destination_candidates(signal)
             if _same_player_name(transfer.player_name, signal.player_name)
             and _same_destination(transfer, signal)
             and _same_or_adjacent_date(transfer.date, signal.date)
             and _compatible_event_type(transfer, signal)
         ]
         if len(candidates) == 1:
-            _merge_provenance(candidates[0], signal)
+            target = candidates[0]
+            _merge_provenance(target, signal)
+            index.refresh(target)
             corroborated_signals += 1
         elif not candidates and signal.infer_from_current_roster:
             verified.append(signal)
+            index.add(signal)
             inferred_signals += 1
         elif not candidates:
             ignored_signals += 1
@@ -253,10 +469,10 @@ def reconcile_transfer_sources(
                 signal.to_club,
             )
 
-    for corroborator in corroborators or []:
+    for corroborator in corroborators:
         candidates = [
             transfer
-            for transfer in verified
+            for transfer in index.route_candidates(corroborator)
             if _same_player_name(transfer.player_name, corroborator.player_name)
             and _same_or_adjacent_date(transfer.date, corroborator.date)
             and _same_source(transfer, corroborator)
@@ -264,7 +480,9 @@ def reconcile_transfer_sources(
             and _compatible_event_type(transfer, corroborator)
         ]
         if len(candidates) == 1:
-            _merge_provenance(candidates[0], corroborator)
+            target = candidates[0]
+            _merge_provenance(target, corroborator)
+            index.refresh(target)
             corroborated_routes += 1
         else:
             ignored_routes += 1

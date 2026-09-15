@@ -1239,6 +1239,31 @@ def test_route_corroborators_merge_provenance_without_creating_events():
     assert reconciled[0].sources == ("fotmob", "besoccer", "sofascore")
 
 
+
+def test_route_corroborator_matches_fuzzy_club_names():
+    primary = Transfer(
+        "Ada Example",
+        "Old FC",
+        "New FC",
+        date="2026-08-03",
+    )
+    corroborator = Transfer(
+        "Example Ada",
+        "Old",
+        "New",
+        date="2026-08-03",
+        sources=("soccerway",),
+        verification_status="corroborator",
+    )
+
+    reconciled = reconcile_transfer_sources(
+        [[primary]],
+        corroborators=[corroborator],
+    )
+
+    assert len(reconciled) == 1
+    assert reconciled[0].sources == ("fotmob", "soccerway")
+
 def test_reconciliation_enriches_complete_route_with_fast_signal():
     wikipedia = parse_wikipedia_transfer_html(
         WIKIPEDIA_HTML,
