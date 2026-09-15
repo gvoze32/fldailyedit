@@ -736,6 +736,44 @@ def test_stateful_matching_moves_unique_current_squad_registration():
     )
     assert [(item.action, item.current_team_id) for item in plan] == [("move", 10)]
 
+def test_stateful_matching_uses_snapshot_identity_map_for_current_move():
+    from scraper.matcher import NameMatcher
+
+    matcher = NameMatcher()
+    matcher.load_player_db([("Anderson Lopes", 3001)])
+    matcher.load_team_db({"Old Club": 10, "Vissel Kobe": 20})
+    snapshot = SquadSnapshot(
+        club_name="Vissel Kobe",
+        team_id_fotmob=4688,
+        members=(
+            SquadMember("Anderson Lopes", player_id_fotmob=498456),
+            *(
+                SquadMember(f"Snapshot Player {index}")
+                for index in range(10)
+            ),
+        ),
+        source_url="https://www.fotmob.com/api/data/teams?id=4688",
+        complete=True,
+    )
+
+    matched = _match_transfers_statefully(
+        [],
+        matcher,
+        80,
+        {10: [3001] + list(range(3002, 3019)), 20: []},
+        {10, 20},
+        validated_fotmob_ids={4688},
+        validated_fotmob_teams={4688: 20},
+        squad_snapshots=(snapshot,),
+    )
+
+    assert len(matched) == 1
+    assert matched[0].transfer.transfer_type == "squad_registration"
+    assert matched[0].player_id == 3001
+    assert matched[0].from_team_id == 10
+    assert matched[0].to_team_id == 20
+
+
 def test_stateful_matching_rejects_same_name_player_from_another_age_group():
     from scraper.matcher import NameMatcher
 
@@ -1332,7 +1370,8 @@ def test_transfer_run_syncs_squad_numbers_in_fast_mode(monkeypatch):
     )
 
     assert calls == [("B", "A")]
-    assert [item.player_name for item in result] == ["Player Two", "Squad Player"]
+    assert [item.player_name for item in result] == ["Player Two"]
+    assert [item.player_name for item in result.roster_updates] == ["Squad Player"]
 
     assert len(result.captain_updates) == 1
     assert result.captain_updates[0].player_name == "Captain Player"

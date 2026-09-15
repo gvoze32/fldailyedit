@@ -20,6 +20,13 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
+      - name: Restore FotMob team payload cache
+        uses: actions/cache@v4
+        with:
+          path: storage/fotmob_team_cache.json
+          key: fotmob-fast-payload-${{ hashFiles('data/major_clubs.json', 'data/fotmob_teams_validated.json') }}-${{ github.run_id }}
+          restore-keys: |
+            fotmob-fast-payload-${{ hashFiles('data/major_clubs.json', 'data/fotmob_teams_validated.json') }}-
 
       - name: Compile pesXdecrypter
         run: |

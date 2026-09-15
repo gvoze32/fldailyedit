@@ -218,6 +218,32 @@ def _fast_squad_target_clubs(transfer_batches) -> tuple[str, ...]:
 
 
 
+_ROSTER_OBSERVATION_TYPES = frozenset(
+    {"squad_registration", "shirt_number_update"}
+)
+
+
+def _scrape_transfer_events(batch) -> list:
+    """Keep roster observations out of cross-source transfer reconciliation."""
+    return [
+        transfer
+        for transfer in batch
+        if getattr(transfer, "transfer_type", "") not in _ROSTER_OBSERVATION_TYPES
+    ]
+
+
+def _scrape_roster_updates(batch) -> tuple:
+    """Read explicit roster updates, with compatibility for older scrape results."""
+    explicit = tuple(getattr(batch, "roster_updates", ()))
+    if explicit:
+        return explicit
+    return tuple(
+        transfer
+        for transfer in batch
+        if getattr(transfer, "transfer_type", "") == "shirt_number_update"
+    )
+
+
 def _scrape_run_transfers(
     args,
     *,
@@ -243,6 +269,7 @@ def _scrape_run_transfers(
         else f"window '{window}' ({start_date} to {end_date or 'latest'})"
     )
     transfer_batches = []
+    roster_updates = []
     captain_updates: list[CaptainUpdate] = []
     squad_snapshots = []
     if club_filter:
@@ -256,7 +283,8 @@ def _scrape_run_transfers(
             since_date=since_date,
             window=window,
         )
-        transfer_batches.append(club_batch)
+        transfer_batches.append(_scrape_transfer_events(club_batch))
+        roster_updates.extend(_scrape_roster_updates(club_batch))
         squad_snapshots.extend(getattr(club_batch, "squad_snapshots", ()))
         captain_updates.extend(getattr(club_batch, "captain_updates", ()))
     elif deep_mode:
@@ -269,7 +297,8 @@ def _scrape_run_transfers(
             window=window,
             progress=progress,
         )
-        transfer_batches.append(deep_batch)
+        transfer_batches.append(_scrape_transfer_events(deep_batch))
+        roster_updates.extend(_scrape_roster_updates(deep_batch))
         squad_snapshots.extend(getattr(deep_batch, "squad_snapshots", ()))
         deep_captains = getattr(deep_batch, "captain_updates", ())
         captain_updates.extend(deep_captains)
@@ -307,19 +336,16 @@ def _scrape_run_transfers(
                 squad_updates = fetch_squads_for_club_names(list(squad_targets))
             except IncompleteScrapeError as error:
                 logger.warning("Fast squad sync skipped: %s", error)
-                squad_updates = []
-            transfer_batches.append(squad_updates)
+            transfer_batches.append(_scrape_transfer_events(squad_updates))
+            roster_updates.extend(_scrape_roster_updates(squad_updates))
             squad_snapshots.extend(getattr(squad_updates, "squad_snapshots", ()))
             fast_captains = getattr(squad_updates, "captain_updates", ())
             captain_updates.extend(fast_captains)
             membership_updates = sum(
-                transfer.transfer_type == "squad_registration"
-                for transfer in squad_updates
+                len(snapshot.members)
+                for snapshot in getattr(squad_updates, "squad_snapshots", ())
             )
-            shirt_updates = sum(
-                transfer.transfer_type == "shirt_number_update"
-                for transfer in squad_updates
-            )
+            shirt_updates = len(_scrape_roster_updates(squad_updates))
             print(
                 "  Squad sync found "
                 f"{membership_updates} memberships and {shirt_updates} shirt numbers"
@@ -428,7 +454,14 @@ def _scrape_run_transfers(
     if len(transfers) > 5:
         print(f"  ... and {len(transfers) - 5} more")
     print(f"Current captain markers to process: {len(captain_updates)}")
-    return ScrapeResult(transfers, captain_updates, squad_snapshots)
+    roster_updates = merge_transfers([roster_updates])
+    print(f"Current roster updates to process: {len(roster_updates)}")
+    return ScrapeResult(
+        transfers,
+        captain_updates,
+        squad_snapshots,
+        roster_updates,
+    )
 
 def _load_match_database(
     edit_file: EditFile,
@@ -642,8 +675,12 @@ def _match_and_plan_transfers(
         for player_id, player in getattr(edit_file, "_player_cache", {}).items()
         if getattr(player, "name", "")
     }
+    planning_transfers = [
+        *transfers,
+        *getattr(transfers, "roster_updates", ()),
+    ]
     matched = planning._match_transfers_statefully(
-        transfers,
+        planning_transfers,
         matcher,
         threshold,
         team_player_map,
@@ -654,6 +691,7 @@ def _match_and_plan_transfers(
         ),
         validated_fotmob_teams=validated_fotmob_teams,
         squad_snapshots=getattr(transfers, "squad_snapshots", ()),
+        fotmob_identity_map=getattr(transfers, "fotmob_identity_map", None),
         player_names=player_names,
     )
     matched, duplicate_shirt_matches = planning._dedupe_shirt_number_matches(matched)

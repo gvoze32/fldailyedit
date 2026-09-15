@@ -85,20 +85,59 @@ class CaptainUpdate:
 
 
 class ScrapeResult(list[Transfer]):
-    """Transfer-compatible scrape result with current-squad snapshots."""
+    """Transfer events plus separate current-roster observations."""
 
     def __init__(
         self,
         transfers: list[Transfer] | tuple[Transfer, ...] = (),
         captain_updates: list[CaptainUpdate] | tuple[CaptainUpdate, ...] = (),
         squad_snapshots: list[SquadSnapshot] | tuple[SquadSnapshot, ...] = (),
+        roster_updates: list[Transfer] | tuple[Transfer, ...] = (),
+        fotmob_identity_map: dict[
+            int,
+            tuple[tuple[int, str, SquadMember], ...],
+        ] | None = None,
     ) -> None:
         super().__init__(transfers)
         self.captain_updates = tuple(captain_updates)
         self.squad_snapshots = tuple(squad_snapshots)
+        self.roster_updates = tuple(roster_updates)
+        if fotmob_identity_map is None:
+            built_identity_map: dict[
+                int,
+                list[tuple[int, str, SquadMember]],
+            ] = {}
+            for snapshot in self.squad_snapshots:
+                if not snapshot.complete:
+                    continue
+                for member in snapshot.members:
+                    player_id = member.player_id_fotmob
+                    if player_id is None:
+                        continue
+                    built_identity_map.setdefault(int(player_id), []).append(
+                        (
+                            snapshot.team_id_fotmob,
+                            snapshot.club_name,
+                            member,
+                        )
+                    )
+            self.fotmob_identity_map = {
+                player_id: tuple(observations)
+                for player_id, observations in built_identity_map.items()
+            }
+        else:
+            self.fotmob_identity_map = {
+                int(player_id): tuple(observations)
+                for player_id, observations in fotmob_identity_map.items()
+            }
 
     def __bool__(self) -> bool:
-        return bool(len(self) or self.captain_updates or self.squad_snapshots)
+        return bool(
+            len(self)
+            or self.captain_updates
+            or self.squad_snapshots
+            or self.roster_updates
+        )
 
 
 @dataclass

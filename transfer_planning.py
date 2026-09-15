@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from collections.abc import Mapping
 import logging
 from math import ceil
 
 from editor.editfile import EditFile
 from editor.roster import MIN_CLUB_ROSTER_SIZE
 from scraper.fotmob import parse_iso_datetime
-from scraper.matcher import NameMatcher
-from scraper.models import MatchedTransfer, SquadSnapshot, Transfer
+from scraper.matcher import NameMatcher, _normalize
+from scraper.models import MatchedTransfer, SquadMember, SquadSnapshot, Transfer
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +138,298 @@ def _transfer_event_order_key(
         event_datetime or datetime.max.replace(tzinfo=timezone.utc),
         index,
     )
+
+
+def _snapshot_identity_map(
+    squad_snapshots: tuple[SquadSnapshot, ...] | list[SquadSnapshot],
+) -> dict[int, tuple[tuple[int, str, SquadMember], ...]]:
+    """Build a compact FotMob identity index from complete snapshots."""
+    observations: dict[int, list[tuple[int, str, SquadMember]]] = {}
+    for snapshot in squad_snapshots:
+        if not snapshot.complete:
+            continue
+        for member in snapshot.members:
+            player_id = _optional_positive_int(member.player_id_fotmob)
+            if player_id is None:
+                continue
+            observations.setdefault(player_id, []).append(
+                (snapshot.team_id_fotmob, snapshot.club_name, member)
+            )
+    return {
+        player_id: tuple(values)
+        for player_id, values in observations.items()
+    }
+
+
+def _match_snapshot_member(
+    matcher: NameMatcher,
+    member: SquadMember,
+    team_id: int,
+    team_player_map: dict[int, list[int]],
+    threshold: float,
+) -> tuple[int | None, str, float]:
+    """Resolve a snapshot identity before using a guarded fuzzy fallback."""
+    all_roster_ids = {
+        player_id
+        for roster in team_player_map.values()
+        for player_id in roster
+    }
+    exact_candidates = [
+        (name, player_id)
+        for name, player_id in getattr(matcher, "_player_candidates", {}).get(
+            _normalize(member.player_name),
+            (),
+        )
+        if matcher._is_player_metadata_compatible(
+            player_id,
+            position=member.position,
+            age=member.age,
+        )
+    ]
+    if len(exact_candidates) == 1:
+        name, player_id = exact_candidates[0]
+        return player_id, name, 100.0
+    if len(exact_candidates) > 1:
+        roster_candidates = [
+            candidate
+            for candidate in exact_candidates
+            if candidate[1] in all_roster_ids
+        ]
+        if len(roster_candidates) == 1:
+            name, player_id = roster_candidates[0]
+            return player_id, name, 100.0
+        return None, "", 100.0
+
+    player_id, player_name, confidence = matcher.match_player(
+        member.player_name,
+        threshold=max(float(threshold), 95.0),
+        from_team_id=team_id,
+        team_player_map=team_player_map,
+        position=member.position,
+        nationality=member.nationality,
+        age=member.age,
+    )
+    if (
+        player_id is None
+        or player_id not in all_roster_ids
+        or confidence < max(float(threshold), 95.0)
+    ):
+        return None, "", confidence
+    return player_id, player_name, confidence
+
+
+def _build_fotmob_identity_index(
+    matcher: NameMatcher,
+    team_player_map: dict[int, list[int]],
+    club_ids: set[int],
+    threshold: float,
+    validated_fotmob_ids: set[int] | None,
+    validated_fotmob_teams: dict[int, int] | None,
+    squad_snapshots: tuple[SquadSnapshot, ...] | list[SquadSnapshot],
+    fotmob_identity_map: Mapping[
+        int,
+        tuple[tuple[int, str, SquadMember], ...],
+    ]
+    | None = None,
+) -> tuple[dict[int, int], dict[int, str], Mapping[int, tuple[tuple[int, str, SquadMember], ...]]]:
+    """Resolve current FotMob IDs to unique PES players once per snapshot."""
+    identity_map = (
+        fotmob_identity_map
+        if fotmob_identity_map is not None
+        else _snapshot_identity_map(squad_snapshots)
+    )
+    candidates: dict[int, set[int]] = {}
+    names: dict[int, str] = {}
+    team_cache: dict[int, int | None] = {}
+
+    for fotmob_player_id, observations in identity_map.items():
+        normalized_player_id = _optional_positive_int(fotmob_player_id)
+        if normalized_player_id is None:
+            continue
+        for observation in observations:
+            if len(observation) == 2:
+                fotmob_team_id, member = observation
+                club_name = ""
+            else:
+                fotmob_team_id, club_name, member = observation
+            normalized_team_id = _optional_positive_int(fotmob_team_id)
+            if normalized_team_id is None:
+                continue
+            if (
+                validated_fotmob_ids is not None
+                and normalized_team_id not in validated_fotmob_ids
+            ):
+                continue
+            if normalized_team_id not in team_cache:
+                local_team_id = (
+                    validated_fotmob_teams.get(normalized_team_id)
+                    if validated_fotmob_teams is not None
+                    else None
+                )
+                if local_team_id is None and validated_fotmob_teams is None:
+                    matched_team_id, _, team_confidence = matcher.match_team(
+                        club_name,
+                        threshold=98.0,
+                    )
+                    local_team_id = (
+                        matched_team_id
+                        if team_confidence >= 98.0
+                        else None
+                    )
+                team_cache[normalized_team_id] = local_team_id
+            local_team_id = team_cache[normalized_team_id]
+            if local_team_id is None or local_team_id not in club_ids:
+                continue
+            player_id, player_name, confidence = _match_snapshot_member(
+                matcher,
+                member,
+                local_team_id,
+                team_player_map,
+                threshold,
+            )
+            if player_id is None:
+                continue
+            candidates.setdefault(normalized_player_id, set()).add(player_id)
+            if confidence >= max(float(threshold), 95.0):
+                names[normalized_player_id] = player_name or member.player_name
+
+    unique = {
+        fotmob_player_id: next(iter(player_ids))
+        for fotmob_player_id, player_ids in candidates.items()
+        if len(player_ids) == 1
+    }
+    unique_names = {
+        fotmob_player_id: names[fotmob_player_id]
+        for fotmob_player_id in unique
+        if fotmob_player_id in names
+    }
+    return unique, unique_names, identity_map
+
+
+def _append_current_squad_moves(
+    matched: list[MatchedTransfer],
+    matcher: NameMatcher,
+    virtual_rosters: dict[int, list[int]],
+    club_ids: set[int],
+    identity_map: Mapping[int, tuple[tuple[int, str, SquadMember], ...]],
+    fotmob_to_pes: dict[int, int],
+    fotmob_identity_names: dict[int, str],
+    validated_fotmob_teams: dict[int, int] | None,
+) -> None:
+    """Create only actionable moves from current snapshots, not 46k events."""
+    seen: set[tuple[int, int]] = set()
+    destination_cache: dict[int, int | None] = {}
+
+    for raw_fotmob_id, observations in identity_map.items():
+        fotmob_player_id = _optional_positive_int(raw_fotmob_id)
+        if fotmob_player_id is None:
+            continue
+        player_id = fotmob_to_pes.get(fotmob_player_id)
+        if player_id is None:
+            continue
+
+        destination_observations: list[
+            tuple[int, int, str, SquadMember]
+        ] = []
+        destination_ids: set[int] = set()
+        for observation in observations:
+            if len(observation) == 2:
+                fotmob_team_id, member = observation
+                club_name = ""
+            else:
+                fotmob_team_id, club_name, member = observation
+            normalized_team_id = _optional_positive_int(fotmob_team_id)
+            if normalized_team_id is None:
+                continue
+            if normalized_team_id not in destination_cache:
+                destination_id = (
+                    validated_fotmob_teams.get(normalized_team_id)
+                    if validated_fotmob_teams is not None
+                    else None
+                )
+                if destination_id is None and validated_fotmob_teams is None:
+                    matched_team_id, _, team_confidence = matcher.match_team(
+                        club_name,
+                        threshold=98.0,
+                    )
+                    destination_id = (
+                        matched_team_id
+                        if team_confidence >= 98.0
+                        else None
+                    )
+                destination_cache[normalized_team_id] = destination_id
+            destination_id = destination_cache[normalized_team_id]
+            if destination_id is None:
+                continue
+            destination_ids.add(destination_id)
+            destination_observations.append(
+                (
+                    destination_id,
+                    normalized_team_id,
+                    club_name,
+                    member,
+                )
+            )
+
+        if len(destination_ids) != 1:
+            continue
+        destination_id = next(iter(destination_ids))
+        if destination_id not in club_ids:
+            continue
+
+        current_clubs = [
+            team_id
+            for team_id, roster in virtual_rosters.items()
+            if team_id in club_ids and player_id in roster
+        ]
+        if len(current_clubs) != 1:
+            continue
+        source_id = current_clubs[0]
+        if source_id == destination_id or (player_id, destination_id) in seen:
+            continue
+
+        source_name = matcher.get_team_name(source_id)
+        destination_name = matcher.get_team_name(destination_id)
+        if not source_name or not destination_name:
+            continue
+        seen.add((player_id, destination_id))
+        _, raw_team_id, _, member = destination_observations[0]
+        source_url = f"https://www.fotmob.com/api/data/teams?id={raw_team_id}"
+        transfer = Transfer(
+            player_name=member.player_name,
+            from_club=source_name,
+            to_club=destination_name,
+            transfer_type="squad_registration",
+            to_club_id_fotmob=raw_team_id,
+            player_id_fotmob=fotmob_player_id,
+            from_club_full_name=source_name,
+            to_club_full_name=destination_name,
+            source_urls=(source_url,),
+            proof_urls=(source_url,),
+            verification_status="enabled",
+            infer_from_current_roster=True,
+        )
+        matched.append(
+            MatchedTransfer(
+                transfer=transfer,
+                player_id=player_id,
+                from_team_id=source_id,
+                to_team_id=destination_id,
+                player_confidence=100.0,
+                from_team_confidence=100.0,
+                to_team_confidence=100.0,
+                matched_player_name=(
+                    fotmob_identity_names.get(fotmob_player_id)
+                    or member.player_name
+                ),
+                matched_from_team=source_name,
+                matched_to_team=destination_name,
+            )
+        )
+        virtual_rosters[source_id].remove(player_id)
+        virtual_rosters.setdefault(destination_id, []).append(player_id)
+
+
 
 
 def _append_current_squad_releases(
@@ -281,6 +574,11 @@ def _match_transfers_statefully(
     validated_fotmob_ids: set[int] | None = None,
     validated_fotmob_teams: dict[int, int] | None = None,
     squad_snapshots: tuple[SquadSnapshot, ...] | list[SquadSnapshot] = (),
+    fotmob_identity_map: Mapping[
+        int,
+        tuple[tuple[int, str, SquadMember], ...],
+    ]
+    | None = None,
     player_names: dict[int, str] | None = None,
 ) -> list[MatchedTransfer]:
     """Match transfer events and derive releases from complete live squads."""
@@ -331,6 +629,23 @@ def _match_transfers_statefully(
                     (destination, event_datetime)
                 )
 
+    snapshot_fotmob_to_pes, snapshot_identity_names, identity_map = (
+        _build_fotmob_identity_index(
+            matcher,
+            team_player_map,
+            club_ids,
+            threshold,
+            validated_fotmob_ids,
+            validated_fotmob_teams,
+            squad_snapshots,
+            fotmob_identity_map,
+        )
+    )
+    for fotmob_player_id, player_id in snapshot_fotmob_to_pes.items():
+        fotmob_identity_candidates.setdefault(fotmob_player_id, set()).add(
+            player_id
+        )
+    fotmob_identity_names.update(snapshot_identity_names)
     fotmob_to_pes = {
         fotmob_player_id: next(iter(player_ids))
         for fotmob_player_id, player_ids in fotmob_identity_candidates.items()
@@ -552,6 +867,16 @@ def _match_transfers_statefully(
         elif ftid is not None:
             loaned_by_parent.get(ftid, set()).discard(pid)
 
+    _append_current_squad_moves(
+        matched,
+        matcher,
+        virtual_rosters,
+        club_ids,
+        identity_map,
+        fotmob_to_pes,
+        fotmob_identity_names,
+        validated_fotmob_teams,
+    )
     _append_current_squad_releases(
         matched,
         matcher,

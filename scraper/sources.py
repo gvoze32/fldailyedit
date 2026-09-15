@@ -27,6 +27,39 @@ _SOURCE_PRIORITY = {
     "transfermarkt": 1,
     "wikipedia": 2,
 }
+_PLAYER_ID_FIELDS = (
+    "player_id_fotmob",
+    "player_id_transfermarkt",
+    "player_id_sortitoutsi",
+)
+
+
+def _player_identity_keys(transfer: Transfer) -> tuple[tuple[str, int], ...]:
+    """Return namespaced source IDs suitable for exact joins."""
+    keys: list[tuple[str, int]] = []
+    for field in _PLAYER_ID_FIELDS:
+        value = getattr(transfer, field, None)
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError):
+            continue
+        if normalized > 0:
+            keys.append((field, normalized))
+    return tuple(keys)
+
+
+def _same_player(left: Transfer, right: Transfer) -> bool:
+    """Use exact source identity first, then safe name fallback."""
+    left_ids = dict(_player_identity_keys(left))
+    right_ids = dict(_player_identity_keys(right))
+    shared_fields = left_ids.keys() & right_ids.keys()
+    if any(left_ids[field] != right_ids[field] for field in shared_fields):
+        return False
+    if shared_fields:
+        return True
+    return _same_player_name(left.player_name, right.player_name)
+
+
 
 
 def _source_priority(transfer: Transfer) -> int:
@@ -102,7 +135,12 @@ class _TransferCandidateIndex:
         self._by_route: dict[tuple[str, str], list[Transfer]] = defaultdict(list)
         self._by_destination: dict[str, list[Transfer]] = defaultdict(list)
         self._free_by_destination: dict[str, list[Transfer]] = defaultdict(list)
-        self._locations: dict[int, tuple[str, str, bool]] = {}
+        self._by_identity: dict[tuple[str, int], list[Transfer]] = defaultdict(list)
+        self._identity_by_name: dict[str, set[tuple[str, int]]] = defaultdict(set)
+        self._locations: dict[
+            int,
+            tuple[str, str, bool, tuple[tuple[str, int], ...], str],
+        ] = {}
 
         for transfer in transfers:
             self.add(transfer)
@@ -124,7 +162,7 @@ class _TransferCandidateIndex:
             buckets.pop(key, None)
 
     def add(self, transfer: Transfer) -> None:
-        """Add a transfer using its current route fields."""
+        """Add a transfer using its current route and identity fields."""
         identity = id(transfer)
         if identity in self._locations:
             self.remove(transfer)
@@ -132,7 +170,15 @@ class _TransferCandidateIndex:
         source_key = _transfer_club_key(transfer, source=True)
         destination_key = _transfer_club_key(transfer, source=False)
         is_free_transfer = transfer.transfer_type == "free transfer"
-        self._locations[identity] = (source_key, destination_key, is_free_transfer)
+        identity_keys = _player_identity_keys(transfer)
+        player_name_key = _normalize(transfer.player_name)
+        self._locations[identity] = (
+            source_key,
+            destination_key,
+            is_free_transfer,
+            identity_keys,
+            player_name_key,
+        )
 
         if destination_key:
             self._by_destination[destination_key].append(transfer)
@@ -140,13 +186,23 @@ class _TransferCandidateIndex:
                 self._free_by_destination[destination_key].append(transfer)
         if source_key and destination_key:
             self._by_route[(source_key, destination_key)].append(transfer)
+        for identity_key in identity_keys:
+            self._by_identity[identity_key].append(transfer)
+        if player_name_key and identity_keys:
+            self._identity_by_name[player_name_key].update(identity_keys)
 
     def remove(self, transfer: Transfer) -> None:
-        """Remove a transfer using the route fields captured when it was added."""
+        """Remove a transfer using the fields captured when it was indexed."""
         location = self._locations.pop(id(transfer), None)
         if location is None:
             return
-        source_key, destination_key, is_free_transfer = location
+        (
+            source_key,
+            destination_key,
+            is_free_transfer,
+            identity_keys,
+            player_name_key,
+        ) = location
         if destination_key:
             self._remove_from_bucket(
                 self._by_destination,
@@ -165,6 +221,39 @@ class _TransferCandidateIndex:
                 (source_key, destination_key),
                 transfer,
             )
+        for identity_key in identity_keys:
+            self._remove_from_bucket(
+                self._by_identity,
+                identity_key,
+                transfer,
+            )
+        if player_name_key and identity_keys:
+            aliases = self._identity_by_name.get(player_name_key)
+            if aliases is not None:
+                aliases.difference_update(identity_keys)
+                if not aliases:
+                    self._identity_by_name.pop(player_name_key, None)
+
+    def refresh(self, transfer: Transfer) -> None:
+        """Refresh an indexed transfer after provenance enrichment."""
+        self.remove(transfer)
+        self.add(transfer)
+
+    def _identity_candidates(
+        self,
+        transfer: Transfer,
+    ) -> tuple[bool, list[Transfer]]:
+        """Return exact identity candidates when the index contains them."""
+        identity_keys = _player_identity_keys(transfer)
+        if identity_keys:
+            candidates = self._collect(self._by_identity, identity_keys)
+            return bool(candidates), candidates
+        player_name_key = _normalize(transfer.player_name)
+        aliases = self._identity_by_name.get(player_name_key, set())
+        if len(aliases) == 1:
+            candidates = self._collect(self._by_identity, aliases)
+            return bool(candidates), candidates
+        return False, []
 
     def refresh(self, transfer: Transfer) -> None:
         """Refresh an indexed transfer after provenance enrichment."""
@@ -188,13 +277,19 @@ class _TransferCandidateIndex:
         return collected
 
     def destination_candidates(self, transfer: Transfer) -> list[Transfer]:
+        identity_decisive, identity_candidates = self._identity_candidates(transfer)
+        if identity_decisive:
+            return identity_candidates
         destination_key = _transfer_club_key(transfer, source=False)
         if not destination_key:
             return []
         destination_keys = self._club_index.matching_keys(destination_key)
         return self._collect(self._by_destination, destination_keys)
-
     def route_candidates(self, transfer: Transfer) -> list[Transfer]:
+        identity_decisive, identity_candidates = self._identity_candidates(transfer)
+        if identity_decisive:
+            return identity_candidates
+
         source_key = _transfer_club_key(transfer, source=True)
         destination_key = _transfer_club_key(transfer, source=False)
         if not destination_key:
@@ -399,7 +494,7 @@ def _merge_verified_batches(
         candidates = [
             existing
             for existing in index.route_candidates(transfer)
-            if _same_player_name(existing.player_name, transfer.player_name)
+            if _same_player(existing, transfer)
             and _compatible_source(existing, transfer)
             and _same_destination(existing, transfer)
             and _same_or_adjacent_date(existing.date, transfer.date)
@@ -445,7 +540,7 @@ def reconcile_transfer_sources(
         candidates = [
             transfer
             for transfer in index.destination_candidates(signal)
-            if _same_player_name(transfer.player_name, signal.player_name)
+            if _same_player(transfer, signal)
             and _same_destination(transfer, signal)
             and _same_or_adjacent_date(transfer.date, signal.date)
             and _compatible_event_type(transfer, signal)
@@ -473,7 +568,7 @@ def reconcile_transfer_sources(
         candidates = [
             transfer
             for transfer in index.route_candidates(corroborator)
-            if _same_player_name(transfer.player_name, corroborator.player_name)
+            if _same_player(transfer, corroborator)
             and _same_or_adjacent_date(transfer.date, corroborator.date)
             and _same_source(transfer, corroborator)
             and _same_destination(transfer, corroborator)

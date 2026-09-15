@@ -8,6 +8,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent
 DATA_DIR = PROJECT_ROOT / "data"
 VENDOR_DIR = PROJECT_ROOT / "vendor"
+STORAGE_DIR = PROJECT_ROOT / "storage"
+FOTMOB_TEAM_CACHE_FILE = STORAGE_DIR / "fotmob_team_cache.json"
 OUTPUT_DIR = PROJECT_ROOT / "output"
 BASE_DIR = PROJECT_ROOT / "base"
 

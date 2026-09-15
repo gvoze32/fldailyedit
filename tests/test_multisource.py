@@ -1733,3 +1733,58 @@ def test_fotmob_only_flag_does_not_call_supplemental_sources(monkeypatch):
 
     assert len(transfers) == 1
     assert transfers[0].sources == ("fotmob",)
+def test_reconciliation_uses_exact_source_identity_before_route_fallback():
+    first = Transfer(
+        "Alex Example",
+        "Old A",
+        "New A",
+        date="2026-08-03",
+        player_id_fotmob=101,
+    )
+    second = Transfer(
+        "Alex Example",
+        "Old B",
+        "New B",
+        date="2026-08-03",
+        player_id_fotmob=202,
+    )
+    corroborator = Transfer(
+        "Alex Example",
+        "Old B",
+        "New B",
+        date="2026-08-03",
+        sources=("soccerway",),
+        verification_status="corroborator",
+        player_id_fotmob=202,
+    )
+
+    reconciled = reconcile_transfer_sources(
+        [[first, second]],
+        corroborators=[corroborator],
+    )
+
+    assert len(reconciled) == 2
+    assert reconciled[0].sources == ("fotmob",)
+    assert reconciled[1].sources == ("fotmob", "soccerway")
+
+
+def test_reconciliation_keeps_conflicting_same_source_ids_separate():
+    first = Transfer(
+        "Alex Example",
+        "Old FC",
+        "New FC",
+        date="2026-08-03",
+        player_id_fotmob=101,
+    )
+    conflicting = Transfer(
+        "Alex Example",
+        "Old FC",
+        "New FC",
+        date="2026-08-03",
+        player_id_fotmob=202,
+    )
+
+    reconciled = reconcile_transfer_sources([[first, conflicting]])
+
+    assert len(reconciled) == 2
+    assert {item.player_id_fotmob for item in reconciled} == {101, 202}

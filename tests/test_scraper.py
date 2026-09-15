@@ -534,6 +534,7 @@ class TestScraperSafety:
 
     def test_complete_squad_snapshot_is_emitted_for_full_payload(self):
         from scraper.fotmob import FotmobScraper
+        from scraper.models import ScrapeResult
 
         payload = {
             "squad": {
@@ -563,6 +564,10 @@ class TestScraperSafety:
         assert len(snapshot.members) == 11
         assert snapshot.members[0].player_id_fotmob == 100
         assert snapshot.members[-1].position == "CMF"
+
+        result = ScrapeResult(squad_snapshots=(snapshot,))
+        assert result.fotmob_identity_map[100][0][0] == 42
+        assert result.fotmob_identity_map[100][0][2] is snapshot.members[0]
 
 
     def test_club_target_resolution_rejects_ambiguous_substring(self):
@@ -645,18 +650,14 @@ class TestScraperSafety:
 
         result = fotmob.fetch_squads_for_club_names(["Example FC"])
 
-        assert len(result) == 2
+        assert len(result) == 0
         assert result.squad_snapshots == ()
-        registration = next(
-            item for item in result if item.transfer_type == "squad_registration"
+        assert len(result.roster_updates) == 1
+        assert all(
+            item.transfer_type != "squad_registration"
+            for item in result
         )
-        shirt_update = next(
-            item for item in result if item.transfer_type == "shirt_number_update"
-        )
-        assert registration.player_name == "Squad Player"
-        assert registration.to_club_id_fotmob == 42
-        assert registration.infer_from_current_roster is True
-        assert registration.proof_urls
+        shirt_update = result.roster_updates[0]
         assert shirt_update.player_name == "Squad Player"
         assert shirt_update.shirt_number == 7
         assert shirt_update.to_club_id_fotmob == 42
@@ -666,6 +667,86 @@ class TestScraperSafety:
         assert captain.player_id_fotmob == 987
         assert captain.club_name == "Example FC"
         assert captain.nationality == "Exampleland"
+
+    def test_team_payload_cache_uses_conditional_request(self, tmp_path):
+        from scraper import fotmob
+
+        cache_path = tmp_path / "fotmob-team-cache.json"
+        payload = {"details": {"name": "Example FC"}, "squad": {"squad": []}}
+        cache = fotmob._FotmobTeamPayloadCache(cache_path)
+        cache.update(42, payload, {"ETag": '"example-v1"'})
+        cache.save()
+
+        restored = fotmob._FotmobTeamPayloadCache(cache_path)
+        requested = {}
+
+        class FakeResponse:
+            status = 304
+            headers = {}
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+            async def json(self, **_kwargs):
+                raise AssertionError("304 responses must not decode a body")
+
+        class FakeSession:
+            def get(self, url, *, headers):
+                requested["url"] = url
+                requested["headers"] = headers
+                return FakeResponse()
+
+        result = asyncio.run(
+            fotmob.FotmobScraper()._fetch_club_data_cached_async(
+                FakeSession(),
+                42,
+                restored,
+            )
+        )
+
+        assert result == payload
+        assert requested == {
+            "url": "https://www.fotmob.com/api/data/teams?id=42",
+            "headers": {"If-None-Match": '"example-v1"'},
+        }
+
+    def test_team_payload_cache_records_response_validator(self, tmp_path):
+        from scraper import fotmob
+
+        cache = fotmob._FotmobTeamPayloadCache(tmp_path / "fotmob-team-cache.json")
+        payload = {"details": {"name": "Example FC"}}
+
+        class FakeResponse:
+            status = 200
+            headers = {"ETag": '"example-v2"', "Last-Modified": "yesterday"}
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+            async def json(self, **_kwargs):
+                return payload
+
+        class FakeSession:
+            def get(self, url):
+                assert url.endswith("teams?id=42")
+                return FakeResponse()
+
+        scraper = fotmob.FotmobScraper()
+        result = asyncio.run(
+            scraper._fetch_club_data_cached_async(FakeSession(), 42, cache)
+        )
+
+        assert result == payload
+        assert cache.conditional_headers(42) == {
+            "If-None-Match": '"example-v2"',
+            "If-Modified-Since": "yesterday",
+        }
 
     def test_deep_fetch_collects_captains_for_every_indexed_club(self, monkeypatch):
         from scraper import fotmob
