@@ -481,7 +481,7 @@ def cmd_repair(args):
                     )
             repaired_duplicates += 1
 
-        game_plan_repairs = ef.repair_game_plans()
+        game_plan_repairs = ef.repair_game_plans(preserve_existing_primary=True)
         if bytes(ef._data[league_block_start:league_block_end]) != original_league_block:
             raise RuntimeError("Repair attempted to change league promotion/division membership")
 

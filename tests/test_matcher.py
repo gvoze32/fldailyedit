@@ -233,6 +233,36 @@ class TestPlayerMatching:
             assert player_id == 7001
 
 
+
+    def test_unknown_age_cannot_lose_to_known_duplicate(self):
+        matcher = NameMatcher()
+        matcher.load_player_db(
+            players=[("João Pedro", 9001), ("João Pedro", 9002)],
+            ages={9001: 24},
+        )
+
+        player_id, matched_name, confidence = matcher.match_player(
+            "João Pedro",
+            age=21,
+        )
+
+        assert (player_id, matched_name, confidence) == (None, "", 100.0)
+
+    def test_known_position_line_rejects_other_position_line(self):
+        matcher = NameMatcher()
+        matcher.load_player_db(
+            players=[("João Pedro", 9001), ("João Pedro", 9002)],
+            positions={9001: "CF", 9002: "DMF"},
+        )
+
+        player_id, matched_name, confidence = matcher.match_player(
+            "João Pedro",
+            position="Midfielder",
+        )
+
+        assert (player_id, matched_name, confidence) == (9002, "João Pedro", 100.0)
+
+
     def test_tri_factor_nationality_and_age_disambiguation(self):
         """Disambiguate identical or very similar names using nationality and age."""
         m = NameMatcher()

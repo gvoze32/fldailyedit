@@ -42,9 +42,46 @@ _CONTEXT_PLAYER_MIN_CONFIDENCE = 90.0
 
 # Position categorization maps
 _POS_GK = {"GK", "GOALKEEPER", "KEEPER", "GOALIE"}
-_POS_DEF = {"CB", "LB", "RB", "DF", "LWB", "RWB"}
-_POS_MID = {"DMF", "CMF", "AMF", "LMF", "RMF", "DM", "CM", "CAM", "AM", "LM", "RM", "MF"}
-_POS_FWD = {"LWF", "RWF", "SS", "CF", "ST", "LW", "RW", "FW"}
+_POS_DEF = {
+    "CB",
+    "LB",
+    "RB",
+    "DF",
+    "DEF",
+    "DEFENDER",
+    "BACK",
+    "FULLBACK",
+}
+_POS_MID = {
+    "DMF",
+    "CMF",
+    "AMF",
+    "LMF",
+    "RMF",
+    "DM",
+    "CM",
+    "CAM",
+    "AM",
+    "LM",
+    "RM",
+    "MF",
+    "MIDFIELDER",
+    "MIDFIELD",
+}
+_POS_FWD = {
+    "LWF",
+    "RWF",
+    "SS",
+    "CF",
+    "ST",
+    "LW",
+    "RW",
+    "FW",
+    "FWD",
+    "ATTACKER",
+    "FORWARD",
+    "STRIKER",
+}
 
 
 def _get_pos_category(pos: str) -> str:
@@ -63,8 +100,7 @@ def _get_pos_category(pos: str) -> str:
 
 def _is_position_compatible(trans_pos: str, pes_pos: str) -> bool:
     """
-    Check if a transfer's reported position is compatible with a database player's position.
-    Strictly forbids GK ⇄ Outfield mismatches.
+    Reject known line mismatches while allowing missing metadata.
     """
     if not trans_pos or not pes_pos:
         return True
@@ -72,10 +108,7 @@ def _is_position_compatible(trans_pos: str, pes_pos: str) -> bool:
     cat2 = _get_pos_category(pes_pos)
     if cat1 == "UNKNOWN" or cat2 == "UNKNOWN":
         return True
-    # GK must strictly match GK
-    if cat1 == "GK" or cat2 == "GK":
-        return cat1 == cat2
-    return True
+    return cat1 == cat2
 
 
 def _normalize(name: str) -> str:
@@ -481,14 +514,22 @@ class NameMatcher:
 
             if nationality and len(compatible) > 1:
                 norm_nat = _normalize(nationality)
-                nat_matches = [
+                known_nationalities = [
                     (orig, pid)
                     for orig, pid in compatible
-                    if (db_nat := _normalize(self._player_nationalities.get(pid, "")))
-                    and (norm_nat in db_nat or db_nat in norm_nat)
+                    if _normalize(self._player_nationalities.get(pid, ""))
                 ]
-                if nat_matches:
-                    compatible = nat_matches
+                if len(known_nationalities) == len(compatible):
+                    nat_matches = [
+                        (orig, pid)
+                        for orig, pid in known_nationalities
+                        if (
+                            norm_nat in _normalize(self._player_nationalities[pid])
+                            or _normalize(self._player_nationalities[pid]) in norm_nat
+                        )
+                    ]
+                    if nat_matches:
+                        compatible = nat_matches
 
             if age and age > 0 and len(compatible) > 1:
                 known_ages = [
@@ -496,9 +537,16 @@ class NameMatcher:
                     for orig, pid in compatible
                     if self._player_ages.get(pid, 0) > 0
                 ]
-                if known_ages:
+                # Unknown ages cannot be treated as worse than a known
+                # candidate. Require complete age coverage before using age
+                # as an exact-name disambiguator.
+                if len(known_ages) == len(compatible):
                     best_diff = min(item[0] for item in known_ages)
-                    compatible = [(orig, pid) for diff, orig, pid in known_ages if diff == best_diff]
+                    compatible = [
+                        (orig, pid)
+                        for diff, orig, pid in known_ages
+                        if diff == best_diff
+                    ]
 
             return compatible[0] if len(compatible) == 1 else None
 
@@ -638,21 +686,29 @@ class NameMatcher:
                 scored = exact_position
         if nationality and len(scored) > 1:
             norm_nat = _normalize(nationality)
-            exact_nationality = [
+            known_nationality_items = [
                 item
                 for item in scored
-                if (db_nat := _normalize(self._player_nationalities.get(item[2], "")))
-                and (norm_nat in db_nat or db_nat in norm_nat)
+                if _normalize(self._player_nationalities.get(item[2], ""))
             ]
-            if exact_nationality:
-                scored = exact_nationality
+            if len(known_nationality_items) == len(scored):
+                exact_nationality = [
+                    item
+                    for item in known_nationality_items
+                    if (
+                        norm_nat in _normalize(self._player_nationalities[item[2]])
+                        or _normalize(self._player_nationalities[item[2]]) in norm_nat
+                    )
+                ]
+                if exact_nationality:
+                    scored = exact_nationality
         if age and age > 0 and len(scored) > 1:
             known_age_items = [
                 (abs(age - self._player_ages[item[2]]), item)
                 for item in scored
                 if self._player_ages.get(item[2], 0) > 0
             ]
-            if known_age_items:
+            if len(known_age_items) == len(scored):
                 best_age_diff = min(diff for diff, _ in known_age_items)
                 scored = [item for diff, item in known_age_items if diff == best_age_diff]
 

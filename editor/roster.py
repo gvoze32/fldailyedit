@@ -990,6 +990,7 @@ class RosterGamePlanMixin:
         lineup: list[int],
         *,
         position_overrides: dict[int, str] | None = None,
+        preserve_existing_primary: bool = False,
     ) -> tuple[int, int]:
         """Keep known goalkeepers in role zero and repair missing markers."""
         active_count = min(TP_MAX_PLAYERS, roster.roster_size)
@@ -1063,13 +1064,15 @@ class RosterGamePlanMixin:
 
         repaired_roles = 0
         lineup_changed = False
-        # Team-Player slot order is the local squad hierarchy. Player.bin
-        # ``caps`` counts international appearances, so it cannot identify a
-        # club's first-choice goalkeeper (for example, Raya versus Kepa).
-        primary_role = min(
-            goalkeeper_roles,
-            key=lambda role: (lineup[role], role),
-        )
+        # A global reconciliation must not invent a different primary
+        # goalkeeper when role zero is already a known goalkeeper.
+        if preserve_existing_primary and 0 in goalkeeper_roles:
+            primary_role = 0
+        else:
+            primary_role = min(
+                goalkeeper_roles,
+                key=lambda role: (lineup[role], role),
+            )
         if primary_role != 0:
             lineup[0], lineup[primary_role] = (
                 lineup[primary_role],
@@ -1448,7 +1451,11 @@ class RosterGamePlanMixin:
                 return offset
         return None
 
-    def repair_game_plans(self) -> dict[str, int]:
+    def repair_game_plans(
+        self,
+        *,
+        preserve_existing_primary: bool = False,
+    ) -> dict[str, int]:
         """Repair active lineup mappings without replacing tactical data wholesale.
 
         Existing valid roster-slot references keep their relative order. Missing
@@ -1500,6 +1507,7 @@ class RosterGamePlanMixin:
                 offset,
                 roster,
                 lineup,
+                preserve_existing_primary=preserve_existing_primary,
             )
             repaired_goalkeeper_roles += role_repairs
             repaired_position_bytes += position_repairs

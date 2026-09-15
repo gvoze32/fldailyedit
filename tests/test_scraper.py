@@ -518,6 +518,7 @@ class TestScraperSafety:
                             "name": "Valid",
                             "shirtNumber": "17",
                             "role": None,
+                            "positionIdsDesc": "ST,CAM",
                         },
                     ]
                 }]
@@ -527,6 +528,7 @@ class TestScraperSafety:
         assert len(results) == 1
         assert results[0].player_name == "Valid"
         assert results[0].shirt_number == 17
+        assert results[0].position == "ST"
         assert results[0].to_club == "Example FC"
         assert results[0].player_id_fotmob is None
 

@@ -388,11 +388,18 @@ def _match_transfers_statefully(
         fotmob_player_id = _optional_positive_int(transfer.player_id_fotmob)
         known_pid = fotmob_to_pes.get(fotmob_player_id) if fotmob_player_id else None
         if known_pid is not None and pid is None:
-            pid = known_pid
-            pname = fotmob_identity_names.get(
-                fotmob_player_id, transfer.player_name
-            )
-            pconf = 100.0
+            if transfer.infer_from_current_roster:
+                logger.warning(
+                    "FotMob player %s has no independently matched PES identity; "
+                    "ignoring stale history for destination-only registration",
+                    transfer.player_id_fotmob,
+                )
+            else:
+                pid = known_pid
+                pname = fotmob_identity_names.get(
+                    fotmob_player_id, transfer.player_name
+                )
+                pconf = 100.0
         elif known_pid is not None and pid != known_pid:
             logger.warning(
                 "FotMob player %s conflicts with PES history (%s vs %s); skipping",

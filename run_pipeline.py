@@ -1434,7 +1434,7 @@ class _RunLocalUpdateRuntime:
         )
         repair_game_plans = getattr(prepared.edit_file, "repair_game_plans", None)
         repair_metrics = (
-            repair_game_plans()
+            repair_game_plans(preserve_existing_primary=True)
             if not actionable_roster and callable(repair_game_plans)
             else {}
         )
@@ -1689,7 +1689,7 @@ class _RunLocalUpdateRuntime:
 
 
         if callable(repair_game_plans) and actionable_roster:
-            repair_metrics = repair_game_plans()
+            repair_metrics = repair_game_plans(preserve_existing_primary=True)
         if actionable_roster:
             repaired_roles = repair_metrics.get("repaired_goalkeeper_roles", 0)
             repaired_lineups = repair_metrics.get("repaired_lineups", 0)

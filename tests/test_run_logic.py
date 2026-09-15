@@ -334,9 +334,11 @@ def test_local_runtime_publishes_gameplan_repair_without_roster_action(
         def __init__(self):
             self._data = bytearray(b"original")
             self.repair_calls = 0
+            self.repair_kwargs = {}
 
-        def repair_game_plans(self):
+        def repair_game_plans(self, **kwargs):
             self.repair_calls += 1
+            self.repair_kwargs = kwargs
             self._data[:] = b"repaired"
             return {
                 "repaired_lineups": 1,
@@ -373,6 +375,7 @@ def test_local_runtime_publishes_gameplan_repair_without_roster_action(
 
     assert bytes(edit_file._data) == b"repaired"
     assert edit_file.repair_calls == 1
+    assert edit_file.repair_kwargs == {"preserve_existing_primary": True}
     assert result.transfer_applied == 0
     assert result.shirt_numbers_changed == 0
 
@@ -770,6 +773,78 @@ def test_stateful_matching_rejects_same_name_player_from_another_age_group():
 
     assert matched[0].player_id is None
     assert matched[0].is_fully_matched is False
+
+
+def test_stateful_matching_rejects_duplicate_name_registration_chain():
+    from scraper.matcher import NameMatcher
+
+    matcher = NameMatcher()
+    matcher.load_player_db(
+        players=[("João Pedro", 3001), ("João Pedro", 3002), ("João Pedro", 3003)],
+        positions={3001: "CF"},
+        ages={3001: 24},
+    )
+    matcher.load_team_db({"Chelsea": 10, "Casa Pia": 20, "Sao Bernardo": 30})
+    registrations = [
+        Transfer(
+            "João Pedro",
+            "",
+            "Chelsea",
+            transfer_type="squad_registration",
+            position="Attacker",
+            age=24,
+            to_club_id_fotmob=100,
+            player_id_fotmob=1001,
+            proof_urls=("https://example.test/chelsea",),
+            verification_status="enabled",
+            infer_from_current_roster=True,
+        ),
+        Transfer(
+            "João Pedro",
+            "",
+            "Casa Pia",
+            transfer_type="squad_registration",
+            position="Midfielder",
+            age=21,
+            to_club_id_fotmob=200,
+            player_id_fotmob=1002,
+            proof_urls=("https://example.test/casa-pia",),
+            verification_status="enabled",
+            infer_from_current_roster=True,
+        ),
+        Transfer(
+            "João Pedro",
+            "",
+            "Sao Bernardo",
+            transfer_type="squad_registration",
+            position="Defender",
+            age=21,
+            to_club_id_fotmob=300,
+            player_id_fotmob=1003,
+            proof_urls=("https://example.test/sao-bernardo",),
+            verification_status="enabled",
+            infer_from_current_roster=True,
+        ),
+    ]
+    history = [
+        {"player_id": 3001, "fotmob_player_id": 1001},
+        {"player_id": 3001, "fotmob_player_id": 1002},
+        {"player_id": 3001, "fotmob_player_id": 1003},
+    ]
+
+    matched = _match_transfers_statefully(
+        registrations,
+        matcher,
+        80,
+        {10: [3001], 20: [], 30: []},
+        {10, 20, 30},
+        validated_fotmob_ids={100, 200, 300},
+        validated_fotmob_teams={100: 10, 200: 20, 300: 30},
+        historical_entries=history,
+        player_names={3001: "João Pedro"},
+    )
+
+    assert [item.player_id for item in matched] == [3001, None, None]
 
 
 def test_complete_squad_snapshot_releases_stale_current_roster_player():

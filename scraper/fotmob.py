@@ -118,6 +118,28 @@ def _optional_positive_int(value) -> Optional[int]:
     return parsed if parsed > 0 else None
 
 
+def _primary_squad_position(raw_member: dict) -> str:
+    """Prefer FotMob's detailed position line over its broad role label."""
+    detailed_positions = raw_member.get("positionIdsDesc")
+    if isinstance(detailed_positions, str):
+        positions = detailed_positions.split(",")
+    elif isinstance(detailed_positions, (list, tuple)):
+        positions = detailed_positions
+    else:
+        positions = ()
+    for position in positions:
+        normalized = str(position or "").strip().upper()
+        if normalized:
+            return normalized
+
+    role = raw_member.get("role")
+    return (
+        str(role.get("fallback") or "").strip()
+        if isinstance(role, dict)
+        else ""
+    )
+
+
 def _resolve_date_range(
     since_date: Optional[Union[str, date]],
     window: str,
@@ -514,12 +536,7 @@ class FotmobScraper:
                     continue
                 seen.add(member_key)
 
-                role = raw_member.get("role")
-                position = (
-                    str(role.get("fallback") or "").strip()
-                    if isinstance(role, dict)
-                    else ""
-                )
+                position = _primary_squad_position(raw_member)
                 try:
                     age = int(raw_member.get("age") or 0)
                 except (TypeError, ValueError):
