@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 FOTMOB_TRANSFERS_URL = "https://www.fotmob.com/transfers"
 FOTMOB_API_TEMPLATE = "https://www.fotmob.com/api/data/transfers?orderBy=lastModified&page={page}&minFeeCurrency=EUR&popular={popular}"
 AUTO_PAGE_LIMIT = 250
+FOTMOB_DEEP_CONCURRENCY = 4
 _MIN_COMPLETE_SQUAD_MEMBERS = 11
 
 DEFAULT_HEADERS = {
@@ -720,55 +721,104 @@ class FotmobScraper:
         """Fetch current transfers, squads, and captains for every indexed club."""
         start_date, end_date = _resolve_date_range(since_date, window)
 
-        all_transfers: list[Transfer] = []
-        captain_updates: list[CaptainUpdate] = []
-        squad_snapshots: list[SquadSnapshot] = []
         timeout = aiohttp.ClientTimeout(total=15)
-        
         deep_clubs = get_deep_clubs()
         total_clubs = len(deep_clubs)
         if total_clubs == 0:
             raise IncompleteScrapeError("Deep-club index is empty")
-        
-        async with aiohttp.ClientSession(headers=self.headers, timeout=timeout) as session:
-            for i, (club_name, tid) in enumerate(deep_clubs.items(), 1):
+
+        semaphore = asyncio.Semaphore(FOTMOB_DEEP_CONCURRENCY)
+
+        async def fetch_club(
+            index: int,
+            club_name: str,
+            team_id: int,
+            session: aiohttp.ClientSession,
+        ):
+            async with semaphore:
                 if progress is not None:
                     progress(
                         f"Deep mode: checking indexed club "
-                        f"{i}/{total_clubs} — {club_name}",
-                        i,
+                        f"{index}/{total_clubs} — {club_name}",
+                        index,
                         total_clubs,
                     )
-                logger.info(f"Deep fetching {club_name} (ID: {tid}) [{i}/{total_clubs}]...")
+                logger.info(
+                    "Deep fetching %s (ID: %s) [%s/%s]...",
+                    club_name,
+                    team_id,
+                    index,
+                    total_clubs,
+                )
                 try:
-                    data = await self._fetch_club_data_async(session, tid)
-                except IncompleteScrapeError as e:
+                    data = await self._fetch_club_data_async(session, team_id)
+                except IncompleteScrapeError as error:
                     raise IncompleteScrapeError(
-                        f"Deep scrape incomplete at {club_name} ({tid}): {e}"
-                    ) from e
+                        f"Deep scrape incomplete at {club_name} ({team_id}): {error}"
+                    ) from error
 
-                # 1. Extract transfers
-                club_transfers = self._extract_transfers_from_team_data(data, start_date, end_date)
-                all_transfers.extend(club_transfers)
-
-                # 2. Extract current squad membership and shirt numbers
-                club_squad = self._extract_squad_from_team_data(data, tid, club_name)
-                all_transfers.extend(club_squad)
-                snapshot = self._extract_squad_snapshot_from_team_data(
+                club_transfers = self._extract_transfers_from_team_data(
                     data,
-                    tid,
+                    start_date,
+                    end_date,
+                )
+                club_squad = self._extract_squad_from_team_data(
+                    data,
+                    team_id,
                     club_name,
                 )
-                if snapshot.complete:
-                    squad_snapshots.append(snapshot)
-
-                # 3. Extract the latest-lineup captain marker
-                captain_updates.extend(
-                    self._extract_captain_from_team_data(data, tid, club_name)
+                snapshot = self._extract_squad_snapshot_from_team_data(
+                    data,
+                    team_id,
+                    club_name,
                 )
-                
-                # Sleep to prevent Cloudflare ban
+                captain_updates = self._extract_captain_from_team_data(
+                    data,
+                    team_id,
+                    club_name,
+                )
+
+                # Keep the existing per-club cooldown while allowing independent
+                # clubs to progress concurrently.
                 await asyncio.sleep(0.5)
+                return (
+                    club_transfers,
+                    club_squad,
+                    snapshot,
+                    captain_updates,
+                )
+
+        all_transfers: list[Transfer] = []
+        captain_updates: list[CaptainUpdate] = []
+        squad_snapshots: list[SquadSnapshot] = []
+        async with aiohttp.ClientSession(
+            headers=self.headers,
+            timeout=timeout,
+        ) as session:
+            tasks = [
+                asyncio.create_task(
+                    fetch_club(index, club_name, team_id, session)
+                )
+                for index, (club_name, team_id) in enumerate(
+                    deep_clubs.items(),
+                    1,
+                )
+            ]
+            try:
+                club_results = await asyncio.gather(*tasks)
+            except BaseException:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
+
+        for club_transfers, club_squad, snapshot, club_captains in club_results:
+            all_transfers.extend(club_transfers)
+            all_transfers.extend(club_squad)
+            if snapshot.complete:
+                squad_snapshots.append(snapshot)
+            captain_updates.extend(club_captains)
 
         return ScrapeResult(
             merge_transfers([all_transfers]),

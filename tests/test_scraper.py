@@ -731,6 +731,134 @@ class TestScraperSafety:
             102,
         ]
 
+
+    def test_deep_fetch_bounds_concurrency_and_preserves_order(self, monkeypatch):
+        from scraper import fotmob
+
+        indexed_clubs = {f"Club {index}": index for index in range(1, 7)}
+        active = 0
+        peak = 0
+        real_sleep = asyncio.sleep
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+        async def fake_fetch(_scraper, _session, team_id):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            await real_sleep(0.01)
+            active -= 1
+            return {
+                "details": {"name": f"Club {team_id}"},
+                "overview": {
+                    "lastLineupStats": {
+                        "starters": [
+                            {
+                                "id": team_id + 100,
+                                "name": f"Captain {team_id}",
+                                "isCaptain": True,
+                            }
+                        ]
+                    }
+                },
+            }
+
+        async def no_cooldown(_delay):
+            return None
+
+        monkeypatch.setattr(fotmob, "get_deep_clubs", lambda: indexed_clubs)
+        monkeypatch.setattr(
+            fotmob.aiohttp,
+            "ClientSession",
+            lambda **_: FakeSession(),
+        )
+        monkeypatch.setattr(
+            fotmob.FotmobScraper,
+            "_fetch_club_data_async",
+            fake_fetch,
+        )
+        monkeypatch.setattr(fotmob, "FOTMOB_DEEP_CONCURRENCY", 2)
+        monkeypatch.setattr(fotmob.asyncio, "sleep", no_cooldown)
+
+        result = asyncio.run(
+            fotmob.FotmobScraper().fetch_major_clubs_transfers_safely_async(
+                window="all",
+            )
+        )
+
+        assert peak == 2
+        assert [captain.player_id_fotmob for captain in result.captain_updates] == [
+            101,
+            102,
+            103,
+            104,
+            105,
+            106,
+        ]
+
+
+    def test_deep_fetch_cancels_pending_clubs_after_failure(self, monkeypatch):
+        from scraper import fotmob
+
+        indexed_clubs = {f"Club {index}": index for index in range(1, 5)}
+        started = []
+        cancelled = []
+        real_sleep = asyncio.sleep
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+        async def fake_fetch(_scraper, _session, team_id):
+            started.append(team_id)
+            if team_id == 2:
+                raise fotmob.IncompleteScrapeError("rate limited")
+            try:
+                await real_sleep(0.1)
+            except asyncio.CancelledError:
+                cancelled.append(team_id)
+                raise
+            return {}
+
+        async def no_cooldown(_delay):
+            return None
+
+        monkeypatch.setattr(fotmob, "get_deep_clubs", lambda: indexed_clubs)
+        monkeypatch.setattr(
+            fotmob.aiohttp,
+            "ClientSession",
+            lambda **_: FakeSession(),
+        )
+        monkeypatch.setattr(
+            fotmob.FotmobScraper,
+            "_fetch_club_data_async",
+            fake_fetch,
+        )
+        monkeypatch.setattr(fotmob, "FOTMOB_DEEP_CONCURRENCY", 2)
+        monkeypatch.setattr(fotmob.asyncio, "sleep", no_cooldown)
+
+        with pytest.raises(
+            fotmob.IncompleteScrapeError,
+            match=r"Deep scrape incomplete at Club 2 \(2\): rate limited",
+        ):
+            asyncio.run(
+                fotmob.FotmobScraper().fetch_major_clubs_transfers_safely_async(
+                    window="all",
+                )
+            )
+
+        assert started[:2] == [1, 2]
+        assert 4 not in started
+        assert set(cancelled) == set(started) - {2}
+
     def test_merge_normalizes_diacritics_and_enriches_duplicate(self):
         from scraper.fotmob import merge_transfers
 
