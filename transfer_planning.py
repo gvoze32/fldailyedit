@@ -174,31 +174,52 @@ def _match_snapshot_member(
         for roster in team_player_map.values()
         for player_id in roster
     }
-    exact_candidates = [
-        (name, player_id)
-        for name, player_id in getattr(matcher, "_player_candidates", {}).get(
+    exact_records = list(
+        getattr(matcher, "_player_candidates", {}).get(
             _normalize(member.player_name),
             (),
         )
-        if matcher._is_player_metadata_compatible(
-            player_id,
-            position=member.position,
-            age=member.age,
-        )
-    ]
-    if len(exact_candidates) == 1:
-        name, player_id = exact_candidates[0]
-        return player_id, name, 100.0
-    if len(exact_candidates) > 1:
-        roster_candidates = [
+    )
+    if exact_records:
+        # Position labels are not stable across providers (for example,
+        # FotMob's "LW" versus FL26's registered "AMF").  An exact name
+        # and a plausible age is stronger identity evidence than that label.
+        age_compatible = [
             candidate
-            for candidate in exact_candidates
-            if candidate[1] in all_roster_ids
+            for candidate in exact_records
+            if matcher._is_player_age_compatible(
+                candidate[1],
+                age=member.age,
+            )
         ]
-        if len(roster_candidates) == 1:
-            name, player_id = roster_candidates[0]
-            return player_id, name, 100.0
-        return None, "", 100.0
+        if len(age_compatible) == 1:
+            name, player_id = age_compatible[0]
+            if player_id in all_roster_ids:
+                return player_id, name, 100.0
+        elif len(age_compatible) > 1:
+            roster_candidates = [
+                candidate
+                for candidate in age_compatible
+                if candidate[1] in all_roster_ids
+            ]
+            if len(roster_candidates) == 1:
+                name, player_id = roster_candidates[0]
+                return player_id, name, 100.0
+
+            metadata_candidates = [
+                candidate
+                for candidate in age_compatible
+                if matcher._is_player_metadata_compatible(
+                    candidate[1],
+                    position=member.position,
+                    age=member.age,
+                )
+            ]
+            if len(metadata_candidates) == 1:
+                name, player_id = metadata_candidates[0]
+                if player_id in all_roster_ids:
+                    return player_id, name, 100.0
+            return None, "", 100.0
 
     player_id, player_name, confidence = matcher.match_player(
         member.player_name,
@@ -212,7 +233,7 @@ def _match_snapshot_member(
     if (
         player_id is None
         or player_id not in all_roster_ids
-        or confidence < max(float(threshold), 95.0)
+        or confidence < max(float(threshold or 0), 95.0)
     ):
         return None, "", confidence
     return player_id, player_name, confidence
@@ -450,6 +471,18 @@ def _append_current_squad_releases(
         for match in matched
         if match.is_release and match.player_id is not None
     }
+    protected_destination_ids: dict[int, set[int]] = {}
+    for match in matched:
+        if (
+            match.player_id is None
+            or match.to_team_id is None
+            or match.transfer.transfer_type == "shirt_number_update"
+        ):
+            continue
+        if match.player_id in virtual_rosters.get(match.to_team_id, ()):
+            protected_destination_ids.setdefault(match.to_team_id, set()).add(
+                match.player_id
+            )
     seen_team_ids: set[int] = set()
     for snapshot in squad_snapshots:
         if (
@@ -502,14 +535,12 @@ def _append_current_squad_releases(
             # A stale historical identity must not hide the name-based match.
             # The save's current roster is the authoritative context here.
 
-            player_id, _, player_confidence = matcher.match_player(
-                member.player_name,
-                threshold=threshold,
-                from_team_id=team_id,
-                team_player_map=virtual_rosters,
-                position=member.position,
-                nationality=member.nationality,
-                age=member.age,
+            player_id, _, player_confidence = _match_snapshot_member(
+                matcher,
+                member,
+                team_id,
+                virtual_rosters,
+                threshold,
             )
             if (
                 player_id is not None
@@ -535,7 +566,10 @@ def _append_current_squad_releases(
             continue
 
         for player_id in sorted(current_ids - snapshot_player_ids):
-            if player_id in released_ids:
+            if (
+                player_id in released_ids
+                or player_id in protected_destination_ids.get(team_id, set())
+            ):
                 continue
             player_name = (player_names or {}).get(player_id) or f"Player {player_id}"
             matched.append(
