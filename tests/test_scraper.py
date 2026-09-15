@@ -748,6 +748,102 @@ class TestScraperSafety:
             "If-Modified-Since": "yesterday",
         }
 
+    def test_team_fetch_retries_transient_failures_with_backoff(self, monkeypatch):
+        from scraper import fotmob
+
+        delays = []
+
+        class FakeResponse:
+            def __init__(self, status, headers=None):
+                self.status = status
+                self.headers = headers or {}
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+            async def json(self, **_kwargs):
+                return {"details": {"name": "Example FC"}}
+
+        class FakeSession:
+            def __init__(self):
+                self.responses = [
+                    FakeResponse(503),
+                    FakeResponse(429, {"Retry-After": "3"}),
+                    FakeResponse(200, {"ETag": '"example-v3"'}),
+                ]
+
+            def get(self, url):
+                assert url.endswith("teams?id=42")
+                return self.responses.pop(0)
+
+        async def fake_sleep(delay):
+            delays.append(delay)
+
+        monkeypatch.setattr(fotmob.asyncio, "sleep", fake_sleep)
+        scraper = fotmob.FotmobScraper()
+
+        result = asyncio.run(
+            scraper._fetch_club_data_async(FakeSession(), 42)
+        )
+
+        assert result["details"]["name"] == "Example FC"
+        assert delays == [0.5, 3.0]
+        assert scraper._club_response_headers[42]["ETag"] == '"example-v3"'
+
+    def test_cached_team_fetch_never_falls_back_after_retry_exhaustion(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from scraper import fotmob
+
+        cache = fotmob._FotmobTeamPayloadCache(tmp_path / "team-cache.json")
+        cache.update(42, {"details": {"name": "Stale FC"}}, {"ETag": '"old"'})
+        delays = []
+
+        class FakeResponse:
+            status = 503
+            headers = {}
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+        class FakeSession:
+            def __init__(self):
+                self.calls = 0
+
+            def get(self, _url, *, headers):
+                assert headers == {"If-None-Match": '"old"'}
+                self.calls += 1
+                return FakeResponse()
+
+        async def fake_sleep(delay):
+            delays.append(delay)
+
+        monkeypatch.setattr(fotmob.asyncio, "sleep", fake_sleep)
+        session = FakeSession()
+
+        with pytest.raises(
+            fotmob.IncompleteScrapeError,
+            match="HTTP 503",
+        ):
+            asyncio.run(
+                fotmob.FotmobScraper()._fetch_club_data_cached_async(
+                    session,
+                    42,
+                    cache,
+                )
+            )
+
+        assert session.calls == 3
+        assert delays == [0.5, 1.0]
+
     def test_deep_fetch_collects_captains_for_every_indexed_club(self, monkeypatch):
         from scraper import fotmob
 

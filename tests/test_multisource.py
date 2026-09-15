@@ -1788,3 +1788,39 @@ def test_reconciliation_keeps_conflicting_same_source_ids_separate():
 
     assert len(reconciled) == 2
     assert {item.player_id_fotmob for item in reconciled} == {101, 202}
+
+
+def test_reconciliation_uses_exact_composite_before_fuzzy_route():
+    exact_route = Transfer(
+        "Alex Example",
+        "Old FC",
+        "New FC",
+        date="2026-08-03",
+        player_id_fotmob=101,
+    )
+    fuzzy_route = Transfer(
+        "Alex Example",
+        "Old FC Football Club",
+        "New FC",
+        date="2026-08-03",
+        player_id_fotmob=202,
+    )
+    corroborator = Transfer(
+        "Alex Example",
+        "Old FC",
+        "New FC",
+        date="2026-08-03",
+        sources=("soccerway",),
+        verification_status="corroborator",
+    )
+
+    reconciled = reconcile_transfer_sources(
+        [[exact_route, fuzzy_route]],
+        corroborators=[corroborator],
+    )
+
+    assert len(reconciled) == 2
+    exact = next(item for item in reconciled if item.player_id_fotmob == 101)
+    fuzzy = next(item for item in reconciled if item.player_id_fotmob == 202)
+    assert exact.sources == ("fotmob", "soccerway")
+    assert fuzzy.sources == ("fotmob",)

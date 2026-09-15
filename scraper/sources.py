@@ -115,17 +115,44 @@ def _transfer_club_key(transfer: Transfer, *, source: bool) -> str:
     return _normalize(transfer.to_club_full_name or transfer.to_club)
 
 
+IdentityKey = tuple[str, int]
+CompositeKey = tuple[str, str, str, str, str]
+
+
+def _transfer_event_date_key(transfer: Transfer) -> str:
+    event_date = parse_iso_date(transfer.date)
+    return event_date.isoformat() if event_date is not None else ""
+
+
+def _transfer_event_type_key(transfer: Transfer) -> str:
+    return (transfer.transfer_type or "transfer").strip().casefold()
+
+
+def _transfer_composite_key(
+    transfer: Transfer,
+    player_key: str,
+) -> CompositeKey:
+    return (
+        player_key,
+        _transfer_club_key(transfer, source=True),
+        _transfer_club_key(transfer, source=False),
+        _transfer_event_date_key(transfer),
+        _transfer_event_type_key(transfer),
+    )
+
+
 class _TransferCandidateIndex:
-    """Index transfers by fuzzy-resolvable source and destination club keys."""
+    """Index IDs, aliases, exact event keys, then fuzzy route candidates."""
 
     def __init__(
         self,
         transfers: list[Transfer],
         extra_transfers: list[Transfer] | tuple[Transfer, ...] = (),
     ) -> None:
+        known_transfers = (*transfers, *extra_transfers)
         club_values = [
             club
-            for transfer in (*transfers, *extra_transfers)
+            for transfer in known_transfers
             for club in (
                 transfer.from_club_full_name or transfer.from_club,
                 transfer.to_club_full_name or transfer.to_club,
@@ -135,15 +162,96 @@ class _TransferCandidateIndex:
         self._by_route: dict[tuple[str, str], list[Transfer]] = defaultdict(list)
         self._by_destination: dict[str, list[Transfer]] = defaultdict(list)
         self._free_by_destination: dict[str, list[Transfer]] = defaultdict(list)
-        self._by_identity: dict[tuple[str, int], list[Transfer]] = defaultdict(list)
-        self._identity_by_name: dict[str, set[tuple[str, int]]] = defaultdict(set)
+        self._by_identity: dict[IdentityKey, list[Transfer]] = defaultdict(list)
+        self._by_alias: dict[str, list[Transfer]] = defaultdict(list)
+        self._by_composite: dict[CompositeKey, list[Transfer]] = defaultdict(list)
+        self._identity_by_name: dict[str, set[IdentityKey]] = defaultdict(set)
+        self._safe_aliases = self._build_safe_aliases(known_transfers)
         self._locations: dict[
             int,
-            tuple[str, str, bool, tuple[tuple[str, int], ...], str],
+            tuple[
+                str,
+                str,
+                bool,
+                tuple[IdentityKey, ...],
+                str,
+                str,
+                tuple[CompositeKey, ...],
+            ],
         ] = {}
 
         for transfer in transfers:
             self.add(transfer)
+
+    @staticmethod
+    def _build_safe_aliases(
+        transfers: tuple[Transfer, ...],
+    ) -> frozenset[str]:
+        """Build aliases only when source IDs have no same-source conflict."""
+        identity_parent: dict[IdentityKey, IdentityKey] = {}
+        identities_by_name: dict[str, set[IdentityKey]] = defaultdict(set)
+        signature_fields: dict[
+            tuple[str, str, str, str],
+            dict[str, set[int]],
+        ] = defaultdict(lambda: defaultdict(set))
+
+        def find(identity: IdentityKey) -> IdentityKey:
+            parent = identity_parent.setdefault(identity, identity)
+            while parent != identity_parent[parent]:
+                identity_parent[parent] = identity_parent[
+                    identity_parent[parent]
+                ]
+                parent = identity_parent[parent]
+            identity_parent[identity] = parent
+            return parent
+
+        def union(left: IdentityKey, right: IdentityKey) -> None:
+            left_root = find(left)
+            right_root = find(right)
+            if left_root != right_root:
+                identity_parent[right_root] = left_root
+
+        for transfer in transfers:
+            name_key = _normalize(transfer.player_name)
+            identity_keys = _player_identity_keys(transfer)
+            if not name_key or not identity_keys:
+                continue
+            for identity_key in identity_keys:
+                identity_parent.setdefault(identity_key, identity_key)
+                identities_by_name[name_key].add(identity_key)
+            first_identity = identity_keys[0]
+            for identity_key in identity_keys[1:]:
+                union(first_identity, identity_key)
+
+            signature = (
+                name_key,
+                _transfer_club_key(transfer, source=True),
+                _transfer_club_key(transfer, source=False),
+                _transfer_event_date_key(transfer),
+                _transfer_event_type_key(transfer),
+            )
+            for field, value in identity_keys:
+                signature_fields[signature][field].add(value)
+
+        for signature, fields in signature_fields.items():
+            if any(len(values) > 1 for values in fields.values()):
+                continue
+            identity_keys = tuple(
+                (field, value)
+                for field, values in fields.items()
+                for value in values
+            )
+            if identity_keys:
+                first_identity = identity_keys[0]
+                for identity_key in identity_keys[1:]:
+                    union(first_identity, identity_key)
+
+        return frozenset(
+            name_key
+            for name_key, identity_keys in identities_by_name.items()
+            if len({find(identity_key) for identity_key in identity_keys}) == 1
+        )
+
 
     @staticmethod
     def _remove_from_bucket(
@@ -161,6 +269,25 @@ class _TransferCandidateIndex:
         if not bucket:
             buckets.pop(key, None)
 
+    def _composite_index_keys(
+        self,
+        transfer: Transfer,
+    ) -> tuple[CompositeKey, ...]:
+        player_name_key = _normalize(transfer.player_name)
+        player_keys: list[str] = []
+        if player_name_key in self._safe_aliases:
+            player_keys.append(f"alias:{player_name_key}")
+        player_keys.extend(
+            f"id:{field}:{value}"
+            for field, value in _player_identity_keys(transfer)
+        )
+        if player_name_key:
+            player_keys.append(f"name:{player_name_key}")
+        return tuple(
+            _transfer_composite_key(transfer, player_key)
+            for player_key in dict.fromkeys(player_keys)
+        )
+
     def add(self, transfer: Transfer) -> None:
         """Add a transfer using its current route and identity fields."""
         identity = id(transfer)
@@ -172,12 +299,18 @@ class _TransferCandidateIndex:
         is_free_transfer = transfer.transfer_type == "free transfer"
         identity_keys = _player_identity_keys(transfer)
         player_name_key = _normalize(transfer.player_name)
+        alias_key = (
+            player_name_key if player_name_key in self._safe_aliases else ""
+        )
+        composite_keys = self._composite_index_keys(transfer)
         self._locations[identity] = (
             source_key,
             destination_key,
             is_free_transfer,
             identity_keys,
             player_name_key,
+            alias_key,
+            composite_keys,
         )
 
         if destination_key:
@@ -190,6 +323,10 @@ class _TransferCandidateIndex:
             self._by_identity[identity_key].append(transfer)
         if player_name_key and identity_keys:
             self._identity_by_name[player_name_key].update(identity_keys)
+        if alias_key:
+            self._by_alias[alias_key].append(transfer)
+        for composite_key in composite_keys:
+            self._by_composite[composite_key].append(transfer)
 
     def remove(self, transfer: Transfer) -> None:
         """Remove a transfer using the fields captured when it was indexed."""
@@ -202,6 +339,8 @@ class _TransferCandidateIndex:
             is_free_transfer,
             identity_keys,
             player_name_key,
+            alias_key,
+            composite_keys,
         ) = location
         if destination_key:
             self._remove_from_bucket(
@@ -233,6 +372,14 @@ class _TransferCandidateIndex:
                 aliases.difference_update(identity_keys)
                 if not aliases:
                     self._identity_by_name.pop(player_name_key, None)
+        if alias_key:
+            self._remove_from_bucket(self._by_alias, alias_key, transfer)
+        for composite_key in composite_keys:
+            self._remove_from_bucket(
+                self._by_composite,
+                composite_key,
+                transfer,
+            )
 
     def refresh(self, transfer: Transfer) -> None:
         """Refresh an indexed transfer after provenance enrichment."""
@@ -243,22 +390,30 @@ class _TransferCandidateIndex:
         self,
         transfer: Transfer,
     ) -> tuple[bool, list[Transfer]]:
-        """Return exact identity candidates when the index contains them."""
+        """Return exact source-ID candidates when present."""
         identity_keys = _player_identity_keys(transfer)
-        if identity_keys:
-            candidates = self._collect(self._by_identity, identity_keys)
-            return bool(candidates), candidates
-        player_name_key = _normalize(transfer.player_name)
-        aliases = self._identity_by_name.get(player_name_key, set())
-        if len(aliases) == 1:
-            candidates = self._collect(self._by_identity, aliases)
-            return bool(candidates), candidates
-        return False, []
+        if not identity_keys:
+            return False, []
+        candidates = self._collect(self._by_identity, identity_keys)
+        return bool(candidates), candidates
 
-    def refresh(self, transfer: Transfer) -> None:
-        """Refresh an indexed transfer after provenance enrichment."""
-        self.remove(transfer)
-        self.add(transfer)
+    def _alias_candidates(
+        self,
+        transfer: Transfer,
+    ) -> tuple[bool, list[Transfer]]:
+        """Return candidates for a globally safe canonical player alias."""
+        player_name_key = _normalize(transfer.player_name)
+        if player_name_key not in self._safe_aliases:
+            return False, []
+        candidates = self._collect(self._by_alias, (player_name_key,))
+        return bool(candidates), candidates
+
+    def _composite_candidates(self, transfer: Transfer) -> list[Transfer]:
+        """Return exact player/route/date/type composite-key candidates."""
+        return self._collect(
+            self._by_composite,
+            self._composite_index_keys(transfer),
+        )
 
     @staticmethod
     def _collect(
@@ -280,15 +435,28 @@ class _TransferCandidateIndex:
         identity_decisive, identity_candidates = self._identity_candidates(transfer)
         if identity_decisive:
             return identity_candidates
+        alias_decisive, alias_candidates = self._alias_candidates(transfer)
+        if alias_decisive:
+            return alias_candidates
+        composite_candidates = self._composite_candidates(transfer)
+        if composite_candidates:
+            return composite_candidates
         destination_key = _transfer_club_key(transfer, source=False)
         if not destination_key:
             return []
         destination_keys = self._club_index.matching_keys(destination_key)
         return self._collect(self._by_destination, destination_keys)
+
     def route_candidates(self, transfer: Transfer) -> list[Transfer]:
         identity_decisive, identity_candidates = self._identity_candidates(transfer)
         if identity_decisive:
             return identity_candidates
+        alias_decisive, alias_candidates = self._alias_candidates(transfer)
+        if alias_decisive:
+            return alias_candidates
+        composite_candidates = self._composite_candidates(transfer)
+        if composite_candidates:
+            return composite_candidates
 
         source_key = _transfer_club_key(transfer, source=True)
         destination_key = _transfer_club_key(transfer, source=False)

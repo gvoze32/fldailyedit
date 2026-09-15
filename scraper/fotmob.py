@@ -33,6 +33,10 @@ FOTMOB_API_TEMPLATE = "https://www.fotmob.com/api/data/transfers?orderBy=lastMod
 AUTO_PAGE_LIMIT = 250
 FOTMOB_DEEP_CONCURRENCY = 4
 _MIN_COMPLETE_SQUAD_MEMBERS = 11
+FOTMOB_REQUEST_MAX_ATTEMPTS = 3
+FOTMOB_RETRY_BACKOFF_SECONDS = 0.5
+FOTMOB_RETRY_MAX_DELAY_SECONDS = 8.0
+_FOTMOB_RETRYABLE_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
 
 DEFAULT_HEADERS = {
     "User-Agent": (
@@ -548,36 +552,107 @@ class FotmobScraper:
             )
         )
 
+    @staticmethod
+    def _retry_delay(
+        attempt: int,
+        response_headers: dict[str, str] | None = None,
+    ) -> float:
+        headers = response_headers or {}
+        retry_after = next(
+            (
+                value
+                for name, value in headers.items()
+                if name.casefold() == "retry-after"
+            ),
+            "",
+        )
+        try:
+            requested_delay = float(retry_after)
+        except (TypeError, ValueError):
+            requested_delay = FOTMOB_RETRY_BACKOFF_SECONDS * (2**attempt)
+        return min(
+            max(requested_delay, 0.0),
+            FOTMOB_RETRY_MAX_DELAY_SECONDS,
+        )
+
+    async def _fetch_team_response_async(
+        self,
+        session: aiohttp.ClientSession,
+        team_id: int,
+        request_headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict | None, dict[str, str]]:
+        """Fetch a team response with bounded retries for transient failures."""
+        url = f"https://www.fotmob.com/api/data/teams?id={team_id}"
+        for attempt in range(FOTMOB_REQUEST_MAX_ATTEMPTS):
+            try:
+                request = (
+                    session.get(url, headers=request_headers)
+                    if request_headers
+                    else session.get(url)
+                )
+                retry_delay: float | None = None
+                async with request as resp:
+                    response_headers = {
+                        str(name): str(value)
+                        for name, value in getattr(resp, "headers", {}).items()
+                    }
+                    if resp.status == 304:
+                        return 304, None, response_headers
+                    if resp.status == 200:
+                        data = await resp.json(content_type=None)
+                        if not isinstance(data, dict):
+                            raise IncompleteScrapeError(
+                                f"FotMob team API {team_id} returned a "
+                                "non-object JSON payload"
+                            )
+                        return 200, data, response_headers
+                    if (
+                        resp.status not in _FOTMOB_RETRYABLE_STATUSES
+                        or attempt + 1 >= FOTMOB_REQUEST_MAX_ATTEMPTS
+                    ):
+                        raise IncompleteScrapeError(
+                            f"FotMob team API {team_id} returned HTTP {resp.status}"
+                        )
+                    retry_delay = self._retry_delay(attempt, response_headers)
+                if retry_delay is not None:
+                    await asyncio.sleep(retry_delay)
+                    continue
+            except IncompleteScrapeError:
+                raise
+            except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as error:
+                if attempt + 1 >= FOTMOB_REQUEST_MAX_ATTEMPTS:
+                    raise IncompleteScrapeError(
+                        f"Error fetching FotMob team {team_id}: {error}"
+                    ) from error
+                await asyncio.sleep(self._retry_delay(attempt))
+
+        raise IncompleteScrapeError(
+            f"FotMob team API {team_id} exhausted retry attempts"
+        )
+
     async def _fetch_club_data_async(
         self,
         session: aiohttp.ClientSession,
         team_id: int,
     ) -> dict:
         """Fetch raw team data JSON from FotMob API."""
-        url = f"https://www.fotmob.com/api/data/teams?id={team_id}"
         try:
-            async with session.get(url) as resp:
-                if resp.status != 200:
-                    raise IncompleteScrapeError(
-                        f"FotMob team API {team_id} returned HTTP {resp.status}"
-                    )
-                response_headers = getattr(resp, "headers", {})
-                self._club_response_headers[int(team_id)] = {
-                    str(name): str(value)
-                    for name, value in response_headers.items()
-                }
-                data = await resp.json(content_type=None)
-                if not isinstance(data, dict):
-                    raise IncompleteScrapeError(
-                        f"FotMob team API {team_id} returned a non-object JSON payload"
-                    )
-                return data
+            status, data, response_headers = (
+                await self._fetch_team_response_async(session, team_id)
+            )
+            if status != 200 or data is None:
+                raise IncompleteScrapeError(
+                    f"FotMob team API {team_id} returned HTTP {status}"
+                )
+            self._club_response_headers[int(team_id)] = response_headers
+            return data
         except IncompleteScrapeError:
             raise
-        except Exception as e:
+        except Exception as error:
             raise IncompleteScrapeError(
-                f"Error fetching FotMob team {team_id}: {e}"
-            ) from e
+                f"Error fetching FotMob team {team_id}: {error}"
+            ) from error
+
     async def _fetch_club_data_cached_async(
         self,
         session: aiohttp.ClientSession,
@@ -596,36 +671,28 @@ class FotmobScraper:
             )
             return data
 
-        url = f"https://www.fotmob.com/api/data/teams?id={team_id}"
         try:
-            async with session.get(url, headers=conditional_headers) as resp:
-                if resp.status == 304:
-                    payload = entry.get("payload")
-                    if not isinstance(payload, dict):
-                        raise IncompleteScrapeError(
-                            f"FotMob team cache {team_id} is not a JSON object"
-                        )
-                    cache.touch(team_id)
-                    return payload
-                if resp.status != 200:
-                    raise IncompleteScrapeError(
-                        f"FotMob team API {team_id} returned HTTP {resp.status}"
-                    )
-                data = await resp.json(content_type=None)
-                if not isinstance(data, dict):
-                    raise IncompleteScrapeError(
-                        f"FotMob team API {team_id} returned a non-object JSON payload"
-                    )
-                response_headers = getattr(resp, "headers", {})
-                cache.update(
+            status, data, response_headers = (
+                await self._fetch_team_response_async(
+                    session,
                     team_id,
-                    data,
-                    {
-                        str(name): str(value)
-                        for name, value in response_headers.items()
-                    },
+                    conditional_headers,
                 )
-                return data
+            )
+            if status == 304:
+                payload = entry.get("payload")
+                if not isinstance(payload, dict):
+                    raise IncompleteScrapeError(
+                        f"FotMob team cache {team_id} is not a JSON object"
+                    )
+                cache.touch(team_id)
+                return payload
+            if status != 200 or data is None:
+                raise IncompleteScrapeError(
+                    f"FotMob team API {team_id} returned HTTP {status}"
+                )
+            cache.update(team_id, data, response_headers)
+            return data
         except IncompleteScrapeError:
             raise
         except Exception as error:
