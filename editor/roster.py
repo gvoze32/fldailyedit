@@ -1352,6 +1352,7 @@ class RosterGamePlanMixin:
             gp_offset,
             roster,
             new_lineup,
+            preserve_existing_primary=True,
         )
         for role_offset in GP_SINGLE_PLAYER_ROLES:
             target_offset = gp_offset + role_offset
@@ -1438,6 +1439,7 @@ class RosterGamePlanMixin:
             roster,
             lineup,
             position_overrides=position_overrides,
+            preserve_existing_primary=True,
         )
 
     def _find_game_plan_offset(self, team_id: int) -> int | None:

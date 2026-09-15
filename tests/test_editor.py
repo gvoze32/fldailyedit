@@ -388,6 +388,40 @@ class TestEditFileHeader:
 
 
 
+    def test_roster_mutation_preserves_existing_primary_goalkeeper(self):
+        data = _build_mock_data(
+            num_players=40,
+            num_teams=1,
+            num_team_player=1,
+            num_game_plans=1,
+            team_player_entries=[
+                (101, list(range(1000, 1040)), list(range(1, 41))),
+            ],
+        )
+        edit_file = EditFile()
+        edit_file.load_bytes(data)
+        game_plan_base = edit_file.game_plan_start
+        lineup = [22] + [slot for slot in range(TP_MAX_PLAYERS) if slot != 22]
+        edit_file._data[
+            game_plan_base + GP_LINEUP : game_plan_base + GP_LINEUP + TP_MAX_PLAYERS
+        ] = bytes(lineup)
+        edit_file._player_cache = {
+            1010: PlayerInfo(1010, "Backup goalkeeper", position="GK"),
+            1022: PlayerInfo(1022, "Starting goalkeeper", position="GK"),
+        }
+
+        assert edit_file.release_player(1039, 101)
+
+        updated_lineup = list(
+            edit_file._data[
+                game_plan_base + GP_LINEUP : game_plan_base + GP_LINEUP + TP_MAX_PLAYERS
+            ]
+        )
+        assert updated_lineup[0] == 22
+        assert updated_lineup[11] == 10
+
+
+
     def test_game_plan_removal_keeps_backup_goalkeeper_in_goalkeeper_role(self):
         data = _build_mock_data(
             num_players=40,
