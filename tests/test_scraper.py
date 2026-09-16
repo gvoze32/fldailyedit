@@ -7,6 +7,71 @@ import pytest
 from scraper.models import Transfer
 
 
+class TestManagerScrape:
+    def test_extracts_current_coach_from_team_details(self):
+        from scraper.fotmob import FotmobScraper
+        from scraper.models import ScrapeResult
+
+        update = FotmobScraper()._extract_manager_from_team_data(
+            {
+                "details": {
+                    "name": "Example FC",
+                    "coach": {
+                        "id": 34944,
+                        "name": "José Mourinho",
+                        "age": 63,
+                        "countryName": "Portugal",
+                    },
+                }
+            },
+            42,
+            "Fallback FC",
+        )
+
+        assert update is not None
+        assert update.club_name == "Example FC"
+        assert update.manager_name == "José Mourinho"
+        assert update.manager_id_fotmob == 34944
+        assert update.age == 63
+        assert update.nationality == "Portugal"
+        assert bool(ScrapeResult(manager_updates=(update,)))
+
+
+    def test_missing_coach_is_skipped(self):
+        from scraper.fotmob import FotmobScraper
+
+        assert (
+            FotmobScraper()._extract_manager_from_team_data(
+                {"details": {"name": "Example FC"}},
+                42,
+                "Example FC",
+            )
+            is None
+        )
+
+    def test_extracts_current_coach_from_lineup_stats_fallback(self):
+        from scraper.fotmob import FotmobScraper
+
+        update = FotmobScraper()._extract_manager_from_team_data(
+            {
+                "details": {"name": "Example FC"},
+                "overview": {
+                    "lastLineupStats": {
+                        "coach": {
+                            "id": 123,
+                            "name": "Current Coach",
+                        }
+                    }
+                },
+            },
+            42,
+            "Example FC",
+        )
+
+        assert update is not None
+        assert update.manager_name == "Current Coach"
+        assert update.manager_id_fotmob == 123
+
 class TestTransferModel:
     def test_basic_creation(self):
         t = Transfer(
@@ -862,7 +927,11 @@ class TestScraperSafety:
             calls.append(team_id)
             return {
                 "details": {
-                    "name": "Alpha FC" if team_id == 1 else "Beta FC"
+                    "name": "Alpha FC" if team_id == 1 else "Beta FC",
+                    "coach": {
+                        "id": team_id + 1000,
+                        "name": f"Coach {team_id}",
+                    },
                 },
                 "overview": {
                     "lastLineupStats": {
@@ -906,6 +975,89 @@ class TestScraperSafety:
         assert [captain.player_id_fotmob for captain in result.captain_updates] == [
             101,
             102,
+        ]
+        assert [manager.manager_id_fotmob for manager in result.manager_updates] == [
+            1001,
+            1002,
+        ]
+        assert [manager.manager_name for manager in result.manager_updates] == [
+            "Coach 1",
+            "Coach 2",
+        ]
+
+    def test_manager_only_fetch_skips_transfer_and_squad_parsing(self, monkeypatch, tmp_path):
+        from scraper import fotmob
+
+        indexed_clubs = {"Alpha FC": 1, "Beta FC": 2}
+        calls = []
+        progress_events = []
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+        async def fake_fetch(_scraper, _session, team_id):
+            calls.append(team_id)
+            return {
+                "details": {
+                    "name": f"Club {team_id}",
+                    "coach": {
+                        "id": team_id + 1000,
+                        "name": f"Coach {team_id}",
+                    },
+                }
+            }
+
+        async def no_sleep(_delay):
+            return None
+
+        monkeypatch.setattr(fotmob, "get_deep_clubs", lambda: indexed_clubs)
+        monkeypatch.setattr(
+            fotmob,
+            "config",
+            type("Config", (), {"FOTMOB_TEAM_CACHE_FILE": tmp_path / "cache.json"})(),
+        )
+        monkeypatch.setattr(fotmob.aiohttp, "ClientSession", lambda **_: FakeSession())
+        monkeypatch.setattr(
+            fotmob.FotmobScraper,
+            "_fetch_club_data_async",
+            fake_fetch,
+        )
+        monkeypatch.setattr(fotmob.asyncio, "sleep", no_sleep)
+        for method_name in (
+            "_extract_transfers_from_team_data",
+            "_extract_squad_from_team_data",
+            "_extract_squad_snapshot_from_team_data",
+            "_extract_captain_from_team_data",
+        ):
+            monkeypatch.setattr(
+                fotmob.FotmobScraper,
+                method_name,
+                lambda *_args, **_kwargs: pytest.fail(
+                    f"{method_name} must not run in manager-only mode"
+                ),
+            )
+
+        result = asyncio.run(
+            fotmob.FotmobScraper().fetch_managers_safely_async(
+                progress=lambda detail, current, total: progress_events.append(
+                    (detail, current, total)
+                ),
+            )
+        )
+
+        assert calls == [1, 2]
+        assert [manager.manager_name for manager in result] == [
+            "Coach 1",
+            "Coach 2",
+        ]
+        assert [manager.manager_id_fotmob for manager in result] == [1001, 1002]
+        assert progress_events == [
+            ("Manager mode: checking indexed club 1/2 — Alpha FC", 1, 2),
+            ("Manager mode: checking indexed club 2/2 — Beta FC", 2, 2),
         ]
 
 

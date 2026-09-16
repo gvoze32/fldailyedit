@@ -14,6 +14,7 @@ and field positions within the supported PES edit-file layout.
 """
 import logging
 import struct
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 
@@ -597,6 +598,110 @@ class EditFile(RosterGamePlanMixin):
 
         logger.info(f"Read {len(managers)} managers")
         return managers
+    def get_team_manager(self, team_id: int) -> int | None:
+        """Return the manager ID assigned to a team, or ``None`` if unknown."""
+        team_info = self.get_all_team_info().get(team_id)
+        return team_info.manager_id if team_info is not None else None
+
+    def set_team_manager(self, team_id: int, manager_id: int) -> bool:
+        """
+        Assign one existing manager to a team.
+
+        ``0`` clears the assignment. Invalid team or manager IDs are rejected
+        without changing the edit file.
+        """
+        try:
+            self.set_team_managers({team_id: manager_id})
+        except (TypeError, ValueError) as error:
+            logger.warning("Could not assign manager %s to team %s: %s", manager_id, team_id, error)
+            return False
+        return True
+
+    def set_team_managers(
+        self,
+        assignments: Mapping[int, int],
+    ) -> dict[int, tuple[int, int]]:
+        """
+        Atomically assign managers to multiple teams.
+
+        Args:
+            assignments: Mapping of team IDs to manager IDs. Manager ID ``0``
+                clears a team's manager assignment.
+
+        Returns:
+            Mapping of changed team IDs to ``(old_manager_id, new_manager_id)``.
+
+        Raises:
+            TypeError: If the assignment mapping or an ID is not an integer.
+            ValueError: If a team or non-zero manager does not exist, or an ID
+                is outside the uint32 field range.
+
+        All assignments are validated before the first byte is written.
+        """
+        if not isinstance(assignments, Mapping):
+            raise TypeError("assignments must be a mapping of team IDs to manager IDs")
+
+        teams = self.get_all_team_info()
+        managers = self.get_all_managers()
+        invalid: list[str] = []
+        normalized: dict[int, int] = {}
+
+        for team_id, manager_id in assignments.items():
+            if isinstance(team_id, bool) or not isinstance(team_id, int):
+                raise TypeError(f"team ID must be an integer, got {team_id!r}")
+            if isinstance(manager_id, bool) or not isinstance(manager_id, int):
+                raise TypeError(f"manager ID must be an integer, got {manager_id!r}")
+            if not 0 <= team_id <= 0xFFFFFFFF:
+                invalid.append(f"team {team_id} is outside uint32 range")
+                continue
+            if not 0 <= manager_id <= 0xFFFFFFFF:
+                invalid.append(f"manager {manager_id} is outside uint32 range")
+                continue
+            if team_id not in teams:
+                invalid.append(f"team {team_id} does not exist")
+                continue
+            if manager_id != 0 and manager_id not in managers:
+                invalid.append(f"manager {manager_id} does not exist")
+                continue
+            normalized[team_id] = manager_id
+
+        if invalid:
+            raise ValueError("Invalid manager assignment(s): " + "; ".join(invalid))
+
+        changes = {
+            team_id: (teams[team_id].manager_id, manager_id)
+            for team_id, manager_id in normalized.items()
+            if teams[team_id].manager_id != manager_id
+        }
+        if not changes:
+            return {}
+
+        for i in range(self.team_count):
+            entry_offset = self.team_start + i * TEAM_ENTRY_SIZE
+            if entry_offset + TEAM_ENTRY_SIZE > len(self._data):
+                break
+            current_team_id = struct.unpack_from(
+                "<I",
+                self._data,
+                entry_offset + TE_TEAM_ID,
+            )[0]
+            change = changes.get(current_team_id)
+            if change is not None:
+                struct.pack_into(
+                    "<I",
+                    self._data,
+                    entry_offset + TE_MANAGER_ID,
+                    change[1],
+                )
+                logger.info(
+                    "Assigned manager ID %s to team %s (was %s)",
+                    change[1],
+                    current_team_id,
+                    change[0],
+                )
+
+        return changes
+
 
     def get_league_divisions(self) -> list[list[int]]:
         """

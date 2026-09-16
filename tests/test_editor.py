@@ -16,7 +16,8 @@ from editor.editfile import (
     HDR_STADIUM_COUNT, HDR_COMPETITION_COUNT, HDR_UNKNOWN_COUNT,
     HDR_TEAM_PLAYER_COUNT, HDR_GAME_PLAN_COUNT,
     PE_PLAYER_ID, PE_PLAYER_NAME,
-    TE_TEAM_ID, TE_TEAM_NAME,
+    TE_MANAGER_ID, TE_TEAM_ID, TE_TEAM_NAME,
+    ME_MANAGER_ID, ME_MANAGER_NAME,
 )
 from editor.roster import (
     TEAM_PLAYER_ENTRY_SIZE, COMPETITION_SECTION_SIZE, GAME_PLAN_ENTRY_SIZE,
@@ -60,6 +61,7 @@ def _build_mock_data(
     team_player_entries=None,
     player_entries=None,
     team_entries=None,
+    manager_entries=None,
     league_team_ids=None,
 ):
     """
@@ -107,8 +109,17 @@ def _build_mock_data(
             struct.pack_into("<I", team_block, offset + TE_TEAM_ID, tid)
             name_bytes = name.encode("utf-8")[:69]
             team_block[offset + TE_TEAM_NAME:offset + TE_TEAM_NAME + len(name_bytes)] = name_bytes
-
     manager_block = bytearray(MAX_MANAGERS * MANAGER_ENTRY_SIZE)
+    if manager_entries:
+        for i, (manager_id, name) in enumerate(manager_entries):
+            offset = i * MANAGER_ENTRY_SIZE
+            struct.pack_into("<I", manager_block, offset + ME_MANAGER_ID, manager_id)
+            name_bytes = name.encode("utf-8")[:78]
+            manager_block[
+                offset + ME_MANAGER_NAME : offset + ME_MANAGER_NAME + len(name_bytes)
+            ] = name_bytes
+
+
     competition_block = bytearray(MAX_COMPETITIONS * COMPETITION_ENTRY_SIZE)
     stadium_block = bytearray(MAX_STADIUMS * STADIUM_ENTRY_SIZE)
     unknown_block = bytearray(MAX_UNKNOWN * UNKNOWN_ENTRY_SIZE)
@@ -218,6 +229,59 @@ class TestEditFileHeader:
 
         assert report["valid"] is True
         assert report["errors"] == []
+
+
+class TestManagers:
+    def test_read_and_set_team_manager(self):
+        data = _build_mock_data(
+            num_teams=2,
+            num_managers=2,
+            num_team_player=0,
+            num_game_plans=0,
+            team_entries=[(101, "Alpha FC"), (102, "Beta FC")],
+            manager_entries=[(900, "Coach One"), (901, "Coach Two")],
+        )
+        edit_file = EditFile()
+        edit_file.load_bytes(data)
+
+        assert edit_file.get_team_manager(101) == 0
+        assert edit_file.get_all_managers()[900].name == "Coach One"
+        assert edit_file.set_team_manager(101, 900) is True
+        assert edit_file.get_team_manager(101) == 900
+        assert struct.unpack_from(
+            "<I",
+            edit_file._data,
+            edit_file.team_start + TE_MANAGER_ID,
+        )[0] == 900
+
+        assert edit_file.set_team_manager(999, 900) is False
+        assert edit_file.set_team_manager(102, 999) is False
+        assert edit_file.get_team_manager(102) == 0
+
+    def test_batch_manager_assignment_validates_before_writing(self):
+        data = _build_mock_data(
+            num_teams=2,
+            num_managers=2,
+            num_team_player=0,
+            num_game_plans=0,
+            team_entries=[(101, "Alpha FC"), (102, "Beta FC")],
+            manager_entries=[(900, "Coach One"), (901, "Coach Two")],
+        )
+        edit_file = EditFile()
+        edit_file.load_bytes(data)
+        original_data = bytes(edit_file._data)
+
+        with pytest.raises(ValueError, match="manager 999 does not exist"):
+            edit_file.set_team_managers({101: 900, 102: 999})
+        assert bytes(edit_file._data) == original_data
+
+        assert edit_file.set_team_managers({101: 900, 102: 901}) == {
+            101: (0, 900),
+            102: (0, 901),
+        }
+        assert edit_file.get_team_manager(101) == 900
+        assert edit_file.get_team_manager(102) == 901
+
 
     def test_integrity_warns_for_shirt_numbers_on_empty_roster_slots(self):
         data = _build_mock_data(

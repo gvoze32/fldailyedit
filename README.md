@@ -4,28 +4,55 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Update SP Football Life 2026 and eFootball PES 2021 `EDIT00000000` saves with
-verified real-world transfers, squad-number updates, and current captain roles.
+verified real-world transfers, squad numbers, captain roles, and current club
+managers.
 
-## Compatibility
+## Installation
+
+**Windows installer (recommended)**
+
+1. Download and extract [FLDailyEditInstaller.zip](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.zip).
+2. Close the game and choose **Fast** or **Deep**.
+3. Confirm the Football Life folder, then select **Download and install**.
+
+The installer verifies the release, backs up the current save, and replaces it
+atomically. For vanilla PES 2021 or T99, choose **Update my local save**, select
+the save and matching PES 2021 game folder containing `download/*.cpk`, then
+choose **Apply update**. Prebuilt releases are for FL26 saves only.
+
+The installer is unsigned. Verify `FLDailyEditInstaller.zip` against the
+published `FLDailyEditInstaller.zip.sha256` on the
+[latest release](https://github.com/gvoze32/fldailyedit/releases/tag/latest)
+before running it, Windows SmartScreen may warn.
+
+**Manual installation:** Download the [Fast release ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip)
+or [Deep release ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip).
+Back up your save, extract `EDIT00000000`, and copy it to:
+
+`Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\`
+
+For custom club lists or on-demand runs, fork the repository and use
+**Run workflow** in the Actions tab.
+
+## Compatibility & Update Modes
 
 The bundled [base save](base/EDIT00000000) requires:
 
 - **SP Football Life 2026 Update 2.2**
 - **SmokePatch's National Squads Update**
 
-The bundled base save is based on [Gondowan's final FL26 EDIT file](https://www.reddit.com/r/SPFootballLife/comments/1wfnjz6/release_gondowan_final_edit_file_for_fl26/).
-Its tactical game plans use [Klashman69's PES 2021 real-teams tactics](https://evoweb.uk/threads/pes-2021-tactics-discussion-real-teams-thread.84178/page-29). The release notes describe the EPL as complete, while other top leagues remain playable beta coverage as managerial tactics are still being refined.
-
-It is not compatible with UML, older FL26 versions, or installations without
-the national-squad update. Start a new Master League or Become a Legend career
-after installing it.
+It is based on [Gondowan's final FL26 EDIT file](https://www.reddit.com/r/SPFootballLife/comments/1wfnjz6/release_gondowan_final_edit_file_for_fl26/),
+its tactical game plans use [Klashman69's PES 2021 real-teams tactics](https://evoweb.uk/threads/pes-2021-tactics-discussion-real-teams-thread.84178/page-29).
+EPL coverage is complete, other top leagues remain beta while tactics are refined.
+The base save is incompatible with UML, older FL26 versions, and installations
+without the national-squad update. Start a new Master League or Become a Legend
+career after installing it.
 
 ### PES 2021/T99 patch saves
 
-`run` also supports vanilla PES 2021 and T99 patch `EDIT00000000` files when
-the matching native database CPKs are available. Point `--game-root` at either
-the PES installation (with its `download` directory) or a directory containing
-the patch CPKs:
+`run` supports vanilla PES 2021 and T99 patch `EDIT00000000` files when matching
+native database CPKs are available. Point `--game-root` at the PES installation
+(with `download`) or a directory containing the patch CPKs:
 
 ```bash
 python run.py run \
@@ -34,122 +61,62 @@ python run.py run \
   --dry-run
 ```
 
-Use the `EDIT00000000` and CPKs from the same patch generation. The updater
-reads `Player.bin`, `Team.bin`, and `PlayerAssignment.bin` from the native
-PES 2021 database; it never substitutes the bundled FL26 player catalog. A
-missing or mismatched native `Player.bin` is rejected before any save mutation.
+Use the save and CPKs from the same patch generation. The updater reads native
+`Player.bin`, `Team.bin`, and `PlayerAssignment.bin`, it never uses the bundled
+FL26 player catalog. A missing or mismatched native `Player.bin` is rejected
+before any save mutation.
 
-## Install on Windows
+- **Fast (default):** Updates the live transfer feed plus squad membership, shirt
+  numbers, and captain roles for up to 32 clubs found in that feed.
+- **Deep:** Checks every indexed club for current squad membership, shirt numbers,
+  and captain roles.
 
-The installer is the easiest option:
-
-1. Download and extract [FLDailyEditInstaller.zip](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.zip).
-2. Close the game and choose **Fast** or **Deep**.
-3. Confirm the Football Life folder, then select **Download and install**.
-
-The installer verifies the release, backs up the current save, and replaces it
-atomically. To update a vanilla PES 2021 or T99 save, choose **Update my local
-save**, select the save, choose the matching PES 2021 game folder containing
-`download/*.cpk`, then choose **Apply update**. Do not use a prebuilt release
-for a non-FL26 save.
-
-The installer is unsigned. Verify `FLDailyEditInstaller.zip` against the
-published `FLDailyEditInstaller.zip.sha256` on the
-[latest release](https://github.com/gvoze32/fldailyedit/releases/tag/latest)
-before running it; Windows SmartScreen may show a warning.
-
-For manual installation, download the [Fast release ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip)
-or [Deep release ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip).
-Back up your save, extract `EDIT00000000`, and copy it to:
-
-`Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\`
-
-For a custom club list or on-demand run, fork the repository and use
-**Run workflow** in the Actions tab.
-
-## Fast vs Deep
-
-- **Fast:** Standard daily update from the live transfer feed. It also refreshes
-  current squad membership, shirt numbers, and captain roles for up to 32 clubs
-  found in that feed.
-- **Deep:** Broader update that checks every indexed club, refreshing its current
-  squad membership, shirt numbers, and captain role.
-
-Fast is the default. Add `--deep` when you want broader coverage.
+Use `--deep` for broader coverage.
 
 ## What it updates
 
-- Transfers, releases, loans, and loan returns
-- Current indexed-club squad membership, shirt numbers, lineups, and game plans
-  affected by roster changes
-- Current captain roles from each club's latest verified lineup marker
-- Transfer reports and audit logs
-- Daily prebuilt saves through GitHub Actions
+- Verified transfers, releases, loans, and loan returns
+- Indexed-club rosters, shirt numbers, affected lineups, and game plans
+- Current captain roles and club managers (`manager-update --auto`)
+- Transfer reports, audit logs, and daily prebuilt saves through GitHub Actions
 
-It checks the player's current club and never overwrites a shirt number already
-used by another squad member.
-
-Clean PES21 saves may retain shirt numbers in empty roster slots. These are
-reported as non-blocking warnings and do not prevent a local update.
+The updater checks each player's current club and never overwrites an occupied
+shirt number. Clean PES21 saves may retain numbers in empty roster slots, these
+are reported as non-blocking warnings.
 
 ## Transfer logs
 
-Each successful updater run records applied changes in
-`data/transfer_log.jsonl` and refreshes `output/transfer_summary.md` plus
-`output/transfer_summary.html`.
+Successful `run` and `manager-update` commands append applied transfer, roster,
+captain, and manager changes to `data/transfer_log.jsonl`. `run` also refreshes
+`output/transfer_summary.md` and `output/transfer_summary.html`.
 
-When the Windows installer applies a prebuilt Fast or Deep release, it writes
-the bundled transfer report as a timestamped Markdown file under
-`FLDailyEditLogs` beside `EDIT00000000`.
-The installer also displays that report directly on its completion screen.
+When applying a prebuilt release, the Windows installer writes and displays the
+bundled transfer report as a timestamped Markdown file under `FLDailyEditLogs`
+beside `EDIT00000000`.
 
 ## Transfer sources
 
-FotMob is the primary source for current transfer events. The other sources
-supplement it and help resolve incomplete or ambiguous coverage:
+FotMob is the primary source for current transfer events. Transfermarkt and
+Wikipedia provide dated routes and details, Sortitoutsi, BeSoccer, Sofascore,
+and Soccerway corroborate them. For same-day route conflicts, precedence is
+FotMob > Transfermarkt > Wikipedia. Corroboration sources never override a
+primary route or create transfer events.
 
-For dated same-day route conflicts, precedence is FotMob, then Transfermarkt,
-then Wikipedia; corroboration sources never override a primary route.
-
-- Wikipedia's confirmed seasonal transfer lists corroborate transfer routes and
-  dated moves.
-- Sortitoutsi activity provides fast transfer signals that can
-  corroborate or safely enrich a verified event.
-- Transfermarkt provides additional dated transfer details, fees, and stable
-  player/club identifiers.
-- BeSoccer's current confirmed-transfer feed corroborates transfer routes,
-  dates, fees, and transfer types.
-- Sofascore's global transfer page and JSON backing endpoint corroborate dated
-  transfer routes.
-- Soccerway resolves relevant clubs and corroborates their dated transfer routes.
-
-The optional Soccerway corroboration scan reads the first transfer page per
-relevant primary club by default; deeper history can request a larger
-`max_pages` value.
-Soccerway has a 60-second source budget so a blocked feed cannot hold the
-pipeline indefinitely.
-Sofascore and Soccerway are filtered to primary-source clubs because they only
-add corroboration and never create transfer events.
-
-BeSoccer, Sofascore, and Soccerway can add provenance to an existing verified
-FotMob/Transfermarkt/Wikipedia route, but never create a new transfer event.
-Failures or missing data from these optional sources do not block a run.
-Events that remain incomplete or ambiguous are skipped rather than forced into
-the save.
+Sofascore and Soccerway scan only relevant primary-source clubs. Soccerway reads
+the first transfer page per club by default, supports deeper history through
+`max_pages`, and has a 60-second source budget. Optional-source failures do not
+block a run, incomplete or ambiguous events are skipped.
 
 ## Run locally
 
-Supported on macOS, Linux, and Windows through WSL. Python 3.10 or newer is
-required.
+Supported on macOS, Linux, and Windows through WSL. Python 3.10+ is required.
 
 ```bash
 git clone https://github.com/gvoze32/fldailyedit.git
 cd fldailyedit
-
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
-
 cd vendor/pesXdecrypter
 make
 cd ../..
@@ -158,13 +125,13 @@ cd ../..
 ## Common commands
 
 ```bash
-# Preview transfers without writing a save
+# Preview current-cycle transfers
 python run.py run --dry-run --edit-file base/EDIT00000000
 
-# Apply current-cycle transfers (default auto)
+# Apply current-cycle transfers (default window)
 python run.py run --window auto
 
-# Replay the full available transfer history explicitly
+# Replay all available transfer history
 python run.py run --window all
 
 # Update a specific save in place
@@ -173,27 +140,37 @@ python run.py run --edit-file /path/to/EDIT00000000 --in-place
 # Validate a save
 python run.py validate --edit-file /path/to/EDIT00000000
 
-# Show command options
+# Preview current club managers
+python run.py manager-update \
+  --edit-file /path/to/EDIT00000000 \
+  --auto \
+  --dry-run
+
+# Apply current managers in place
+python run.py manager-update \
+  --edit-file /path/to/EDIT00000000 \
+  --auto \
+  --in-place
+
 python run.py run --help
 ```
 
 `run` applies verified transfers, releases, loans, returns, squad-number updates,
-and captain roles. Use `python run.py <command> --help` for audit, comparison,
-logging, and repair tools.
+and captain roles. `manager-update --auto` syncs FotMob managers to existing
+Manager Entry records. Other audit, comparison, logging, and repair commands are
+listed by `python run.py <command> --help`.
 
 ## Safety
 
 - Saves are validated before and after changes.
 - Local runs create rolling backups and use atomic, verified encryption.
 - A process lock prevents concurrent writes to the same output.
-- FotMob/primary-source failures can abort a run; optional supplemental-source
-  failures are isolated and produce no corroboration instead.
-- Incomplete source data and ambiguous matches are skipped rather than forced
-  into the save.
-- Roster compaction preserves existing tactical game-plan positions while
-  updating lineup slot references and goalkeeper placement. Validation rejects
-  non-empty plans without exactly one goalkeeper marker in each tactical phase;
-  known goalkeeper metadata drives role-zero repair.
+- Primary-source failures may abort a run, optional-source failures are isolated.
+- Incomplete or ambiguous data is skipped rather than forced into the save.
+- Roster compaction preserves tactical game-plan positions, updates lineup slots
+  and goalkeeper placement, and repairs role zero from known goalkeeper metadata.
+  Validation rejects non-empty plans without exactly one goalkeeper marker per
+  tactical phase.
 
 ## Development
 

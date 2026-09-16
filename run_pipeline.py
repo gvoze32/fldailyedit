@@ -34,6 +34,7 @@ from scraper.fotmob import (
     fetch_transfers_for_club_names,
     fetch_squads_for_club_names,
     fetch_major_clubs_transfers_safely,
+    fetch_managers_safely,
 )
 from scraper.besoccer import fetch_besoccer_transfers
 from scraper.matcher import NameMatcher

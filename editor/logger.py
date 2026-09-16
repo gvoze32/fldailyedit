@@ -20,6 +20,13 @@ def _is_removed_feature_entry(entry: dict) -> bool:
 def _active_entries(entries: list[dict]) -> list[dict]:
     return [entry for entry in entries if not _is_removed_feature_entry(entry)]
 
+def _append_record(record: dict) -> None:
+    """Append one structured audit record to the JSONL log."""
+    log_file = config.TRANSFER_LOG_FILE
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
 
 def log_transfer(
     player_name: str,
@@ -86,11 +93,7 @@ def log_transfer(
         "native_metadata": dict(native_metadata or {}),
     }
 
-    log_file = config.TRANSFER_LOG_FILE
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(log_file, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    _append_record(record)
 
     action = "DRY-RUN" if dry_run else "APPLIED"
     if transfer_type == "captain_update":
@@ -110,6 +113,49 @@ def log_transfer(
             f"{from_team} → {to_team} (conf={confidence:.0f}%)"
         )
 
+def log_manager_update(
+    team_name: str,
+    team_id: int,
+    previous_manager: str,
+    previous_manager_id: int,
+    manager: str,
+    manager_id: int,
+    *,
+    confidence: float = 0.0,
+    dry_run: bool = False,
+    save_scope: str = "",
+    source: str = "manual",
+    source_url: str = "",
+    fotmob_manager_id: int | None = None,
+) -> dict:
+    """Append one club-manager change audit record."""
+    sources = (source,) if source else ()
+    source_urls = (source_url,) if source_url else ()
+    record = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "transfer_type": "manager_update",
+        "team_name": team_name,
+        "team_id": team_id,
+        "previous_manager": previous_manager,
+        "previous_manager_id": previous_manager_id,
+        "manager": manager,
+        "manager_id": manager_id,
+        "confidence": round(confidence, 1),
+        "dry_run": dry_run,
+        "save_scope": save_scope,
+        "sources": list(sources),
+        "source_urls": list(source_urls),
+        "fotmob_manager_id": fotmob_manager_id,
+        "native_metadata": {},
+    }
+    _append_record(record)
+
+    action = "DRY-RUN" if dry_run else "APPLIED"
+    logger.info(
+        f"[{action}] {team_name} manager: {previous_manager} → {manager} "
+        f"(conf={confidence:.0f}%, source={source or 'unknown'})"
+    )
+    return record
 
 def read_log(
     save_scope: str | None = None,
@@ -143,17 +189,24 @@ def read_log(
 
 
 def print_summary(last_n: int = 20):
-    """Print a human-readable summary of recent transfers."""
+    """Print a human-readable summary of recent save changes."""
     entries = read_log()
     if not entries:
-        print("No transfers logged yet.")
+        print("No save changes logged yet.")
         return
 
     recent = entries[-last_n:]
     for e in recent:
         dry = " [DRY-RUN]" if e.get("dry_run") else ""
         ts = e.get("timestamp", "")[:19].replace("T", " ")
-        if _is_captain_update(e):
+        if _is_manager_update(e):
+            print(
+                f"  {ts}  {e.get('team_name', 'Unknown team')} manager: "
+                f"{e.get('previous_manager', 'Unknown')} → "
+                f"{e.get('manager', 'Unknown')}"
+                f"{dry}"
+            )
+        elif _is_captain_update(e):
             previous_id = (e.get("native_metadata") or {}).get(
                 "previous_captain_player_id",
                 "?",
@@ -182,6 +235,14 @@ _SHIRT_UPDATE_TYPES = {"shirt_number_update", "squad_update"}
 def _is_shirt_number_update(entry: dict) -> bool:
     """Recognize current and legacy shirt-number audit records."""
     return str(entry.get("transfer_type", "")) in _SHIRT_UPDATE_TYPES
+
+_MANAGER_UPDATE_TYPES = {"manager_update"}
+
+
+def _is_manager_update(entry: dict) -> bool:
+    """Recognize club-manager audit records."""
+    return str(entry.get("transfer_type", "")).strip().lower() in _MANAGER_UPDATE_TYPES
+
 
 _CAPTAIN_UPDATE_TYPES = {"captain_update"}
 
