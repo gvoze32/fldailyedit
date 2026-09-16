@@ -9,7 +9,7 @@ managers.
 
 ## Installation
 
-**Windows installer (recommended)**
+**Installer (recommended)**
 
 1. Download and extract [FLDailyEditInstaller.zip](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.zip).
 2. Close the game and choose **Fast** or **Deep**.
@@ -23,7 +23,7 @@ choose **Apply update**. Prebuilt releases are for FL26 saves only.
 The installer is unsigned. Verify `FLDailyEditInstaller.zip` against the
 published `FLDailyEditInstaller.zip.sha256` on the
 [latest release](https://github.com/gvoze32/fldailyedit/releases/tag/latest)
-before running it, Windows SmartScreen may warn.
+before running it, SmartScreen may warn.
 
 **Manual installation:** Download the [Fast release ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip)
 or [Deep release ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip).
@@ -92,7 +92,7 @@ Successful `run` and `manager-update` commands append applied transfer, roster,
 captain, and manager changes to `data/transfer_log.jsonl`. `run` also refreshes
 `output/transfer_summary.md` and `output/transfer_summary.html`.
 
-When applying a prebuilt release, the Windows installer writes and displays the
+When applying a prebuilt release, the installer writes and displays the
 bundled transfer report as a timestamped Markdown file under `FLDailyEditLogs`
 beside `EDIT00000000`.
 
