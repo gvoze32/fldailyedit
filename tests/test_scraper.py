@@ -635,6 +635,48 @@ class TestScraperSafety:
         assert result.fotmob_identity_map[100][0][2] is snapshot.members[0]
 
 
+
+    def test_squad_snapshot_excludes_coach_sections(self):
+        from scraper.fotmob import FotmobScraper
+
+        payload = {
+            "squad": {
+                "squad": [
+                    {
+                        "title": "coach",
+                        "members": [
+                            {
+                                "id": 999,
+                                "name": "Current Coach",
+                                "role": {"key": "coach"},
+                            }
+                        ],
+                    },
+                    {
+                        "title": "keepers",
+                        "members": [
+                            {
+                                "id": player_id,
+                                "name": f"Player {player_id}",
+                                "role": {"fallback": "GK"},
+                            }
+                            for player_id in range(100, 111)
+                        ],
+                    },
+                ]
+            }
+        }
+
+        snapshot = FotmobScraper()._extract_squad_snapshot_from_team_data(
+            payload,
+            42,
+            "Example FC",
+        )
+
+        assert snapshot.complete is True
+        assert len(snapshot.members) == 11
+        assert all(member.player_name != "Current Coach" for member in snapshot.members)
+
     def test_club_target_resolution_rejects_ambiguous_substring(self):
         from scraper.fotmob import _resolve_club_targets
 

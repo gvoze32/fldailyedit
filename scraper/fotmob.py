@@ -784,6 +784,11 @@ class FotmobScraper:
         for section in squad_sections:
             if not isinstance(section, dict):
                 continue
+            section_name = str(
+                section.get("title") or section.get("name") or ""
+            ).strip().casefold()
+            if section_name in {"coach", "coaches", "manager", "managers", "staff"}:
+                continue
             raw_members = section.get("members", [])
             if not isinstance(raw_members, list):
                 continue
@@ -792,6 +797,14 @@ class FotmobScraper:
                     continue
                 name = str(raw_member.get("name") or "").strip()
                 if not name:
+                    continue
+                role = raw_member.get("role")
+                role_name = str(
+                    role.get("key") or role.get("fallback") or ""
+                    if isinstance(role, dict)
+                    else ""
+                ).strip().casefold()
+                if role_name in {"coach", "manager"}:
                     continue
 
                 player_id_fotmob = _optional_positive_int(raw_member.get("id"))

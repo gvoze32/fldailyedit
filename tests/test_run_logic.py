@@ -740,9 +740,30 @@ def test_stateful_matching_uses_snapshot_identity_map_for_current_move():
     from scraper.matcher import NameMatcher
 
     matcher = NameMatcher()
-    matcher.load_player_db([("Anderson Lopes", 3001)])
+    matcher.load_player_db(
+        [
+            ("Anderson Lopes", 3001),
+            *[
+                (f"Source Player {player_id}", player_id)
+                for player_id in range(3002, 3019)
+            ],
+        ]
+    )
     matcher.load_team_db({"Old Club": 10, "Vissel Kobe": 20})
-    snapshot = SquadSnapshot(
+    source_snapshot = SquadSnapshot(
+        club_name="Old Club",
+        team_id_fotmob=777,
+        members=tuple(
+            SquadMember(
+                f"Source Player {player_id}",
+                player_id_fotmob=6000 + player_id,
+            )
+            for player_id in range(3002, 3019)
+        ),
+        source_url="https://www.fotmob.com/api/data/teams?id=777",
+        complete=True,
+    )
+    destination_snapshot = SquadSnapshot(
         club_name="Vissel Kobe",
         team_id_fotmob=4688,
         members=(
@@ -762,9 +783,9 @@ def test_stateful_matching_uses_snapshot_identity_map_for_current_move():
         80,
         {10: [3001] + list(range(3002, 3019)), 20: []},
         {10, 20},
-        validated_fotmob_ids={4688},
-        validated_fotmob_teams={4688: 20},
-        squad_snapshots=(snapshot,),
+        validated_fotmob_ids={4688, 777},
+        validated_fotmob_teams={4688: 20, 777: 10},
+        squad_snapshots=(source_snapshot, destination_snapshot),
     )
 
     assert len(matched) == 1
@@ -773,6 +794,127 @@ def test_stateful_matching_uses_snapshot_identity_map_for_current_move():
     assert matched[0].from_team_id == 10
     assert matched[0].to_team_id == 20
 
+
+
+def test_snapshot_prefers_club_roster_over_unrelated_exact_name():
+    from scraper.matcher import NameMatcher
+
+    current_ids = [4001, *range(4002, 4018)]
+    matcher = NameMatcher()
+    matcher.load_player_db(
+        [
+            ("Endrick Felipe", 4001),
+            ("Endrick", 5001),
+            *[
+                (f"Player {player_id}", player_id)
+                for player_id in current_ids[1:]
+            ],
+        ]
+    )
+    matcher.load_team_db({"Real Madrid": 10, "Malaysia": 20})
+    snapshot = SquadSnapshot(
+        club_name="Real Madrid",
+        team_id_fotmob=8633,
+        members=(
+            SquadMember("Endrick", player_id_fotmob=9001),
+            *(
+                SquadMember(
+                    f"Player {player_id}",
+                    player_id_fotmob=9000 + index,
+                )
+                for index, player_id in enumerate(current_ids[1:], 1)
+            ),
+        ),
+        source_url="https://www.fotmob.com/api/data/teams?id=8633",
+        complete=True,
+    )
+
+    matched = _match_transfers_statefully(
+        [],
+        matcher,
+        80,
+        {10: current_ids, 20: [5001]},
+        {10, 20},
+        validated_fotmob_ids={8633},
+        validated_fotmob_teams={8633: 10},
+        squad_snapshots=(snapshot,),
+    )
+
+    assert matched == []
+
+
+def test_unhealthy_snapshot_skips_inferred_moves_and_releases():
+    from scraper.matcher import NameMatcher
+
+    source_ids = list(range(5001, 5039))
+    destination_ids = list(range(6001, 6017))
+    matcher = NameMatcher()
+    matcher.load_player_db(
+        [
+            ("Move Me", 5001),
+            *[
+                (f"Source Player {player_id}", player_id)
+                for player_id in source_ids[1:]
+            ],
+            *[
+                (f"Destination Player {player_id}", player_id)
+                for player_id in destination_ids
+            ],
+        ]
+    )
+    matcher.load_team_db({"Source FC": 10, "Destination FC": 20})
+    source_snapshot = SquadSnapshot(
+        club_name="Source FC",
+        team_id_fotmob=100,
+        members=tuple(
+            SquadMember(
+                f"Source Player {player_id}",
+                player_id_fotmob=7000 + index,
+            )
+            for index, player_id in enumerate(source_ids[1:26], 1)
+        ),
+        source_url="https://www.fotmob.com/api/data/teams?id=100",
+        complete=True,
+    )
+    destination_snapshot = SquadSnapshot(
+        club_name="Destination FC",
+        team_id_fotmob=200,
+        members=(
+            SquadMember("Move Me", player_id_fotmob=9001),
+            *(
+                SquadMember(
+                    f"Destination Player {player_id}",
+                    player_id_fotmob=9001 + index,
+                )
+                for index, player_id in enumerate(destination_ids[:10], 1)
+            ),
+        ),
+        source_url="https://www.fotmob.com/api/data/teams?id=200",
+        complete=True,
+    )
+
+    matched = _match_transfers_statefully(
+        [],
+        matcher,
+        80,
+        {10: source_ids, 20: destination_ids},
+        {10, 20},
+        validated_fotmob_ids={100, 200},
+        validated_fotmob_teams={100: 10, 200: 20},
+        squad_snapshots=(source_snapshot, destination_snapshot),
+        player_names={
+            player_id: (
+                "Move Me"
+                if player_id == 5001
+                else f"Source Player {player_id}"
+                if player_id in source_ids
+                else f"Destination Player {player_id}"
+            )
+            for player_id in [*source_ids, *destination_ids]
+        },
+    )
+
+    assert matched == []
 
 def test_stateful_matching_rejects_same_name_player_from_another_age_group():
     from scraper.matcher import NameMatcher

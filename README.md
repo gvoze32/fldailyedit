@@ -111,7 +111,9 @@ block a run, incomplete or ambiguous events are skipped.
 
 ## Run locally
 
-Supported on macOS, Linux, and Windows through WSL. Python 3.10+ is required.
+SP Football Life and the packaged installer are Windows-only. The CLI can also
+run on macOS or Linux for compatible save files, those platforms cannot run SP
+Football Life. Python 3.10+ is required.
 
 ```bash
 git clone https://github.com/gvoze32/fldailyedit.git

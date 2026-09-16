@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 UNRESOLVED_TEAM_ID = -1
 _NON_CLUB_LABELS = {"", "free agent", "without club", "unattached", "career break", "retired"}
 _MIN_COMPLETE_SQUAD_MEMBERS = 11
-_MIN_CURRENT_SQUAD_MATCH_RATIO = 0.40
+_MIN_CURRENT_SQUAD_MATCH_RATIO = 0.75
 
 
 @dataclass
@@ -29,6 +29,17 @@ class PlannedRosterAction:
     overflow_player_id: int | None = None
     overflow_details: dict[str, object] | None = None
 
+
+@dataclass(frozen=True, slots=True)
+class _SnapshotRosterCoverage:
+    """Quality of one provider snapshot against the current local roster."""
+
+    snapshot: SquadSnapshot
+    team_id: int
+    team_name: str
+    current_player_ids: frozenset[int]
+    snapshot_player_ids: frozenset[int]
+    healthy: bool
 
 def _optional_positive_int(value) -> int | None:
     """Parse an identifier from external/history data and reject sentinel values."""
@@ -173,6 +184,12 @@ def _match_snapshot_member(
         player_id
         for roster in team_player_map.values()
         for player_id in roster
+        if player_id
+    }
+    team_roster_ids = {
+        player_id
+        for player_id in team_player_map.get(team_id, ())
+        if player_id
     }
     exact_records = list(
         getattr(matcher, "_player_candidates", {}).get(
@@ -181,9 +198,9 @@ def _match_snapshot_member(
         )
     )
     if exact_records:
-        # Position labels are not stable across providers (for example,
-        # FotMob's "LW" versus FL26's registered "AMF").  An exact name
-        # and a plausible age is stronger identity evidence than that label.
+        # Prefer an exact identity already registered at this snapshot's club.
+        # A provider can shorten a name ("Endrick" vs "Endrick Felipe") while
+        # an unrelated player elsewhere has the shorter exact name.
         age_compatible = [
             candidate
             for candidate in exact_records
@@ -192,23 +209,18 @@ def _match_snapshot_member(
                 age=member.age,
             )
         ]
-        if len(age_compatible) == 1:
-            name, player_id = age_compatible[0]
-            if player_id in all_roster_ids:
-                return player_id, name, 100.0
-        elif len(age_compatible) > 1:
-            roster_candidates = [
-                candidate
-                for candidate in age_compatible
-                if candidate[1] in all_roster_ids
-            ]
-            if len(roster_candidates) == 1:
-                name, player_id = roster_candidates[0]
-                return player_id, name, 100.0
-
+        team_candidates = [
+            candidate
+            for candidate in age_compatible
+            if candidate[1] in team_roster_ids
+        ]
+        if len(team_candidates) == 1:
+            name, player_id = team_candidates[0]
+            return player_id, name, 100.0
+        if len(team_candidates) > 1:
             metadata_candidates = [
                 candidate
-                for candidate in age_compatible
+                for candidate in team_candidates
                 if matcher._is_player_metadata_compatible(
                     candidate[1],
                     position=member.position,
@@ -217,13 +229,88 @@ def _match_snapshot_member(
             ]
             if len(metadata_candidates) == 1:
                 name, player_id = metadata_candidates[0]
-                if player_id in all_roster_ids:
-                    return player_id, name, 100.0
+                return player_id, name, 100.0
             return None, "", 100.0
+
+        # Multi-token exact names are safe enough to resolve from another
+        # current club (the normal inferred-move case). Do not let a
+        # one-token exact name identify a player outside the snapshot club.
+        if len(_normalize(member.player_name).split()) > 1:
+            roster_candidates = [
+                candidate
+                for candidate in age_compatible
+                if candidate[1] in all_roster_ids
+            ]
+            if len(roster_candidates) == 1:
+                name, player_id = roster_candidates[0]
+                return player_id, name, 100.0
+            if len(roster_candidates) > 1:
+                metadata_candidates = [
+                    candidate
+                    for candidate in roster_candidates
+                    if matcher._is_player_metadata_compatible(
+                        candidate[1],
+                        position=member.position,
+                        age=member.age,
+                    )
+                ]
+                if len(metadata_candidates) == 1:
+                    name, player_id = metadata_candidates[0]
+                    return player_id, name, 100.0
+                return None, "", 100.0
+
+    # Search only the snapshot club's local roster before falling back to a
+    # global fuzzy match. This handles abbreviated provider names without
+    # allowing a short exact name from an unrelated club to win.
+    query_norm = _normalize(member.player_name)
+    contextual_scores: dict[int, tuple[float, str]] = {}
+    for candidate_id in team_roster_ids:
+        for candidate_norm, candidate_name in getattr(
+            matcher,
+            "_player_id_to_names",
+            {},
+        ).get(candidate_id, ()):
+            score = matcher._score_player(
+                query_norm,
+                candidate_norm,
+                position=member.position,
+                candidate_pid=candidate_id,
+                nationality=member.nationality,
+                age=member.age,
+            )
+            previous = contextual_scores.get(candidate_id)
+            if previous is None or score > previous[0]:
+                contextual_scores[candidate_id] = (score, candidate_name)
+
+    ranked_context = sorted(
+        (
+            (score, name, candidate_id)
+            for candidate_id, (score, name) in contextual_scores.items()
+        ),
+        reverse=True,
+    )
+    minimum_context_confidence = max(float(threshold or 0), 90.0)
+    if ranked_context and ranked_context[0][0] >= minimum_context_confidence:
+        best_score, best_name, best_id = ranked_context[0]
+        runner_up = next(
+            (item for item in ranked_context[1:] if item[2] != best_id),
+            None,
+        )
+        if runner_up is None or best_score - runner_up[0] >= 3.0:
+            return best_id, best_name, best_score
+        return None, "", best_score
+
+    # A one-token name with no club-context match is not safe to infer from a
+    # global catalog. Leave it untouched rather than selecting a homonym.
+    if len(query_norm.split()) < 2:
+        return None, "", max(
+            (score for score, _, _ in ranked_context),
+            default=0.0,
+        )
 
     player_id, player_name, confidence = matcher.match_player(
         member.player_name,
-        threshold=max(float(threshold), 95.0),
+        threshold=max(float(threshold or 0), 90.0),
         from_team_id=team_id,
         team_player_map=team_player_map,
         position=member.position,
@@ -233,7 +320,7 @@ def _match_snapshot_member(
     if (
         player_id is None
         or player_id not in all_roster_ids
-        or confidence < max(float(threshold or 0), 95.0)
+        or confidence < max(float(threshold or 0), 90.0)
     ):
         return None, "", confidence
     return player_id, player_name, confidence
@@ -326,6 +413,106 @@ def _build_fotmob_identity_index(
     }
     return unique, unique_names, identity_map
 
+def _build_snapshot_roster_coverage(
+    matcher: NameMatcher,
+    threshold: float,
+    virtual_rosters: dict[int, list[int]],
+    club_ids: set[int],
+    squad_snapshots: tuple[SquadSnapshot, ...] | list[SquadSnapshot],
+    fotmob_to_pes: dict[int, int],
+    validated_fotmob_ids: set[int] | None,
+    validated_fotmob_teams: dict[int, int] | None,
+) -> dict[int, _SnapshotRosterCoverage]:
+    """Classify snapshots before allowing destructive roster reconciliation."""
+    coverage: dict[int, _SnapshotRosterCoverage] = {}
+    seen_team_ids: set[int] = set()
+
+    for snapshot in squad_snapshots:
+        if (
+            not snapshot.complete
+            or len(snapshot.members) < _MIN_COMPLETE_SQUAD_MEMBERS
+        ):
+            continue
+
+        fotmob_team_id = _optional_positive_int(snapshot.team_id_fotmob)
+        if fotmob_team_id is None:
+            continue
+        team_id, team_name, _ = _match_transfer_team(
+            matcher,
+            snapshot.club_name,
+            snapshot.club_name,
+            fotmob_team_id,
+            validated_fotmob_ids,
+            validated_fotmob_teams,
+        )
+        if (
+            team_id is None
+            or team_id == UNRESOLVED_TEAM_ID
+            or team_id not in club_ids
+            or team_id in seen_team_ids
+        ):
+            continue
+        seen_team_ids.add(team_id)
+
+        current_ids = frozenset(
+            normalized_player_id
+            for raw_player_id in virtual_rosters.get(team_id, ())
+            if (
+                normalized_player_id := _optional_positive_int(raw_player_id)
+            ) is not None
+        )
+        snapshot_player_ids: set[int] = set()
+        for member in snapshot.members:
+            fotmob_player_id = _optional_positive_int(member.player_id_fotmob)
+            known_player_id = (
+                fotmob_to_pes.get(fotmob_player_id)
+                if fotmob_player_id is not None
+                else None
+            )
+            if known_player_id is not None and known_player_id in current_ids:
+                snapshot_player_ids.add(known_player_id)
+                continue
+
+            player_id, _, player_confidence = _match_snapshot_member(
+                matcher,
+                member,
+                team_id,
+                virtual_rosters,
+                threshold,
+            )
+            if (
+                player_id is not None
+                and player_id in current_ids
+                and player_confidence >= max(float(threshold or 0), 90.0)
+            ):
+                snapshot_player_ids.add(player_id)
+
+        minimum_current_matches = max(
+            _MIN_COMPLETE_SQUAD_MEMBERS,
+            ceil(len(current_ids) * _MIN_CURRENT_SQUAD_MATCH_RATIO),
+        )
+        healthy = bool(current_ids) and (
+            len(snapshot_player_ids) >= minimum_current_matches
+        )
+        if not healthy:
+            logger.warning(
+                "Skipping roster reconciliation for %s (%s): only %s/%s "
+                "current roster players matched",
+                team_name or snapshot.club_name,
+                team_id,
+                len(snapshot_player_ids),
+                len(current_ids),
+            )
+        coverage[team_id] = _SnapshotRosterCoverage(
+            snapshot=snapshot,
+            team_id=team_id,
+            team_name=team_name or snapshot.club_name,
+            current_player_ids=current_ids,
+            snapshot_player_ids=frozenset(snapshot_player_ids),
+            healthy=healthy,
+        )
+    return coverage
+
 
 def _append_current_squad_moves(
     matched: list[MatchedTransfer],
@@ -336,9 +523,11 @@ def _append_current_squad_moves(
     fotmob_to_pes: dict[int, int],
     fotmob_identity_names: dict[int, str],
     validated_fotmob_teams: dict[int, int] | None,
+    snapshot_coverage: Mapping[int, _SnapshotRosterCoverage],
 ) -> None:
-    """Create only actionable moves from current snapshots, not 46k events."""
+    """Create only safe moves from current snapshots, not 46k events."""
     seen: set[tuple[int, int]] = set()
+    unhealthy_source_ids: set[int] = set()
     destination_cache: dict[int, int | None] = {}
 
     for raw_fotmob_id, observations in identity_map.items():
@@ -395,7 +584,10 @@ def _append_current_squad_moves(
         if len(destination_ids) != 1:
             continue
         destination_id = next(iter(destination_ids))
-        if destination_id not in club_ids:
+        if (
+            destination_id not in club_ids
+            or destination_id not in snapshot_coverage
+        ):
             continue
 
         current_clubs = [
@@ -406,6 +598,18 @@ def _append_current_squad_moves(
         if len(current_clubs) != 1:
             continue
         source_id = current_clubs[0]
+        source_coverage = snapshot_coverage.get(source_id)
+        if source_coverage is None or not source_coverage.healthy:
+            if source_id not in unhealthy_source_ids:
+                source_name = matcher.get_team_name(source_id) or f"Team {source_id}"
+                logger.warning(
+                    "Skipping current-squad moves from %s (%s): source roster "
+                    "snapshot is missing or not healthy",
+                    source_name,
+                    source_id,
+                )
+                unhealthy_source_ids.add(source_id)
+            continue
         if source_id == destination_id or (player_id, destination_id) in seen:
             continue
 
@@ -455,17 +659,11 @@ def _append_current_squad_moves(
 
 def _append_current_squad_releases(
     matched: list[MatchedTransfer],
-    matcher: NameMatcher,
-    threshold: float,
     virtual_rosters: dict[int, list[int]],
-    club_ids: set[int],
-    squad_snapshots: tuple[SquadSnapshot, ...] | list[SquadSnapshot],
-    fotmob_to_pes: dict[int, int],
-    validated_fotmob_ids: set[int] | None,
-    validated_fotmob_teams: dict[int, int] | None,
+    snapshot_coverage: Mapping[int, _SnapshotRosterCoverage],
     player_names: dict[int, str] | None,
 ) -> None:
-    """Append releases for local players absent from complete live squads."""
+    """Append releases only for healthy, overlapping live-squad snapshots."""
     released_ids = {
         match.player_id
         for match in matched
@@ -483,34 +681,11 @@ def _append_current_squad_releases(
             protected_destination_ids.setdefault(match.to_team_id, set()).add(
                 match.player_id
             )
-    seen_team_ids: set[int] = set()
-    for snapshot in squad_snapshots:
-        if (
-            not snapshot.complete
-            or len(snapshot.members) < _MIN_COMPLETE_SQUAD_MEMBERS
-        ):
-            continue
 
-        fotmob_team_id = _optional_positive_int(snapshot.team_id_fotmob)
-        if fotmob_team_id is None:
+    for coverage in snapshot_coverage.values():
+        if not coverage.healthy:
             continue
-        team_id, team_name, team_confidence = _match_transfer_team(
-            matcher,
-            snapshot.club_name,
-            snapshot.club_name,
-            fotmob_team_id,
-            validated_fotmob_ids,
-            validated_fotmob_teams,
-        )
-        if (
-            team_id is None
-            or team_id == UNRESOLVED_TEAM_ID
-            or team_id not in club_ids
-            or team_id in seen_team_ids
-        ):
-            continue
-        seen_team_ids.add(team_id)
-
+        team_id = coverage.team_id
         current_ids = {
             normalized_player_id
             for raw_player_id in virtual_rosters.get(team_id, ())
@@ -521,51 +696,7 @@ def _append_current_squad_releases(
         if len(current_ids) <= MIN_CLUB_ROSTER_SIZE:
             continue
 
-        snapshot_player_ids: set[int] = set()
-        for member in snapshot.members:
-            fotmob_player_id = _optional_positive_int(member.player_id_fotmob)
-            known_player_id = (
-                fotmob_to_pes.get(fotmob_player_id)
-                if fotmob_player_id is not None
-                else None
-            )
-            if known_player_id is not None and known_player_id in current_ids:
-                snapshot_player_ids.add(known_player_id)
-                continue
-            # A stale historical identity must not hide the name-based match.
-            # The save's current roster is the authoritative context here.
-
-            player_id, _, player_confidence = _match_snapshot_member(
-                matcher,
-                member,
-                team_id,
-                virtual_rosters,
-                threshold,
-            )
-            if (
-                player_id is not None
-                and player_id in current_ids
-                and player_confidence >= max(float(threshold or 0), 95.0)
-            ):
-                snapshot_player_ids.add(player_id)
-
-        matched_member_count = len(snapshot_player_ids)
-        minimum_current_matches = max(
-            _MIN_COMPLETE_SQUAD_MEMBERS,
-            ceil(len(current_ids) * _MIN_CURRENT_SQUAD_MATCH_RATIO),
-        )
-        if matched_member_count < minimum_current_matches:
-            logger.warning(
-                "Skipping stale-player release for %s (%s): only %s/%s "
-                "current roster players matched",
-                team_name or snapshot.club_name,
-                team_id,
-                matched_member_count,
-                len(current_ids),
-            )
-            continue
-
-        for player_id in sorted(current_ids - snapshot_player_ids):
+        for player_id in sorted(current_ids - coverage.snapshot_player_ids):
             if (
                 player_id in released_ids
                 or player_id in protected_destination_ids.get(team_id, set())
@@ -576,22 +707,22 @@ def _append_current_squad_releases(
                 MatchedTransfer(
                     transfer=Transfer(
                         player_name=player_name,
-                        from_club=team_name or snapshot.club_name,
+                        from_club=coverage.team_name,
                         to_club="Free Agent",
                         transfer_type="squad_release",
-                        from_club_id_fotmob=fotmob_team_id,
-                        from_club_full_name=team_name or snapshot.club_name,
-                        source_urls=(snapshot.source_url,),
-                        proof_urls=(snapshot.source_url,),
+                        from_club_id_fotmob=coverage.snapshot.team_id_fotmob,
+                        from_club_full_name=coverage.team_name,
+                        source_urls=(coverage.snapshot.source_url,),
+                        proof_urls=(coverage.snapshot.source_url,),
                         verification_status="enabled",
                         infer_from_current_roster=True,
                     ),
                     player_id=player_id,
                     from_team_id=team_id,
-                    from_team_confidence=team_confidence or 100.0,
+                    from_team_confidence=100.0,
                     player_confidence=100.0,
                     matched_player_name=player_name,
-                    matched_from_team=team_name or snapshot.club_name,
+                    matched_from_team=coverage.team_name,
                 )
             )
             released_ids.add(player_id)
@@ -901,6 +1032,16 @@ def _match_transfers_statefully(
         elif ftid is not None:
             loaned_by_parent.get(ftid, set()).discard(pid)
 
+    snapshot_coverage = _build_snapshot_roster_coverage(
+        matcher,
+        threshold,
+        virtual_rosters,
+        club_ids,
+        squad_snapshots,
+        fotmob_to_pes,
+        validated_fotmob_ids,
+        validated_fotmob_teams,
+    )
     _append_current_squad_moves(
         matched,
         matcher,
@@ -910,17 +1051,12 @@ def _match_transfers_statefully(
         fotmob_to_pes,
         fotmob_identity_names,
         validated_fotmob_teams,
+        snapshot_coverage,
     )
     _append_current_squad_releases(
         matched,
-        matcher,
-        threshold,
         virtual_rosters,
-        club_ids,
-        squad_snapshots,
-        fotmob_to_pes,
-        validated_fotmob_ids,
-        validated_fotmob_teams,
+        snapshot_coverage,
         player_names,
     )
     return matched
