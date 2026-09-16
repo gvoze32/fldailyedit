@@ -48,6 +48,15 @@ The base save is incompatible with UML, older FL26 versions, and installations
 without the national-squad update. Start a new Master League or Become a Legend
 career after installing it.
 
+### Fast vs Deep
+
+| Mode                | Coverage                                                                                                          | Best for        |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------- | --------------- |
+| **Fast (default)**  | Live transfer feed plus squad membership, shirt numbers, and captain roles for up to 32 clubs found in that feed. | Daily updates   |
+| **Deep (`--deep`)** | Current squad membership, shirt numbers, and captain roles for every indexed club.                                | Broad refreshes |
+
+Use **Fast** for routine updates, choose **Deep** for broader coverage.
+
 ### PES 2021/T99 patch saves
 
 `run` supports vanilla PES 2021 and T99 patch `EDIT00000000` files when matching
@@ -65,13 +74,6 @@ Use the save and CPKs from the same patch generation. The updater reads native
 `Player.bin`, `Team.bin`, and `PlayerAssignment.bin`, it never uses the bundled
 FL26 player catalog. A missing or mismatched native `Player.bin` is rejected
 before any save mutation.
-
-- **Fast (default):** Updates the live transfer feed plus squad membership, shirt
-  numbers, and captain roles for up to 32 clubs found in that feed.
-- **Deep:** Checks every indexed club for current squad membership, shirt numbers,
-  and captain roles.
-
-Use `--deep` for broader coverage.
 
 ## What it updates
 
