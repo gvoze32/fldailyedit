@@ -23,7 +23,7 @@ choose **Apply update**. Prebuilt releases are for FL26 saves only.
 The installer is unsigned. Verify `FLDailyEditInstaller.zip` against the
 published `FLDailyEditInstaller.zip.sha256` on the
 [latest release](https://github.com/gvoze32/fldailyedit/releases/tag/latest)
-before running it.
+before running it, Windows SmartScreen may warn.
 
 **Manual installation:** Download the [Fast release ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-fast.zip)
 or [Deep release ZIP](https://github.com/gvoze32/fldailyedit/releases/download/latest/fldailyedit-fl2026-deep.zip).
