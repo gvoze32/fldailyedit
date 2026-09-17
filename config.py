@@ -32,7 +32,6 @@ MATCH_THRESHOLD_TEAM = 75    # minimum confidence for team name match
 
 # --- Data files ---
 TEAM_ALIASES_FILE = DATA_DIR / "team_aliases.json"
-NAME_OVERRIDES_FILE = DATA_DIR / "name_overrides.json"
 PLAYERS_CSV_FILE = DATA_DIR / "players.csv"
 CURRENT_PLAYERS_FILE = DATA_DIR / "FL2622wc_players.txt"
 CURRENT_TEAMS_FILE = DATA_DIR / "FL262_teams.txt"

@@ -1735,7 +1735,6 @@ def self_test() -> int:
     required_data = (
         "fotmob_teams_validated.json",
         "major_clubs.json",
-        "name_overrides.json",
         "team_aliases.json",
         "FL262_teams.txt",
         "FL2622wc_players.txt",

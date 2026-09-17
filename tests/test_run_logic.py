@@ -19,6 +19,7 @@ from run_pipeline import (
     _load_represented_fotmob_club_ids,
     _match_and_plan_transfers,
     _plan_captain_updates,
+    _fast_squad_target_clubs,
 )
 from transfer_planning import (
     PlannedRosterAction,
@@ -758,7 +759,7 @@ def test_stateful_matching_uses_snapshot_identity_map_for_current_move():
                 f"Source Player {player_id}",
                 player_id_fotmob=6000 + player_id,
             )
-            for player_id in range(3002, 3019)
+            for player_id in range(3002, 3013)
         ),
         source_url="https://www.fotmob.com/api/data/teams?id=777",
         complete=True,
@@ -794,6 +795,80 @@ def test_stateful_matching_uses_snapshot_identity_map_for_current_move():
     assert matched[0].from_team_id == 10
     assert matched[0].to_team_id == 20
 
+
+
+def test_fast_snapshot_move_allows_uncovered_source_and_shirt_identity():
+    from scraper.matcher import NameMatcher
+
+    source_ids = [3001, *range(3002, 3019)]
+    destination_ids = list(range(4001, 4017))
+    matcher = NameMatcher()
+    matcher.load_player_db(
+        [
+            ("Current Player", 3001),
+            *[
+                (f"Source Player {player_id}", player_id)
+                for player_id in source_ids[1:]
+            ],
+            *[
+                (f"Destination Player {player_id}", player_id)
+                for player_id in destination_ids
+            ],
+        ]
+    )
+    matcher.load_team_db({"Source FC": 10, "Destination FC": 20})
+    snapshot = SquadSnapshot(
+        club_name="Destination FC",
+        team_id_fotmob=200,
+        members=(
+            SquadMember("Current Player", player_id_fotmob=9001, shirt_number=7),
+            *(
+                SquadMember(
+                    f"Destination Player {player_id}",
+                    player_id_fotmob=9001 + index,
+                )
+                for index, player_id in enumerate(destination_ids, 1)
+            ),
+        ),
+        source_url="https://www.fotmob.com/api/data/teams?id=200",
+        complete=True,
+    )
+    shirt_update = Transfer(
+        "Current Player",
+        "Destination FC",
+        "Destination FC",
+        transfer_type="shirt_number_update",
+        shirt_number=7,
+        from_club_id_fotmob=200,
+        to_club_id_fotmob=200,
+        player_id_fotmob=9001,
+    )
+
+    matched = _match_transfers_statefully(
+        [shirt_update],
+        matcher,
+        80,
+        {10: source_ids, 20: destination_ids},
+        {10, 20},
+        validated_fotmob_ids={200},
+        validated_fotmob_teams={200: 20},
+        squad_snapshots=(snapshot,),
+        allow_uncovered_source=True,
+    )
+
+    assert [
+        (
+            item.transfer.transfer_type,
+            item.player_id,
+            item.from_team_id,
+            item.to_team_id,
+            item.transfer.shirt_number,
+        )
+        for item in matched
+    ] == [
+        ("squad_registration", 3001, 10, 20, 7),
+        ("shirt_number_update", 3001, 20, 20, 7),
+    ]
 
 
 def test_snapshot_prefers_club_roster_over_unrelated_exact_name():
@@ -1186,6 +1261,57 @@ def test_snapshot_does_not_release_player_from_current_transfer_event():
         (match.player_id, match.transfer.transfer_type)
         for match in matched
     ] == [(incoming_id, "transfer")]
+
+
+def test_squad_releases_precede_shirt_updates():
+    from scraper.matcher import NameMatcher
+
+    current_ids = list(range(3301, 3319))
+    matcher = NameMatcher()
+    matcher.load_player_db(
+        [(f"Player {player_id}", player_id) for player_id in current_ids]
+    )
+    matcher.load_team_db({"Example FC": 10})
+    snapshot = SquadSnapshot(
+        club_name="Example FC",
+        team_id_fotmob=42,
+        members=tuple(
+            SquadMember(
+                player_name=f"Player {player_id}",
+                player_id_fotmob=9000 + index,
+            )
+            for index, player_id in enumerate(current_ids[:-1], 1)
+        ),
+        source_url="https://www.fotmob.com/api/data/teams?id=42",
+        complete=True,
+    )
+    shirt_update = Transfer(
+        "Player 3301",
+        "Example FC",
+        "Example FC",
+        transfer_type="shirt_number_update",
+        shirt_number=17,
+        from_club_id_fotmob=42,
+        to_club_id_fotmob=42,
+        player_id_fotmob=9001,
+    )
+
+    matched = _match_transfers_statefully(
+        [shirt_update],
+        matcher,
+        80,
+        {10: current_ids},
+        {10},
+        validated_fotmob_ids={42},
+        validated_fotmob_teams={42: 10},
+        squad_snapshots=(snapshot,),
+        player_names={player_id: f"Player {player_id}" for player_id in current_ids},
+    )
+
+    assert [
+        (match.player_id, match.transfer.transfer_type)
+        for match in matched
+    ] == [(3318, "squad_release"), (3301, "shirt_number_update")]
 
 def test_squad_snapshot_falls_back_when_historical_identity_is_stale():
     from scraper.matcher import NameMatcher
@@ -1628,6 +1754,33 @@ def test_transfer_run_syncs_squad_numbers_in_fast_mode(monkeypatch):
     assert len(result.captain_updates) == 1
     assert result.captain_updates[0].player_name == "Captain Player"
     assert result.squad_snapshots == (snapshot,)
+
+
+def test_fast_squad_targets_rank_clubs_by_transfer_activity():
+    crowded = [
+        Transfer(
+            f"Player {index}",
+            f"Source {index}",
+            f"Destination {index}",
+            from_club_id_fotmob=1000 + index,
+            to_club_id_fotmob=2000 + index,
+        )
+        for index in range(32)
+    ]
+    juventus_activity = [
+        Transfer(
+            f"Juventus Player {index}",
+            "Juventus",
+            "Juventus",
+            from_club_id_fotmob=9885,
+            to_club_id_fotmob=9885,
+        )
+        for index in range(4)
+    ]
+
+    targets = _fast_squad_target_clubs((crowded + juventus_activity,))
+
+    assert "Juventus" in targets
 
 def test_fast_captain_sync_keeps_existing_squad_club_limit(monkeypatch):
     import run_pipeline as run

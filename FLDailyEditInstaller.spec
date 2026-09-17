@@ -14,7 +14,6 @@ CRYPTO_BINARIES = [
 RUNTIME_DATA = [
     ("data/major_clubs.json", "data"),
     ("data/fotmob_teams_validated.json", "data"),
-    ("data/name_overrides.json", "data"),
     ("data/team_aliases.json", "data"),
     ("data/FL262_teams.txt", "data"),
     ("data/FL2622wc_players.txt", "data"),

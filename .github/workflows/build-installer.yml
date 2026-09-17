@@ -15,7 +15,6 @@ on:
       - ".github/workflows/build-installer.yml"
       - "data/major_clubs.json"
       - "data/fotmob_teams_validated.json"
-      - "data/name_overrides.json"
       - "data/team_aliases.json"
       - "data/FL262_teams.txt"
       - "data/FL2622wc_players.txt"

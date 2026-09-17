@@ -126,7 +126,6 @@ def test_installer_spec_is_one_file_windowed_and_excludes_sensitive_payloads():
     for resource in (
         "data/major_clubs.json",
         "data/fotmob_teams_validated.json",
-        "data/name_overrides.json",
         "data/team_aliases.json",
         "data/FL2622wc_players.txt",
         "data/players.csv",
@@ -178,7 +177,6 @@ def test_installer_workflow_builds_tests_and_smoke_tests_on_windows():
     for path_filter in (
         "data/major_clubs.json",
         "data/fotmob_teams_validated.json",
-        "data/name_overrides.json",
         "data/team_aliases.json",
         "data/FL262_teams.txt",
         "data/FL2622wc_players.txt",

@@ -183,7 +183,7 @@ def _supplemental_target_clubs(transfer_batches) -> tuple[str, ...]:
     return tuple(targets)
 
 def _fast_squad_target_clubs(transfer_batches) -> tuple[str, ...]:
-    """Return recent transfer clubs whose current squads should be refreshed."""
+    """Return the most active recent-transfer clubs for a fast squad refresh."""
     non_clubs = {
         "",
         "career break",
@@ -192,27 +192,50 @@ def _fast_squad_target_clubs(transfer_batches) -> tuple[str, ...]:
         "unattached",
         "without club",
     }
-    targets: list[str] = []
-    seen: set[str] = set()
+    activity: dict[tuple[str, int | str], int] = {}
+    first_seen: dict[tuple[str, int | str], int] = {}
+    display_names: dict[tuple[str, int | str], str] = {}
+    order = 0
+
     for batch in transfer_batches:
         for transfer in batch:
-            for candidate in (
-                transfer.to_club_full_name or transfer.to_club,
-                transfer.from_club_full_name or transfer.from_club,
+            for candidate, raw_team_id in (
+                (
+                    transfer.to_club_full_name or transfer.to_club,
+                    transfer.to_club_id_fotmob,
+                ),
+                (
+                    transfer.from_club_full_name or transfer.from_club,
+                    transfer.from_club_id_fotmob,
+                ),
             ):
                 clean = candidate.strip()
-                key = clean.casefold()
-                if (
-                    not clean
-                    or key in non_clubs
-                    or key in seen
-                ):
+                name_key = clean.casefold()
+                if not clean or name_key in non_clubs:
                     continue
-                seen.add(key)
-                targets.append(clean)
-                if len(targets) >= _FAST_SQUAD_CLUB_LIMIT:
-                    return tuple(targets)
-    return tuple(targets)
+                try:
+                    team_id = int(raw_team_id)
+                except (TypeError, ValueError):
+                    team_id = 0
+                identity = (
+                    ("id", team_id)
+                    if team_id > 0
+                    else ("name", name_key)
+                )
+                if identity not in first_seen:
+                    first_seen[identity] = order
+                    display_names[identity] = clean
+                    order += 1
+                activity[identity] = activity.get(identity, 0) + 1
+
+    ranked = sorted(
+        activity,
+        key=lambda identity: (-activity[identity], first_seen[identity]),
+    )
+    return tuple(
+        display_names[identity]
+        for identity in ranked[:_FAST_SQUAD_CLUB_LIMIT]
+    )
 
 
 
@@ -627,20 +650,19 @@ def _load_match_database(
             if player.age
         },
     )
-    # The save's league memberships already filter national teams. Numeric
-    # club-ID heuristics are invalid for FL26 (some real clubs have low IDs).
+    # The team reference is tied to the current player reference. If that
+    # SPFL catalog is unavailable, ignore any bundled team file as well: it
+    # may describe a different base than a ULM/vanilla save.
     matcher.load_team_db(team_name_to_id, clubs_only=False)
     if current_catalog_entries == 0:
-        print("  ⚠ External player catalog unavailable; using names from selected save")
+        print(
+            "  ⚠ External player catalog unavailable; using names from selected save"
+        )
     print(
         f"  {len(players)} players, {len(team_name_to_id)} playable clubs "
         "(national teams excluded)"
     )
     return matcher, all_rosters, team_player_map, club_ids
-
-
-
-
 
 
 def _match_and_plan_transfers(
@@ -654,6 +676,7 @@ def _match_and_plan_transfers(
     output_path,
     *,
     allow_overflow_release,
+    allow_uncovered_source=False,
 ):
     """Match scraped identities, classify them, and create safe roster actions."""
 
@@ -694,6 +717,7 @@ def _match_and_plan_transfers(
         squad_snapshots=getattr(transfers, "squad_snapshots", ()),
         fotmob_identity_map=getattr(transfers, "fotmob_identity_map", None),
         player_names=player_names,
+        allow_uncovered_source=allow_uncovered_source,
     )
     matched, duplicate_shirt_matches = planning._dedupe_shirt_number_matches(matched)
     superseded_loan_sources = planning._build_superseded_loan_sources(
@@ -1419,6 +1443,7 @@ class _RunLocalUpdateRuntime:
                 prepared.edit_file,
                 prepared.output_path,
                 allow_overflow_release=request.allow_overflow_release,
+                allow_uncovered_source=not request.deep,
             )
             captain_sources = getattr(transfers, "captain_updates", ())
             if captain_sources:

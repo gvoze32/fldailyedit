@@ -197,6 +197,7 @@ def _match_snapshot_member(
             (),
         )
     )
+    exact_global_candidate: tuple[str, int] | None = None
     if exact_records:
         # Prefer an exact identity already registered at this snapshot's club.
         # A provider can shorten a name ("Endrick" vs "Endrick Felipe") while
@@ -232,9 +233,24 @@ def _match_snapshot_member(
                 return player_id, name, 100.0
             return None, "", 100.0
 
+        # A unique exact candidate already in any local roster is safe when
+        # the snapshot club has no stronger contextual candidate. This covers
+        # single-name players such as "Allan" and "Sávio" without guessing
+        # among homonyms.
+        if len(age_compatible) == 1:
+            candidate = age_compatible[0]
+            if (
+                candidate[1] in all_roster_ids
+                and matcher._is_player_metadata_compatible(
+                    candidate[1],
+                    position=member.position,
+                    age=member.age,
+                )
+            ):
+                exact_global_candidate = candidate
+
         # Multi-token exact names are safe enough to resolve from another
-        # current club (the normal inferred-move case). Do not let a
-        # one-token exact name identify a player outside the snapshot club.
+        # current club (the normal inferred-move case).
         if len(_normalize(member.player_name).split()) > 1:
             roster_candidates = [
                 candidate
@@ -300,14 +316,16 @@ def _match_snapshot_member(
             return best_id, best_name, best_score
         return None, "", best_score
 
-    # A one-token name with no club-context match is not safe to infer from a
-    # global catalog. Leave it untouched rather than selecting a homonym.
+    # A unique exact name already present in another local roster is safe
+    # after contextual matching; do not use a fuzzy one-token global guess.
+    if exact_global_candidate is not None:
+        name, player_id = exact_global_candidate
+        return player_id, name, 100.0
     if len(query_norm.split()) < 2:
         return None, "", max(
             (score for score, _, _ in ranked_context),
             default=0.0,
         )
-
     player_id, player_name, confidence = matcher.match_player(
         member.player_name,
         threshold=max(float(threshold or 0), 90.0),
@@ -524,10 +542,11 @@ def _append_current_squad_moves(
     fotmob_identity_names: dict[int, str],
     validated_fotmob_teams: dict[int, int] | None,
     snapshot_coverage: Mapping[int, _SnapshotRosterCoverage],
+    allow_uncovered_source: bool = False,
 ) -> None:
     """Create only safe moves from current snapshots, not 46k events."""
     seen: set[tuple[int, int]] = set()
-    unhealthy_source_ids: set[int] = set()
+    uncovered_source_ids: set[int] = set()
     destination_cache: dict[int, int | None] = {}
 
     for raw_fotmob_id, observations in identity_map.items():
@@ -584,9 +603,14 @@ def _append_current_squad_moves(
         if len(destination_ids) != 1:
             continue
         destination_id = next(iter(destination_ids))
+        destination_coverage = snapshot_coverage.get(destination_id)
         if (
             destination_id not in club_ids
-            or destination_id not in snapshot_coverage
+            or destination_coverage is None
+            or (
+                not destination_coverage.healthy
+                and bool(destination_coverage.current_player_ids)
+            )
         ):
             continue
 
@@ -598,17 +622,20 @@ def _append_current_squad_moves(
         if len(current_clubs) != 1:
             continue
         source_id = current_clubs[0]
+        # Source snapshot health gates destructive release reconciliation, not
+        # this single-player move: local membership is already unique and the
+        # destination snapshot is complete enough to identify the player.
         source_coverage = snapshot_coverage.get(source_id)
-        if source_coverage is None or not source_coverage.healthy:
-            if source_id not in unhealthy_source_ids:
+        if source_coverage is None and not allow_uncovered_source:
+            if source_id not in uncovered_source_ids:
                 source_name = matcher.get_team_name(source_id) or f"Team {source_id}"
                 logger.warning(
                     "Skipping current-squad moves from %s (%s): source roster "
-                    "snapshot is missing or not healthy",
+                    "snapshot is missing",
                     source_name,
                     source_id,
                 )
-                unhealthy_source_ids.add(source_id)
+                uncovered_source_ids.add(source_id)
             continue
         if source_id == destination_id or (player_id, destination_id) in seen:
             continue
@@ -625,6 +652,10 @@ def _append_current_squad_moves(
             from_club=source_name,
             to_club=destination_name,
             transfer_type="squad_registration",
+            shirt_number=member.shirt_number,
+            position=member.position,
+            age=member.age,
+            nationality=member.nationality,
             to_club_id_fotmob=raw_team_id,
             player_id_fotmob=fotmob_player_id,
             from_club_full_name=source_name,
@@ -634,23 +665,30 @@ def _append_current_squad_moves(
             verification_status="enabled",
             infer_from_current_roster=True,
         )
-        matched.append(
-            MatchedTransfer(
-                transfer=transfer,
-                player_id=player_id,
-                from_team_id=source_id,
-                to_team_id=destination_id,
-                player_confidence=100.0,
-                from_team_confidence=100.0,
-                to_team_confidence=100.0,
-                matched_player_name=(
-                    fotmob_identity_names.get(fotmob_player_id)
-                    or member.player_name
-                ),
-                matched_from_team=source_name,
-                matched_to_team=destination_name,
-            )
+        move = MatchedTransfer(
+            transfer=transfer,
+            player_id=player_id,
+            from_team_id=source_id,
+            to_team_id=destination_id,
+            player_confidence=100.0,
+            from_team_confidence=100.0,
+            to_team_confidence=100.0,
+            matched_player_name=(
+                fotmob_identity_names.get(fotmob_player_id)
+                or member.player_name
+            ),
+            matched_from_team=source_name,
+            matched_to_team=destination_name,
         )
+        insert_at = next(
+            (
+                index
+                for index, item in enumerate(matched)
+                if item.transfer.transfer_type == "shirt_number_update"
+            ),
+            len(matched),
+        )
+        matched.insert(insert_at, move)
         virtual_rosters[source_id].remove(player_id)
         virtual_rosters.setdefault(destination_id, []).append(player_id)
 
@@ -663,7 +701,7 @@ def _append_current_squad_releases(
     snapshot_coverage: Mapping[int, _SnapshotRosterCoverage],
     player_names: dict[int, str] | None,
 ) -> None:
-    """Append releases only for healthy, overlapping live-squad snapshots."""
+    """Insert safe releases before shirt updates for healthy snapshots."""
     released_ids = {
         match.player_id
         for match in matched
@@ -681,6 +719,14 @@ def _append_current_squad_releases(
             protected_destination_ids.setdefault(match.to_team_id, set()).add(
                 match.player_id
             )
+    insert_at = next(
+        (
+            index
+            for index, item in enumerate(matched)
+            if item.transfer.transfer_type == "shirt_number_update"
+        ),
+        len(matched),
+    )
 
     for coverage in snapshot_coverage.values():
         if not coverage.healthy:
@@ -703,7 +749,8 @@ def _append_current_squad_releases(
             ):
                 continue
             player_name = (player_names or {}).get(player_id) or f"Player {player_id}"
-            matched.append(
+            matched.insert(
+                insert_at,
                 MatchedTransfer(
                     transfer=Transfer(
                         player_name=player_name,
@@ -725,6 +772,7 @@ def _append_current_squad_releases(
                     matched_from_team=coverage.team_name,
                 )
             )
+            insert_at += 1
             released_ids.add(player_id)
 
 
@@ -745,6 +793,7 @@ def _match_transfers_statefully(
     ]
     | None = None,
     player_names: dict[int, str] | None = None,
+    allow_uncovered_source: bool = False,
 ) -> list[MatchedTransfer]:
     """Match transfer events and derive releases from complete live squads."""
     virtual_rosters = {
@@ -866,8 +915,36 @@ def _match_transfers_statefully(
             age=transfer.age,
         )
         fotmob_player_id = _optional_positive_int(transfer.player_id_fotmob)
-        known_pid = fotmob_to_pes.get(fotmob_player_id) if fotmob_player_id else None
-        if known_pid is not None and pid is None:
+        snapshot_known_pid = (
+            snapshot_fotmob_to_pes.get(fotmob_player_id)
+            if fotmob_player_id is not None
+            else None
+        )
+        known_pid = (
+            snapshot_known_pid
+            if (
+                transfer.transfer_type == "shirt_number_update"
+                and snapshot_known_pid is not None
+            )
+            else (
+                fotmob_to_pes.get(fotmob_player_id)
+                if fotmob_player_id is not None
+                else None
+            )
+        )
+        if (
+            transfer.transfer_type == "shirt_number_update"
+            and snapshot_known_pid is not None
+        ):
+            # The complete current-squad snapshot is the authoritative
+            # provider identity for its own shirt observations. A stale
+            # historical route must not make the number update ambiguous.
+            pid = snapshot_known_pid
+            pname = snapshot_identity_names.get(
+                fotmob_player_id, transfer.player_name
+            )
+            pconf = 100.0
+        elif known_pid is not None and pid is None:
             if transfer.infer_from_current_roster:
                 logger.warning(
                     "FotMob player %s has no independently matched PES identity; "
@@ -1048,10 +1125,11 @@ def _match_transfers_statefully(
         virtual_rosters,
         club_ids,
         identity_map,
-        fotmob_to_pes,
-        fotmob_identity_names,
+        snapshot_fotmob_to_pes,
+        snapshot_identity_names,
         validated_fotmob_teams,
         snapshot_coverage,
+        allow_uncovered_source=allow_uncovered_source,
     )
     _append_current_squad_releases(
         matched,

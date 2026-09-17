@@ -23,6 +23,10 @@ class TestNormalize:
     def test_combined(self):
         assert _normalize("  Kylian  Mbappé  ") == "kylian mbappe"
 
+    def test_transliterate_non_decomposing_letters(self):
+        assert _normalize("Kenan Yıldız") == "kenan yildiz"
+
+
 
 # --- Player matching tests ---
 
@@ -109,8 +113,39 @@ class TestPlayerMatching:
         assert pid is None
         assert conf == 0.0
 
-    def test_override_metadata_is_not_treated_as_player_alias(self):
-        assert "_comment" not in NameMatcher()._player_overrides
+
+    def test_compound_surname_suffix_matches_base_name(self):
+        matcher = NameMatcher()
+        matcher.load_player_db({"Khéphren Thuram": 1011})
+
+        player_id, matched_name, confidence = matcher.match_player(
+            "Khéphren Thuram-Ulien",
+            threshold=80,
+        )
+
+        assert player_id == 1011
+        assert matched_name == "Khéphren Thuram"
+        assert confidence >= 95
+
+
+    def test_provider_short_name_matches_suffix_variant_with_metadata(self):
+        matcher = NameMatcher()
+        matcher.load_player_db(
+            {"Neymar Jr": 1011, "Neymar Uribe": 1012},
+            positions={1011: "SS"},
+            ages={1011: 33},
+        )
+
+        player_id, matched_name, confidence = matcher.match_player(
+            "Neymar",
+            threshold=80,
+            position="CAM",
+            age=34,
+        )
+
+        assert player_id == 1011
+        assert matched_name == "Neymar Jr"
+        assert confidence >= 95
 
     def test_middle_name_token_set(self, matcher):
         """'Gabriel Jesus' matching 'Gabriel Fernando de Jesus'."""
