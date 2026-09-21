@@ -870,6 +870,132 @@ def test_fast_snapshot_move_allows_uncovered_source_and_shirt_identity():
         ("shirt_number_update", 3001, 20, 20, 7),
     ]
 
+def test_current_squad_registers_catalog_player_missing_from_local_roster():
+    from scraper.matcher import NameMatcher
+
+    existing_ids = list(range(3001, 3026))
+    matcher = NameMatcher()
+    matcher.load_player_db(
+        [
+            ("Missing Catalog Player", 3999),
+            *[
+                (f"Destination Player {player_id}", player_id)
+                for player_id in existing_ids
+            ],
+        ]
+    )
+    matcher.load_team_db({"Destination FC": 20})
+    snapshot = SquadSnapshot(
+        club_name="Destination FC",
+        team_id_fotmob=200,
+        members=(
+            SquadMember("Missing Catalog Player", player_id_fotmob=9001),
+            *[
+                SquadMember(
+                    f"Destination Player {player_id}",
+                    player_id_fotmob=9001 + index,
+                )
+                for index, player_id in enumerate(existing_ids, 1)
+            ],
+        ),
+        source_url="https://www.fotmob.com/api/data/teams?id=200",
+        complete=True,
+    )
+
+    matched = _match_transfers_statefully(
+        [],
+        matcher,
+        80,
+        {20: existing_ids},
+        {20},
+        validated_fotmob_ids={200},
+        validated_fotmob_teams={200: 20},
+        squad_snapshots=(snapshot,),
+    )
+
+    assert [
+        (item.transfer.transfer_type, item.player_id, item.from_team_id, item.to_team_id)
+        for item in matched
+    ] == [("squad_registration", 3999, None, 20)]
+    plan = _plan_roster_actions(
+        matched,
+        {20: TeamData(20, existing_ids + [0] * 15)},
+        {20},
+        object(),
+        {},
+    )
+    assert [(item.action, item.current_team_id) for item in plan] == [("add", None)]
+
+
+def test_snapshot_identity_collision_keeps_current_roster_anchor():
+    from scraper.matcher import NameMatcher
+
+    source_ids = list(range(3001, 3018))
+    destination_ids = list(range(4001, 4017))
+    matcher = NameMatcher()
+    matcher.load_player_db(
+        [
+            ("Allan", 3001),
+            *[
+                (f"Source Player {player_id}", player_id)
+                for player_id in source_ids[1:]
+            ],
+            *[
+                (f"Destination Player {player_id}", player_id)
+                for player_id in destination_ids
+            ],
+        ]
+    )
+    matcher.load_team_db({"Lanus": 10, "Manchester City": 20})
+    source_snapshot = SquadSnapshot(
+        club_name="Lanus",
+        team_id_fotmob=100,
+        members=(
+            SquadMember("Allan", player_id_fotmob=9000),
+            *[
+                SquadMember(
+                    f"Source Player {player_id}",
+                    player_id_fotmob=9100 + index,
+                )
+                for index, player_id in enumerate(source_ids[1:], 1)
+            ],
+        ),
+        source_url="https://www.fotmob.com/api/data/teams?id=100",
+        complete=True,
+    )
+    destination_snapshot = SquadSnapshot(
+        club_name="Manchester City",
+        team_id_fotmob=200,
+        members=(
+            SquadMember("Allan", player_id_fotmob=9001),
+            *[
+                SquadMember(
+                    f"Destination Player {player_id}",
+                    player_id_fotmob=9200 + index,
+                )
+                for index, player_id in enumerate(destination_ids, 1)
+            ],
+        ),
+        source_url="https://www.fotmob.com/api/data/teams?id=200",
+        complete=True,
+    )
+
+    matched = _match_transfers_statefully(
+        [],
+        matcher,
+        80,
+        {10: source_ids, 20: destination_ids},
+        {10, 20},
+        validated_fotmob_ids={100, 200},
+        validated_fotmob_teams={100: 10, 200: 20},
+        squad_snapshots=(source_snapshot, destination_snapshot),
+    )
+
+    assert matched == []
+
+
+
+
 
 def test_snapshot_prefers_club_roster_over_unrelated_exact_name():
     from scraper.matcher import NameMatcher
