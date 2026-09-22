@@ -1238,6 +1238,25 @@ class RosterGamePlanMixin:
             ]
             for role in range(starter_count)
         ]
+
+        # CB role order is formation-specific. In a two-CB line the first
+        # slot renders right and the second left; in a three-CB line the
+        # first slot is central, then right, then left. This side preference
+        # is deliberately limited to CB slots, never LB/RB or another line.
+        cb_roles = [role for role, code in enumerate(target_codes) if code == 1]
+        cb_side_by_role: dict[int, str] = {}
+        if len(cb_roles) == 2:
+            cb_side_by_role[cb_roles[0]] = "R"
+            cb_side_by_role[cb_roles[1]] = "L"
+        elif len(cb_roles) >= 3:
+            cb_side_by_role[cb_roles[1]] = "R"
+            cb_side_by_role[cb_roles[-1]] = "L"
+
+        def player_preferred_foot(slot: int) -> str | None:
+            player_id = roster.player_ids[slot]
+            getter = getattr(self, "get_player_preferred_foot", None)
+            return getter(player_id) if callable(getter) else None
+
         preferred_slots: list[int] = []
         preferred_rank: dict[int, int] = {}
         for player_id in preferred_starters:
@@ -1297,6 +1316,15 @@ class RosterGamePlanMixin:
                 value += 8
             if current_role.get(slot) == role:
                 value += 12
+            side = cb_side_by_role.get(role)
+            if (
+                side is not None
+                and player_code(slot) == 1
+                and player_preferred_foot(slot) == side
+            ):
+                # Strong-foot alignment wins over incumbent/live-XI tie-breaks,
+                # while unknown or opposite-foot CBs remain valid fallbacks.
+                value += 40
             return value
 
         assigned: dict[int, int] = {0: current_slots[0]} if starter_count else {}

@@ -102,6 +102,8 @@ PE_PLAYER_NAME = 0x36      # 61 bytes null-terminated string
 PE_PRINT_NAME = 0x73       # 61 bytes null-terminated string
 PE_AGE_BYTE = 0x20         # 6-bit age field starts at bit 7
 PE_REGISTERED_POSITION_BYTE = 0x21  # 4-bit position field starts at bit 5
+PE_STRONG_FOOT_BYTE = 0x2F
+PE_STRONG_FOOT_MASK = 1 << 5
 
 # Team entry
 TE_TEAM_ID = 0x000         # 4 bytes uint32 LE
@@ -162,6 +164,7 @@ class EditFile(RosterGamePlanMixin):
         self.team_player_start: int = 0
         self.competition_entry_start: int = 0
         self.game_plan_start: int = 0
+        self._player_record_offsets: dict[int, int] | None = None
         self.save_header: SaveHeader | None = None
         self.game_root: Path | None = None
         self.player_catalog_report: PlayerCatalogReport | None = None
@@ -248,6 +251,38 @@ class EditFile(RosterGamePlanMixin):
         position = (record.registered_position or "").strip()
         return position or None
 
+    def _player_record_offsets_by_id(self) -> dict[int, int]:
+        """Index save-player records once for repeated metadata lookups."""
+        offsets = self._player_record_offsets
+        if offsets is not None:
+            return offsets
+        offsets = {}
+        for index in range(min(self.player_count, MAX_PLAYERS)):
+            entry_offset = self.player_start + index * PLAYER_TOTAL_SIZE
+            if entry_offset + PLAYER_ENTRY_SIZE > len(self._data):
+                break
+            player_id = struct.unpack_from(
+                "<I", self._data, entry_offset + PE_PLAYER_ID
+            )[0]
+            if player_id:
+                offsets.setdefault(player_id, entry_offset)
+        self._player_record_offsets = offsets
+        return offsets
+
+    def _save_player_preferred_foot(self, player_id: int) -> str | None:
+        entry_offset = self._player_record_offsets_by_id().get(player_id)
+        if entry_offset is None:
+            return None
+        return (
+            "L"
+            if self._data[entry_offset + PE_STRONG_FOOT_BYTE] & PE_STRONG_FOOT_MASK
+            else "R"
+        )
+
+    def get_player_preferred_foot(self, player_id: int) -> str | None:
+        """Return strong-foot metadata from the save player record."""
+        return self._save_player_preferred_foot(player_id)
+
     def get_player_position(self, player_id: int) -> str | None:
         """Return native position first, then selected-save fallback metadata."""
         native_position = self._native_player_position(player_id)
@@ -307,6 +342,7 @@ class EditFile(RosterGamePlanMixin):
 
         with open(self.path, "rb") as f:
             self._data = bytearray(f.read())
+        self._player_record_offsets = None
 
         logger.info(f"Loaded {len(self._data):,} bytes from {self.path}")
         self._parse_header()
@@ -315,6 +351,7 @@ class EditFile(RosterGamePlanMixin):
     def load_bytes(self, data: bytes | bytearray):
         """Load from raw bytes (for testing)."""
         self._data = bytearray(data)
+        self._player_record_offsets = None
         self._parse_header()
         self._calculate_offsets()
 

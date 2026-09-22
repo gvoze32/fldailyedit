@@ -6,7 +6,12 @@ from pathlib import Path
 import config
 import pytest
 
-from editor.editfile import PE_REGISTERED_POSITION_BYTE, EditFile
+from editor.editfile import (
+    PE_REGISTERED_POSITION_BYTE,
+    PE_STRONG_FOOT_BYTE,
+    PLAYER_TOTAL_SIZE,
+    EditFile,
+)
 from editor.roster import (
     GP_ATTACK_PLAYERS,
     GP_CAPTAIN,
@@ -105,6 +110,24 @@ def test_playerbin_invalid_position_is_not_misclassified_as_goalkeeper():
 
     assert record is not None
     assert record.registered_position == "UNKNOWN(15)"
+
+
+def test_edit_file_reads_strong_foot_from_save_player_record():
+    from tests.test_editor import _build_mock_data
+
+    edit_file = EditFile()
+    edit_file.load_bytes(
+        _build_mock_data(
+            num_players=1,
+            num_teams=0,
+            num_team_player=0,
+            num_game_plans=0,
+            player_entries=[(999999, "Left-footed CB")],
+        )
+    )
+    edit_file._data[edit_file.player_start + PE_STRONG_FOOT_BYTE] = 1 << 5
+
+    assert edit_file.get_player_preferred_foot(999999) == "L"
 
 @pytest.mark.skipif(
     not EXTRA_CPK_PATH.exists(), reason="data_extra.cpk fixture is not available"
@@ -613,6 +636,113 @@ def test_position_aware_gameplan_repair_promotes_exact_roles():
                 game_plan_offset + preset_offset + phase_offset :
                 game_plan_offset + preset_offset + phase_offset + 11
             ] == bytes(target_positions)
+
+
+def test_cb_roles_prefer_matching_strong_foot_by_side():
+    from tests.test_editor import _build_mock_data
+
+    player_ids = list(range(4000, 4012))
+    positions = [
+        "GK",
+        "CB",
+        "CB",
+        "CB",
+        "RB",
+        "LB",
+        "DMF",
+        "CMF",
+        "AMF",
+        "LWF",
+        "CF",
+        "RWF",
+    ]
+    feet = ["R", "R", "L", "R", "R", "L", "R", "R", "R", "R", "R", "R"]
+    data = _build_mock_data(
+        num_players=len(player_ids),
+        num_teams=1,
+        num_team_player=1,
+        num_game_plans=1,
+        team_player_entries=[
+            (101, player_ids, list(range(1, len(player_ids) + 1))),
+        ],
+        player_entries=[(player_id, f"Player {player_id}") for player_id in player_ids],
+        league_team_ids=[101],
+    )
+    edit_file = EditFile()
+    edit_file.load_bytes(data)
+    for index, foot in enumerate(feet):
+        if foot == "L":
+            edit_file._data[
+                edit_file.player_start + index * PLAYER_TOTAL_SIZE + PE_STRONG_FOOT_BYTE
+            ] |= 1 << 5
+    edit_file.attach_playerbin(
+        PlayerBinDatabase(
+            {
+                player_id: PlayerBinRecord(
+                    player_id,
+                    f"Player {player_id}",
+                    24,
+                    position,
+                    0,
+                )
+                for player_id, position in zip(player_ids, positions)
+            }
+        )
+    )
+    game_plan_offset = edit_file.game_plan_start
+    target_positions = [0, 1, 1, 1, 3, 2, 4, 5, 8, 10, 12]
+    for preset_offset in GP_POSITION_PRESETS:
+        for phase_offset in GP_POSITION_PHASE_OFFSETS:
+            edit_file._data[
+                game_plan_offset + preset_offset + phase_offset :
+                game_plan_offset + preset_offset + phase_offset + 11
+            ] = bytes(target_positions)
+    edit_file._data[
+        game_plan_offset + GP_LINEUP :
+        game_plan_offset + GP_LINEUP + 11
+    ] = bytes(range(11))
+
+    edit_file.repair_game_plans(
+        preferred_starters={101: ()},
+        align_positions=True,
+    )
+
+    roster = edit_file.get_team_roster(101)
+    assert roster is not None
+    lineup = list(
+        edit_file._data[
+            game_plan_offset + GP_LINEUP :
+            game_plan_offset + GP_LINEUP + 11
+        ]
+    )
+    starter_ids = [roster.player_ids[slot] for slot in lineup]
+
+    assert starter_ids[1:4] == [4001, 4003, 4002]
+    two_cb_positions = [0, 1, 1, 3, 2, 4, 5, 8, 10, 9, 12]
+    for preset_offset in GP_POSITION_PRESETS:
+        for phase_offset in GP_POSITION_PHASE_OFFSETS:
+            edit_file._data[
+                game_plan_offset + preset_offset + phase_offset :
+                game_plan_offset + preset_offset + phase_offset + 11
+            ] = bytes(two_cb_positions)
+    edit_file._data[
+        game_plan_offset + GP_LINEUP :
+        game_plan_offset + GP_LINEUP + 11
+    ] = bytes([0, 2, 3, 4, 5, 6, 7, 8, 11, 9, 10])
+
+    edit_file.repair_game_plans(
+        preferred_starters={101: ()},
+        align_positions=True,
+    )
+    lineup = list(
+        edit_file._data[
+            game_plan_offset + GP_LINEUP :
+            game_plan_offset + GP_LINEUP + 11
+        ]
+    )
+    starter_ids = [roster.player_ids[slot] for slot in lineup]
+
+    assert starter_ids[1:3] == [4003, 4002]
 
 
 def test_position_aware_repair_rejects_cross_line_and_opposite_wing_players():
