@@ -671,15 +671,7 @@ def _append_current_squad_moves(
         if len(destination_ids) != 1:
             continue
         destination_id = next(iter(destination_ids))
-        destination_coverage = snapshot_coverage.get(destination_id)
-        if (
-            destination_id not in club_ids
-            or destination_coverage is None
-            or (
-                not destination_coverage.healthy
-                and bool(destination_coverage.current_player_ids)
-            )
-        ):
+        if destination_id not in club_ids:
             continue
 
         current_clubs = [
@@ -690,11 +682,31 @@ def _append_current_squad_moves(
         if len(current_clubs) > 1:
             continue
         source_id = current_clubs[0] if current_clubs else None
-        # Source snapshot health gates destructive roster reconciliation, not
-        # a destination-only registration for a known catalog player.
+
+        destination_coverage = snapshot_coverage.get(destination_id)
+        if destination_coverage is None:
+            continue
+        # A complete destination snapshot is sufficient evidence for a
+        # non-destructive registration of a uniquely resolved catalog player.
+        # Stale local academy entries can make the coverage ratio unhealthy;
+        # they must not prevent adding a player absent from every local roster.
+        if (
+            not destination_coverage.healthy
+            and bool(destination_coverage.current_player_ids)
+            and source_id is not None
+        ):
+            continue
+
+        # A healthy complete destination snapshot is authoritative for current
+        # membership, even when the player's local source team was not indexed.
+        # Keep moves gated when destination coverage is also unhealthy.
         if source_id is not None:
             source_coverage = snapshot_coverage.get(source_id)
-            if source_coverage is None and not allow_uncovered_source:
+            if (
+                source_coverage is None
+                and not allow_uncovered_source
+                and not destination_coverage.healthy
+            ):
                 if source_id not in uncovered_source_ids:
                     source_name = matcher.get_team_name(source_id) or f"Team {source_id}"
                     logger.warning(
