@@ -1197,14 +1197,12 @@ class RosterGamePlanMixin:
         preferred_starters: Sequence[int] = (),
         position_overrides: Mapping[int, str] | None = None,
     ) -> tuple[bool, int]:
-        """Align the active XI and tactical position bytes with current roles.
+        """Align the active XI with existing formation roles.
 
-        The legacy game-plan lineup stores roster-slot indexes, while the
-        position bytes describe the role at each lineup ordinal.  Transfers can
-        therefore leave a valid permutation that still puts a full-back in a
-        winger role.  Prefer the live XI when available, promote an exact-role
-        roster match for an incompatible starter, and finally keep the existing
-        order as the stable fallback.
+        The position arrays are formation slots: they control where a role
+        renders on the Game Plan screen. They are not player metadata and
+        must never be rewritten from a player's registered position. Promote
+        only players compatible with the role's line and, for LWF/RWF, side.
         """
         active_slots = [
             slot for slot, player_id in enumerate(roster.player_ids) if player_id
@@ -1268,42 +1266,51 @@ class RosterGamePlanMixin:
             if slot not in candidate_slots:
                 candidate_slots.append(slot)
 
-        def compatibility(role: int, slot: int) -> int:
+        def compatibility(role: int, slot: int) -> int | None:
             player_position = player_code(slot)
             target = target_codes[role]
             if player_position is None:
-                return 10
-            if player_position == target:
+                return None
+            if target == player_position:
                 return 100
-            if player_position in (9, 10) and target in (9, 10):
-                return 80
-            if player_position in (11, 12) and target in (11, 12):
-                return 70
-            if _game_plan_position_line(player_position) == _game_plan_position_line(
-                target
-            ):
-                return 45
-            return -50
+            if target in (9, 10):
+                # Game Plan coordinates are literal: LWF stays left and RWF
+                # stays right. These roles are never interchangeable.
+                return None
+            if target in (1, 2, 3):
+                return 55 if player_position in (1, 2, 3) else None
+            if target in (4, 5, 6, 7, 8):
+                return 55 if player_position in (4, 5, 6, 7, 8) else None
+            if target in (11, 12):
+                return 55 if player_position in (9, 10, 11, 12) else None
+            return None
 
         def score(role: int, slot: int) -> int:
             value = compatibility(role, slot)
+            if value is None:
+                return -10_000
             preferred_index = preferred_rank.get(slot)
             if preferred_index is not None:
-                # Earlier players in the verified latest XI win ambiguous
-                # same-line roles.  This also lets caller-supplied priorities
-                # be prepended without a second selection mechanism.
-                value += max(0, 60 - preferred_index * 3)
-            if slot in current_role and compatibility(role, slot) >= 0:
-                value += 15
-            if current_role.get(slot) == role and compatibility(role, slot) >= 0:
-                value += 20
+                # Live-XI order breaks ties only after line and side
+                # compatibility have been established.
+                value += max(0, 24 - preferred_index)
+            if slot in current_role:
+                value += 8
+            if current_role.get(slot) == role:
+                value += 12
             return value
 
         role_order = sorted(
             range(starter_count),
             key=lambda role: (
-                sum(compatibility(role, slot) >= 100 for slot in candidate_slots),
-                sum(compatibility(role, slot) > 0 for slot in candidate_slots),
+                sum(
+                    compatibility(role, slot) == 100
+                    for slot in candidate_slots
+                ),
+                sum(
+                    compatibility(role, slot) is not None
+                    for slot in candidate_slots
+                ),
                 role,
             ),
         )
@@ -1312,10 +1319,15 @@ class RosterGamePlanMixin:
         role_order = [role for role in role_order if role != 0]
         for role in role_order:
             available = [
-                slot for slot in candidate_slots if slot not in used_slots
+                slot
+                for slot in candidate_slots
+                if slot not in used_slots
+                and compatibility(role, slot) is not None
             ]
             if not available:
-                break
+                # Never put a known player from another line or wing into
+                # this role. Preserve the complete existing plan instead.
+                return False, 0
             selected = max(
                 available,
                 key=lambda slot: (
@@ -1354,26 +1366,10 @@ class RosterGamePlanMixin:
                 game_plan_offset + GP_LINEUP + TP_MAX_PLAYERS
             ] = bytes(lineup)
 
-        repaired_positions = 0
-        for role, slot in enumerate(repaired_lineup):
-            desired_code = player_code(slot)
-            if desired_code is None:
-                continue
-            for preset_offset in GP_POSITION_PRESETS:
-                for phase_offset in GP_POSITION_PHASE_OFFSETS:
-                    position_address = (
-                        game_plan_offset
-                        + preset_offset
-                        + phase_offset
-                        + role * GP_POSITION_ENTRY_SIZE
-                    )
-                    if position_address >= len(self._data):
-                        continue
-                    if self._data[position_address] == desired_code:
-                        continue
-                    self._data[position_address] = desired_code
-                    repaired_positions += 1
-        return changed, repaired_positions
+        # Position arrays describe the formation slots, not the registered
+        # position of whichever player occupies each slot. Keep every preset
+        # and phase intact; only the lineup permutation is reconciled.
+        return changed, 0
 
     def _update_game_plan_after_removal(
         self,
@@ -1654,12 +1650,12 @@ class RosterGamePlanMixin:
         position_overrides: Mapping[int, Mapping[int, str]] | None = None,
         align_positions: bool = False,
     ) -> dict[str, int]:
-        """Repair roster mappings and optionally reconcile current tactical XI.
+        """Repair roster mappings and optionally reconcile current starters.
 
         Existing valid roster-slot references keep their relative order by
-        default.  When ``preferred_starters`` is supplied for a team,
-        position-aware reconciliation may promote an exact-role reserve and
-        rewrites tactical position bytes from verified current positions.
+        default. When ``preferred_starters`` is supplied, candidates can be
+        promoted into the existing formation roles, but the position arrays
+        themselves remain untouched except for goalkeeper invariants.
         """
         rosters = self.get_all_rosters()
         repaired_lineups = 0

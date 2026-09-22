@@ -858,11 +858,8 @@ def _plan_gameplan_preferences(
             starter_ids.append(player_id)
 
         # Keep a key even when the current match could not safely resolve XI
-        # identities: position bytes are still safe to repair from the full
-        # current-squad snapshot, while lineup promotion remains conservative.
-        preferred_starters[team_id] = tuple(starter_ids)
-        if resolved_positions:
-            position_overrides[team_id] = resolved_positions
+        # identities: starter promotion remains conservative, and any manual
+        # position overrides only classify candidates for existing roles.
 
     return preferred_starters, position_overrides
 
