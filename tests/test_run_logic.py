@@ -1044,6 +1044,101 @@ def test_snapshot_prefers_club_roster_over_unrelated_exact_name():
     assert matched == []
 
 
+def test_snapshot_short_name_prefers_local_long_identity_over_catalog_name():
+    from scraper.matcher import NameMatcher
+    from transfer_planning import _match_snapshot_member
+
+    matcher = NameMatcher()
+    matcher.load_player_db(
+        [
+            ("Gabriel", 90866),
+            ("Gabriel Magalhães", 111207),
+        ],
+        positions={111207: "CB"},
+        ages={111207: 28},
+    )
+    member = SquadMember("Gabriel", position="CB", age=28)
+
+    player_id, player_name, confidence = _match_snapshot_member(
+        matcher,
+        member,
+        10,
+        {10: [111207], 20: []},
+        80,
+    )
+
+    assert (player_id, player_name) == (111207, "Gabriel Magalhães")
+    assert confidence == 100.0
+
+
+def test_snapshot_global_fuzzy_rejects_unsafe_near_name():
+    from scraper.matcher import NameMatcher
+    from transfer_planning import _match_snapshot_member
+
+    matcher = NameMatcher()
+    matcher.load_player_db(
+        [
+            ("Peque Fernández", 131798),
+            ("Ezequiel Fernández", 140305),
+        ]
+    )
+
+    player_id, player_name, confidence = _match_snapshot_member(
+        matcher,
+        SquadMember("Equi Fernández", position="CDM", age=24),
+        10,
+        {10: [], 20: [131798]},
+        80,
+    )
+
+    assert (player_id, player_name) == (None, "")
+    assert confidence < 95
+
+
+def test_stateful_matching_rejects_stale_provider_identity_with_conflicting_metadata():
+    from scraper.matcher import NameMatcher
+
+    matcher = NameMatcher()
+    matcher.load_player_db(
+        [("Brian Arias", 90158)],
+        positions={90158: "CB"},
+        ages={90158: 19},
+    )
+    matcher.load_team_db({"Old FC": 10, "New FC": 20})
+    transfer = Transfer(
+        "Brian Fariñas",
+        "Old FC",
+        "New FC",
+        player_id_fotmob=777,
+        position="CM",
+        age=20,
+    )
+    history = [
+        {
+            "player_id": 90158,
+            "fotmob_player_id": 777,
+            "player_name": "Brian Arias",
+            "from_team_id": 10,
+            "to_team_id": 20,
+            "transfer_type": "transfer",
+            "transfer_date": "2026-08-01",
+        }
+    ]
+
+    matched = _match_transfers_statefully(
+        [transfer],
+        matcher,
+        80,
+        {10: [90158], 20: []},
+        {10, 20},
+        history,
+    )
+
+    assert len(matched) == 1
+    assert matched[0].player_id is None
+
+
+
 def test_unhealthy_snapshot_skips_inferred_moves_and_releases():
     from scraper.matcher import NameMatcher
 

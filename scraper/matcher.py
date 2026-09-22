@@ -256,7 +256,7 @@ class NameMatcher:
         self._cleaned_team_candidates: dict[str, list[tuple[str, int]]] = {}
         self._cleaned_team_names: list[str] = []
 
-        # Team aliases are the only external name mapping.
+        # Verified team aliases are external identity evidence.
         self._team_aliases: dict[str, str] = {}  # alias → canonical fl26_name
         self._normalized_team_aliases: dict[str, str] = {}
 
@@ -467,6 +467,16 @@ class NameMatcher:
             len(c_tokens) >= 2
             and len(q_tokens) > len(c_tokens)
             and q_tokens[: len(c_tokens)] == c_tokens
+        ):
+            base_score = max(base_score, 95.0)
+
+        # Provider feeds may insert a middle name while preserving the
+        # first and last identity tokens.
+        elif (
+            len(q_tokens) >= 2
+            and len(c_tokens) >= 2
+            and q_tokens[0] == c_tokens[0]
+            and q_tokens[-1] == c_tokens[-1]
         ):
             base_score = max(base_score, 95.0)
 

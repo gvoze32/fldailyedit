@@ -153,6 +153,19 @@ class TestPlayerMatching:
         pid, name, conf = matcher.match_player("Gabriel Jesus", threshold=75)
         assert pid == 5001
         assert conf >= 75
+    def test_first_and_last_tokens_survive_inserted_middle_name(self):
+        matcher = NameMatcher()
+        matcher.load_player_db({"Pierre Højbjerg": 1011})
+
+        player_id, matched_name, confidence = matcher.match_player(
+            "Pierre-Emile Højbjerg",
+            threshold=80,
+        )
+
+        assert player_id == 1011
+        assert matched_name == "Pierre Højbjerg"
+        assert confidence >= 95
+
 
     def test_contextual_disambiguation(self):
         """When multiple players share similar names, context chooses the one on from_team."""

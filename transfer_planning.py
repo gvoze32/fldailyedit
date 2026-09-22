@@ -172,6 +172,8 @@ def _snapshot_identity_map(
     }
 
 
+
+
 def _match_snapshot_member(
     matcher: NameMatcher,
     member: SquadMember,
@@ -249,8 +251,11 @@ def _match_snapshot_member(
             ):
                 exact_global_candidate = candidate
         # A unique exact catalog identity absent from every local roster is
-        # safe to restore from a complete current-squad snapshot.
-        if len(age_compatible) == 1:
+        # safe to restore from a complete current-squad snapshot only when
+        # the provider supplies a multi-token identity.
+        if len(age_compatible) == 1 and len(
+            _normalize(member.player_name).split()
+        ) >= 2:
             candidate = age_compatible[0]
             if (
                 candidate[1] not in all_roster_ids
@@ -341,9 +346,10 @@ def _match_snapshot_member(
             (score for score, _, _ in ranked_context),
             default=0.0,
         )
+    global_match_threshold = max(float(threshold or 0), 95.0)
     player_id, player_name, confidence = matcher.match_player(
         member.player_name,
-        threshold=max(float(threshold or 0), 90.0),
+        threshold=global_match_threshold,
         from_team_id=team_id,
         team_player_map=team_player_map,
         position=member.position,
@@ -353,7 +359,7 @@ def _match_snapshot_member(
     if (
         player_id is None
         or player_id not in all_roster_ids
-        or confidence < max(float(threshold or 0), 90.0)
+        or confidence < global_match_threshold
     ):
         return None, "", confidence
     return player_id, player_name, confidence
@@ -1018,7 +1024,26 @@ def _match_transfers_statefully(
                     "ignoring stale history for destination-only registration",
                     transfer.player_id_fotmob,
                 )
+            elif (
+                (transfer.position or transfer.age)
+                and not matcher._is_player_metadata_compatible(
+                    known_pid,
+                    position=transfer.position,
+                    age=transfer.age,
+                )
+            ):
+                logger.warning(
+                    "Rejecting stale provider identity %s for %r: "
+                    "metadata conflicts with PES player %s",
+                    transfer.player_id_fotmob,
+                    transfer.player_name,
+                    known_pid,
+                )
+                pid, pname = None, ""
             else:
+                # Historical provider IDs remain the only evidence for
+                # legitimate public-name changes when no metadata contradicts
+                # the established identity.
                 pid = known_pid
                 pname = fotmob_identity_names.get(
                     fotmob_player_id, transfer.player_name
