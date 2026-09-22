@@ -66,6 +66,7 @@ class SquadSnapshot:
     members: tuple[SquadMember, ...]
     source_url: str
     complete: bool = False
+    starter_members: tuple[SquadMember, ...] = ()
 
 
 

@@ -533,6 +533,103 @@ def test_repair_game_plans_preserves_role_position_bytes_when_moving_goalkeeper(
     assert edit_file.validate_integrity()["valid"] is True
 
 
+def test_position_aware_gameplan_repair_promotes_exact_roles():
+    from tests.test_editor import _build_mock_data
+
+    player_ids = list(range(1000, 1013))
+    positions = [
+        "GK",
+        "CB",
+        "CB",
+        "RB",
+        "LB",
+        "DMF",
+        "CMF",
+        "LB",
+        "RWF",
+        "AMF",
+        "CF",
+        "RWF",
+        "LWF",
+    ]
+    data = _build_mock_data(
+        num_players=0,
+        num_teams=1,
+        num_team_player=1,
+        num_game_plans=1,
+        team_player_entries=[
+            (101, player_ids, list(range(1, len(player_ids) + 1))),
+        ],
+        league_team_ids=[101],
+    )
+    edit_file = EditFile()
+    edit_file.load_bytes(data)
+    edit_file.attach_playerbin(
+        PlayerBinDatabase(
+            {
+                player_id: PlayerBinRecord(
+                    player_id,
+                    f"Player {player_id}",
+                    24,
+                    position,
+                    0,
+                )
+                for player_id, position in zip(player_ids, positions)
+            }
+        )
+    )
+    game_plan_offset = edit_file.game_plan_start
+    target_positions = [0, 1, 1, 3, 2, 4, 5, 10, 9, 8, 12]
+    for preset_offset in GP_POSITION_PRESETS:
+        for phase_offset in GP_POSITION_PHASE_OFFSETS:
+            values = (
+                target_positions
+                if (
+                    preset_offset == GP_POSITION_PRESETS[0]
+                    and phase_offset == GP_POSITION_PHASE_OFFSETS[0]
+                )
+                else [0] * 11
+            )
+            edit_file._data[
+                game_plan_offset + preset_offset + phase_offset :
+                game_plan_offset + preset_offset + phase_offset + 11
+            ] = bytes(values)
+
+    metrics = edit_file.repair_game_plans(
+        preferred_starters={101: (1011, 1012)},
+        position_overrides={101: {1011: "RW", 1012: "LW"}},
+        align_positions=True,
+    )
+    roster = edit_file.get_team_roster(101)
+    assert roster is not None
+    lineup = list(
+        edit_file._data[
+            game_plan_offset + GP_LINEUP :
+            game_plan_offset + GP_LINEUP + 11
+        ]
+    )
+    starter_ids = [roster.player_ids[slot] for slot in lineup]
+
+    assert 1011 in starter_ids
+    assert 1012 in starter_ids
+    assert 1007 not in starter_ids
+    assert metrics["repaired_lineups"] == 1
+    assert metrics["repaired_position_bytes"] > 0
+    for role, slot in enumerate(lineup):
+        player_id = roster.player_ids[slot]
+        expected = POSITION_NAMES.index(
+            {1011: "RWF", 1012: "LWF"}.get(
+                player_id,
+                positions[player_id - 1000],
+            )
+        )
+        for preset_offset in GP_POSITION_PRESETS:
+            for phase_offset in GP_POSITION_PHASE_OFFSETS:
+                assert edit_file._data[
+                    game_plan_offset + preset_offset + phase_offset + role
+                ] == expected
+
+
 def test_repair_game_plans_preserves_cross_line_tactical_positions():
     from tests.test_editor import _build_mock_data
 

@@ -634,6 +634,46 @@ class TestScraperSafety:
         assert result.fotmob_identity_map[100][0][0] == 42
         assert result.fotmob_identity_map[100][0][2] is snapshot.members[0]
 
+    def test_squad_snapshot_carries_latest_starting_xi(self):
+        from scraper.fotmob import FotmobScraper
+
+        payload = {
+            "squad": {
+                "squad": [
+                    {
+                        "members": [
+                            {
+                                "id": player_id,
+                                "name": f"Player {player_id}",
+                                "role": {"fallback": "CMF"},
+                            }
+                            for player_id in range(100, 111)
+                        ]
+                    }
+                ]
+            },
+            "overview": {
+                "lastLineupStats": {
+                    "starters": [
+                        {"id": 100, "name": "Player 100"},
+                        {"id": 101, "name": "Player 101"},
+                    ]
+                }
+            },
+        }
+
+        snapshot = FotmobScraper()._extract_squad_snapshot_from_team_data(
+            payload,
+            42,
+            "Example FC",
+        )
+
+        assert [member.player_name for member in snapshot.starter_members] == [
+            "Player 100",
+            "Player 101",
+        ]
+        assert snapshot.starter_members[0].position == "CMF"
+
 
 
     def test_squad_snapshot_excludes_coach_sections(self):

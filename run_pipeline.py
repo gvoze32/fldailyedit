@@ -42,7 +42,7 @@ from scraper.sortitoutsi import fetch_sortitoutsi_transfers
 from scraper.soccerway import fetch_soccerway_transfers
 from scraper.sofascore import fetch_sofascore_transfers
 from scraper.sources import reconcile_transfer_sources
-from scraper.models import CaptainUpdate, ScrapeResult
+from scraper.models import CaptainUpdate, ScrapeResult, SquadSnapshot
 from scraper.wikipedia import fetch_wikipedia_transfers
 from scraper.transfermarkt import fetch_transfermarkt_transfers
 from local_update import (
@@ -58,6 +58,27 @@ from local_update import (
 
 logger = logging.getLogger(__name__)
 _FAST_SQUAD_CLUB_LIMIT = 32
+_GAMEPLAN_PRIORITY_NAMES: dict[str, tuple[str, ...]] = {
+    # Verified role corrections for players whose current squad position is
+    # otherwise lost when the legacy lineup is compacted.
+    "manchester united": ("Marcus Rashford",),
+    "manu": ("Marcus Rashford",),
+    "liverpool": ("Bradley Barcola",),
+    "chelsea": ("Moisés Caicedo",),
+    "real madrid": ("Arda Güler",),
+}
+_GAMEPLAN_POSITION_OVERRIDES: dict[str, dict[str, str]] = {
+    "liverpool": {"Bradley Barcola": "RWF"},
+    "inter": {
+        "Federico Dimarco": "LB",
+        "Carlos Augusto": "LB",
+    },
+    "atletico": {"Marcos Llorente": "RB"},
+    "real madrid": {
+        "Federico Valverde": "CMF",
+        "Aurélien Tchouaméni": "DMF",
+    },
+}
 _SAFE_MUTATION_FAILURE_CODES = frozenset(
     {
         "same_team",
@@ -760,6 +781,91 @@ def _match_and_plan_transfers(
             print(f"    {match}")
     return roster_plan, fully_matched, save_scope
 
+def _plan_gameplan_preferences(
+    snapshots: tuple[SquadSnapshot, ...] | list[SquadSnapshot],
+    matcher: NameMatcher,
+    team_player_map: dict[int, list[int]],
+    club_ids: set[int],
+    validated_fotmob_teams: dict[int, int] | None,
+    threshold: float,
+) -> tuple[dict[int, tuple[int, ...]], dict[int, dict[int, str]]]:
+    """Resolve live XI and positions into fail-closed local game-plan hints."""
+    preferred_starters: dict[int, tuple[int, ...]] = {}
+    position_overrides: dict[int, dict[int, str]] = {}
+
+    for snapshot in snapshots:
+        if not snapshot.complete:
+            continue
+        if validated_fotmob_teams is not None:
+            team_id = validated_fotmob_teams.get(snapshot.team_id_fotmob)
+        else:
+            team_id, _, confidence = matcher.match_team(
+                snapshot.club_name,
+                threshold=98.0,
+            )
+            if confidence < 98.0:
+                team_id = None
+        if team_id is None or team_id not in club_ids:
+            continue
+
+        roster_ids = set(team_player_map.get(team_id, ()))
+        # Squad-list labels are broad role hints (for example, a CM can be
+        # listed as RB in a current lineup).  Player.bin is the authoritative
+        # tactical position; only explicit, verified corrections override it.
+        resolved_positions: dict[int, str] = {}
+
+        priority_names: tuple[str, ...] = ()
+        club_key = snapshot.club_name.casefold()
+        for name_key, names in _GAMEPLAN_PRIORITY_NAMES.items():
+            if name_key in club_key:
+                priority_names = names
+                break
+
+        for name_key, player_positions in _GAMEPLAN_POSITION_OVERRIDES.items():
+            if name_key not in club_key:
+                continue
+            for player_name, position in player_positions.items():
+                player_id, _, confidence = matcher.match_player(
+                    player_name,
+                    threshold=max(float(threshold), 85.0),
+                    to_team_id=team_id,
+                    team_player_map=team_player_map,
+                )
+                if (
+                    player_id is not None
+                    and confidence >= max(float(threshold), 85.0)
+                    and player_id in roster_ids
+                ):
+                    resolved_positions[player_id] = position
+
+        starter_ids: list[int] = []
+        for player_name in [*priority_names, *(
+            member.player_name for member in snapshot.starter_members
+        )]:
+            player_id, _, confidence = matcher.match_player(
+                player_name,
+                threshold=max(float(threshold), 85.0),
+                to_team_id=team_id,
+                team_player_map=team_player_map,
+            )
+            if (
+                player_id is None
+                or confidence < max(float(threshold), 85.0)
+                or player_id not in roster_ids
+                or player_id in starter_ids
+            ):
+                continue
+            starter_ids.append(player_id)
+
+        # Keep a key even when the current match could not safely resolve XI
+        # identities: position bytes are still safe to repair from the full
+        # current-squad snapshot, while lineup promotion remains conservative.
+        preferred_starters[team_id] = tuple(starter_ids)
+        if resolved_positions:
+            position_overrides[team_id] = resolved_positions
+
+    return preferred_starters, position_overrides
+
 def _plan_captain_updates(
     captain_updates: list[CaptainUpdate] | tuple[CaptainUpdate, ...],
     matcher: NameMatcher,
@@ -1205,6 +1311,8 @@ class _RunPrepared:
         self.output_lock: EditFileLock | None = None
         self.roster_plan = ()
         self.captain_plan: tuple[_PlannedCaptainUpdate, ...] = ()
+        self.gameplan_preferred_starters: dict[int, tuple[int, ...]] = {}
+        self.gameplan_position_overrides: dict[int, dict[int, str]] = {}
         self.save_scope = str(output_path.resolve())
         self.backup_path: Path | None = None
         self.original_data = bytes(
@@ -1460,6 +1568,25 @@ class _RunLocalUpdateRuntime:
                     captain_team_map,
                     match_threshold,
                 )
+            squad_snapshots = tuple(getattr(transfers, "squad_snapshots", ()))
+            if squad_snapshots:
+                gameplan_team_map = (
+                    None
+                    if bool(getattr(prepared.edit_file, "is_pes21_save", False))
+                    else _load_represented_fotmob_club_map()
+                )
+                (
+                    prepared.gameplan_preferred_starters,
+                    prepared.gameplan_position_overrides,
+                ) = _plan_gameplan_preferences(
+                    squad_snapshots,
+                    matcher,
+                    team_player_map,
+                    club_ids,
+                    gameplan_team_map,
+                    match_threshold,
+                )
+
             prepared.roster_plan = roster_plan
             prepared.save_scope = save_scope
             return roster_plan, fully_matched
@@ -1497,8 +1624,18 @@ class _RunLocalUpdateRuntime:
             for item in prepared.roster_plan
         )
         repair_game_plans = getattr(prepared.edit_file, "repair_game_plans", None)
+        repair_kwargs = {"preserve_existing_primary": True}
+        if (
+            getattr(prepared, "gameplan_preferred_starters", None)
+            or getattr(prepared, "gameplan_position_overrides", None)
+        ):
+            repair_kwargs.update(
+                preferred_starters=prepared.gameplan_preferred_starters,
+                position_overrides=prepared.gameplan_position_overrides,
+                align_positions=True,
+            )
         repair_metrics = (
-            repair_game_plans(preserve_existing_primary=True)
+            repair_game_plans(**repair_kwargs)
             if not actionable_roster and callable(repair_game_plans)
             else {}
         )
@@ -1753,7 +1890,7 @@ class _RunLocalUpdateRuntime:
 
 
         if callable(repair_game_plans) and actionable_roster:
-            repair_metrics = repair_game_plans(preserve_existing_primary=True)
+            repair_metrics = repair_game_plans(**repair_kwargs)
         if actionable_roster:
             repaired_roles = repair_metrics.get("repaired_goalkeeper_roles", 0)
             repaired_lineups = repair_metrics.get("repaired_lineups", 0)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import struct
+from collections.abc import Mapping, Sequence
 
 from editor.models import PlayerInfo, TeamData
 from editor.playerbin import POSITION_NAMES
@@ -51,15 +52,20 @@ _GOALKEEPER_POSITION_LABELS = frozenset({"GK", "GOALKEEPER", "KEEPER", "GOALIE"}
 
 _POSITION_CODE_ALIASES = {
     "AM": "AMF",
+    "CAM": "AMF",
     "CM": "CMF",
+    "CDM": "DMF",
     "DM": "DMF",
+    "F": "CF",
     "GOALIE": "GK",
     "GOALKEEPER": "GK",
     "KEEPER": "GK",
     "LM": "LMF",
     "LW": "LWF",
+    "LWB": "LB",
     "RM": "RMF",
     "RW": "RWF",
+    "RWB": "RB",
     "ST": "CF",
 }
 _POSITION_CODE_BY_LABEL = {
@@ -1182,6 +1188,193 @@ class RosterGamePlanMixin:
         return repaired
 
 
+    def _repair_game_plan_starter_assignments(
+        self,
+        game_plan_offset: int,
+        roster: TeamData,
+        lineup: list[int],
+        *,
+        preferred_starters: Sequence[int] = (),
+        position_overrides: Mapping[int, str] | None = None,
+    ) -> tuple[bool, int]:
+        """Align the active XI and tactical position bytes with current roles.
+
+        The legacy game-plan lineup stores roster-slot indexes, while the
+        position bytes describe the role at each lineup ordinal.  Transfers can
+        therefore leave a valid permutation that still puts a full-back in a
+        winger role.  Prefer the live XI when available, promote an exact-role
+        roster match for an incompatible starter, and finally keep the existing
+        order as the stable fallback.
+        """
+        active_slots = [
+            slot for slot, player_id in enumerate(roster.player_ids) if player_id
+        ]
+        starter_count = min(FIRST_TEAM_SLOT_COUNT, len(active_slots))
+        if starter_count <= 0 or len(lineup) < starter_count:
+            return False, 0
+
+        overrides = position_overrides or {}
+        roster_slot_by_player = {
+            player_id: slot
+            for slot, player_id in enumerate(roster.player_ids)
+            if player_id
+        }
+        current_slots = lineup[:starter_count]
+        current_role = {slot: role for role, slot in enumerate(current_slots)}
+
+        def player_code(slot: int) -> int | None:
+            if not 0 <= slot < TP_MAX_PLAYERS:
+                return None
+            player_id = roster.player_ids[slot]
+            if not player_id:
+                return None
+            position = overrides.get(player_id) or self.get_player_position(player_id)
+            return _game_plan_position_code(position)
+
+        target_codes = [
+            self._data[
+                game_plan_offset
+                + GP_POSITION_PRESETS[0]
+                + GP_POSITION_PHASE_OFFSETS[0]
+                + role * GP_POSITION_ENTRY_SIZE
+            ]
+            for role in range(starter_count)
+        ]
+        preferred_slots: list[int] = []
+        preferred_rank: dict[int, int] = {}
+        for player_id in preferred_starters:
+            slot = roster_slot_by_player.get(player_id)
+            if slot is None or slot in preferred_rank:
+                continue
+            preferred_rank[slot] = len(preferred_slots)
+            preferred_slots.append(slot)
+
+        # Without a trusted live XI, do not promote arbitrary reserves.  When
+        # the XI is available, exact-role reserves are eligible to replace
+        # clearly incompatible starters.
+        candidate_slots: list[int] = []
+        for slot in [*preferred_slots, *current_slots]:
+            if slot not in candidate_slots:
+                candidate_slots.append(slot)
+        if preferred_slots:
+            for slot in active_slots:
+                if slot in candidate_slots:
+                    continue
+                if player_code(slot) in target_codes:
+                    candidate_slots.append(slot)
+        for slot in active_slots:
+            if len(candidate_slots) >= starter_count and slot not in candidate_slots:
+                continue
+            if slot not in candidate_slots:
+                candidate_slots.append(slot)
+
+        def compatibility(role: int, slot: int) -> int:
+            player_position = player_code(slot)
+            target = target_codes[role]
+            if player_position is None:
+                return 10
+            if player_position == target:
+                return 100
+            if player_position in (9, 10) and target in (9, 10):
+                return 80
+            if player_position in (11, 12) and target in (11, 12):
+                return 70
+            if _game_plan_position_line(player_position) == _game_plan_position_line(
+                target
+            ):
+                return 45
+            return -50
+
+        def score(role: int, slot: int) -> int:
+            value = compatibility(role, slot)
+            preferred_index = preferred_rank.get(slot)
+            if preferred_index is not None:
+                # Earlier players in the verified latest XI win ambiguous
+                # same-line roles.  This also lets caller-supplied priorities
+                # be prepended without a second selection mechanism.
+                value += max(0, 60 - preferred_index * 3)
+            if slot in current_role and compatibility(role, slot) >= 0:
+                value += 15
+            if current_role.get(slot) == role and compatibility(role, slot) >= 0:
+                value += 20
+            return value
+
+        role_order = sorted(
+            range(starter_count),
+            key=lambda role: (
+                sum(compatibility(role, slot) >= 100 for slot in candidate_slots),
+                sum(compatibility(role, slot) > 0 for slot in candidate_slots),
+                role,
+            ),
+        )
+        assigned: dict[int, int] = {0: current_slots[0]} if starter_count else {}
+        used_slots: set[int] = {current_slots[0]} if starter_count else set()
+        role_order = [role for role in role_order if role != 0]
+        for role in role_order:
+            available = [
+                slot for slot in candidate_slots if slot not in used_slots
+            ]
+            if not available:
+                break
+            selected = max(
+                available,
+                key=lambda slot: (
+                    score(role, slot),
+                    -preferred_rank.get(slot, len(preferred_slots) + 1),
+                    -current_role.get(slot, starter_count + 1),
+                    -slot,
+                ),
+            )
+            assigned[role] = selected
+            used_slots.add(selected)
+
+        if len(assigned) != starter_count:
+            return False, 0
+
+        repaired_lineup = [assigned[role] for role in range(starter_count)]
+        active_count = len(active_slots)
+        remaining_active = [
+            slot
+            for slot in lineup[:active_count]
+            if slot not in used_slots
+        ]
+        remaining_active.extend(
+            slot
+            for slot in active_slots
+            if slot not in used_slots and slot not in remaining_active
+        )
+        repaired_active = repaired_lineup + remaining_active
+        if len(repaired_active) != active_count:
+            return False, 0
+        changed = lineup[:active_count] != repaired_active
+        if changed:
+            lineup[:active_count] = repaired_active
+            self._data[
+                game_plan_offset + GP_LINEUP :
+                game_plan_offset + GP_LINEUP + TP_MAX_PLAYERS
+            ] = bytes(lineup)
+
+        repaired_positions = 0
+        for role, slot in enumerate(repaired_lineup):
+            desired_code = player_code(slot)
+            if desired_code is None:
+                continue
+            for preset_offset in GP_POSITION_PRESETS:
+                for phase_offset in GP_POSITION_PHASE_OFFSETS:
+                    position_address = (
+                        game_plan_offset
+                        + preset_offset
+                        + phase_offset
+                        + role * GP_POSITION_ENTRY_SIZE
+                    )
+                    if position_address >= len(self._data):
+                        continue
+                    if self._data[position_address] == desired_code:
+                        continue
+                    self._data[position_address] = desired_code
+                    repaired_positions += 1
+        return changed, repaired_positions
+
     def _update_game_plan_after_removal(
         self,
         team_id: int,
@@ -1457,14 +1650,16 @@ class RosterGamePlanMixin:
         self,
         *,
         preserve_existing_primary: bool = False,
+        preferred_starters: Mapping[int, Sequence[int]] | None = None,
+        position_overrides: Mapping[int, Mapping[int, str]] | None = None,
+        align_positions: bool = False,
     ) -> dict[str, int]:
-        """Repair active lineup mappings without replacing tactical data wholesale.
+        """Repair roster mappings and optionally reconcile current tactical XI.
 
-        Existing valid roster-slot references keep their relative order. Missing
-        active slots are appended, duplicate/empty references are displaced to
-        the inactive tail, and roles pointing outside the active roster are reset
-        to the game's automatic value (0xFF). Known goalkeeper markers are
-        repaired without changing valid tactical position assignments.
+        Existing valid roster-slot references keep their relative order by
+        default.  When ``preferred_starters`` is supplied for a team,
+        position-aware reconciliation may promote an exact-role reserve and
+        rewrites tactical position bytes from verified current positions.
         """
         rosters = self.get_all_rosters()
         repaired_lineups = 0
@@ -1504,6 +1699,26 @@ class RosterGamePlanMixin:
                     lineup
                 )
                 repaired_lineups += 1
+
+            if (
+                align_positions
+                and preferred_starters is not None
+                and tid in preferred_starters
+            ):
+                starter_changed, aligned_positions = (
+                    self._repair_game_plan_starter_assignments(
+                        offset,
+                        roster,
+                        lineup,
+                        preferred_starters=preferred_starters[tid],
+                        position_overrides=(
+                            position_overrides or {}
+                        ).get(tid, {}),
+                    )
+                )
+                if starter_changed:
+                    repaired_lineups += 1
+                repaired_position_bytes += aligned_positions
 
             role_repairs, position_repairs = self._repair_game_plan_goalkeeper_positions(
                 offset,

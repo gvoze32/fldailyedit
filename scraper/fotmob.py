@@ -847,6 +847,78 @@ class FotmobScraper:
 
         return tuple(members)
 
+    def _extract_last_lineup_members(
+        self,
+        data: dict,
+        members: tuple[SquadMember, ...],
+    ) -> tuple[SquadMember, ...]:
+        """Return the latest starting XI with squad metadata attached."""
+        overview = data.get("overview")
+        last_lineup = (
+            overview.get("lastLineupStats")
+            if isinstance(overview, dict)
+            else None
+        )
+        raw_starters = (
+            last_lineup.get("starters")
+            if isinstance(last_lineup, dict)
+            else None
+        )
+        if not isinstance(raw_starters, list):
+            return ()
+
+        by_id = {
+            member.player_id_fotmob: member
+            for member in members
+            if member.player_id_fotmob is not None
+        }
+        by_name = {
+            member.player_name.casefold(): member
+            for member in members
+        }
+        starters: list[SquadMember] = []
+        seen: set[tuple[str, int | str]] = set()
+        for raw_member in raw_starters:
+            if not isinstance(raw_member, dict):
+                continue
+            name = str(raw_member.get("name") or "").strip()
+            if not name:
+                continue
+            player_id = _optional_positive_int(raw_member.get("id"))
+            key: tuple[str, int | str] = (
+                ("id", player_id) if player_id is not None else ("name", name.casefold())
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+
+            squad_member = (
+                by_id.get(player_id)
+                if player_id is not None
+                else by_name.get(name.casefold())
+            )
+            if squad_member is not None:
+                starters.append(squad_member)
+                continue
+
+            position = _primary_squad_position(raw_member)
+            try:
+                age = int(raw_member.get("age") or 0)
+            except (TypeError, ValueError):
+                age = 0
+            starters.append(
+                SquadMember(
+                    player_name=name,
+                    player_id_fotmob=player_id,
+                    position=position,
+                    nationality=str(
+                        raw_member.get("countryName") or ""
+                    ).strip(),
+                    age=age,
+                )
+            )
+        return tuple(starters)
+
     def _extract_squad_snapshot_from_team_data(
         self,
         data: dict,
@@ -859,12 +931,14 @@ class FotmobScraper:
             team_id,
             team_name,
         )
+        starter_members = self._extract_last_lineup_members(data, members)
         return SquadSnapshot(
             club_name=team_name.strip(),
             team_id_fotmob=team_id,
             members=members,
             source_url=f"https://www.fotmob.com/api/data/teams?id={team_id}",
             complete=len(members) >= _MIN_COMPLETE_SQUAD_MEMBERS,
+            starter_members=starter_members,
         )
 
     def _extract_squad_from_team_data(
