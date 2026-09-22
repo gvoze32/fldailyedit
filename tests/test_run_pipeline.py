@@ -18,6 +18,39 @@ from local_update import (
     LocalUpdateStage,
 )
 
+def test_gameplan_preferences_persist_resolved_snapshot_keys():
+    from scraper.matcher import NameMatcher
+    from scraper.models import SquadMember, SquadSnapshot
+
+    member = SquadMember(
+        "Example Player",
+        player_id_fotmob=9001,
+        position="RWF",
+    )
+    snapshot = SquadSnapshot(
+        club_name="Example FC",
+        team_id_fotmob=42,
+        members=(member,),
+        starter_members=(member,),
+        source_url="https://example.test/team",
+        complete=True,
+    )
+    matcher = NameMatcher()
+    matcher.load_player_db({"Example Player": 1001})
+
+    preferred, overrides = run_pipeline._plan_gameplan_preferences(
+        (snapshot,),
+        matcher,
+        {101: [1001]},
+        {101},
+        {42: 101},
+        80,
+    )
+
+    assert preferred == {101: (1001,)}
+    assert overrides == {}
+
+
 
 
 def test_transfer_run_skips_save_work_when_no_transfers(

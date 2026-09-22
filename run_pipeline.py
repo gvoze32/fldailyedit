@@ -860,7 +860,9 @@ def _plan_gameplan_preferences(
         # Keep a key even when the current match could not safely resolve XI
         # identities: starter promotion remains conservative, and any manual
         # position overrides only classify candidates for existing roles.
-
+        preferred_starters[team_id] = tuple(starter_ids)
+        if resolved_positions:
+            position_overrides[team_id] = resolved_positions
     return preferred_starters, position_overrides
 
 def _plan_captain_updates(

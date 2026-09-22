@@ -1247,19 +1247,18 @@ class RosterGamePlanMixin:
             preferred_rank[slot] = len(preferred_slots)
             preferred_slots.append(slot)
 
-        # Without a trusted live XI, do not promote arbitrary reserves.  When
-        # the XI is available, exact-role reserves are eligible to replace
-        # clearly incompatible starters.
+        # Exact formation-role players are eligible even when the live XI
+        # scraper returns no starter list. This prevents a winger, defender,
+        # or reserve goalkeeper from occupying an unrelated current slot.
         candidate_slots: list[int] = []
         for slot in [*preferred_slots, *current_slots]:
             if slot not in candidate_slots:
                 candidate_slots.append(slot)
-        if preferred_slots:
-            for slot in active_slots:
-                if slot in candidate_slots:
-                    continue
-                if player_code(slot) in target_codes:
-                    candidate_slots.append(slot)
+        for slot in active_slots:
+            if slot in candidate_slots:
+                continue
+            if player_code(slot) in target_codes:
+                candidate_slots.append(slot)
         for slot in active_slots:
             if len(candidate_slots) >= starter_count and slot not in candidate_slots:
                 continue
@@ -1300,45 +1299,62 @@ class RosterGamePlanMixin:
                 value += 12
             return value
 
-        role_order = sorted(
-            range(starter_count),
+        assigned: dict[int, int] = {0: current_slots[0]} if starter_count else {}
+        used_slots: set[int] = {current_slots[0]} if starter_count else set()
+        roles = list(range(1, starter_count))
+
+        # Reserve roles with no safe candidate. Other roles must not steal
+        # their incumbent and force a cross-line or opposite-wing fallback.
+        for role in roles:
+            if any(
+                compatibility(role, slot) is not None
+                for slot in candidate_slots
+            ):
+                continue
+            assigned[role] = current_slots[role]
+            used_slots.add(current_slots[role])
+
+        roles = [role for role in roles if role not in assigned]
+        roles.sort(
             key=lambda role: (
-                sum(
-                    compatibility(role, slot) == 100
-                    for slot in candidate_slots
-                ),
                 sum(
                     compatibility(role, slot) is not None
                     for slot in candidate_slots
                 ),
                 role,
-            ),
+            )
         )
-        assigned: dict[int, int] = {0: current_slots[0]} if starter_count else {}
-        used_slots: set[int] = {current_slots[0]} if starter_count else set()
-        role_order = [role for role in role_order if role != 0]
-        for role in role_order:
-            available = [
-                slot
-                for slot in candidate_slots
-                if slot not in used_slots
-                and compatibility(role, slot) is not None
-            ]
-            if not available:
-                # Never put a known player from another line or wing into
-                # this role. Preserve the complete existing plan instead.
-                return False, 0
-            selected = max(
-                available,
+
+        def assign_remaining(index: int) -> bool:
+            if index == len(roles):
+                return True
+            role = roles[index]
+            available = sorted(
+                (
+                    slot
+                    for slot in candidate_slots
+                    if slot not in used_slots
+                    and compatibility(role, slot) is not None
+                ),
                 key=lambda slot: (
-                    score(role, slot),
-                    -preferred_rank.get(slot, len(preferred_slots) + 1),
-                    -current_role.get(slot, starter_count + 1),
-                    -slot,
+                    -score(role, slot),
+                    preferred_rank.get(slot, len(preferred_slots) + 1),
+                    current_role.get(slot, starter_count + 1),
+                    slot,
                 ),
             )
-            assigned[role] = selected
-            used_slots.add(selected)
+            for slot in available:
+                assigned[role] = slot
+                used_slots.add(slot)
+                if assign_remaining(index + 1):
+                    return True
+                used_slots.remove(slot)
+                del assigned[role]
+
+            return False
+
+        if not assign_remaining(0):
+            return False, 0
 
         if len(assigned) != starter_count:
             return False, 0
@@ -1696,17 +1712,13 @@ class RosterGamePlanMixin:
                 )
                 repaired_lineups += 1
 
-            if (
-                align_positions
-                and preferred_starters is not None
-                and tid in preferred_starters
-            ):
+            if align_positions and preferred_starters is not None:
                 starter_changed, aligned_positions = (
                     self._repair_game_plan_starter_assignments(
                         offset,
                         roster,
                         lineup,
-                        preferred_starters=preferred_starters[tid],
+                        preferred_starters=preferred_starters.get(tid, ()),
                         position_overrides=(
                             position_overrides or {}
                         ).get(tid, {}),
