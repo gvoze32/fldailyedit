@@ -10,7 +10,7 @@ on:
       - "tests/test_release_asset.py"
       - "tests/test_release_publisher.py"
       - "tools/publish_release_assets.py"
-      - "FLDailyEditInstaller.spec"
+      - "tools/build_installer_update_manifest.py"
       - "pyproject.toml"
       - ".github/workflows/build-installer.yml"
       - "data/major_clubs.json"
@@ -80,6 +80,7 @@ jobs:
           tests/test_installer_paths.py
           tests/test_installer_install.py
           tests/test_installer_app.py
+          tests/test_installer_update.py
           tests/test_release_asset.py
           tests/test_workflow_config.py
           -q
@@ -117,6 +118,11 @@ jobs:
         run: |
           $hash = (Get-FileHash -Path "dist\FLDailyEditInstaller.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  FLDailyEditInstaller.zip" | Set-Content -Path "dist\FLDailyEditInstaller.zip.sha256" -Encoding ascii
+      - name: Generate installer update manifest
+        run: >-
+          python tools/build_installer_update_manifest.py
+          --asset dist/FLDailyEditInstaller.zip
+          --output dist/installer-update.json
       - name: Upload internal build artifact
         uses: actions/upload-artifact@v7
         with:
@@ -124,6 +130,7 @@ jobs:
           path: |
             dist/FLDailyEditInstaller.zip
             dist/FLDailyEditInstaller.zip.sha256
+            dist/installer-update.json
           if-no-files-found: error
           retention-days: 1
 
@@ -153,6 +160,12 @@ jobs:
             --tag latest \
             release-payload/FLDailyEditInstaller.zip \
             release-payload/FLDailyEditInstaller.zip.sha256
+      - name: Publish installer update manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release upload latest release-payload/installer-update.json --repo "$GH_REPO" --clobber
       - name: Remove legacy standalone installer assets
         env:
           GH_TOKEN: ${{ github.token }}

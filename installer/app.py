@@ -20,6 +20,9 @@ from installer.install import InstallStage
 from local_update import LocalUpdateError, LocalUpdateResult, LocalUpdateStage
 from installer.paths import GameTarget, SaveLocation, find_game_cpks
 from installer.state import (
+    AppUpdateChecked,
+    AppUpdateDownloaded,
+    AppUpdateFailed,
     CatalogLoaded,
     DestinationValidated,
     DestinationValidationFailed,
@@ -32,6 +35,13 @@ from installer.state import (
     LocationsDiscovered,
     WizardStep,
     WorkerFailed,
+)
+from installer.update import (
+    AppUpdateManifest,
+    AppUpdateError,
+    cleanup_staged_app_update,
+    packaged_windows_app,
+    schedule_app_update,
 )
 from installer.worker import InstallerWorker
 
@@ -79,6 +89,16 @@ UI_COPY = {
     "close_game": "Close the game before continuing.",
     "open_folder": "Open save folder",
     "copy_diagnostics": "Copy diagnostic details",
+    "check_app_update": "Check for app updates",
+    "update_app": "Update app",
+    "checking_app_update": "Checking for app updates…",
+    "app_up_to_date": "App is up to date",
+    "app_update_available": "New app version available",
+    "downloading_app_update": "Downloading app update…",
+    "restarting_app_update": "Update ready. Restarting app…",
+    "app_update_unavailable": (
+        "Automatic app updates are available in the packaged Windows app."
+    ),
 }
 
 _WINDOW_MINIMUM = (760, 560)
@@ -400,12 +420,16 @@ class InstallerApplication:
         self._locations_by_key: dict[str, SaveLocation] = {}
         self._local_game_root: Path | None = None
         self._wrapped_labels: list[ttk.Label] = []
+        self._app_update_supported = packaged_windows_app()
+        self._app_update_pending = False
+        self._app_update_manifest: AppUpdateManifest | None = None
+        self._app_update_staged_executable: Path | None = None
+        self._app_update_restarting = False
 
         self._configure_root()
         self._configure_styles()
         self._build_view()
         self._render(self.controller.state)
-
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
         self.root.bind("<Escape>", self._on_escape)
@@ -413,7 +437,11 @@ class InstallerApplication:
         self._schedule_poll()
         self.worker.discover_locations()
         self.worker.load_catalog()
-
+        if self._app_update_supported:
+            self._request_app_update_check()
+        else:
+            self._app_update_status_var.set(UI_COPY["app_update_unavailable"])
+            self._render_footer(self.controller.state)
     def _configure_root(self) -> None:
         self.root.title("FLDailyEdit Installer")
         self.root.minsize(*_WINDOW_MINIMUM)
@@ -494,6 +522,24 @@ class InstallerApplication:
         footer = ttk.Frame(self._shell)
         footer.grid(row=5, column=0, sticky="ew")
         footer.columnconfigure(0, weight=1)
+
+        app_update_area = ttk.Frame(footer)
+        app_update_area.grid(row=0, column=0, sticky="w")
+        self._app_update_status_var = tkinter.StringVar(
+            self.root,
+            value=UI_COPY["checking_app_update"],
+        )
+        self._app_update_button = ttk.Button(
+            app_update_area,
+            text=UI_COPY["check_app_update"],
+            command=self._app_update_clicked,
+            underline=0,
+        )
+        self._app_update_button.grid(row=0, column=0, padx=(0, _SPACE_S))
+        ttk.Label(
+            app_update_area,
+            textvariable=self._app_update_status_var,
+        ).grid(row=0, column=1, sticky="w")
 
         self._back_button = ttk.Button(
             footer,
@@ -957,6 +1003,60 @@ class InstallerApplication:
                 event = self.worker.events.get_nowait()
             except Empty:
                 break
+
+            if isinstance(event, AppUpdateChecked):
+                self._app_update_restarting = False
+                self._app_update_pending = False
+                if event.available:
+                    self._app_update_manifest = event.manifest
+                    self._app_update_status_var.set(
+                        f"{UI_COPY['app_update_available']}: {event.manifest.version}"
+                    )
+                else:
+                    self._app_update_manifest = None
+                    self._app_update_status_var.set(
+                        f"{UI_COPY['app_up_to_date']} ({event.manifest.version})"
+                    )
+                self._render_footer(self.controller.state)
+                continue
+
+            if isinstance(event, AppUpdateDownloaded):
+                self._app_update_pending = False
+                self._app_update_staged_executable = event.staged_executable
+                try:
+                    schedule_app_update(event.staged_executable)
+                except AppUpdateError as error:
+                    cleanup_staged_app_update(event.staged_executable)
+                    self._app_update_staged_executable = None
+                    self._app_update_manifest = None
+                    self._app_update_status_var.set(
+                        f"App update could not be started: {error}"
+                    )
+                else:
+                    self._app_update_restarting = True
+                    self._app_update_staged_executable = None
+                    self._app_update_manifest = None
+                    self._app_update_status_var.set(
+                        UI_COPY["restarting_app_update"]
+                    )
+                    self._app_update_button.configure(
+                        text=UI_COPY["restarting_app_update"],
+                        state="disabled",
+                    )
+                    self.root.after(100, self.close)
+                self._render_footer(self.controller.state)
+                continue
+
+            if isinstance(event, AppUpdateFailed):
+                self._app_update_restarting = False
+                self._app_update_pending = False
+                self._app_update_manifest = None
+                self._app_update_status_var.set(
+                    f"App update failed: {event.error}"
+                )
+                self._render_footer(self.controller.state)
+                continue
+
             terminal = isinstance(
                 event,
                 (InstallCompleted, LocalUpdateCompleted, WorkerFailed),
@@ -1454,6 +1554,81 @@ class InstallerApplication:
             self._cancel_button.configure(text="Cancelling…", state="disabled")
         else:
             self._cancel_button.configure(text="Cancel", state="normal")
+        app_update_button = getattr(self, "_app_update_button", None)
+        if app_update_button is not None:
+            restarting = getattr(self, "_app_update_restarting", False)
+            manifest = getattr(self, "_app_update_manifest", None)
+            pending = getattr(self, "_app_update_pending", False)
+            supported = getattr(self, "_app_update_supported", False)
+            if restarting:
+                update_text = UI_COPY["restarting_app_update"]
+                update_state = "disabled"
+            else:
+                update_text = (
+                    f"{UI_COPY['update_app']} to {manifest.version}"
+                    if manifest is not None
+                    else UI_COPY["check_app_update"]
+                )
+                update_state = (
+                    "normal"
+                    if supported
+                    and not pending
+                    and state.step is not WizardStep.PROGRESS
+                    else "disabled"
+                )
+            app_update_button.configure(
+                text=update_text,
+                state=update_state,
+            )
+
+    def _request_app_update_check(self) -> None:
+        if not getattr(self, "_app_update_supported", False):
+            self._app_update_status_var.set(UI_COPY["app_update_unavailable"])
+            self._render_footer(self.controller.state)
+            return
+        if getattr(self, "_app_update_pending", False):
+            return
+        try:
+            accepted = self.worker.check_app_update()
+        except Exception as error:
+            self._app_update_status_var.set(f"App update check failed: {error}")
+            self._render_footer(self.controller.state)
+            return
+        if not accepted:
+            return
+        self._app_update_pending = True
+        self._app_update_manifest = None
+        self._app_update_status_var.set(UI_COPY["checking_app_update"])
+        self._render_footer(self.controller.state)
+
+    def _start_app_update_download(self) -> None:
+        manifest = getattr(self, "_app_update_manifest", None)
+        if manifest is None or getattr(self, "_app_update_pending", False):
+            return
+        if self.controller.state.step is WizardStep.PROGRESS:
+            return
+        try:
+            accepted = self.worker.download_app_update(manifest)
+        except Exception as error:
+            self._app_update_status_var.set(f"App update failed: {error}")
+            self._render_footer(self.controller.state)
+            return
+        if not accepted:
+            return
+        self._app_update_pending = True
+        self._app_update_status_var.set(
+            f"{UI_COPY['downloading_app_update']} ({manifest.version})"
+        )
+        self._render_footer(self.controller.state)
+
+    def _app_update_clicked(self) -> None:
+        if not getattr(self, "_app_update_supported", False):
+            self._app_update_status_var.set(UI_COPY["app_update_unavailable"])
+            return
+        if self._app_update_manifest is not None:
+            self._start_app_update_download()
+        else:
+            self._request_app_update_check()
 
     def _focus_for_step(self, step: WizardStep) -> None:
         if self._closed:
@@ -1710,6 +1885,10 @@ class InstallerApplication:
             except tkinter.TclError:
                 pass
             self._poll_after_id = None
+        staged_executable = getattr(self, "_app_update_staged_executable", None)
+        if staged_executable is not None:
+            cleanup_staged_app_update(staged_executable)
+            self._app_update_staged_executable = None
         self.worker.close(timeout=0.0)
         try:
             self.root.destroy()

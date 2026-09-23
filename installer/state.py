@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
@@ -8,6 +7,7 @@ from typing import Callable
 from installer.catalog import Catalog, Channel, ReleaseRecord
 from installer.install import InstallResult
 from installer.paths import GameTarget, SaveLocation
+from installer.update import AppUpdateManifest
 from local_update import LocalUpdateProgress, LocalUpdateResult
 
 class InstallerMode(str, Enum):
@@ -90,6 +90,23 @@ class LocalProgressChanged:
 class LocalUpdateCompleted:
     result: LocalUpdateResult
 
+
+@dataclass(frozen=True, slots=True)
+class AppUpdateChecked:
+    manifest: AppUpdateManifest
+    available: bool
+
+
+@dataclass(frozen=True, slots=True)
+class AppUpdateDownloaded:
+    staged_executable: Path
+
+
+@dataclass(frozen=True, slots=True)
+class AppUpdateFailed:
+    error: Exception
+
+
 @dataclass(frozen=True, slots=True)
 class InstallCompleted:
     result: InstallResult
@@ -111,6 +128,9 @@ WorkerEvent = (
     | LocalSaveSelected
     | InstallCompleted
     | LocalUpdateCompleted
+    | AppUpdateChecked
+    | AppUpdateDownloaded
+    | AppUpdateFailed
     | WorkerFailed
 )
 _NETWORK_ERROR_CODES = frozenset({"network_error", "http_error", "timeout"})

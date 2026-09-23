@@ -821,7 +821,7 @@ def test_entry_point_supports_launch_version_self_test_and_rejects_unknown(
     assert entry_point.main(["--self-test"]) == 0
     assert calls == ["launch", "self-test"]
     assert entry_point.main(["--version"]) == 0
-    assert capsys.readouterr().out == "0.1.0\n"
+    assert capsys.readouterr().out == "0.2.0\n"
     with pytest.raises(SystemExit) as error:
         entry_point.main(["--unknown"])
     assert error.value.code != 0
@@ -1092,7 +1092,7 @@ def test_diagnostics_include_only_version_stage_code_and_selected_path() -> None
     assert installer_app.diagnostic_details(
         state, error_code="checksum_mismatch"
     ) == (
-        "FLDailyEdit Installer 0.1.0\n"
+        "FLDailyEdit Installer 0.2.0\n"
         "Stage: verifying_archive\n"
         "Code: checksum_mismatch\n"
         f"Selected path: {location.save_directory}"

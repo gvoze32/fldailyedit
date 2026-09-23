@@ -15,6 +15,10 @@ verified real-world transfers, squad numbers, and captain roles.
 2. Close the game and choose **Fast** or **Deep**.
 3. Confirm the Football Life folder, then select **Download and install**.
 
+The packaged Windows app checks for a newer installer when it starts. Use the
+**Check for app updates** button to download, verify, and install the latest
+app version; the app restarts automatically after the verified download.
+
 The installer verifies the release, backs up the current save, and replaces it
 atomically. For vanilla PES 2021 or T99, choose **Update my local save**, select
 the save and matching PES 2021 game folder containing `download/*.cpk`, then

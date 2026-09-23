@@ -29,6 +29,9 @@ from installer.paths import (
     validate_destination,
 )
 from installer.state import (
+    AppUpdateChecked,
+    AppUpdateDownloaded,
+    AppUpdateFailed,
     CatalogLoaded,
     DestinationValidated,
     DestinationValidationFailed,
@@ -42,6 +45,12 @@ from installer.state import (
     WorkerEvent,
     WorkerFailed,
 )
+from installer.update import (
+    AppUpdateManifest,
+    fetch_app_update_manifest as default_fetch_app_update_manifest,
+    is_app_update_available,
+    stage_app_update as default_stage_app_update,
+)
 from local_update import (
     CancellationToken,
     LocalUpdateProgress,
@@ -53,6 +62,16 @@ from local_update import (
 @dataclass(frozen=True, slots=True)
 class _LoadCatalog:
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class _CheckAppUpdate:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class _DownloadAppUpdate:
+    manifest: AppUpdateManifest
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,15 +104,17 @@ class _StartLocalUpdate:
     game_root: Path | None = None
 
 
-
-
 @dataclass(frozen=True, slots=True)
 class _Stop:
     pass
 
 
+
+
 _WorkerCommand = (
     _LoadCatalog
+    | _CheckAppUpdate
+    | _DownloadAppUpdate
     | _DiscoverLocations
     | _ValidateDestination
     | _Install
@@ -108,6 +129,12 @@ class InstallerWorker:
         self,
         *,
         fetch_catalog: Callable[[], Catalog] = default_fetch_catalog,
+        fetch_app_update: Callable[[], AppUpdateManifest] = (
+            default_fetch_app_update_manifest
+        ),
+        stage_app_update: Callable[[AppUpdateManifest], Path] = (
+            default_stage_app_update
+        ),
         discover_locations: Callable[
             [], tuple[SaveLocation, ...]
         ] = discover_save_locations,
@@ -123,6 +150,8 @@ class InstallerWorker:
         self.events: SimpleQueue[WorkerEvent] = SimpleQueue()
         self._commands: SimpleQueue[_WorkerCommand] = SimpleQueue()
         self._fetch_catalog = fetch_catalog
+        self._fetch_app_update = fetch_app_update
+        self._stage_app_update = stage_app_update
         self._discover_locations = discover_locations
         self._validate_destination = validate_destination
         self._download_archive = download_archive
@@ -138,6 +167,7 @@ class InstallerWorker:
         self._state_lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._install_pending = False
+        self._app_update_pending = False
         self._closed = False
         self._local_token: CancellationToken | None = None
         self._commit_started = False
@@ -162,6 +192,24 @@ class InstallerWorker:
     def load_catalog(self) -> None:
         self.start()
         self._commands.put(_LoadCatalog())
+
+    def check_app_update(self) -> bool:
+        self.start()
+        with self._state_lock:
+            if self._app_update_pending:
+                return False
+            self._app_update_pending = True
+        self._commands.put(_CheckAppUpdate())
+        return True
+
+    def download_app_update(self, manifest: AppUpdateManifest) -> bool:
+        self.start()
+        with self._state_lock:
+            if self._app_update_pending:
+                return False
+            self._app_update_pending = True
+        self._commands.put(_DownloadAppUpdate(manifest))
+        return True
 
     def discover_locations(self) -> None:
         self.start()
@@ -361,6 +409,29 @@ class InstallerWorker:
                     self.events.put(WorkerFailed(error))
                 else:
                     self.events.put(CatalogLoaded(catalog))
+                continue
+            if isinstance(command, _CheckAppUpdate):
+                try:
+                    manifest = self._fetch_app_update()
+                    available = is_app_update_available(manifest)
+                except Exception as error:
+                    self.events.put(AppUpdateFailed(error))
+                else:
+                    self.events.put(AppUpdateChecked(manifest, available))
+                finally:
+                    with self._state_lock:
+                        self._app_update_pending = False
+                continue
+            if isinstance(command, _DownloadAppUpdate):
+                try:
+                    staged_executable = self._stage_app_update(command.manifest)
+                except Exception as error:
+                    self.events.put(AppUpdateFailed(error))
+                else:
+                    self.events.put(AppUpdateDownloaded(staged_executable))
+                finally:
+                    with self._state_lock:
+                        self._app_update_pending = False
                 continue
             if isinstance(command, _DiscoverLocations):
                 try:

@@ -158,7 +158,7 @@ def test_installer_workflow_builds_tests_and_smoke_tests_on_windows():
         "pyproject.toml",
         ".github/workflows/build-installer.yml",
         "tools/publish_release_assets.py",
-        "tests/test_release_publisher.py",
+        "tools/build_installer_update_manifest.py",
         "config.py",
         "local_update.py",
         "run.py",
@@ -189,9 +189,8 @@ def test_installer_workflow_builds_tests_and_smoke_tests_on_windows():
     assert "encrypter21.exe" in build
     for test_path in (
         "tests/test_installer_catalog.py",
-        "tests/test_installer_paths.py",
-        "tests/test_installer_install.py",
         "tests/test_installer_app.py",
+        "tests/test_installer_update.py",
         "tests/test_release_asset.py",
         "tests/test_workflow_config.py",
     ):
@@ -242,12 +241,12 @@ def test_installer_publish_job_is_serialized_and_uploads_exact_release_assets():
         "            release-payload/FLDailyEditInstaller.zip.sha256"
     ) in publish
     assert "Remove legacy standalone installer assets" in publish
-    assert (
-        'gh release delete-asset latest "$legacy" --repo "$GH_REPO" --yes'
-        in publish
-    )
     assert "release-payload/FLDailyEditInstaller.exe" not in publish
-    assert "gh release upload" not in publish
+    assert "Publish installer update manifest" in publish
+    assert (
+        'gh release upload latest release-payload/installer-update.json '
+        '--repo "$GH_REPO" --clobber'
+    ) in publish
     for line in publish.splitlines():
         if "gh release " in line:
             assert '--repo "$GH_REPO"' in line
