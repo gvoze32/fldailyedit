@@ -59,17 +59,8 @@ class TeamData:
 
 @dataclass
 class TeamInfo:
-    """Team metadata from the Team Entry table (name, abbreviation, manager)."""
+    """Team metadata from the Team Entry table (name and abbreviation)."""
     team_id: int
     name: str
     abbreviation: str = ""
-    manager_id: int = 0
-
-
-@dataclass
-class ManagerInfo:
-    """Manager metadata from the Manager Entry table."""
-    manager_id: int
-    name: str
-    nationality: int = 0
 

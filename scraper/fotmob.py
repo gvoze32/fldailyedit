@@ -20,7 +20,6 @@ import aiohttp
 import config
 from scraper.models import (
     CaptainUpdate,
-    ManagerUpdate,
     ScrapeResult,
     SquadMember,
     SquadSnapshot,
@@ -1045,58 +1044,6 @@ class FotmobScraper:
             )
         ]
 
-    def _extract_manager_from_team_data(
-        self,
-        data: dict,
-        team_id: int,
-        team_name: str,
-    ) -> ManagerUpdate | None:
-        """Extract the current head coach from a team payload."""
-        canonical_team_name = _payload_team_name(data, team_name)
-        details = data.get("details")
-        overview = data.get("overview")
-        manager = details.get("coach") if isinstance(details, dict) else None
-        if not isinstance(manager, dict):
-            last_lineup = (
-                overview.get("lastLineupStats")
-                if isinstance(overview, dict)
-                else None
-            )
-            manager = (
-                last_lineup.get("coach")
-                if isinstance(last_lineup, dict)
-                else None
-            )
-        if not isinstance(manager, dict) and isinstance(overview, dict):
-            manager = overview.get("coach")
-        if not isinstance(manager, dict):
-            manager = data.get("coach")
-        if not isinstance(manager, dict):
-            return None
-
-        manager_name = str(manager.get("name") or "").strip()
-        if not manager_name:
-            logger.warning(
-                "Skipping incomplete manager data for %s (%s)",
-                canonical_team_name or team_id,
-                team_id,
-            )
-            return None
-
-        try:
-            age = int(manager.get("age") or 0)
-        except (TypeError, ValueError):
-            age = 0
-
-        return ManagerUpdate(
-            club_name=canonical_team_name,
-            team_id_fotmob=team_id,
-            manager_name=manager_name,
-            manager_id_fotmob=_optional_positive_int(manager.get("id")),
-            age=age,
-            nationality=str(manager.get("countryName") or "").strip(),
-            source_url=f"https://www.fotmob.com/api/data/teams?id={team_id}",
-        )
 
 
     async def fetch_major_clubs_transfers_safely_async(
@@ -1105,7 +1052,7 @@ class FotmobScraper:
         window: str = "auto",
         progress: Callable[[str, int, int], None] | None = None,
     ) -> ScrapeResult:
-        """Fetch current transfers, squads, captains, and managers for indexed clubs."""
+        """Fetch current transfers, squads, and captains for indexed clubs."""
         start_date, end_date = _resolve_date_range(since_date, window)
 
         timeout = aiohttp.ClientTimeout(total=15)
@@ -1168,11 +1115,6 @@ class FotmobScraper:
                     team_id,
                     club_name,
                 )
-                manager_update = self._extract_manager_from_team_data(
-                    data,
-                    team_id,
-                    club_name,
-                )
 
                 # Keep the existing per-club cooldown while allowing independent
                 # clubs to progress concurrently.
@@ -1182,13 +1124,11 @@ class FotmobScraper:
                     club_roster_updates,
                     snapshot,
                     captain_updates,
-                    manager_update,
                 )
 
         all_transfers: list[Transfer] = []
         roster_updates: list[Transfer] = []
         captain_updates: list[CaptainUpdate] = []
-        manager_updates: list[ManagerUpdate] = []
         squad_snapshots: list[SquadSnapshot] = []
         cache = _FotmobTeamPayloadCache(
             getattr(config, "FOTMOB_TEAM_CACHE_FILE", None)
@@ -1198,7 +1138,6 @@ class FotmobScraper:
             list[Transfer],
             SquadSnapshot,
             list[CaptainUpdate],
-            ManagerUpdate | None,
         ]] = []
         try:
             async with aiohttp.ClientSession(
@@ -1230,102 +1169,20 @@ class FotmobScraper:
             club_roster_updates,
             snapshot,
             club_captains,
-            manager_update,
         ) in club_results:
             all_transfers.extend(club_transfers)
             roster_updates.extend(club_roster_updates)
             if snapshot.complete:
                 squad_snapshots.append(snapshot)
             captain_updates.extend(club_captains)
-            if manager_update is not None:
-                manager_updates.append(manager_update)
 
         return ScrapeResult(
             merge_transfers([all_transfers]),
             captain_updates,
             squad_snapshots,
             merge_transfers([roster_updates]),
-            manager_updates=manager_updates,
         )
 
-    async def fetch_managers_safely_async(
-        self,
-        progress: Callable[[str, int, int], None] | None = None,
-    ) -> tuple[ManagerUpdate, ...]:
-        """Fetch only current managers for every indexed club."""
-        timeout = aiohttp.ClientTimeout(total=15)
-        deep_clubs = get_deep_clubs()
-        total_clubs = len(deep_clubs)
-        if total_clubs == 0:
-            raise IncompleteScrapeError("Deep-club index is empty")
-
-        semaphore = asyncio.Semaphore(FOTMOB_DEEP_CONCURRENCY)
-        cache = _FotmobTeamPayloadCache(
-            getattr(config, "FOTMOB_TEAM_CACHE_FILE", None)
-        )
-
-        async def fetch_club(
-            index: int,
-            club_name: str,
-            team_id: int,
-            session: aiohttp.ClientSession,
-        ) -> ManagerUpdate | None:
-            async with semaphore:
-                if progress is not None:
-                    progress(
-                        f"Manager mode: checking indexed club "
-                        f"{index}/{total_clubs} — {club_name}",
-                        index,
-                        total_clubs,
-                    )
-                try:
-                    data = await self._fetch_club_data_cached_async(
-                        session,
-                        team_id,
-                        cache,
-                    )
-                except IncompleteScrapeError as error:
-                    raise IncompleteScrapeError(
-                        f"Manager scrape incomplete at {club_name} ({team_id}): {error}"
-                    ) from error
-
-                manager_update = self._extract_manager_from_team_data(
-                    data,
-                    team_id,
-                    club_name,
-                )
-                await asyncio.sleep(0.5)
-                return manager_update
-
-        manager_results: list[ManagerUpdate | None] = []
-        try:
-            async with aiohttp.ClientSession(
-                headers=self.headers,
-                timeout=timeout,
-            ) as session:
-                tasks = [
-                    asyncio.create_task(
-                        fetch_club(index, club_name, team_id, session)
-                    )
-                    for index, (club_name, team_id) in enumerate(
-                        deep_clubs.items(),
-                        1,
-                    )
-                ]
-                try:
-                    manager_results = await asyncio.gather(*tasks)
-                except BaseException:
-                    for task in tasks:
-                        if not task.done():
-                            task.cancel()
-                    await asyncio.gather(*tasks, return_exceptions=True)
-                    raise
-        finally:
-            cache.save()
-
-        return tuple(
-            manager for manager in manager_results if manager is not None
-        )
 
 
 def get_deep_clubs() -> dict[str, int]:
@@ -1571,21 +1428,12 @@ def fetch_major_clubs_transfers_safely(
             progress=progress,
         )
     )
-def fetch_managers_safely(
-    progress: Callable[[str, int, int], None] | None = None,
-) -> ScrapeResult:
-    """Fetch only current managers for indexed clubs."""
-    scraper = FotmobScraper()
-    manager_updates = asyncio.run(
-        scraper.fetch_managers_safely_async(progress=progress)
-    )
-    return ScrapeResult(manager_updates=manager_updates)
 
 
 
 
 def fetch_squads_for_club_names(club_names: list[str]) -> ScrapeResult:
-    """Fetch current squad membership, numbers, captains, and managers."""
+    """Fetch current squad membership, numbers, and captains."""
     requested = [name.strip() for name in club_names if name.strip()]
     if not requested:
         return ScrapeResult()
@@ -1606,7 +1454,6 @@ def fetch_squads_for_club_names(club_names: list[str]) -> ScrapeResult:
     scraper = FotmobScraper()
     roster_updates: list[Transfer] = []
     captain_updates: list[CaptainUpdate] = []
-    manager_updates: list[ManagerUpdate] = []
     squad_snapshots: list[SquadSnapshot] = []
     team_cache = _FotmobTeamPayloadCache(
         getattr(config, "FOTMOB_TEAM_CACHE_FILE", None)
@@ -1655,13 +1502,6 @@ def fetch_squads_for_club_names(club_names: list[str]) -> ScrapeResult:
                             team_name,
                         )
                     )
-                    manager_update = scraper._extract_manager_from_team_data(
-                        data,
-                        team_id,
-                        team_name,
-                    )
-                    if manager_update is not None:
-                        manager_updates.append(manager_update)
 
     try:
         asyncio.run(fetch_subset())
@@ -1672,7 +1512,6 @@ def fetch_squads_for_club_names(club_names: list[str]) -> ScrapeResult:
         captain_updates,
         squad_snapshots,
         merge_transfers([roster_updates]),
-        manager_updates=manager_updates,
     )
 
 
@@ -1681,7 +1520,7 @@ def fetch_transfers_for_club_names(
     since_date: Optional[Union[str, date]] = None,
     window: str = "auto",
 ) -> ScrapeResult:
-    """Fetch transfers, squad membership, captains, and managers."""
+    """Fetch transfers, squad membership, and captains."""
     requested = {name.strip().casefold() for name in club_names if name.strip()}
     targets = _resolve_club_targets(club_names, get_deep_clubs())
     if not targets or len(targets) < len(requested):
@@ -1695,7 +1534,6 @@ def fetch_transfers_for_club_names(
     all_transfers: list[Transfer] = []
     roster_updates: list[Transfer] = []
     captain_updates: list[CaptainUpdate] = []
-    manager_updates: list[ManagerUpdate] = []
     squad_snapshots: list[SquadSnapshot] = []
     team_cache = _FotmobTeamPayloadCache(
         getattr(config, "FOTMOB_TEAM_CACHE_FILE", None)
@@ -1742,13 +1580,6 @@ def fetch_transfers_for_club_names(
                             team_name,
                         )
                     )
-                    manager_update = scraper._extract_manager_from_team_data(
-                        data,
-                        tid,
-                        team_name,
-                    )
-                    if manager_update is not None:
-                        manager_updates.append(manager_update)
 
     try:
         asyncio.run(fetch_subset())
@@ -1759,5 +1590,4 @@ def fetch_transfers_for_club_names(
         captain_updates,
         squad_snapshots,
         merge_transfers([roster_updates]),
-        manager_updates=manager_updates,
     )

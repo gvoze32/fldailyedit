@@ -4,8 +4,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Update SP Football Life 2026 and eFootball PES 2021 `EDIT00000000` saves with
-verified real-world transfers, squad numbers, captain roles, and current club
-managers.
+verified real-world transfers, squad numbers, and captain roles.
+
 
 ## Installation
 
@@ -79,7 +79,7 @@ before any save mutation.
 
 - Verified transfers, releases, loans, and loan returns
 - Indexed-club rosters, shirt numbers, affected lineups, and game plans
-- Current captain roles and club managers (`manager-update --auto`)
+- Current captain roles
 - Transfer reports, audit logs, and daily prebuilt saves through GitHub Actions
 
 The updater checks each player's current club and never overwrites an occupied
@@ -88,8 +88,8 @@ are reported as non-blocking warnings.
 
 ## Transfer logs
 
-Successful `run` and `manager-update` commands append applied transfer, roster,
-captain, and manager changes to `data/transfer_log.jsonl`. `run` also refreshes
+Successful `run` commands append applied transfer, roster, and captain changes
+to `data/transfer_log.jsonl`. `run` also refreshes
 `output/transfer_summary.md` and `output/transfer_summary.html`.
 
 When applying a prebuilt release, the installer writes and displays the
@@ -142,24 +142,12 @@ python run.py run --edit-file /path/to/EDIT00000000 --in-place
 # Validate a save
 python run.py validate --edit-file /path/to/EDIT00000000
 
-# Preview current club managers
-python run.py manager-update \
-  --edit-file /path/to/EDIT00000000 \
-  --auto \
-  --dry-run
-
-# Apply current managers in place
-python run.py manager-update \
-  --edit-file /path/to/EDIT00000000 \
-  --auto \
-  --in-place
 
 python run.py run --help
 ```
 
 `run` applies verified transfers, releases, loans, returns, squad-number updates,
-and captain roles. `manager-update --auto` syncs FotMob managers to existing
-Manager Entry records. Other audit, comparison, logging, and repair commands are
+and captain roles. Other audit, comparison, logging, and repair commands are
 listed by `python run.py <command> --help`.
 
 ## Safety

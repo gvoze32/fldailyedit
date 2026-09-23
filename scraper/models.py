@@ -84,22 +84,9 @@ class CaptainUpdate:
     source: str = "fotmob"
     source_url: str = ""
 
-@dataclass(frozen=True, slots=True)
-class ManagerUpdate:
-    """Current manager marker extracted from a club's live team payload."""
-
-    club_name: str
-    team_id_fotmob: int
-    manager_name: str
-    manager_id_fotmob: Optional[int] = None
-    age: int = 0
-    nationality: str = ""
-    source: str = "fotmob"
-    source_url: str = ""
-
 
 class ScrapeResult(list[Transfer]):
-    """Transfer events plus current roster, captain, and manager observations."""
+    """Transfer events plus current roster and captain observations."""
 
     def __init__(
         self,
@@ -111,12 +98,10 @@ class ScrapeResult(list[Transfer]):
             int,
             tuple[tuple[int, str, SquadMember], ...],
         ] | None = None,
-        manager_updates: list[ManagerUpdate] | tuple[ManagerUpdate, ...] = (),
     ) -> None:
         super().__init__(transfers)
         self.captain_updates = tuple(captain_updates)
         self.squad_snapshots = tuple(squad_snapshots)
-        self.manager_updates = tuple(manager_updates)
         self.roster_updates = tuple(roster_updates)
         if fotmob_identity_map is None:
             built_identity_map: dict[
@@ -153,7 +138,6 @@ class ScrapeResult(list[Transfer]):
             or self.captain_updates
             or self.squad_snapshots
             or self.roster_updates
-            or self.manager_updates
         )
 
 

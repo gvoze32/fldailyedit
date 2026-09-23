@@ -64,48 +64,6 @@ def test_log_transfer_persists_sources_and_native_metadata(monkeypatch, tmp_path
 
 
 
-def test_log_manager_update_persists_manager_transition_and_summary(
-    monkeypatch, tmp_path: Path, capsys
-):
-    log_path = tmp_path / "transfer_log.jsonl"
-    monkeypatch.setattr(config, "TRANSFER_LOG_FILE", log_path)
-
-    transfer_logger.log_manager_update(
-        team_name="Example FC",
-        team_id=42,
-        previous_manager="Coach One",
-        previous_manager_id=900,
-        manager="Coach Two",
-        manager_id=901,
-        confidence=100.0,
-        source="fotmob",
-        source_url="https://example.test/teams/42",
-        fotmob_manager_id=777,
-    )
-
-    entries = transfer_logger.read_log()
-    assert entries == [
-        {
-            "timestamp": entries[0]["timestamp"],
-            "transfer_type": "manager_update",
-            "team_name": "Example FC",
-            "team_id": 42,
-            "previous_manager": "Coach One",
-            "previous_manager_id": 900,
-            "manager": "Coach Two",
-            "manager_id": 901,
-            "confidence": 100.0,
-            "dry_run": False,
-            "save_scope": "",
-            "sources": ["fotmob"],
-            "source_urls": ["https://example.test/teams/42"],
-            "fotmob_manager_id": 777,
-            "native_metadata": {},
-        }
-    ]
-
-    transfer_logger.print_summary()
-    assert "Example FC manager: Coach One → Coach Two" in capsys.readouterr().out
 
 def test_read_log_isolates_save_scope_and_ignores_removed_feature_history(
     monkeypatch, tmp_path: Path

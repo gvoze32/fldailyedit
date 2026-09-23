@@ -113,49 +113,6 @@ def log_transfer(
             f"{from_team} → {to_team} (conf={confidence:.0f}%)"
         )
 
-def log_manager_update(
-    team_name: str,
-    team_id: int,
-    previous_manager: str,
-    previous_manager_id: int,
-    manager: str,
-    manager_id: int,
-    *,
-    confidence: float = 0.0,
-    dry_run: bool = False,
-    save_scope: str = "",
-    source: str = "manual",
-    source_url: str = "",
-    fotmob_manager_id: int | None = None,
-) -> dict:
-    """Append one club-manager change audit record."""
-    sources = (source,) if source else ()
-    source_urls = (source_url,) if source_url else ()
-    record = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "transfer_type": "manager_update",
-        "team_name": team_name,
-        "team_id": team_id,
-        "previous_manager": previous_manager,
-        "previous_manager_id": previous_manager_id,
-        "manager": manager,
-        "manager_id": manager_id,
-        "confidence": round(confidence, 1),
-        "dry_run": dry_run,
-        "save_scope": save_scope,
-        "sources": list(sources),
-        "source_urls": list(source_urls),
-        "fotmob_manager_id": fotmob_manager_id,
-        "native_metadata": {},
-    }
-    _append_record(record)
-
-    action = "DRY-RUN" if dry_run else "APPLIED"
-    logger.info(
-        f"[{action}] {team_name} manager: {previous_manager} → {manager} "
-        f"(conf={confidence:.0f}%, source={source or 'unknown'})"
-    )
-    return record
 
 def read_log(
     save_scope: str | None = None,
@@ -199,14 +156,7 @@ def print_summary(last_n: int = 20):
     for e in recent:
         dry = " [DRY-RUN]" if e.get("dry_run") else ""
         ts = e.get("timestamp", "")[:19].replace("T", " ")
-        if _is_manager_update(e):
-            print(
-                f"  {ts}  {e.get('team_name', 'Unknown team')} manager: "
-                f"{e.get('previous_manager', 'Unknown')} → "
-                f"{e.get('manager', 'Unknown')}"
-                f"{dry}"
-            )
-        elif _is_captain_update(e):
+        if _is_captain_update(e):
             previous_id = (e.get("native_metadata") or {}).get(
                 "previous_captain_player_id",
                 "?",
@@ -236,12 +186,6 @@ def _is_shirt_number_update(entry: dict) -> bool:
     """Recognize current and legacy shirt-number audit records."""
     return str(entry.get("transfer_type", "")) in _SHIRT_UPDATE_TYPES
 
-_MANAGER_UPDATE_TYPES = {"manager_update"}
-
-
-def _is_manager_update(entry: dict) -> bool:
-    """Recognize club-manager audit records."""
-    return str(entry.get("transfer_type", "")).strip().lower() in _MANAGER_UPDATE_TYPES
 
 
 _CAPTAIN_UPDATE_TYPES = {"captain_update"}
