@@ -45,6 +45,14 @@ GP_SINGLE_PLAYER_ROLES = (
 # Each preset stores three 11-byte tactical position arrays before GP_LINEUP.
 # Position codes use the same order as Player.bin's registered positions.
 GP_POSITION_PRESETS = (0x004, 0x0A4, 0x144)
+
+# Main preset tactical bytes; offsets are relative to the preset at 0x004.
+GP_TACTICAL_FIELD_OFFSETS = {
+    "attacking_style": 0x063,
+    "build_up": 0x064,
+    "attacking_area": 0x065,
+    "defensive_style": 0x067,
+}
 GP_POSITION_PHASE_OFFSETS = (0x000, 0x021, 0x042)
 GP_POSITION_ENTRY_SIZE = 1
 
@@ -226,6 +234,36 @@ class RosterGamePlanMixin:
 
         self._data[game_plan_offset + GP_CAPTAIN] = matching_slots[0]
         return True
+
+    def set_team_tactical_settings(
+        self,
+        team_id: int,
+        settings: Mapping[str, int],
+    ) -> int:
+        """Set validated binary choices in the main tactical preset only."""
+        game_plan_offset = self._find_game_plan_offset(team_id)
+        if (
+            game_plan_offset is None
+            or game_plan_offset + GAME_PLAN_ENTRY_SIZE > len(self._data)
+            or not isinstance(settings, Mapping)
+            or not settings
+            or any(
+                key not in GP_TACTICAL_FIELD_OFFSETS
+                or type(value) is not int
+                or value not in (0, 1)
+                for key, value in settings.items()
+            )
+        ):
+            return 0
+
+        preset_offset = game_plan_offset + GP_POSITION_PRESETS[0]
+        changed = 0
+        for name, value in settings.items():
+            offset = preset_offset + GP_TACTICAL_FIELD_OFFSETS[name]
+            if self._data[offset] != value:
+                self._data[offset] = value
+                changed += 1
+        return changed
 
 
     def _overflow_role_slots(

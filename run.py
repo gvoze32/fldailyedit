@@ -540,7 +540,9 @@ def cmd_run(args):
     if dry_run and not edit_path.exists():
         transfers = pipeline._scrape_run_transfers(args)
         if not transfers:
-            print("No verified transfers or captain updates found. Nothing to apply.")
+            print(
+                "No verified transfer, roster, captain, or tactical updates found."
+            )
             return
         print("\n⚠ Dry-run mode without edit file — showing scraped data only.")
         print(f"\nAll {len(transfers)} transfers:")
@@ -551,6 +553,14 @@ def cmd_run(args):
             print(f"\nCurrent captain markers ({len(captain_updates)}):")
             for captain in captain_updates:
                 print(f"  {captain.club_name}: {captain.player_name}")
+        tactical_updates = getattr(transfers, "tactical_updates", ())
+        if tactical_updates:
+            print("\nEvidence-gated tactical profiles (not applied):")
+            for update in tactical_updates:
+                print(
+                    f"  {update.club_name} (league {update.league_id}, "
+                    f"{update.sample_matches} matches): {dict(update.settings)}"
+                )
         return
 
     request = LocalUpdateRequest(
@@ -583,19 +593,21 @@ def cmd_run(args):
             result.transfer_applied == 0
             and result.shirt_numbers_changed == 0
             and result.captains_changed == 0
+            and result.tactics_changed == 0
             and result.unchanged == 0
             and result.safety_skipped == 0
         ):
             print(
-                "No verified transfers found. Nothing to apply. "
-                "No captain updates were available."
+                "No verified transfer, roster, captain, or tactical changes "
+                "were available."
             )
         return
 
     print(
         f"\n✅ Done! {result.transfer_applied} transfers applied; "
         f"{result.shirt_numbers_changed} shirt numbers changed; "
-        f"{result.captains_changed} captains changed."
+        f"{result.captains_changed} captains changed; "
+        f"{result.tactics_changed} tactical settings changed."
     )
 
     if result.diagnostic:

@@ -23,7 +23,9 @@ jobs:
       - name: Restore FotMob team payload cache
         uses: actions/cache@v4
         with:
-          path: storage/fotmob_team_cache.json
+          path: |
+            storage/fotmob_team_cache.json
+            storage/fotmob_tactics_cache.json
           key: fotmob-deep-payload-${{ hashFiles('data/major_clubs.json', 'data/fotmob_teams_validated.json') }}-${{ github.run_id }}
           restore-keys: |
             fotmob-deep-payload-${{ hashFiles('data/major_clubs.json', 'data/fotmob_teams_validated.json') }}-

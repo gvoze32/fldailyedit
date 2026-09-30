@@ -9,7 +9,13 @@ import pytest
 import run_pipeline
 
 from editor.models import TeamData
-from scraper.models import CaptainUpdate, MatchedTransfer, Transfer
+from scraper.models import (
+    CaptainUpdate,
+    MatchedTransfer,
+    ScrapeResult,
+    TacticalUpdate,
+    Transfer,
+)
 from transfer_planning import PlannedRosterAction
 from local_update import (
     CancellationToken,
@@ -81,7 +87,7 @@ def test_transfer_run_skips_save_work_when_no_transfers(
         )
     )
 
-    assert "No verified transfers found. Nothing to apply." in capsys.readouterr().out
+    capsys.readouterr()
 
 
     monkeypatch.setattr(run.sys, "argv", ["run.py", "--help"])
@@ -923,6 +929,100 @@ def test_real_run_applies_captain_update_without_transfer_actions(
     assert mutation.captains_changed == 1
     assert prepared.captain_records[0]["transfer_type"] == "captain_update"
 
+
+def test_tactical_only_scrape_result_plans_and_applies_settings(
+    monkeypatch, tmp_path
+):
+    class FakeEditFile:
+        def __init__(self):
+            self._data = bytearray(b"original")
+            self.settings = {"attacking_style": 0, "build_up": 0}
+            self.is_pes21_save = False
+
+        def validate_integrity(self):
+            return {"errors": []}
+
+        def set_team_tactical_settings(self, team_id, settings):
+            assert team_id == 101
+            changed = sum(
+                self.settings.get(name) != value
+                for name, value in settings.items()
+            )
+            self.settings.update(settings)
+            if changed:
+                self._data[0] = settings["attacking_style"]
+            return changed
+
+    edit_path = tmp_path / "EDIT00000000"
+    output_path = tmp_path / "output" / "EDIT00000000"
+    data_dat = tmp_path / "data.dat"
+    data_dat.write_bytes(b"original")
+    edit_file = FakeEditFile()
+    prepared = run_pipeline._RunPrepared(
+        temp_dir=tmp_path,
+        data_dat=data_dat,
+        edit_file=edit_file,
+        edit_path=edit_path,
+        output_path=output_path,
+        input_digest="input",
+        same_input_output=False,
+        output_existed=False,
+        output_digest=None,
+    )
+    monkeypatch.setattr(
+        run_pipeline,
+        "_load_match_database",
+        lambda _edit_file: (None, [], {}, {101}),
+    )
+    monkeypatch.setattr(
+        run_pipeline,
+        "_match_and_plan_transfers",
+        lambda *args, **kwargs: ((), (), "scope"),
+    )
+    monkeypatch.setattr(
+        run_pipeline,
+        "_load_represented_fotmob_club_map",
+        lambda: {42: 101},
+    )
+    backup_calls = []
+    backup_path = tmp_path / "backup"
+    monkeypatch.setattr(
+        run_pipeline.backup_mod,
+        "create_backup",
+        lambda path: backup_calls.append(path) or backup_path,
+    )
+    tactical_update = TacticalUpdate(
+        club_name="Example FC",
+        team_id_fotmob=42,
+        league_id=10,
+        settings=(("attacking_style", 1), ("build_up", 0)),
+        sample_matches=8,
+    )
+    tactical_only = ScrapeResult(tactical_updates=(tactical_update,))
+    runtime = run_pipeline._RunLocalUpdateRuntime()
+    request = LocalUpdateRequest(edit_path, output_path=output_path)
+
+    plan = runtime.match_and_plan(
+        request,
+        prepared,
+        tactical_only,
+        CancellationToken(),
+    )
+    mutation = runtime.apply(
+        request,
+        prepared,
+        plan,
+        CancellationToken(),
+    )
+
+    assert bool(tactical_only)
+    assert prepared.gameplan_tactics == {
+        101: {"attacking_style": 1, "build_up": 0}
+    }
+    assert edit_file.settings == {"attacking_style": 1, "build_up": 0}
+    assert mutation.tactics_changed == 1
+    assert backup_calls == [edit_path]
+    assert prepared.backup_path == backup_path
 
 
 

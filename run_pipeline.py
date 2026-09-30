@@ -35,13 +35,19 @@ from scraper.fotmob import (
     fetch_squads_for_club_names,
     fetch_major_clubs_transfers_safely,
 )
+from scraper.tactics import fetch_fotmob_tactical_updates
 from scraper.besoccer import fetch_besoccer_transfers
 from scraper.matcher import NameMatcher
 from scraper.sortitoutsi import fetch_sortitoutsi_transfers
 from scraper.soccerway import fetch_soccerway_transfers
 from scraper.sofascore import fetch_sofascore_transfers
 from scraper.sources import reconcile_transfer_sources
-from scraper.models import CaptainUpdate, ScrapeResult, SquadSnapshot
+from scraper.models import (
+    CaptainUpdate,
+    ScrapeResult,
+    SquadSnapshot,
+    TacticalUpdate,
+)
 from scraper.wikipedia import fetch_wikipedia_transfers
 from scraper.transfermarkt import fetch_transfermarkt_transfers
 from local_update import (
@@ -500,11 +506,26 @@ def _scrape_run_transfers(
     print(f"Current captain markers to process: {len(captain_updates)}")
     roster_updates = merge_transfers([roster_updates])
     print(f"Current roster updates to process: {len(roster_updates)}")
+    tactical_updates = ()
+    if squad_snapshots:
+        print("\n📊 Preparing evidence-gated tactical settings from FotMob...")
+        try:
+            tactical_updates = fetch_fotmob_tactical_updates(squad_snapshots)
+        except Exception as error:
+            logger.warning(
+                "Tactical stats unavailable; preserving saved game plans: %s",
+                error,
+            )
+        print(
+            "Current-season tactical settings to process: "
+            f"{len(tactical_updates)}"
+        )
     return ScrapeResult(
         transfers,
         captain_updates,
         squad_snapshots,
         roster_updates,
+        tactical_updates=tactical_updates,
     )
 
 def _load_match_database(
@@ -864,6 +885,44 @@ def _plan_gameplan_preferences(
             position_overrides[team_id] = resolved_positions
     return preferred_starters, position_overrides
 
+def _plan_gameplan_tactics(
+    tactical_updates: tuple[TacticalUpdate, ...] | list[TacticalUpdate],
+    matcher: NameMatcher,
+    club_ids: set[int],
+    validated_fotmob_teams: dict[int, int] | None,
+) -> dict[int, dict[str, int]]:
+    """Resolve FotMob profiles to represented local clubs, failing closed."""
+    planned: dict[int, dict[str, int]] = {}
+    conflicted: set[int] = set()
+    for source in tactical_updates:
+        if validated_fotmob_teams is not None:
+            team_id = validated_fotmob_teams.get(source.team_id_fotmob)
+        else:
+            team_id, _, confidence = matcher.match_team(
+                source.club_name,
+                threshold=98.0,
+            )
+            if confidence < 98.0:
+                team_id = None
+        if team_id is None or team_id not in club_ids or team_id in conflicted:
+            continue
+
+        settings = dict(source.settings)
+        if not settings:
+            continue
+        previous = planned.get(team_id)
+        if previous is not None and previous != settings:
+            logger.warning(
+                "Skipping conflicting tactical profiles for team %s",
+                team_id,
+            )
+            planned.pop(team_id, None)
+            conflicted.add(team_id)
+            continue
+        planned[team_id] = settings
+    return planned
+
+
 def _plan_captain_updates(
     captain_updates: list[CaptainUpdate] | tuple[CaptainUpdate, ...],
     matcher: NameMatcher,
@@ -943,8 +1002,9 @@ def _print_dry_run(
     edit_file: EditFile,
     roster_plan,
     captain_plan=(),
+    tactical_profiles: dict[int, dict[str, int]] | None = None,
 ) -> None:
-    """Render planned roster and captain actions without mutating."""
+    """Render planned roster, captain, and tactical actions without mutating."""
 
     print("\n🔍 DRY-RUN — checking each match against the current roster:")
     would_apply = 0
@@ -1043,6 +1103,13 @@ def _print_dry_run(
             f"  WOULD SET CAPTAIN: {planned_captain.source.club_name} → "
             f"{planned_captain.matched_player_name}"
         )
+    if tactical_profiles:
+        print("\nEvidence-gated tactical profiles (main preset):")
+        for team_id, settings in sorted(tactical_profiles.items()):
+            print(
+                f"  Team {team_id}: {settings} "
+                "(only differing supported fields would be written)"
+            )
     print(
         f"\nDry-run complete. Would apply: {would_apply}, "
         f"already current: {already_current}, safety-skipped: {safety_skipped}. "
@@ -1311,6 +1378,7 @@ class _RunPrepared:
         self.captain_plan: tuple[_PlannedCaptainUpdate, ...] = ()
         self.gameplan_preferred_starters: dict[int, tuple[int, ...]] = {}
         self.gameplan_position_overrides: dict[int, dict[int, str]] = {}
+        self.gameplan_tactics: dict[int, dict[str, int]] = {}
         self.save_scope = str(output_path.resolve())
         self.backup_path: Path | None = None
         self.original_data = bytes(
@@ -1334,12 +1402,14 @@ class _RunMutation:
         unchanged: int,
         safety_skipped: int,
         captains_changed: int = 0,
+        tactics_changed: int = 0,
     ) -> None:
         self.transfer_applied = transfer_applied
         self.shirt_numbers_changed = shirt_numbers_changed
         self.unchanged = unchanged
         self.safety_skipped = safety_skipped
         self.captains_changed = captains_changed
+        self.tactics_changed = tactics_changed
 
 
 class _RunLocalUpdateRuntime:
@@ -1552,27 +1622,28 @@ class _RunLocalUpdateRuntime:
                 allow_uncovered_source=not request.deep,
             )
             captain_sources = getattr(transfers, "captain_updates", ())
+            squad_snapshots = tuple(getattr(transfers, "squad_snapshots", ()))
+            tactical_sources = tuple(getattr(transfers, "tactical_updates", ()))
+            is_pes21_save = bool(
+                getattr(prepared.edit_file, "is_pes21_save", False)
+            )
+            team_map = None
+            if (
+                not is_pes21_save
+                and (captain_sources or squad_snapshots or tactical_sources)
+            ):
+                team_map = _load_represented_fotmob_club_map()
+
             if captain_sources:
-                captain_team_map = (
-                    None
-                    if bool(getattr(prepared.edit_file, "is_pes21_save", False))
-                    else _load_represented_fotmob_club_map()
-                )
                 prepared.captain_plan = _plan_captain_updates(
                     captain_sources,
                     matcher,
                     team_player_map,
                     club_ids,
-                    captain_team_map,
+                    team_map,
                     match_threshold,
                 )
-            squad_snapshots = tuple(getattr(transfers, "squad_snapshots", ()))
             if squad_snapshots:
-                gameplan_team_map = (
-                    None
-                    if bool(getattr(prepared.edit_file, "is_pes21_save", False))
-                    else _load_represented_fotmob_club_map()
-                )
                 (
                     prepared.gameplan_preferred_starters,
                     prepared.gameplan_position_overrides,
@@ -1581,10 +1652,20 @@ class _RunLocalUpdateRuntime:
                     matcher,
                     team_player_map,
                     club_ids,
-                    gameplan_team_map,
+                    team_map,
                     match_threshold,
                 )
-
+            if tactical_sources:
+                prepared.gameplan_tactics = _plan_gameplan_tactics(
+                    tactical_sources,
+                    matcher,
+                    club_ids,
+                    team_map,
+                )
+                print(
+                    "Tactical profiles safely mapped to local clubs: "
+                    f"{len(prepared.gameplan_tactics)}"
+                )
             prepared.roster_plan = roster_plan
             prepared.save_scope = save_scope
             return roster_plan, fully_matched
@@ -1646,14 +1727,34 @@ class _RunLocalUpdateRuntime:
                 "reset_roles",
             )
         )
-        if not actionable_roster and not gameplan_changed and not captain_actionable:
+        tactics_changed = 0
+        tactical_setter = getattr(
+            prepared.edit_file,
+            "set_team_tactical_settings",
+            None,
+        )
+        if callable(tactical_setter):
+            for team_id, settings in prepared.gameplan_tactics.items():
+                token.raise_if_cancelled()
+                changed = tactical_setter(team_id, settings)
+                if type(changed) is int and changed > 0:
+                    tactics_changed += changed
+        if (
+            not actionable_roster
+            and not gameplan_changed
+            and not captain_actionable
+            and not tactics_changed
+        ):
             unchanged = sum(
                 item.action == "noop" for item in prepared.roster_plan
             )
             safety_skipped = sum(
                 item.action == "skip" for item in prepared.roster_plan
             )
-            print("\nNo effective transfer, shirt-number, or captain changes to apply. Exiting.")
+            print(
+                "\nNo effective transfer, squad, captain, or tactical "
+                "changes to apply. Exiting."
+            )
             return LocalUpdateResult(
                 target_path=prepared.output_path,
                 backup_path=None,
@@ -1671,6 +1772,8 @@ class _RunLocalUpdateRuntime:
                 f"{repair_metrics.get('repaired_goalkeeper_roles', 0)} goalkeeper roles, "
                 f"{repair_metrics.get('repaired_position_bytes', 0)} position bytes"
             )
+        if tactics_changed:
+            print(f"  Tactical settings changed: {tactics_changed}")
 
         token.raise_if_cancelled()
         print("\n💾 Creating backup...")
@@ -1967,6 +2070,7 @@ class _RunLocalUpdateRuntime:
             f"\n  Transfers applied: {transfer_applied}, "
             f"shirt numbers changed: {shirt_numbers_applied}, "
             f"captains changed: {captains_changed}, "
+            f"tactical settings changed: {tactics_changed}, "
             f"already current: {unchanged}, safety-skipped: {safety_skipped}"
         )
         return _RunMutation(
@@ -1975,6 +2079,7 @@ class _RunLocalUpdateRuntime:
             unchanged=unchanged,
             safety_skipped=safety_skipped,
             captains_changed=captains_changed,
+            tactics_changed=tactics_changed,
         )
 
     def verify(
@@ -2155,6 +2260,7 @@ class _RunLocalUpdateRuntime:
             diagnostic=diagnostic,
             transfer_log_content=transfer_log_content,
             captains_changed=mutation.captains_changed,
+            tactics_changed=mutation.tactics_changed,
         )
 
     def preview(
@@ -2168,6 +2274,7 @@ class _RunLocalUpdateRuntime:
             prepared.edit_file,
             plan[0] if isinstance(plan, tuple) else plan,
             getattr(prepared, "captain_plan", ()),
+            getattr(prepared, "gameplan_tactics", {}),
         )
         return LocalUpdateResult(
             target_path=prepared.output_path,

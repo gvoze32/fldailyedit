@@ -24,7 +24,7 @@ from editor.roster import (
     TP_TEAM_ID, TP_PLAYER_IDS, TP_SHIRT_NUMBERS, TP_MAX_PLAYERS,
     RESERVED_PLAYER_ID_MIN,
     GP_TEAM_ID, GP_LINEUP, GP_CAPTAIN,
-    GP_POSITION_PRESETS, GP_POSITION_PHASE_OFFSETS,
+    GP_POSITION_PRESETS, GP_POSITION_PHASE_OFFSETS, GP_TACTICAL_FIELD_OFFSETS,
     assign_smart_shirt_number,
 )
 from editor.models import TeamData, PlayerInfo
@@ -732,6 +732,61 @@ class TestTeamRosters:
 
         assert ef_with_rosters.set_team_captain(101, 9999) is False
         assert ef_with_rosters.get_team_captain_player(101) == 1003
+
+    def test_tactical_settings_only_change_supported_main_preset(
+        self,
+        ef_with_rosters,
+    ):
+        game_plan_base = ef_with_rosters._find_game_plan_offset(101)
+        expected = {
+            "attacking_style": 1,
+            "build_up": 0,
+            "attacking_area": 0,
+            "defensive_style": 1,
+        }
+        tactical_offsets = {
+            GP_POSITION_PRESETS[0] + GP_TACTICAL_FIELD_OFFSETS[name]
+            for name in expected
+        }
+        for name, value in expected.items():
+            offset = GP_POSITION_PRESETS[0] + GP_TACTICAL_FIELD_OFFSETS[name]
+            ef_with_rosters._data[game_plan_base + offset] = 1 - value
+
+        before = bytes(
+            ef_with_rosters._data[
+                game_plan_base : game_plan_base + GAME_PLAN_ENTRY_SIZE
+            ]
+        )
+        assert ef_with_rosters.set_team_tactical_settings(101, expected) == 4
+        after = bytes(
+            ef_with_rosters._data[
+                game_plan_base : game_plan_base + GAME_PLAN_ENTRY_SIZE
+            ]
+        )
+        assert {
+            offset for offset, (old, new) in enumerate(zip(before, after))
+            if old != new
+        } == tactical_offsets
+        assert {
+            GP_POSITION_PRESETS[0] + GP_TACTICAL_FIELD_OFFSETS[name]: after[
+                GP_POSITION_PRESETS[0] + GP_TACTICAL_FIELD_OFFSETS[name]
+            ]
+            for name in expected
+        } == {
+            GP_POSITION_PRESETS[0] + GP_TACTICAL_FIELD_OFFSETS[name]: value
+            for name, value in expected.items()
+        }
+        assert ef_with_rosters.set_team_tactical_settings(101, expected) == 0
+
+        unchanged = bytes(ef_with_rosters._data)
+        assert (
+            ef_with_rosters.set_team_tactical_settings(
+                101,
+                {"attacking_style": 1, "unsupported": 0},
+            )
+            == 0
+        )
+        assert bytes(ef_with_rosters._data) == unchanged
 
     def test_batch_shirt_updates_support_swaps(self, ef_with_rosters):
         assert ef_with_rosters.update_player_shirt_numbers(

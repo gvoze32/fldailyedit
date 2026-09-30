@@ -931,6 +931,18 @@ class FotmobScraper:
             team_name,
         )
         starter_members = self._extract_last_lineup_members(data, members)
+        details = data.get("details")
+        raw_league_id = (
+            details.get("primaryLeagueId")
+            if isinstance(details, dict)
+            else None
+        )
+        try:
+            primary_league_id = int(raw_league_id)
+        except (TypeError, ValueError):
+            primary_league_id = None
+        if primary_league_id is not None and primary_league_id <= 0:
+            primary_league_id = None
         return SquadSnapshot(
             club_name=team_name.strip(),
             team_id_fotmob=team_id,
@@ -938,6 +950,7 @@ class FotmobScraper:
             source_url=f"https://www.fotmob.com/api/data/teams?id={team_id}",
             complete=len(members) >= _MIN_COMPLETE_SQUAD_MEMBERS,
             starter_members=starter_members,
+            primary_league_id=primary_league_id,
         )
 
     def _extract_squad_from_team_data(

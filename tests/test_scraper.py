@@ -552,7 +552,8 @@ class TestScraperSafety:
                         ]
                     }
                 ]
-            }
+            },
+            "details": {"primaryLeagueId": 47},
         }
 
         snapshot = FotmobScraper()._extract_squad_snapshot_from_team_data(
@@ -562,6 +563,7 @@ class TestScraperSafety:
         )
 
         assert snapshot.complete is True
+        assert snapshot.primary_league_id == 47
         assert len(snapshot.members) == 11
         assert snapshot.members[0].player_id_fotmob == 100
         assert snapshot.members[-1].position == "CMF"

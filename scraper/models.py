@@ -67,6 +67,7 @@ class SquadSnapshot:
     source_url: str
     complete: bool = False
     starter_members: tuple[SquadMember, ...] = ()
+    primary_league_id: Optional[int] = None
 
 
 
@@ -85,8 +86,20 @@ class CaptainUpdate:
     source_url: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class TacticalUpdate:
+    """Evidence-backed main-preset settings for one FotMob club."""
+
+    club_name: str
+    team_id_fotmob: int
+    league_id: int
+    settings: tuple[tuple[str, int], ...]
+    sample_matches: int
+    source_urls: tuple[str, ...] = ()
+
+
 class ScrapeResult(list[Transfer]):
-    """Transfer events plus current roster and captain observations."""
+    """Transfer events plus current roster, captain, and tactical observations."""
 
     def __init__(
         self,
@@ -98,11 +111,13 @@ class ScrapeResult(list[Transfer]):
             int,
             tuple[tuple[int, str, SquadMember], ...],
         ] | None = None,
+        tactical_updates: list[TacticalUpdate] | tuple[TacticalUpdate, ...] = (),
     ) -> None:
         super().__init__(transfers)
         self.captain_updates = tuple(captain_updates)
         self.squad_snapshots = tuple(squad_snapshots)
         self.roster_updates = tuple(roster_updates)
+        self.tactical_updates = tuple(tactical_updates)
         if fotmob_identity_map is None:
             built_identity_map: dict[
                 int,
@@ -138,6 +153,7 @@ class ScrapeResult(list[Transfer]):
             or self.captain_updates
             or self.squad_snapshots
             or self.roster_updates
+            or self.tactical_updates
         )
 
 
