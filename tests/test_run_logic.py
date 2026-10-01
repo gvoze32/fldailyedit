@@ -1530,6 +1530,132 @@ def test_snapshot_exact_name_survives_position_label_mismatch():
     ] == [(3016, "squad_release")]
 
 
+def test_snapshot_short_aliases_use_local_shirt_and_position_before_releases():
+    from scraper.matcher import NameMatcher
+
+    allan_id = 35001
+    wrong_savio_id = 35002
+    savinho_id = 35003
+    city_extras = list(range(35100, 35115))
+    spurs_extras = list(range(35200, 35215))
+    unrelated_allan_id = 35300
+    city_ids = [allan_id, *city_extras]
+    spurs_ids = [wrong_savio_id, savinho_id, *spurs_extras]
+    player_names = {
+        allan_id: "Allan Andrade",
+        wrong_savio_id: "Sávio",
+        savinho_id: "Savinho",
+        unrelated_allan_id: "Allan",
+        **{
+            player_id: f"City Player {index}"
+            for index, player_id in enumerate(city_extras)
+        },
+        **{
+            player_id: f"Spurs Player {index}"
+            for index, player_id in enumerate(spurs_extras)
+        },
+    }
+    matcher = NameMatcher()
+    matcher.load_player_db(
+        [(name, player_id) for player_id, name in player_names.items()],
+        positions={
+            allan_id: "AMF",
+            wrong_savio_id: "RB",
+            savinho_id: "LWF",
+            unrelated_allan_id: "RW",
+            **{
+                player_id: "CM"
+                for player_id in [*city_extras, *spurs_extras]
+            },
+        },
+        ages={
+            allan_id: 21,
+            wrong_savio_id: 22,
+            savinho_id: 20,
+            unrelated_allan_id: 35,
+            **{player_id: 25 for player_id in [*city_extras, *spurs_extras]},
+        },
+    )
+    matcher.load_team_db({"Manchester City": 10, "Tottenham": 20, "Other": 30})
+    city_snapshot = SquadSnapshot(
+        club_name="Manchester City",
+        team_id_fotmob=42,
+        members=(
+            SquadMember("Allan", 9001, "RW", age=22, shirt_number=37),
+            *(
+                SquadMember(
+                    player_names[player_id],
+                    9100 + index,
+                    "CM",
+                    age=25,
+                    shirt_number=index + 1,
+                )
+                for index, player_id in enumerate(city_extras)
+            ),
+        ),
+        source_url="https://www.fotmob.com/api/data/teams?id=42",
+        complete=True,
+    )
+    spurs_snapshot = SquadSnapshot(
+        club_name="Tottenham",
+        team_id_fotmob=43,
+        members=(
+            SquadMember("Sávio", 9201, "RW", age=22, shirt_number=17),
+            *(
+                SquadMember(
+                    player_names[player_id],
+                    9300 + index,
+                    "CM",
+                    age=25,
+                    shirt_number=index + 1,
+                )
+                for index, player_id in enumerate(spurs_extras)
+            ),
+        ),
+        source_url="https://www.fotmob.com/api/data/teams?id=43",
+        complete=True,
+    )
+    team_player_map = {
+        10: city_ids,
+        20: spurs_ids,
+        30: [unrelated_allan_id],
+    }
+    team_shirt_numbers = {
+        10: {
+            allan_id: 37,
+            **{
+                player_id: index + 1
+                for index, player_id in enumerate(city_extras)
+            },
+        },
+        20: {
+            wrong_savio_id: 2,
+            savinho_id: 17,
+            **{player_id: index + 1 for index, player_id in enumerate(spurs_extras)},
+        },
+        30: {unrelated_allan_id: 10},
+    }
+
+    matched = _match_transfers_statefully(
+        [],
+        matcher,
+        80,
+        team_player_map,
+        {10, 20, 30},
+        validated_fotmob_ids={42, 43},
+        validated_fotmob_teams={42: 10, 43: 20},
+        squad_snapshots=(city_snapshot, spurs_snapshot),
+        player_names=player_names,
+        team_shirt_numbers=team_shirt_numbers,
+    )
+
+    assert [
+        (match.player_id, match.transfer.transfer_type)
+        for match in matched
+    ] == [(wrong_savio_id, "squad_release")]
+
+
+
 def test_snapshot_does_not_release_player_from_current_transfer_event():
     from scraper.matcher import NameMatcher
 

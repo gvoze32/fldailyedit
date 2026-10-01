@@ -61,7 +61,8 @@ Start a new Master League or Become a Legend career after installing it.
 Use **Fast** for routine updates, choose **Deep** for broader coverage.
 
 Roster changes come from verified transfer events or complete FotMob squad
-snapshots matched to existing local identities. Ambiguous or low-coverage
+snapshots matched to existing local identities. Short provider aliases require
+matching shirt, age, and compatible-role evidence; ambiguous or low-coverage
 evidence does not force player-specific corrections.
 
 ### PES 2021/T99 patch saves

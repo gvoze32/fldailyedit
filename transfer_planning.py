@@ -19,6 +19,12 @@ _NON_CLUB_LABELS = {"", "free agent", "without club", "unattached", "career brea
 _MIN_COMPLETE_SQUAD_MEMBERS = 11
 _MIN_CURRENT_SQUAD_MATCH_RATIO = 0.75
 
+_ATTACKING_SHORT_ALIAS_POSITIONS = frozenset(
+    {"AMF", "CAM", "AM", "SS", "LWF", "RWF", "LW", "RW", "LMF", "RMF"}
+)
+
+_MIN_SHORT_ALIAS_SCORE = 80.0
+
 
 @dataclass
 class PlannedRosterAction:
@@ -180,6 +186,7 @@ def _match_snapshot_member(
     team_id: int,
     team_player_map: dict[int, list[int]],
     threshold: float,
+    team_shirt_numbers: Mapping[int, Mapping[int, int]] | None = None,
 ) -> tuple[int | None, str, float]:
     """Resolve a snapshot identity before using a guarded fuzzy fallback."""
     all_roster_ids = {
@@ -218,6 +225,15 @@ def _match_snapshot_member(
             if candidate[1] in team_roster_ids
         ]
         if len(team_candidates) == 1:
+            alias_match = _match_short_name_by_current_shirt(
+                matcher,
+                member,
+                team_id,
+                team_player_map,
+                team_shirt_numbers,
+            )
+            if alias_match is not None and alias_match[0] != team_candidates[0][1]:
+                return alias_match
             name, player_id = team_candidates[0]
             return player_id, name, 100.0
         if len(team_candidates) > 1:
@@ -233,6 +249,15 @@ def _match_snapshot_member(
             if len(metadata_candidates) == 1:
                 name, player_id = metadata_candidates[0]
                 return player_id, name, 100.0
+            alias_match = _match_short_name_by_current_shirt(
+                matcher,
+                member,
+                team_id,
+                team_player_map,
+                team_shirt_numbers,
+            )
+            if alias_match is not None:
+                return alias_match
             return None, "", 100.0
 
         # A unique exact candidate already in any local roster is safe when
@@ -294,6 +319,16 @@ def _match_snapshot_member(
                     name, player_id = metadata_candidates[0]
                     return player_id, name, 100.0
                 return None, "", 100.0
+
+    alias_match = _match_short_name_by_current_shirt(
+        matcher,
+        member,
+        team_id,
+        team_player_map,
+        team_shirt_numbers,
+    )
+    if alias_match is not None:
+        return alias_match
 
     # Search only the snapshot club's local roster before falling back to a
     # global fuzzy match. This handles abbreviated provider names without
@@ -364,6 +399,76 @@ def _match_snapshot_member(
         return None, "", confidence
     return player_id, player_name, confidence
 
+def _match_short_name_by_current_shirt(
+    matcher: NameMatcher,
+    member: SquadMember,
+    team_id: int,
+    team_player_map: dict[int, list[int]],
+    team_shirt_numbers: Mapping[int, Mapping[int, int]] | None,
+) -> tuple[int, str, float] | None:
+    """Resolve a single-token alias only with unique roster and shirt evidence."""
+    query_tokens = _normalize(member.player_name).split()
+    shirt_number = _optional_positive_int(member.shirt_number)
+    if (
+        len(query_tokens) != 1
+        or shirt_number is None
+        or team_shirt_numbers is None
+    ):
+        return None
+
+    local_shirt_numbers = team_shirt_numbers.get(team_id, {})
+    provider_position = (member.position or "").strip().upper()
+    candidates: dict[int, tuple[float, str]] = {}
+    for player_id in team_player_map.get(team_id, ()):
+        if (
+            _optional_positive_int(local_shirt_numbers.get(player_id))
+            != shirt_number
+            or not matcher._is_player_age_compatible(
+                player_id,
+                age=member.age,
+            )
+        ):
+            continue
+
+        position_compatible = matcher._is_player_metadata_compatible(
+            player_id,
+            position=member.position,
+            age=member.age,
+        )
+        candidate_position = (
+            matcher._player_positions.get(player_id, "") or ""
+        ).strip().upper()
+        adjacent_attacking_positions = (
+            provider_position in _ATTACKING_SHORT_ALIAS_POSITIONS
+            and candidate_position in _ATTACKING_SHORT_ALIAS_POSITIONS
+        )
+        for candidate_norm, candidate_name in getattr(
+            matcher,
+            "_player_id_to_names",
+            {},
+        ).get(player_id, ()):
+            candidate_tokens = candidate_norm.split()
+            if not candidate_tokens:
+                continue
+            exact_first_token = candidate_tokens[0] == query_tokens[0]
+            if not position_compatible and not (
+                adjacent_attacking_positions and exact_first_token
+            ):
+                continue
+            score = matcher._score_player(query_tokens[0], candidate_norm)
+            if score < _MIN_SHORT_ALIAS_SCORE:
+                continue
+            previous = candidates.get(player_id)
+            if previous is None or score > previous[0]:
+                candidates[player_id] = (score, candidate_name)
+
+    if len(candidates) != 1:
+        return None
+    player_id, (_, player_name) = next(iter(candidates.items()))
+    return player_id, player_name, 95.0
+
+
+
 
 def _build_fotmob_identity_index(
     matcher: NameMatcher,
@@ -378,6 +483,7 @@ def _build_fotmob_identity_index(
         tuple[tuple[int, str, SquadMember], ...],
     ]
     | None = None,
+    team_shirt_numbers: Mapping[int, Mapping[int, int]] | None = None,
 ) -> tuple[dict[int, int], dict[int, str], Mapping[int, tuple[tuple[int, str, SquadMember], ...]]]:
     """Resolve current FotMob IDs to unique PES players once per snapshot."""
     identity_map = (
@@ -434,6 +540,7 @@ def _build_fotmob_identity_index(
                 local_team_id,
                 team_player_map,
                 threshold,
+                team_shirt_numbers,
             )
             if player_id is None:
                 continue
@@ -508,6 +615,7 @@ def _build_snapshot_roster_coverage(
     fotmob_to_pes: dict[int, int],
     validated_fotmob_ids: set[int] | None,
     validated_fotmob_teams: dict[int, int] | None,
+    team_shirt_numbers: Mapping[int, Mapping[int, int]] | None = None,
 ) -> dict[int, _SnapshotRosterCoverage]:
     """Classify snapshots before allowing destructive roster reconciliation."""
     coverage: dict[int, _SnapshotRosterCoverage] = {}
@@ -565,6 +673,7 @@ def _build_snapshot_roster_coverage(
                 team_id,
                 virtual_rosters,
                 threshold,
+                team_shirt_numbers,
             )
             if (
                 player_id is not None
@@ -879,6 +988,7 @@ def _match_transfers_statefully(
     | None = None,
     player_names: dict[int, str] | None = None,
     allow_uncovered_source: bool = False,
+    team_shirt_numbers: Mapping[int, Mapping[int, int]] | None = None,
 ) -> list[MatchedTransfer]:
     """Match transfer events and derive releases from complete live squads."""
     virtual_rosters = {
@@ -938,6 +1048,7 @@ def _match_transfers_statefully(
             validated_fotmob_teams,
             squad_snapshots,
             fotmob_identity_map,
+            team_shirt_numbers,
         )
     )
     for fotmob_player_id, player_id in snapshot_fotmob_to_pes.items():
@@ -1222,6 +1333,7 @@ def _match_transfers_statefully(
         fotmob_to_pes,
         validated_fotmob_ids,
         validated_fotmob_teams,
+        team_shirt_numbers,
     )
     _append_current_squad_moves(
         matched,

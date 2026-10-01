@@ -749,6 +749,18 @@ def _match_and_plan_transfers(
         *transfers,
         *getattr(transfers, "roster_updates", ()),
     ]
+    team_shirt_numbers = {
+        team_id: {
+            player_id: shirt_number
+            for player_id, shirt_number in zip(
+                roster.player_ids,
+                getattr(roster, "shirt_numbers", ()),
+            )
+            if player_id and shirt_number > 0
+        }
+        for team_id, roster in all_rosters.items()
+    }
+
     matched = planning._match_transfers_statefully(
         planning_transfers,
         matcher,
@@ -764,6 +776,7 @@ def _match_and_plan_transfers(
         fotmob_identity_map=getattr(transfers, "fotmob_identity_map", None),
         player_names=player_names,
         allow_uncovered_source=allow_uncovered_source,
+        team_shirt_numbers=team_shirt_numbers,
     )
     matched, duplicate_shirt_matches = planning._dedupe_shirt_number_matches(matched)
     superseded_loan_sources = planning._build_superseded_loan_sources(
