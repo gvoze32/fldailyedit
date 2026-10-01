@@ -142,6 +142,10 @@ the first transfer page per club by default, supports deeper history through
 `max_pages`, and has a 60-second source budget. Optional-source failures do not
 block a run, incomplete or ambiguous events are skipped.
 
+Fast-mode Transfermarkt scans stop after 120 seconds and retain verified rows
+already read; events available only on later pages may be missed. Deep mode
+keeps the full scan.
+
 ## Run locally
 
 Python 3.10+ is required.

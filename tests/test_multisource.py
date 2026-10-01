@@ -1478,6 +1478,49 @@ def test_run_pipeline_accepts_transfermarkt_dated_event_without_other_sources(
 
     assert transfers == [transfermarkt]
 
+def test_fast_mode_bounds_transfermarkt_scan_but_deep_keeps_full_results(
+    monkeypatch, caplog
+):
+    import run_pipeline as run
+    from scraper import transfermarkt
+
+    monkeypatch.setattr(run, "_FAST_TRANSFERMARKT_TIMEOUT_SECONDS", 0.1)
+    second_page = TRANSFERMARKT_PAGE_2.replace(
+        "02/08/2026", "03/08/2026"
+    )
+
+    async def fake_fetch(_session, reader_url):
+        if "page=2" in reader_url:
+            await asyncio.sleep(0.25)
+            return second_page
+        if "page=3" in reader_url:
+            return TRANSFERMARKT_PAGE_2
+        return TRANSFERMARKT_MARKDOWN
+
+    monkeypatch.setattr(transfermarkt, "_fetch_text", fake_fetch)
+    monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_: [])
+    monkeypatch.setattr(run, "fetch_major_clubs_transfers_safely", lambda **_: [])
+    monkeypatch.setattr(run, "fetch_wikipedia_transfers", lambda **_: [])
+    monkeypatch.setattr(run, "fetch_sortitoutsi_transfers", lambda **_: [])
+    monkeypatch.setattr(run, "fetch_besoccer_transfers", lambda **_: [])
+    monkeypatch.setattr(run, "fetch_sofascore_transfers", lambda **_: [])
+    monkeypatch.setattr(run, "fetch_soccerway_transfers", lambda **_: [])
+    args = dict(
+        popular=False,
+        window="summer",
+        since="2026-08-03",
+        club=None,
+        fotmob_only=False,
+    )
+
+    with caplog.at_level(logging.WARNING, logger=transfermarkt.__name__):
+        fast = run._scrape_run_transfers(SimpleNamespace(deep=False, **args))
+    deep = run._scrape_run_transfers(SimpleNamespace(deep=True, **args))
+
+    assert len({item.transfer_id_transfermarkt for item in fast}) == 3
+    assert len({item.transfer_id_transfermarkt for item in deep}) == 4
+    assert "reached its 0.1-second budget" in caplog.text
+
 
 def test_run_pipeline_reconciles_supplemental_sources(monkeypatch):
     import run_pipeline as run

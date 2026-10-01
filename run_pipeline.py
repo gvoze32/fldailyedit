@@ -64,6 +64,7 @@ from local_update import (
 
 logger = logging.getLogger(__name__)
 _FAST_SQUAD_CLUB_LIMIT = 32
+_FAST_TRANSFERMARKT_TIMEOUT_SECONDS = 120
 _GAMEPLAN_PRIORITY_NAMES: dict[str, tuple[str, ...]] = {
     # Verified role corrections for players whose current squad position is
     # otherwise lost when the legacy lineup is compacted.
@@ -438,8 +439,17 @@ def _scrape_run_transfers(
         print(f"  Sortitoutsi found {len(fast_signals)} enabled signals")
 
         print("\n🔎 Adding verified Transfermarkt detailed transfers...")
+        transfermarkt_timeout = (
+            None if deep_mode else _FAST_TRANSFERMARKT_TIMEOUT_SECONDS
+        )
+        if transfermarkt_timeout is not None:
+            print(
+                "  Fast Transfermarkt scan budget: "
+                f"{transfermarkt_timeout} seconds"
+            )
         transfermarkt_events = fetch_transfermarkt_transfers(
-            since_date=scrape_since_date or start_date
+            since_date=scrape_since_date or start_date,
+            timeout_seconds=transfermarkt_timeout,
         )
         transfer_batches.append(transfermarkt_events)
         print(
