@@ -57,6 +57,37 @@ def test_gameplan_preferences_persist_resolved_snapshot_keys():
     assert overrides == {}
 
 
+def test_gameplan_formations_require_supported_shapes_and_unambiguous_mapping():
+    from scraper.models import SquadSnapshot
+    from scraper.matcher import NameMatcher
+
+    def snapshot(team_id, formation, *, complete=True):
+        return SquadSnapshot(
+            club_name=f"Team {team_id}",
+            team_id_fotmob=team_id,
+            members=(),
+            source_url=f"https://example.test/teams/{team_id}",
+            complete=complete,
+            formation=formation,
+        )
+
+    snapshots = (
+        snapshot(42, "04-2-03-1"),
+        snapshot(43, "4-3-3", complete=False),
+        snapshot(44, "2-4-4"),
+        snapshot(45, "4-3-3"),
+        snapshot(46, "4-4-2"),
+        snapshot(46, "4-2-3-1"),
+    )
+
+    planned = run_pipeline._plan_gameplan_formations(
+        snapshots,
+        NameMatcher(),
+        {101, 102, 103, 104},
+        {42: 101, 43: 102, 44: 103, 46: 104},
+    )
+
+    assert planned == {101: "4-2-3-1"}
 
 
 def test_transfer_run_skips_save_work_when_no_transfers(
@@ -936,7 +967,7 @@ def test_tactical_only_scrape_result_plans_and_applies_settings(
     class FakeEditFile:
         def __init__(self):
             self._data = bytearray(b"original")
-            self.settings = {"attacking_style": 0, "build_up": 0}
+            self.settings = {}
             self.is_pes21_save = False
 
         def validate_integrity(self):
@@ -995,7 +1026,16 @@ def test_tactical_only_scrape_result_plans_and_applies_settings(
         club_name="Example FC",
         team_id_fotmob=42,
         league_id=10,
-        settings=(("attacking_style", 1), ("build_up", 0)),
+        settings=(
+            ("attacking_style", 1),
+            ("build_up", 0),
+            ("attacking_area", 1),
+            ("defensive_style", 0),
+            ("containment_area", 1),
+            ("pressuring", 0),
+            ("defensive_line", 7),
+            ("compactness", 6),
+        ),
         sample_matches=8,
     )
     tactical_only = ScrapeResult(tactical_updates=(tactical_update,))
@@ -1016,11 +1056,19 @@ def test_tactical_only_scrape_result_plans_and_applies_settings(
     )
 
     assert bool(tactical_only)
-    assert prepared.gameplan_tactics == {
-        101: {"attacking_style": 1, "build_up": 0}
+    expected_settings = {
+        "attacking_style": 1,
+        "build_up": 0,
+        "attacking_area": 1,
+        "defensive_style": 0,
+        "containment_area": 1,
+        "pressuring": 0,
+        "defensive_line": 7,
+        "compactness": 6,
     }
-    assert edit_file.settings == {"attacking_style": 1, "build_up": 0}
-    assert mutation.tactics_changed == 1
+    assert prepared.gameplan_tactics == {101: expected_settings}
+    assert edit_file.settings == expected_settings
+    assert mutation.tactics_changed == 8
     assert backup_calls == [edit_path]
     assert prepared.backup_path == backup_path
 

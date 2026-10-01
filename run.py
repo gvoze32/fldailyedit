@@ -594,12 +594,13 @@ def cmd_run(args):
             and result.shirt_numbers_changed == 0
             and result.captains_changed == 0
             and result.tactics_changed == 0
+            and result.formations_changed == 0
             and result.unchanged == 0
             and result.safety_skipped == 0
         ):
             print(
-                "No verified transfer, roster, captain, or tactical changes "
-                "were available."
+                "No verified transfer, roster, captain, tactical, or "
+                "formation changes were available."
             )
         return
 
@@ -607,7 +608,8 @@ def cmd_run(args):
         f"\n✅ Done! {result.transfer_applied} transfers applied; "
         f"{result.shirt_numbers_changed} shirt numbers changed; "
         f"{result.captains_changed} captains changed; "
-        f"{result.tactics_changed} tactical settings changed."
+        f"{result.tactics_changed} tactical settings changed; "
+        f"{result.formations_changed} formations changed."
     )
 
     if result.diagnostic:

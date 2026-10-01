@@ -24,8 +24,10 @@ from editor.roster import (
     TP_TEAM_ID, TP_PLAYER_IDS, TP_SHIRT_NUMBERS, TP_MAX_PLAYERS,
     RESERVED_PLAYER_ID_MIN,
     GP_TEAM_ID, GP_LINEUP, GP_CAPTAIN,
-    GP_POSITION_PRESETS, GP_POSITION_PHASE_OFFSETS, GP_TACTICAL_FIELD_OFFSETS,
-    assign_smart_shirt_number,
+    GP_POSITION_PRESETS, GP_POSITION_PHASE_OFFSETS,
+    GP_POSITION_COORDINATE_OFFSETS, GP_TACTICAL_FIELD_OFFSETS,
+    assign_smart_shirt_number, game_plan_formation_layout,
+    normalize_game_plan_formation,
 )
 from editor.models import TeamData, PlayerInfo
 
@@ -743,6 +745,10 @@ class TestTeamRosters:
             "build_up": 0,
             "attacking_area": 0,
             "defensive_style": 1,
+            "containment_area": 1,
+            "pressuring": 0,
+            "defensive_line": 1,
+            "compactness": 10,
         }
         tactical_offsets = {
             GP_POSITION_PRESETS[0] + GP_TACTICAL_FIELD_OFFSETS[name]
@@ -750,14 +756,19 @@ class TestTeamRosters:
         }
         for name, value in expected.items():
             offset = GP_POSITION_PRESETS[0] + GP_TACTICAL_FIELD_OFFSETS[name]
-            ef_with_rosters._data[game_plan_base + offset] = 1 - value
+            if name in ("defensive_line", "compactness"):
+                ef_with_rosters._data[game_plan_base + offset] = (
+                    value - 1 if value > 1 else 0
+                )
+            else:
+                ef_with_rosters._data[game_plan_base + offset] = 1 - value
 
         before = bytes(
             ef_with_rosters._data[
                 game_plan_base : game_plan_base + GAME_PLAN_ENTRY_SIZE
             ]
         )
-        assert ef_with_rosters.set_team_tactical_settings(101, expected) == 4
+        assert ef_with_rosters.set_team_tactical_settings(101, expected) == 8
         after = bytes(
             ef_with_rosters._data[
                 game_plan_base : game_plan_base + GAME_PLAN_ENTRY_SIZE
@@ -787,6 +798,127 @@ class TestTeamRosters:
             == 0
         )
         assert bytes(ef_with_rosters._data) == unchanged
+
+        for invalid_settings in (
+            {"defensive_line": 0},
+            {"defensive_line": 11},
+            {"compactness": 0},
+            {"compactness": 11},
+            {"pressuring": 2},
+            {"pressuring": True},
+        ):
+            assert (
+                ef_with_rosters.set_team_tactical_settings(
+                    101,
+                    invalid_settings,
+                )
+                == 0
+            )
+            assert bytes(ef_with_rosters._data) == unchanged
+
+    def test_game_plan_formation_updates_main_preset_roles_and_geometry(
+        self,
+        ef_with_rosters,
+    ):
+        game_plan_base = ef_with_rosters._find_game_plan_offset(101)
+        before = bytes(
+            ef_with_rosters._data[
+                game_plan_base : game_plan_base + GAME_PLAN_ENTRY_SIZE
+            ]
+        )
+        layout = game_plan_formation_layout("4-2-3-1")
+        assert layout == (
+            (0, 1, 1, 3, 2, 4, 4, 8, 10, 9, 12),
+            (
+                (3, 52),
+                (11, 64),
+                (11, 40),
+                (13, 88),
+                (13, 16),
+                (19, 64),
+                (22, 40),
+                (33, 52),
+                (41, 84),
+                (41, 20),
+                (43, 52),
+            ),
+        )
+
+        changed = ef_with_rosters.set_team_formation(101, "4-2-3-1")
+        after = bytes(
+            ef_with_rosters._data[
+                game_plan_base : game_plan_base + GAME_PLAN_ENTRY_SIZE
+            ]
+        )
+        allowed_offsets = set()
+        for phase_index, phase_offset in enumerate(GP_POSITION_PHASE_OFFSETS):
+            role_offset = GP_POSITION_PRESETS[0] + phase_offset
+            allowed_offsets.update(range(role_offset, role_offset + 11))
+            coordinate_offset = (
+                GP_POSITION_PRESETS[0]
+                + GP_POSITION_COORDINATE_OFFSETS[phase_index]
+            )
+            allowed_offsets.update(range(coordinate_offset, coordinate_offset + 22))
+
+            assert after[role_offset : role_offset + 11] == bytes(layout[0])
+            expected_coordinates = bytes(
+                value for coordinate in layout[1] for value in coordinate
+            )
+            assert (
+                after[coordinate_offset : coordinate_offset + 22]
+                == expected_coordinates
+            )
+
+        changed_offsets = {
+            offset
+            for offset, (old, new) in enumerate(zip(before, after))
+            if old != new
+        }
+        assert changed > 0
+        assert changed == len(changed_offsets)
+        assert changed_offsets <= allowed_offsets
+        assert ef_with_rosters.set_team_formation(101, "4-2-3-1") == 0
+
+    @pytest.mark.parametrize(
+        "formation",
+        (
+            None,
+            "4-2-3",
+            "2-4-4",
+            "4-2-2-3",
+            "4-2-3-1-0",
+            "4-2-three-1",
+        ),
+    )
+    def test_unsupported_game_plan_formation_preserves_all_bytes(
+        self,
+        ef_with_rosters,
+        formation,
+    ):
+        before = bytes(ef_with_rosters._data)
+        assert normalize_game_plan_formation(formation) is None
+        assert ef_with_rosters.set_team_formation(101, formation) == 0
+        assert bytes(ef_with_rosters._data) == before
+
+    def test_game_plan_formation_layout_supports_common_line_shapes(self):
+        for formation in ("3-5-2", "4-4-2", "5-3-2", "4-2-3-1"):
+            layout = game_plan_formation_layout(formation)
+            assert layout is not None
+            assert len(layout[0]) == 11
+            assert len(layout[1]) == 11
+        assert game_plan_formation_layout("4-1-4-1")[0] == (
+            0,
+            1,
+            1,
+            3,
+            2,
+            4,
+            5,
+            5,
+            7,
+            6,
+            12,
+        )
 
     def test_batch_shirt_updates_support_swaps(self, ef_with_rosters):
         assert ef_with_rosters.update_player_shirt_numbers(

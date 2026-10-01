@@ -61,6 +61,7 @@ class LocalUpdateResult:
     transfer_log_content: str | None = None
     captains_changed: int = 0
     tactics_changed: int = 0
+    formations_changed: int = 0
 
 class LocalUpdateError(RuntimeError):
     """Stable service error suitable for CLI and beginner-facing GUI copy."""

@@ -35,6 +35,10 @@ def test_league_tactics_follow_extreme_current_season_rates():
             "build_up": 1,
             "attacking_area": 1,
             "defensive_style": 1,
+            "containment_area": 0,
+            "pressuring": 1,
+            "defensive_line": 1,
+            "compactness": 1,
         },
         6,
     )
@@ -44,10 +48,46 @@ def test_league_tactics_follow_extreme_current_season_rates():
             "build_up": 0,
             "attacking_area": 0,
             "defensive_style": 0,
+            "containment_area": 1,
+            "pressuring": 0,
+            "defensive_line": 10,
+            "compactness": 10,
         },
         6,
     )
-    assert 104 not in decisions
+    assert decisions[104] == (
+        {"defensive_line": 5, "compactness": 5},
+        6,
+    )
+
+
+    assert [
+        decisions[team_id][0]["defensive_line"]
+        for team_id in range(101, 109)
+    ] == [1, 2, 4, 5, 6, 7, 9, 10]
+    assert [
+        decisions[team_id][0]["compactness"]
+        for team_id in range(101, 109)
+    ] == [1, 2, 4, 5, 6, 7, 9, 10]
+
+def test_slider_decisions_require_eight_distinct_current_season_profiles():
+    teams = _league_teams()
+    del teams["108"]["final_third_wins"]
+    insufficient_teams = _league_decisions({"teams": teams})
+    assert all(
+        "defensive_line" not in settings and "compactness" not in settings
+        for settings, _ in insufficient_teams.values()
+    )
+
+    teams = _league_teams()
+    for profile in teams.values():
+        profile["final_third_wins"]["value"] = 4
+    uniform_profiles = _league_decisions({"teams": teams})
+    assert all(
+        "defensive_line" not in settings and "compactness" not in settings
+        for settings, _ in uniform_profiles.values()
+    )
+
 
 def test_tactical_evidence_requires_minimum_matches_and_distinct_quartiles():
     teams = _league_teams()
@@ -111,6 +151,10 @@ def test_cached_fotmob_league_evidence_builds_public_tactical_update(tmp_path):
         "build_up": 1,
         "attacking_area": 1,
         "defensive_style": 1,
+        "containment_area": 0,
+        "pressuring": 1,
+        "defensive_line": 1,
+        "compactness": 1,
     }
     assert updates[0].sample_matches == 6
     assert updates[0].source_urls == (source_url,)

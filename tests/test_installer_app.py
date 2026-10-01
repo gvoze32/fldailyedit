@@ -1043,6 +1043,7 @@ def test_completion_renders_prebuilt_and_local_transfer_details(
             transfer_applied=2,
             shirt_numbers_changed=1,
             captains_changed=1,
+            formations_changed=1,
             unchanged=3,
             safety_skipped=4,
             transfer_log_content=local_log,
@@ -1055,6 +1056,7 @@ def test_completion_renders_prebuilt_and_local_transfer_details(
     assert "Transfers applied: 2" in application._progress_detail_var.value
     assert "Shirt numbers changed: 1" in application._progress_detail_var.value
     assert "Captains changed: 1" in application._progress_detail_var.value
+    assert "Formations changed: 1" in application._progress_detail_var.value
     assert "Unchanged: 3" in application._progress_detail_var.value
     assert "Safety skipped: 4" in application._progress_detail_var.value
     assert "uncertain changes are never forced" in application._progress_detail_var.value

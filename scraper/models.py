@@ -68,6 +68,8 @@ class SquadSnapshot:
     complete: bool = False
     starter_members: tuple[SquadMember, ...] = ()
     primary_league_id: Optional[int] = None
+    formation: str | None = None
+    formation_source_url: str = ""
 
 
 

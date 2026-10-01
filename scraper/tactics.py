@@ -339,6 +339,21 @@ def _quartile_decisions(
     }
 
 
+def _league_slider_decisions(values_by_team: dict[int, float]) -> dict[int, int]:
+    """Scale a league-relative profile to the game's 1-10 slider range."""
+    if len(values_by_team) < _MIN_LEAGUE_TEAMS:
+        return {}
+    low = min(values_by_team.values())
+    high = max(values_by_team.values())
+    if low >= high:
+        return {}
+    spread = high - low
+    return {
+        team_id: 1 + int((value - low) / spread * 9 + 0.5)
+        for team_id, value in values_by_team.items()
+    }
+
+
 def _league_decisions(entry: dict) -> dict[int, tuple[dict[str, int], int]]:
     teams = entry.get("teams")
     if not isinstance(teams, dict):
@@ -354,10 +369,17 @@ def _league_decisions(entry: dict) -> dict[int, tuple[dict[str, int], int]]:
     cross_shares: dict[int, float] = {}
     final_third_wins: dict[int, float] = {}
     sample_counts: dict[str, dict[int, int]] = {
-        "attacking_style": {},
-        "build_up": {},
-        "attacking_area": {},
-        "defensive_style": {},
+        setting: {}
+        for setting in (
+            "attacking_style",
+            "build_up",
+            "attacking_area",
+            "defensive_style",
+            "containment_area",
+            "pressuring",
+            "defensive_line",
+            "compactness",
+        )
     }
     for team_id, profile in normalized.items():
         possession = _entry_metric(profile, "possession")
@@ -385,11 +407,18 @@ def _league_decisions(entry: dict) -> dict[int, tuple[dict[str, int], int]]:
         ):
             cross_shares[team_id] = crosses[0] / passes[0]
             sample_counts["attacking_area"][team_id] = passes[1]
+            sample_counts["containment_area"][team_id] = passes[1]
 
         final_third = _entry_metric(profile, "final_third_wins")
         if final_third is not None:
             final_third_wins[team_id] = final_third[0]
-            sample_counts["defensive_style"][team_id] = final_third[1]
+            for setting in (
+                "defensive_style",
+                "pressuring",
+                "defensive_line",
+                "compactness",
+            ):
+                sample_counts[setting][team_id] = final_third[1]
 
     decisions_by_setting = {
         "attacking_style": _quartile_decisions(
@@ -412,6 +441,18 @@ def _league_decisions(entry: dict) -> dict[int, tuple[dict[str, int], int]]:
             low_value=1,  # all-out defense
             high_value=0,  # frontline pressure
         ),
+        "containment_area": _quartile_decisions(
+            cross_shares,
+            low_value=0,  # middle
+            high_value=1,  # wide
+        ),
+        "pressuring": _quartile_decisions(
+            final_third_wins,
+            low_value=1,  # conservative
+            high_value=0,  # aggressive
+        ),
+        "defensive_line": _league_slider_decisions(final_third_wins),
+        "compactness": _league_slider_decisions(final_third_wins),
     }
 
     result: dict[int, tuple[dict[str, int], int]] = {}

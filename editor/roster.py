@@ -47,14 +47,31 @@ GP_SINGLE_PLAYER_ROLES = (
 GP_POSITION_PRESETS = (0x004, 0x0A4, 0x144)
 
 # Main preset tactical bytes; offsets are relative to the preset at 0x004.
+# Binary encodings: containment 0=middle/1=wide;
+# pressuring 0=aggressive/1=conservative.
 GP_TACTICAL_FIELD_OFFSETS = {
     "attacking_style": 0x063,
     "build_up": 0x064,
     "attacking_area": 0x065,
     "defensive_style": 0x067,
+    "containment_area": 0x068,
+    "pressuring": 0x069,
+    "defensive_line": 0x08E,
+    "compactness": 0x08F,
 }
+GP_TACTICAL_FIELD_VALUE_RANGES = {
+    name: (0, 1)
+    for name in GP_TACTICAL_FIELD_OFFSETS
+}
+GP_TACTICAL_FIELD_VALUE_RANGES["defensive_line"] = (1, 10)
+GP_TACTICAL_FIELD_VALUE_RANGES["compactness"] = (1, 10)
+
 GP_POSITION_PHASE_OFFSETS = (0x000, 0x021, 0x042)
 GP_POSITION_ENTRY_SIZE = 1
+
+# Each position phase stores 11 (vertical, horizontal) coordinate pairs.
+GP_POSITION_COORDINATE_OFFSETS = (0x00B, 0x02C, 0x04D)
+GP_POSITION_COORDINATE_ENTRY_SIZE = 2
 
 _GOALKEEPER_POSITION_LABELS = frozenset({"GK", "GOALKEEPER", "KEEPER", "GOALIE"})
 
@@ -108,6 +125,135 @@ def _game_plan_position_code(position: str | None) -> int | None:
     label = _POSITION_CODE_ALIASES.get(label, label)
     return _POSITION_CODE_BY_LABEL.get(label)
 
+
+_FORMATION_LINE_LAYOUTS = {
+    "defense": {
+        3: (("CB", 52, 0), ("CB", 68, 0), ("CB", 36, 0)),
+        4: (("CB", 64, 0), ("CB", 40, 0), ("RB", 88, 2), ("LB", 16, 2)),
+        5: (
+            ("CB", 52, 0),
+            ("CB", 68, 0),
+            ("CB", 36, 0),
+            ("RB", 92, 2),
+            ("LB", 12, 2),
+        ),
+    },
+    "midfield": {
+        1: (("DMF", 52, 0),),
+        2: (("DMF", 64, 0), ("DMF", 40, 3)),
+        3: (("DMF", 52, -2), ("CMF", 64, 2), ("CMF", 40, 2)),
+        4: (
+            ("CMF", 40, 0),
+            ("CMF", 64, 0),
+            ("RMF", 88, 2),
+            ("LMF", 16, 2),
+        ),
+        5: (
+            ("DMF", 52, -2),
+            ("CMF", 64, 2),
+            ("CMF", 40, 2),
+            ("RMF", 88, 3),
+            ("LMF", 16, 3),
+        ),
+    },
+    "attacking": {
+        1: (("AMF", 52, 0),),
+        2: (("AMF", 40, 0), ("AMF", 64, 0)),
+        3: (("AMF", 52, 0), ("RWF", 84, 8), ("LWF", 20, 8)),
+        4: (
+            ("AMF", 40, 0),
+            ("AMF", 64, 0),
+            ("RWF", 88, 8),
+            ("LWF", 16, 8),
+        ),
+        5: (
+            ("AMF", 52, 0),
+            ("AMF", 40, 0),
+            ("AMF", 64, 0),
+            ("RWF", 88, 8),
+            ("LWF", 16, 8),
+        ),
+    },
+    "forward": {
+        1: (("CF", 52, 0),),
+        2: (("CF", 64, 0), ("CF", 40, 0)),
+        3: (("CF", 52, 2), ("RWF", 84, -2), ("LWF", 20, -2)),
+        4: (
+            ("CF", 40, 0),
+            ("CF", 64, 0),
+            ("RWF", 88, -2),
+            ("LWF", 16, -2),
+        ),
+    },
+}
+_FORMATION_ROW_POSITIONS = {
+    3: (11, 24, 43),
+    4: (11, 19, 33, 43),
+}
+
+
+def normalize_game_plan_formation(formation: object) -> str | None:
+    """Return a supported 10-outfield-player formation or ``None``."""
+    if not isinstance(formation, str):
+        return None
+    parts = formation.strip().split("-")
+    if (
+        len(parts) not in _FORMATION_ROW_POSITIONS
+        or any(not part.isascii() or not part.isdecimal() for part in parts)
+    ):
+        return None
+    counts = tuple(int(part) for part in parts)
+    if (
+        sum(counts) != 10
+        or counts[0] not in (3, 4, 5)
+        or counts[-1] not in (1, 2, 3, 4)
+        or any(count < 1 or count > 5 for count in counts)
+    ):
+        return None
+    return "-".join(str(count) for count in counts)
+
+
+def game_plan_formation_layout(
+    formation: object,
+) -> tuple[tuple[int, ...], tuple[tuple[int, int], ...]] | None:
+    """Build PES role codes and vertical/horizontal coordinates for a shape."""
+    normalized = normalize_game_plan_formation(formation)
+    if normalized is None:
+        return None
+
+    counts = tuple(int(part) for part in normalized.split("-"))
+    middle_count = len(counts) - 2
+    line_kinds = ["defense"]
+    line_kinds.extend(
+        "midfield"
+        if (
+            middle_index == 0
+            or middle_count == 1
+            or counts[middle_index + 1] >= 4
+        )
+        else "attacking"
+        for middle_index in range(middle_count)
+    )
+    line_kinds.append("forward")
+
+    role_codes = [0]
+    coordinates = [(3, 52)]
+    row_positions = _FORMATION_ROW_POSITIONS[len(counts)]
+    for count, kind, row_position in zip(counts, line_kinds, row_positions):
+        entries = _FORMATION_LINE_LAYOUTS[kind].get(count)
+        if entries is None:
+            return None
+        for position, horizontal, vertical_adjustment in entries:
+            role_code = _game_plan_position_code(position)
+            vertical = row_position + vertical_adjustment
+            if role_code is None or not 0 <= vertical <= 0x64:
+                return None
+            role_codes.append(role_code)
+            coordinates.append((vertical, horizontal))
+
+    if len(role_codes) != 11 or len(coordinates) != 11:
+        return None
+    return tuple(role_codes), tuple(coordinates)
 
 
 def assign_smart_shirt_number(
@@ -240,7 +386,7 @@ class RosterGamePlanMixin:
         team_id: int,
         settings: Mapping[str, int],
     ) -> int:
-        """Set validated binary choices in the main tactical preset only."""
+        """Set validated main-preset choices and 1-10 tactical sliders."""
         game_plan_offset = self._find_game_plan_offset(team_id)
         if (
             game_plan_offset is None
@@ -250,7 +396,11 @@ class RosterGamePlanMixin:
             or any(
                 key not in GP_TACTICAL_FIELD_OFFSETS
                 or type(value) is not int
-                or value not in (0, 1)
+                or not (
+                    GP_TACTICAL_FIELD_VALUE_RANGES[key][0]
+                    <= value
+                    <= GP_TACTICAL_FIELD_VALUE_RANGES[key][1]
+                )
                 for key, value in settings.items()
             )
         ):
@@ -263,6 +413,62 @@ class RosterGamePlanMixin:
             if self._data[offset] != value:
                 self._data[offset] = value
                 changed += 1
+        return changed
+
+    def set_team_formation(self, team_id: int, formation: object) -> int:
+        """Set the main preset's role and coordinate arrays in all phases."""
+        layout = game_plan_formation_layout(formation)
+        game_plan_offset = self._find_game_plan_offset(team_id)
+        if layout is None:
+            self._set_mutation_failure(
+                "unsupported_formation",
+                f"Unsupported formation: {formation!r}",
+            )
+            return 0
+        if (
+            game_plan_offset is None
+            or game_plan_offset + GAME_PLAN_ENTRY_SIZE > len(self._data)
+        ):
+            self._set_mutation_failure(
+                "game_plan_not_found",
+                f"No game plan found for team {team_id}",
+            )
+            return 0
+
+        role_codes, coordinates = layout
+        preset_offset = game_plan_offset + GP_POSITION_PRESETS[0]
+        changed = 0
+        for phase_index, phase_offset in enumerate(GP_POSITION_PHASE_OFFSETS):
+            role_offset = preset_offset + phase_offset
+            coordinate_offset = (
+                preset_offset + GP_POSITION_COORDINATE_OFFSETS[phase_index]
+            )
+            if (
+                role_offset + len(role_codes) > len(self._data)
+                or coordinate_offset
+                + len(coordinates) * GP_POSITION_COORDINATE_ENTRY_SIZE
+                > len(self._data)
+            ):
+                self._set_mutation_failure(
+                    "game_plan_out_of_bounds",
+                    f"Game plan for team {team_id} is truncated",
+                )
+                return 0
+            for role, code in enumerate(role_codes):
+                address = role_offset + role * GP_POSITION_ENTRY_SIZE
+                if self._data[address] != code:
+                    self._data[address] = code
+                    changed += 1
+            for role, (vertical, horizontal) in enumerate(coordinates):
+                address = (
+                    coordinate_offset
+                    + role * GP_POSITION_COORDINATE_ENTRY_SIZE
+                )
+                pair = bytes((vertical, horizontal))
+                end = address + GP_POSITION_COORDINATE_ENTRY_SIZE
+                if self._data[address:end] != pair:
+                    self._data[address:end] = pair
+                    changed += GP_POSITION_COORDINATE_ENTRY_SIZE
         return changed
 
 

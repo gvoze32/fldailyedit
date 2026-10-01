@@ -1431,6 +1431,7 @@ class InstallerApplication:
                     f"\n\nTransfers applied: {state.result.transfer_applied}"
                     f"\nShirt numbers changed: {state.result.shirt_numbers_changed}"
                     f"\nCaptains changed: {state.result.captains_changed}"
+                    f"\nFormations changed: {state.result.formations_changed}"
                     f"\nUnchanged: {state.result.unchanged}"
                     f"\nSafety skipped: {state.result.safety_skipped}"
                 )

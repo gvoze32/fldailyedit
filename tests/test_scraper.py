@@ -554,6 +554,7 @@ class TestScraperSafety:
                 ]
             },
             "details": {"primaryLeagueId": 47},
+            "overview": {"lastLineupStats": {"formation": "4-2-3-1"}},
         }
 
         snapshot = FotmobScraper()._extract_squad_snapshot_from_team_data(
@@ -567,6 +568,10 @@ class TestScraperSafety:
         assert len(snapshot.members) == 11
         assert snapshot.members[0].player_id_fotmob == 100
         assert snapshot.members[-1].position == "CMF"
+        assert snapshot.formation == "4-2-3-1"
+        assert snapshot.formation_source_url == (
+            "https://www.fotmob.com/api/data/teams?id=42"
+        )
 
         result = ScrapeResult(squad_snapshots=(snapshot,))
         assert result.fotmob_identity_map[100][0][0] == 42
@@ -612,7 +617,165 @@ class TestScraperSafety:
         ]
         assert snapshot.starter_members[0].position == "CMF"
 
+    def test_latest_team_match_page_uses_newest_finished_team_result(self):
+        from scraper.fotmob import _latest_team_match_page
 
+        payload = {
+            "table": {
+                "teamForm": {
+                    "42": [
+                        {
+                            "resultString": "W",
+                            "linkToMatch": "/matches/old-match/old#100",
+                            "tooltipText": {
+                                "utcTime": "2026-09-10T12:00:00Z",
+                                "homeTeamId": 42,
+                                "awayTeamId": 9,
+                                "homeTeam": "Old Home",
+                                "awayTeam": "Old Away",
+                            },
+                        },
+                        {
+                            "resultString": "D",
+                            "linkToMatch": "/matches/new-match/new#200",
+                            "tooltipText": {
+                                "utcTime": "2026-09-20T12:00:00Z",
+                                "homeTeamId": 8,
+                                "awayTeamId": 42,
+                                "homeTeam": "Other FC",
+                                "awayTeam": "Example FC",
+                            },
+                        },
+                        {
+                            "resultString": "",
+                            "linkToMatch": "/matches/future-match/future#300",
+                            "tooltipText": {
+                                "utcTime": "2026-10-20T12:00:00Z",
+                                "homeTeamId": 42,
+                                "awayTeamId": 7,
+                            },
+                        },
+                        {
+                            "resultString": "W",
+                            "linkToMatch": "/matches/unrelated/unrelated#400",
+                            "tooltipText": {
+                                "utcTime": "2026-09-25T12:00:00Z",
+                                "homeTeamId": 4,
+                                "awayTeamId": 5,
+                            },
+                        },
+                    ]
+                }
+            }
+        }
+
+        assert _latest_team_match_page(payload, 42) == (
+            "https://www.fotmob.com/matches/new-match/new",
+            "Example FC",
+        )
+
+    def test_match_page_formation_requires_a_named_team_summary(self):
+        from scraper.fotmob import _formation_from_match_page
+
+        html = """
+        <html>
+          <script>Éxample FC (4-3-3): hidden fake formation</script>
+          <main>
+            <p>The lineups are:</p>
+            <p>Éxample FC (4-2-3-1): starting players</p>
+            <p>Other FC (3-4-3): other players</p>
+          </main>
+        </html>
+        """
+
+        assert _formation_from_match_page(html, ("Example FC",)) == "4-2-3-1"
+        assert _formation_from_match_page(html, ("Missing FC",)) is None
+
+    def test_complete_snapshot_enriches_formation_from_last_match_page(self):
+        import asyncio
+
+        from scraper.fotmob import FotmobScraper
+
+        match_html = (
+            "<main><p>The lineups are:</p>"
+            "<p>Example FC (4-2-3-1): starting players</p>"
+            "<p>Other FC (4-4-2): starting players</p></main>"
+        )
+        payload = {
+            "details": {"name": "Example FC", "shortName": "EXA"},
+            "squad": {
+                "squad": [
+                    {
+                        "members": [
+                            {"id": player_id, "name": f"Player {player_id}"}
+                            for player_id in range(100, 111)
+                        ]
+                    }
+                ]
+            },
+            "table": {
+                "teamForm": {
+                    "42": [
+                        {
+                            "resultString": "W",
+                            "linkToMatch": "/matches/example-vs-other/abc#123",
+                            "tooltipText": {
+                                "utcTime": "2026-09-20T12:00:00Z",
+                                "homeTeamId": 42,
+                                "awayTeamId": 9,
+                                "homeTeam": "Example FC",
+                                "awayTeam": "Other FC",
+                            },
+                        }
+                    ]
+                }
+            },
+        }
+
+        class FakeResponse:
+            status = 200
+            headers = {}
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+            async def text(self):
+                return match_html
+
+        class FakeSession:
+            def __init__(self):
+                self.urls = []
+
+            def get(self, url, *, headers):
+                self.urls.append((url, headers["Accept"]))
+                return FakeResponse()
+
+        scraper = FotmobScraper()
+        snapshot = scraper._extract_squad_snapshot_from_team_data(
+            payload,
+            42,
+            "Example FC",
+        )
+        session = FakeSession()
+
+        enriched = asyncio.run(
+            scraper._enrich_squad_snapshot_formation_async(
+                session,
+                payload,
+                snapshot,
+            )
+        )
+
+        assert enriched.complete is True
+        assert enriched.formation == "4-2-3-1"
+        assert enriched.formation_source_url == (
+            "https://www.fotmob.com/matches/example-vs-other/abc"
+        )
+        assert session.urls[0][0] == enriched.formation_source_url
+        assert session.urls[0][1] == "text/html,application/xhtml+xml"
 
     def test_squad_snapshot_excludes_coach_sections(self):
         from scraper.fotmob import FotmobScraper

@@ -7,14 +7,19 @@ detection and date filtering.
 """
 import asyncio
 import hashlib
-import os
-from calendar import monthrange
-from datetime import date, datetime, timezone
 import json
 import logging
-from pathlib import Path
+import os
+import re
 import unicodedata
+from calendar import monthrange
+from dataclasses import replace
+from datetime import date, datetime, timezone
+from html.parser import HTMLParser
+from pathlib import Path
 from typing import Callable, Optional, Union
+from urllib.parse import urljoin, urlsplit
+
 import aiohttp
 
 import config
@@ -260,6 +265,144 @@ def _optional_positive_int(value) -> Optional[int]:
     except (TypeError, ValueError):
         return None
     return parsed if parsed > 0 else None
+
+
+class _VisibleHTMLText(HTMLParser):
+    """Collect server-rendered page text without script or style payloads."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._ignored_tags: list[str] = []
+
+    def handle_starttag(self, tag: str, _attrs) -> None:
+        if tag in {"script", "style", "noscript"}:
+            self._ignored_tags.append(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._ignored_tags and tag == self._ignored_tags[-1]:
+            self._ignored_tags.pop()
+
+    def handle_data(self, data: str) -> None:
+        if not self._ignored_tags and data.strip():
+            self.parts.append(data.strip())
+
+
+def _normalized_team_label(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value).casefold()
+    return "".join(character for character in normalized if character.isalnum())
+
+
+def _latest_team_match_page(
+    data: dict,
+    team_id: int,
+) -> tuple[str, str | None] | None:
+    """Find the latest completed-match page and its team label."""
+    candidates: list[tuple[datetime, int, str, str | None]] = []
+
+    def visit(value) -> None:
+        if isinstance(value, dict):
+            team_forms = value.get("teamForm")
+            if isinstance(team_forms, dict):
+                rows = team_forms.get(str(team_id), team_forms.get(team_id, ()))
+                if isinstance(rows, list):
+                    for row in rows:
+                        if not isinstance(row, dict):
+                            continue
+                        tooltip = row.get("tooltipText")
+                        if not isinstance(tooltip, dict):
+                            continue
+                        home_team_id = _optional_positive_int(
+                            tooltip.get("homeTeamId")
+                        )
+                        away_team_id = _optional_positive_int(
+                            tooltip.get("awayTeamId")
+                        )
+                        if home_team_id != team_id and away_team_id != team_id:
+                            continue
+                        if str(row.get("resultString") or "").upper() not in {
+                            "W",
+                            "D",
+                            "L",
+                        }:
+                            continue
+                        played_at = parse_iso_datetime(
+                            str(tooltip.get("utcTime") or "")
+                        )
+                        link = str(row.get("linkToMatch") or "").strip()
+                        if played_at is None or not link:
+                            continue
+                        parsed = urlsplit(link)
+                        if (
+                            (
+                                parsed.netloc
+                                and parsed.hostname
+                                not in {"fotmob.com", "www.fotmob.com"}
+                            )
+                            or not parsed.path.startswith("/matches/")
+                            or not parsed.fragment.isdigit()
+                        ):
+                            continue
+                        match_id = int(parsed.fragment)
+                        team_label = (
+                            tooltip.get("homeTeam")
+                            if home_team_id == team_id
+                            else tooltip.get("awayTeam")
+                        )
+                        candidates.append(
+                            (
+                                played_at,
+                                match_id,
+                                urljoin(
+                                    "https://www.fotmob.com",
+                                    parsed.path,
+                                ),
+                                str(team_label).strip()
+                                if team_label
+                                else None,
+                            )
+                        )
+            for nested in value.values():
+                visit(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                visit(nested)
+
+    visit(data)
+    if not candidates:
+        return None
+    _, _, page_url, team_label = max(candidates, key=lambda item: item[:3])
+    return page_url, team_label
+
+
+def _formation_from_match_page(
+    html: str,
+    team_names: tuple[str, ...],
+) -> str | None:
+    """Read the named team's formation from FotMob's rendered match summary."""
+    parser = _VisibleHTMLText()
+    parser.feed(html)
+    text = " ".join(parser.parts)
+    known_names = {
+        _normalized_team_label(name)
+        for name in team_names
+        if name.strip()
+    }
+    pattern = re.compile(
+        r"(?P<team>[^:.;]{1,100}?)\s*"
+        r"\((?P<formation>\d+(?:-\d+){2,3})\)\s*:"
+    )
+    for match in pattern.finditer(text):
+        if _normalized_team_label(match.group("team").strip()) in known_names:
+            return match.group("formation")
+    return None
+
+
+def _formation_label(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    match = re.search(r"(?<!\d)\d+(?:-\d+){2,3}(?!\d)", value)
+    return match.group(0) if match else None
 
 
 def _primary_squad_position(raw_member: dict) -> str:
@@ -700,6 +843,80 @@ class FotmobScraper:
                 f"Error fetching FotMob team {team_id}: {error}"
             ) from error
 
+    async def _fetch_latest_team_formation_async(
+        self,
+        session: aiohttp.ClientSession,
+        data: dict,
+        team_id: int,
+        team_name: str,
+    ) -> tuple[str | None, str | None]:
+        """Read a team's shape from its latest finished FotMob match page."""
+        match_page = _latest_team_match_page(data, team_id)
+        if match_page is None:
+            return None, None
+        page_url, match_team_name = match_page
+
+        details = data.get("details")
+        team_names = [team_name]
+        if match_team_name:
+            team_names.append(match_team_name)
+        if isinstance(details, dict):
+            team_names.extend(
+                str(details.get(key) or "")
+                for key in ("name", "shortName")
+            )
+        visible_names = tuple(dict.fromkeys(name for name in team_names if name))
+        page_headers = {
+            "Accept": "text/html,application/xhtml+xml",
+            "Referer": "https://www.fotmob.com/",
+        }
+
+        html = None
+        for attempt in range(FOTMOB_REQUEST_MAX_ATTEMPTS):
+            try:
+                async with session.get(page_url, headers=page_headers) as response:
+                    response_headers = getattr(response, "headers", {})
+                    if response.status == 200:
+                        html = await response.text()
+                        break
+                    if (
+                        response.status not in _FOTMOB_RETRYABLE_STATUSES
+                        or attempt + 1 >= FOTMOB_REQUEST_MAX_ATTEMPTS
+                    ):
+                        logger.debug(
+                            "Skipping optional FotMob formation page %s: HTTP %s",
+                            page_url,
+                            response.status,
+                        )
+                        return None, None
+                    retry_delay = self._retry_delay(
+                        attempt,
+                        response_headers,
+                    )
+                await asyncio.sleep(retry_delay)
+            except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as error:
+                if attempt + 1 >= FOTMOB_REQUEST_MAX_ATTEMPTS:
+                    logger.debug(
+                        "Skipping optional FotMob formation page %s: %s",
+                        page_url,
+                        error,
+                    )
+                    return None, None
+                await asyncio.sleep(self._retry_delay(attempt))
+
+        formation = (
+            _formation_from_match_page(html, visible_names)
+            if isinstance(html, str)
+            else None
+        )
+        if formation is None:
+            logger.debug(
+                "No named lineup formation found on FotMob match page %s",
+                page_url,
+            )
+            return None, None
+        return formation, page_url
+
     async def fetch_club_transfers_async(
         self,
         team_id: int,
@@ -931,6 +1148,18 @@ class FotmobScraper:
             team_name,
         )
         starter_members = self._extract_last_lineup_members(data, members)
+        overview = data.get("overview")
+        last_lineup = (
+            overview.get("lastLineupStats")
+            if isinstance(overview, dict)
+            else None
+        )
+        formation = (
+            _formation_label(last_lineup.get("formation"))
+            if isinstance(last_lineup, dict)
+            else None
+        )
+        source_url = f"https://www.fotmob.com/api/data/teams?id={team_id}"
         details = data.get("details")
         raw_league_id = (
             details.get("primaryLeagueId")
@@ -947,10 +1176,34 @@ class FotmobScraper:
             club_name=team_name.strip(),
             team_id_fotmob=team_id,
             members=members,
-            source_url=f"https://www.fotmob.com/api/data/teams?id={team_id}",
+            source_url=source_url,
             complete=len(members) >= _MIN_COMPLETE_SQUAD_MEMBERS,
             starter_members=starter_members,
             primary_league_id=primary_league_id,
+            formation=formation,
+            formation_source_url=source_url if formation else "",
+        )
+
+    async def _enrich_squad_snapshot_formation_async(
+        self,
+        session: aiohttp.ClientSession,
+        data: dict,
+        snapshot: SquadSnapshot,
+    ) -> SquadSnapshot:
+        if not snapshot.complete or snapshot.formation:
+            return snapshot
+        formation, source_url = await self._fetch_latest_team_formation_async(
+            session,
+            data,
+            snapshot.team_id_fotmob,
+            snapshot.club_name,
+        )
+        if formation is None:
+            return snapshot
+        return replace(
+            snapshot,
+            formation=formation,
+            formation_source_url=source_url or "",
         )
 
     def _extract_squad_from_team_data(
@@ -1122,6 +1375,11 @@ class FotmobScraper:
                     data,
                     team_id,
                     club_name,
+                )
+                snapshot = await self._enrich_squad_snapshot_formation_async(
+                    session,
+                    data,
+                    snapshot,
                 )
                 captain_updates = self._extract_captain_from_team_data(
                     data,
@@ -1499,6 +1757,11 @@ def fetch_squads_for_club_names(club_names: list[str]) -> ScrapeResult:
                         team_id,
                         team_name,
                     )
+                    snapshot = await scraper._enrich_squad_snapshot_formation_async(
+                        session,
+                        data,
+                        snapshot,
+                    )
                     if snapshot.complete:
                         squad_snapshots.append(snapshot)
                     roster_updates.extend(
@@ -1576,6 +1839,11 @@ def fetch_transfers_for_club_names(
                         data,
                         tid,
                         team_name,
+                    )
+                    snapshot = await scraper._enrich_squad_snapshot_formation_async(
+                        sess,
+                        data,
+                        snapshot,
                     )
                     if snapshot.complete:
                         squad_snapshots.append(snapshot)
