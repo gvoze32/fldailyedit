@@ -26,16 +26,16 @@ class FakeRuntime:
         self.preview_calls = 0
         self.cleaned = 0
 
-    def scrape(self, request: LocalUpdateRequest, token: CancellationToken):
-        return self.transfers
-
     def validate_and_prepare(
         self,
         request: LocalUpdateRequest,
-        transfers,
         token: CancellationToken,
     ):
         return {"path": request.edit_path}
+
+    def scrape(self, request: LocalUpdateRequest, prepared, token: CancellationToken):
+        assert prepared == {"path": request.edit_path}
+        return self.transfers
 
     def match_and_plan(
         self,
@@ -130,8 +130,8 @@ def test_service_reports_ordered_progress_and_returns_result() -> None:
     )
 
     assert [event.stage for event in events] == [
-        LocalUpdateStage.SCRAPING,
         LocalUpdateStage.VALIDATING,
+        LocalUpdateStage.SCRAPING,
         LocalUpdateStage.MATCHING,
         LocalUpdateStage.APPLYING,
         LocalUpdateStage.VERIFYING,
@@ -145,7 +145,7 @@ def test_service_reports_ordered_progress_and_returns_result() -> None:
 
 def test_service_reports_scrape_failures_with_scraping_stage() -> None:
     class ScrapeFailureRuntime(FakeRuntime):
-        def scrape(self, request, token):
+        def scrape(self, request, prepared, token):
             raise RuntimeError("deep-club index is empty")
 
     service = LocalUpdateService(ScrapeFailureRuntime())
@@ -181,13 +181,15 @@ def test_empty_scrape_returns_without_backup_or_publish() -> None:
 
     assert result.no_changes is True
     assert result.backup_path is None
+    assert result.skipped == ()
     assert runtime.apply_calls == 0
     assert runtime.publish_calls == 0
-    assert runtime.cleaned == 0
+    # The save is prepared before scraping, so it is always cleaned up.
+    assert runtime.cleaned == 1
 
 def test_captain_only_scrape_is_not_treated_as_empty() -> None:
     class CaptainOnlyRuntime(FakeRuntime):
-        def scrape(self, request, token):
+        def scrape(self, request, prepared, token):
             return ScrapeResult(
                 [],
                 [

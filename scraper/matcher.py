@@ -10,17 +10,16 @@ Uses a multi-strategy approach:
 6. Compound-name prefix handling for provider surname variants
 7. Club prefix/suffix normalization (strips FC, CF, AC, SV, etc.)
 """
-import json
+import heapq
 import logging
 import re
-import unicodedata
 from collections.abc import Iterable, Mapping
-from pathlib import Path
 from typing import Optional
 
 from rapidfuzz import fuzz, process
 
 import config
+from scraper.text import fold_text
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +38,10 @@ _NON_CLUB_NAMES = {
     "retired",
 }
 _CONTEXT_PLAYER_MIN_CONFIDENCE = 90.0
+_PLAYER_AMBIGUITY_MARGIN = 3.0
+# Largest score boost from metadata in NameMatcher._score_player:
+# position (+2), nationality (+6) and age (+4).
+_PLAYER_METADATA_BONUS_MAX = 12.0
 
 # Position categorization maps
 _POS_GK = {"GK", "GOALKEEPER", "KEEPER", "GOALIE"}
@@ -83,7 +86,14 @@ _POS_FWD = {
     "STRIKER",
 }
 
-_POS_ATTACKING_MID = {"AMF", "CAM", "AM"}
+# Labels that providers and PES legitimately place on different lines for the
+# same player: attacking midfielders/second strikers, wingers/wide
+# midfielders, and full-backs/wide midfielders (wing-backs).
+_POS_CROSS_LINE_GROUPS = (
+    {"AMF", "CAM", "AM", "SS"},
+    {"LW", "RW", "LWF", "RWF", "LM", "RM", "LMF", "RMF"},
+    {"LB", "RB", "FULLBACK", "LM", "RM", "LMF", "RMF"},
+)
 
 
 def _get_pos_category(pos: str) -> str:
@@ -112,52 +122,9 @@ def _is_position_compatible(trans_pos: str, pes_pos: str) -> bool:
     cat2 = _get_pos_category(p2)
     if cat1 == "UNKNOWN" or cat2 == "UNKNOWN":
         return True
-    if {p1, p2} <= (_POS_ATTACKING_MID | {"SS"}):
+    if any({p1, p2} <= group for group in _POS_CROSS_LINE_GROUPS):
         return True
     return cat1 == cat2
-
-
-_NAME_CHARACTER_TRANSLATIONS = str.maketrans(
-    {
-        "ı": "i",
-        "Ł": "L",
-        "ł": "l",
-        "Đ": "D",
-        "đ": "d",
-        "Ð": "D",
-        "ð": "d",
-        "Þ": "Th",
-        "þ": "th",
-        "Æ": "AE",
-        "æ": "ae",
-        "Œ": "OE",
-        "œ": "oe",
-        "Ø": "O",
-        "ø": "o",
-        "Ħ": "H",
-        "ħ": "h",
-        "Ŧ": "T",
-        "ŧ": "t",
-        "Ŋ": "N",
-        "ŋ": "n",
-        "ĸ": "k",
-    }
-)
-
-
-def _normalize(name: str) -> str:
-    """
-    Normalize a name for comparison:
-    - Lowercase
-    - Strip diacritics (é → e, ü → u, ñ → n)
-    - Transliterate letters that NFKD does not decompose (ı → i, ł → l)
-    - Collapse whitespace
-    - Strip leading/trailing whitespace
-    """
-    nfkd = unicodedata.normalize("NFKD", name)
-    stripped = "".join(c for c in nfkd if unicodedata.category(c) != "Mn")
-    translated = stripped.translate(_NAME_CHARACTER_TRANSLATIONS)
-    return " ".join(translated.casefold().split())
 
 
 _NAME_TOKEN_SPLIT_RE = re.compile(r"[\W_]+")
@@ -182,8 +149,8 @@ _NAME_SUFFIX_TOKENS = {
 
 def _mononym_suffix_preference(query_norm: str, candidate_norm: str) -> int:
     """Prefer a recognized suffix over an arbitrary surname after a mononym."""
-    query_tokens = _name_tokens(_normalize(query_norm))
-    candidate_tokens = _name_tokens(_normalize(candidate_norm))
+    query_tokens = _name_tokens(fold_text(query_norm))
+    candidate_tokens = _name_tokens(fold_text(candidate_norm))
     if (
         len(query_tokens) == 1
         and len(candidate_tokens) > 1
@@ -199,17 +166,64 @@ def _clean_club_name(name: str) -> str:
     Normalize a club name and strip common noise affixes (FC, CF, AC, etc.).
     Example: 'FC Barcelona' → 'barcelona', 'Union Saint-Gilloise' → 'union saint-gilloise'
     """
-    norm = _normalize(name)
+    norm = fold_text(name)
     cleaned = _CLUB_AFFIX_REGEX.sub(" ", norm)
     return " ".join(cleaned.split())
 
 
-def _load_json(path: Path) -> dict:
-    """Load a JSON file, return empty dict if missing."""
-    if path.exists():
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+class _TokenSetIndex:
+    """Exact ``process.extract(..., scorer=fuzz.token_set_ratio)`` replacement.
+
+    For names sharing no whitespace token with the query, rapidfuzz's
+    token_set_ratio equals ``fuzz.ratio`` of the sorted, de-duplicated token
+    strings (up to float rounding), which rapidfuzz scores an order of
+    magnitude faster. That cheaper score only pre-filters, with a margin for
+    rounding; every surviving name is rescored with token_set_ratio itself,
+    so results equal process.extract's: score descending, then choice index.
+    """
+
+    _PREFILTER_MARGIN = 0.01
+
+    def __init__(self, names: list[str]):
+        self._names = names
+        self._sorted_tokens: list[str] = []
+        self._by_token: dict[str, list[int]] = {}
+        for index, name in enumerate(names):
+            tokens = set(name.split())
+            self._sorted_tokens.append(" ".join(sorted(tokens)))
+            for token in tokens:
+                self._by_token.setdefault(token, []).append(index)
+        self._cache: dict[tuple[str, float], list[tuple[str, float, int]]] = {}
+
+    def extract(self, query: str, score_cutoff: float) -> list[tuple[str, float, int]]:
+        key = (query, score_cutoff)
+        cached = self._cache.get(key)
+        if cached is not None:
+            return cached
+        tokens = set(query.split())
+        shared: set[int] = set()
+        for token in tokens:
+            shared.update(self._by_token.get(token, ()))
+        for _, _, index in process.extract(
+            " ".join(sorted(tokens)),
+            self._sorted_tokens,
+            scorer=fuzz.ratio,
+            limit=None,
+            score_cutoff=max(0.0, score_cutoff - self._PREFILTER_MARGIN),
+        ):
+            shared.add(index)
+        results: list[tuple[str, float, int]] = []
+        for index in shared:
+            score = fuzz.token_set_ratio(
+                query,
+                self._names[index],
+                score_cutoff=score_cutoff,
+            )
+            if score >= score_cutoff:
+                results.append((self._names[index], score, index))
+        results.sort(key=lambda item: (-item[1], item[2]))
+        self._cache[key] = results
+        return results
 
 
 class NameMatcher:
@@ -249,35 +263,30 @@ class NameMatcher:
 
         # For rapidfuzz: list of normalized names
         self._player_names: list[str] = []
+        self._player_index = _TokenSetIndex([])
         self._team_names: list[str] = []
+        self._team_score_cache: dict[tuple[str, bool], list[tuple[float, str]]] = {}
 
         # Cleaned team names for fallback affix-insensitive matching: {cleaned_name: (orig_name, tid)}
         self._cleaned_team_db: dict[str, tuple[str, int]] = {}
         self._cleaned_team_candidates: dict[str, list[tuple[str, int]]] = {}
         self._cleaned_team_names: list[str] = []
 
-        # Verified team aliases are external identity evidence.
-        self._team_aliases: dict[str, str] = {}  # alias → canonical fl26_name
+        # Data-derived aliases (learned FotMob identities); alias → canonical name.
+        self._team_aliases: dict[str, str] = {}
         self._normalized_team_aliases: dict[str, str] = {}
 
-        self._load_team_aliases()
-
-    def _load_team_aliases(self):
-        """Load the optional team alias file."""
-        raw_team_aliases = _load_json(config.TEAM_ALIASES_FILE)
+    def load_team_aliases(self, aliases: Mapping[str, str]) -> None:
+        """Replace team aliases with identity evidence derived from provider data."""
         self._team_aliases = {
             alias: target
-            for alias, target in raw_team_aliases.items()
-            if isinstance(alias, str)
-            and isinstance(target, str)
-            and not alias.startswith("_")
+            for alias, target in aliases.items()
+            if isinstance(alias, str) and isinstance(target, str) and alias and target
         }
         self._normalized_team_aliases = {
-            _normalize(alias): target
+            fold_text(alias): target
             for alias, target in self._team_aliases.items()
         }
-        if self._team_aliases:
-            logger.info(f"Loaded {len(self._team_aliases)} team aliases")
 
     def load_player_db(
         self,
@@ -314,7 +323,7 @@ class NameMatcher:
         records = players.items() if isinstance(players, Mapping) else players
         record_count = 0
         for name, pid in records:
-            norm = _normalize(name)
+            norm = fold_text(name)
             if not norm:
                 continue
             candidates = self._player_candidates.setdefault(norm, [])
@@ -329,6 +338,7 @@ class NameMatcher:
             self._player_id_to_names[pid].append((norm, name))
 
         self._player_names = list(self._player_candidates.keys())
+        self._player_index = _TokenSetIndex(self._player_names)
         duplicate_names = sum(1 for values in self._player_candidates.values() if len(values) > 1)
         logger.info(
             f"Loaded {record_count} player records ({len(self._player_names)} unique names, "
@@ -353,12 +363,13 @@ class NameMatcher:
         self._team_candidates.clear()
         self._cleaned_team_db.clear()
         self._cleaned_team_candidates.clear()
+        self._team_score_cache.clear()
 
         records = teams.items() if isinstance(teams, Mapping) else teams
         for name, tid in records:
             if clubs_only and tid <= 100:
                 continue
-            norm = _normalize(name)
+            norm = fold_text(name)
             if not norm:
                 continue
             candidates = self._team_candidates.setdefault(norm, [])
@@ -499,8 +510,8 @@ class NameMatcher:
         if nationality and candidate_pid and self._player_nationalities:
             db_nat = self._player_nationalities.get(candidate_pid, "")
             if db_nat:
-                norm_scraped_nat = _normalize(nationality)
-                norm_db_nat = _normalize(db_nat)
+                norm_scraped_nat = fold_text(nationality)
+                norm_db_nat = fold_text(db_nat)
                 if norm_scraped_nat in norm_db_nat or norm_db_nat in norm_scraped_nat:
                     base_score = min(100.0, base_score + 6.0)
 
@@ -592,19 +603,19 @@ class NameMatcher:
                     break
 
             if nationality and len(compatible) > 1:
-                norm_nat = _normalize(nationality)
+                norm_nat = fold_text(nationality)
                 known_nationalities = [
                     (orig, pid)
                     for orig, pid in compatible
-                    if _normalize(self._player_nationalities.get(pid, ""))
+                    if fold_text(self._player_nationalities.get(pid, ""))
                 ]
                 if len(known_nationalities) == len(compatible):
                     nat_matches = [
                         (orig, pid)
                         for orig, pid in known_nationalities
                         if (
-                            norm_nat in _normalize(self._player_nationalities[pid])
-                            or _normalize(self._player_nationalities[pid]) in norm_nat
+                            norm_nat in fold_text(self._player_nationalities[pid])
+                            or fold_text(self._player_nationalities[pid]) in norm_nat
                         )
                     ]
                     if nat_matches:
@@ -632,7 +643,7 @@ class NameMatcher:
         # Metadata is a guard against same-name collisions; roster context
         # and the scoring rules below remain authoritative.
 
-        norm_query = _normalize(scraped_name)
+        norm_query = fold_text(scraped_name)
 
         # Step 2: Exact match after normalization
         exact_records = self._player_candidates.get(norm_query, [])
@@ -673,12 +684,12 @@ class NameMatcher:
                 )
                 return None, "", 100.0
 
-        # Step 3: Context-Aware Candidate Search
-        candidates = process.extract(
+        # Step 3: Context-Aware Candidate Search. Every name that could reach
+        # the threshold after metadata bonuses is scored; a fixed top-N would
+        # silently drop tied candidates and hide ambiguity.
+        candidates = self._player_index.extract(
             norm_query,
-            self._player_names,
-            scorer=fuzz.token_set_ratio,
-            limit=10,
+            max(0.0, threshold - _PLAYER_METADATA_BONUS_MAX),
         )
 
         best_name, best_conf = "", 0.0
@@ -718,7 +729,7 @@ class NameMatcher:
                 )
                 if (
                     runner_up is None
-                    or top[0] - runner_up[0] >= 3.0
+                    or top[0] - runner_up[0] >= _PLAYER_AMBIGUITY_MARGIN
                     or (
                         _mononym_suffix_preference(norm_query, top[1])
                         > _mononym_suffix_preference(norm_query, runner_up[1])
@@ -751,49 +762,6 @@ class NameMatcher:
                 )
                 scored.append((score, cand_orig, cand_pid))
 
-        # Use supplied metadata as a disambiguation filter before comparing
-        # fuzzy scores. The score itself may cap at 100 for several candidates.
-        if position:
-            wanted_category = _get_pos_category(position)
-            compatible_position = [
-                item
-                for item in scored
-                if self._player_positions.get(item[2], "")
-                and _is_position_compatible(
-                    position,
-                    self._player_positions.get(item[2], ""),
-                )
-            ]
-            if wanted_category != "UNKNOWN" and compatible_position:
-                scored = compatible_position
-        if nationality and len(scored) > 1:
-            norm_nat = _normalize(nationality)
-            known_nationality_items = [
-                item
-                for item in scored
-                if _normalize(self._player_nationalities.get(item[2], ""))
-            ]
-            if len(known_nationality_items) == len(scored):
-                exact_nationality = [
-                    item
-                    for item in known_nationality_items
-                    if (
-                        norm_nat in _normalize(self._player_nationalities[item[2]])
-                        or _normalize(self._player_nationalities[item[2]]) in norm_nat
-                    )
-                ]
-                if exact_nationality:
-                    scored = exact_nationality
-        if age and age > 0 and len(scored) > 1:
-            known_age_items = [
-                (abs(age - self._player_ages[item[2]]), item)
-                for item in scored
-                if self._player_ages.get(item[2], 0) > 0
-            ]
-            if len(known_age_items) == len(scored):
-                best_age_diff = min(diff for diff, _ in known_age_items)
-                scored = [item for diff, item in known_age_items if diff == best_age_diff]
-
         scored.sort(
             reverse=True,
             key=lambda item: (
@@ -803,29 +771,132 @@ class NameMatcher:
         )
         if scored:
             best_conf, best_name, best_id = scored[0]
-            runner_up = next((item for item in scored[1:] if item[2] != best_id), None)
-            ambiguity_margin = 3.0
-            if best_conf >= threshold and (
-                runner_up is None
-                or best_conf - runner_up[0] >= ambiguity_margin
-                or (
-                    _mononym_suffix_preference(norm_query, best_name)
-                    > _mononym_suffix_preference(norm_query, runner_up[1])
-                    and best_conf == runner_up[0]
+            if best_conf >= threshold:
+                best_preference = _mononym_suffix_preference(norm_query, best_name)
+                # Name evidence decides which candidates compete. Metadata only
+                # breaks ties inside the ambiguity margin; it must never remove
+                # a stronger name match before ambiguity is assessed.
+                contenders = [scored[0]] + [
+                    item
+                    for item in scored[1:]
+                    if item[2] != best_id
+                    and best_conf - item[0] < _PLAYER_AMBIGUITY_MARGIN
+                    and not (
+                        item[0] == best_conf
+                        and _mononym_suffix_preference(norm_query, item[1])
+                        < best_preference
+                    )
+                ]
+                contenders = self._break_player_metadata_tie(
+                    contenders,
+                    position=position,
+                    nationality=nationality,
+                    age=age,
                 )
-            ):
-                return best_id, best_name, best_conf
-            if best_conf >= threshold and runner_up is not None:
-                logger.warning(
-                    f"Ambiguous player match '{scraped_name}': '{best_name}' ({best_conf:.1f}) "
-                    f"vs '{runner_up[1]}' ({runner_up[0]:.1f}); skipping"
+                chosen = contenders[0]
+                runner_up = next(
+                    (item for item in contenders[1:] if item[2] != chosen[2]),
+                    None,
                 )
+                if runner_up is None and chosen[0] >= threshold:
+                    return chosen[2], chosen[1], chosen[0]
+                if runner_up is not None:
+                    logger.warning(
+                        f"Ambiguous player match '{scraped_name}': '{chosen[1]}' ({chosen[0]:.1f}) "
+                        f"vs '{runner_up[1]}' ({runner_up[0]:.1f}); skipping"
+                    )
 
         logger.debug(
             f"No player match for '{scraped_name}' "
             f"(best: '{best_name}' at {best_conf:.0f}%, threshold: {threshold}%)"
         )
         return None, "", best_conf
+
+    def _break_player_metadata_tie(
+        self,
+        contenders: list[tuple[float, str, int]],
+        position: Optional[str] = None,
+        nationality: Optional[str] = None,
+        age: Optional[int] = None,
+    ) -> list[tuple[float, str, int]]:
+        """Narrow name-tied candidates using complete, supplied metadata."""
+        if position:
+            wanted_category = _get_pos_category(position)
+            compatible_position = [
+                item
+                for item in contenders
+                if self._player_positions.get(item[2], "")
+                and _is_position_compatible(
+                    position,
+                    self._player_positions.get(item[2], ""),
+                )
+            ]
+            if wanted_category != "UNKNOWN" and compatible_position:
+                contenders = compatible_position
+        if nationality and len(contenders) > 1:
+            norm_nat = fold_text(nationality)
+            known_nationalities = [
+                (fold_text(self._player_nationalities.get(item[2], "")), item)
+                for item in contenders
+            ]
+            if all(db_nat for db_nat, _ in known_nationalities):
+                exact_nationality = [
+                    item
+                    for db_nat, item in known_nationalities
+                    if norm_nat in db_nat or db_nat in norm_nat
+                ]
+                if exact_nationality:
+                    contenders = exact_nationality
+        if age and age > 0 and len(contenders) > 1:
+            known_age_items = [
+                (abs(age - self._player_ages[item[2]]), item)
+                for item in contenders
+                if self._player_ages.get(item[2], 0) > 0
+            ]
+            if len(known_age_items) == len(contenders):
+                best_age_diff = min(diff for diff, _ in known_age_items)
+                contenders = [
+                    item for diff, item in known_age_items if diff == best_age_diff
+                ]
+        return contenders
+
+    def _team_top_scores(
+        self,
+        query: str,
+        *,
+        cleaned: bool,
+    ) -> list[tuple[float, str]]:
+        """Top two (score, name) pairs, as ``sorted(..., reverse=True)[:2]``."""
+        key = (query, cleaned)
+        cached = self._team_score_cache.get(key)
+        if cached is not None:
+            return cached
+        if cleaned:
+            scores = (
+                (
+                    max(
+                        fuzz.token_set_ratio(query, candidate),
+                        fuzz.token_sort_ratio(query, candidate),
+                    ),
+                    candidate,
+                )
+                for candidate in self._cleaned_team_names
+            )
+        else:
+            scores = (
+                (
+                    max(
+                        fuzz.token_set_ratio(query, candidate),
+                        fuzz.token_sort_ratio(query, candidate),
+                        fuzz.WRatio(query, candidate),
+                    ),
+                    candidate,
+                )
+                for candidate in self._team_names
+            )
+        top = heapq.nlargest(2, scores)
+        self._team_score_cache[key] = top
+        return top
 
     def match_team(
         self,
@@ -847,7 +918,7 @@ class NameMatcher:
 
         # These values deliberately mean "no roster".  Never allow fuzzy
         # matching to reinterpret one as an actual club with a similar name.
-        if _normalize(scraped_name) in _NON_CLUB_NAMES:
+        if fold_text(scraped_name) in _NON_CLUB_NAMES:
             return None, "", 100.0
 
         if not self._team_names:
@@ -857,10 +928,10 @@ class NameMatcher:
         # Step 1: Check aliases
         alias_target = self._team_aliases.get(scraped_name)
         if not alias_target:
-            alias_target = self._normalized_team_aliases.get(_normalize(scraped_name))
+            alias_target = self._normalized_team_aliases.get(fold_text(scraped_name))
 
         query_name = alias_target or scraped_name
-        norm_query = _normalize(query_name)
+        norm_query = fold_text(query_name)
 
         # Step 2: Exact match
         exact_candidates = self._team_candidates.get(norm_query, [])
@@ -887,20 +958,7 @@ class NameMatcher:
             return None, "", 98.0
 
         # Step 4: Fuzzy match across standard team names
-        standard_scores = sorted(
-            (
-                (
-                    max(
-                        fuzz.token_set_ratio(norm_query, candidate),
-                        fuzz.token_sort_ratio(norm_query, candidate),
-                        fuzz.WRatio(norm_query, candidate),
-                    ),
-                    candidate,
-                )
-                for candidate in self._team_names
-            ),
-            reverse=True,
-        )
+        standard_scores = self._team_top_scores(norm_query, cleaned=False)
         best_conf, best_name = standard_scores[0] if standard_scores else (0.0, "")
         runner_up_conf = standard_scores[1][0] if len(standard_scores) > 1 else -1.0
         ambiguity_margin = 3.0
@@ -912,19 +970,7 @@ class NameMatcher:
 
         # Step 5: Fallback fuzzy match on cleaned club names
         if cleaned_query and self._cleaned_team_names:
-            cleaned_scores = sorted(
-                (
-                    (
-                        max(
-                            fuzz.token_set_ratio(cleaned_query, candidate),
-                            fuzz.token_sort_ratio(cleaned_query, candidate),
-                        ),
-                        candidate,
-                    )
-                    for candidate in self._cleaned_team_names
-                ),
-                reverse=True,
-            )
+            cleaned_scores = self._team_top_scores(cleaned_query, cleaned=True)
             clean_conf, clean_name = cleaned_scores[0]
             clean_runner_up = cleaned_scores[1][0] if len(cleaned_scores) > 1 else -1.0
             if clean_conf > best_conf:

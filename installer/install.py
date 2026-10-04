@@ -14,6 +14,7 @@ from uuid import uuid4
 from typing import Any, BinaryIO, Callable
 
 from installer.catalog import ReleaseRecord
+from installer.paths import is_link_status, is_name_surrogate_reparse_tag
 
 
 SAVE_NAME = "EDIT00000000"
@@ -50,10 +51,6 @@ class InstallError(OSError):
         self.code = code
         self.stage = stage
 
-_REPARSE_POINT_ATTRIBUTE = getattr(
-    stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400
-)
-
 
 @dataclass(frozen=True, slots=True)
 class _TargetSnapshot:
@@ -84,7 +81,7 @@ class _WindowsHandleSnapshot:
     size: int
     sha256: str
     is_regular: bool
-    is_reparse: bool
+    is_link: bool
 
 
 class _WindowsHandleAdapter:
@@ -95,9 +92,9 @@ class _WindowsHandleAdapter:
 
     def _verified_snapshot(self, handle: object) -> _WindowsHandleSnapshot:
         snapshot = self._backend.inspect_handle(handle)
-        if not snapshot.is_regular or snapshot.is_reparse:
+        if not snapshot.is_regular or snapshot.is_link:
             raise OSError(
-                "Windows recovery handle is not a regular non-reparse file"
+                "Windows recovery handle is not a regular non-link file"
             )
         return snapshot
 
@@ -138,6 +135,7 @@ class _CtypesWindowsBackend:
     _FILE_TYPE_DISK = 0x0001
     _FILE_BEGIN = 0
     _FILE_RENAME_INFO = 3
+    _FILE_ATTRIBUTE_TAG_INFO = 9
 
     def __init__(self) -> None:
         if os.name != "nt":
@@ -165,7 +163,14 @@ class _CtypesWindowsBackend:
                 ("nFileIndexLow", wintypes.DWORD),
             ]
 
+        class FileAttributeTagInformation(ctypes.Structure):
+            _fields_ = [
+                ("FileAttributes", wintypes.DWORD),
+                ("ReparseTag", wintypes.DWORD),
+            ]
+
         self._file_information = ByHandleFileInformation
+        self._attribute_tag_information = FileAttributeTagInformation
         self._invalid_handle = ctypes.c_void_p(-1).value
         self._kernel32.CreateFileW.argtypes = [
             wintypes.LPCWSTR,
@@ -182,6 +187,13 @@ class _CtypesWindowsBackend:
             ctypes.POINTER(ByHandleFileInformation),
         ]
         self._kernel32.GetFileInformationByHandle.restype = wintypes.BOOL
+        self._kernel32.GetFileInformationByHandleEx.argtypes = [
+            wintypes.HANDLE,
+            ctypes.c_int,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+        ]
+        self._kernel32.GetFileInformationByHandleEx.restype = wintypes.BOOL
         self._kernel32.GetFileType.argtypes = [wintypes.HANDLE]
         self._kernel32.GetFileType.restype = wintypes.DWORD
         self._kernel32.ReadFile.argtypes = [
@@ -234,10 +246,18 @@ class _CtypesWindowsBackend:
                 & self._FILE_ATTRIBUTE_DIRECTORY
             )
         )
-        is_reparse = bool(
-            information.dwFileAttributes
+        tag_information = self._attribute_tag_information()
+        if not self._kernel32.GetFileInformationByHandleEx(
+            handle,
+            self._FILE_ATTRIBUTE_TAG_INFO,
+            self._ctypes.byref(tag_information),
+            self._ctypes.sizeof(tag_information),
+        ):
+            self._raise_last_error()
+        is_link = bool(
+            tag_information.FileAttributes
             & self._FILE_ATTRIBUTE_REPARSE_POINT
-        )
+        ) and is_name_surrogate_reparse_tag(tag_information.ReparseTag)
         digest = hashlib.sha256()
         total = 0
         buffer = self._ctypes.create_string_buffer(_CHUNK_BYTES)
@@ -268,7 +288,7 @@ class _CtypesWindowsBackend:
             reported_size,
             digest.hexdigest(),
             is_regular,
-            is_reparse,
+            is_link,
         )
 
     def rename_handle_no_replace(
@@ -311,13 +331,6 @@ _WINDOWS_ADAPTER: _WindowsHandleAdapter | None = (
 )
 
 
-def _is_reparse_status(path_status: os.stat_result) -> bool:
-    return stat.S_ISLNK(path_status.st_mode) or bool(
-        getattr(path_status, "st_file_attributes", 0)
-        & _REPARSE_POINT_ATTRIBUTE
-    )
-
-
 def _optional_lstat(path: Path) -> os.stat_result | None:
     try:
         return path.lstat()
@@ -333,14 +346,14 @@ def _assert_safe_destination(
     try:
         destination_status = destination.lstat()
         if (
-            _is_reparse_status(destination_status)
+            is_link_status(destination_status)
             or not stat.S_ISDIR(destination_status.st_mode)
             or destination.name.casefold() != "save"
         ):
             raise OSError("unsafe save destination")
         target_status = _optional_lstat(target)
         if target_status is not None and (
-            _is_reparse_status(target_status)
+            is_link_status(target_status)
             or not stat.S_ISREG(target_status.st_mode)
         ):
             raise OSError("unsafe save target")
@@ -348,13 +361,13 @@ def _assert_safe_destination(
         transfer_log_directory = destination / TRANSFER_LOG_DIRECTORY_NAME
         transfer_log_status = _optional_lstat(transfer_log_directory)
         if transfer_log_status is not None and (
-            _is_reparse_status(transfer_log_status)
+            is_link_status(transfer_log_status)
             or not stat.S_ISDIR(transfer_log_status.st_mode)
         ):
             raise OSError("unsafe transfer log directory")
         backup_status = _optional_lstat(backup_directory)
         if backup_status is not None and (
-            _is_reparse_status(backup_status)
+            is_link_status(backup_status)
             or not stat.S_ISDIR(backup_status.st_mode)
         ):
             raise OSError("unsafe backup directory")
@@ -379,7 +392,7 @@ def _capture_target(target: Path, stage: InstallStage) -> _TargetSnapshot:
             "The save file could not be inspected safely",
             stage=stage,
         ) from error
-    if _is_reparse_status(path_status) or not stat.S_ISREG(path_status.st_mode):
+    if is_link_status(path_status) or not stat.S_ISREG(path_status.st_mode):
         raise InstallError(
             "invalid_destination",
             "The save target is a link, reparse point, or non-file",
@@ -409,7 +422,7 @@ def _capture_target(target: Path, stage: InstallStage) -> _TargetSnapshot:
     }
     if (
         len(identities) != 1
-        or _is_reparse_status(final_path_status)
+        or is_link_status(final_path_status)
         or before.st_size != after.st_size
         or after.st_size != final_path_status.st_size
     ):
@@ -590,12 +603,12 @@ def _write_transfer_log(
     log_directory = destination / TRANSFER_LOG_DIRECTORY_NAME
     status = _optional_lstat(log_directory)
     if status is not None and (
-        _is_reparse_status(status) or not stat.S_ISDIR(status.st_mode)
+        is_link_status(status) or not stat.S_ISDIR(status.st_mode)
     ):
         raise OSError("unsafe transfer log directory")
     log_directory.mkdir(exist_ok=True)
     status = log_directory.lstat()
-    if _is_reparse_status(status) or not stat.S_ISDIR(status.st_mode):
+    if is_link_status(status) or not stat.S_ISDIR(status.st_mode):
         raise OSError("unsafe transfer log directory")
 
     applied_utc = applied_at.astimezone(timezone.utc)
@@ -843,13 +856,6 @@ def _stage_archive(
                 pass
 
 
-def _move_no_replace(source: Path, target: Path) -> bool:
-    raise OSError(
-        "Path-based recovery publication is disabled; Windows handle-bound "
-        "recovery is required"
-    )
-
-
 def _quarantine_target(target: Path) -> Path:
     quarantine = (
         target.parent
@@ -918,7 +924,6 @@ def _restore_after_failed_commit(
                 raise OSError("recovery copy SHA-256 verification failed")
 
         # Diagnostics only: the quarantine move below is the safety boundary.
-        _assert_rollback_ownership(target, installed_snapshot, backup_path)
         _assert_rollback_ownership(target, installed_snapshot, backup_path)
         quarantine_path = _quarantine_target(target)
 
@@ -1040,7 +1045,6 @@ def install_archive(
     backup_size: int | None = None
     backup_sha256: str | None = None
     staged_path: Path | None = None
-    commit_started = False
 
     progress(InstallStage.VALIDATING_DESTINATION)
     _raise_if_cancelled(cancelled, InstallStage.VALIDATING_DESTINATION)
@@ -1097,7 +1101,6 @@ def install_archive(
         _assert_target_matches(
             staged_path, staged_snapshot, InstallStage.REPLACING
         )
-        commit_started = True
         try:
             os.replace(staged_path, target)
             staged_path = None

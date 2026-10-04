@@ -883,7 +883,11 @@ def test_progress_presentation_switches_mode_and_locks_at_commit() -> None:
     local_view = installer_app.progress_presentation(local_progress)
     assert local_view.mode == "determinate"
     assert local_view.maximum == 7
-    assert local_view.value == 1
+    assert local_view.value == 2
+    validating_view = installer_app.progress_presentation(
+        replace(local_progress, progress_stage=LocalUpdateStage.VALIDATING.value)
+    )
+    assert validating_view.value == 1
     local_copy = installer_app.progress_detail_copy(
         local_progress,
         controls_locked=False,
@@ -958,39 +962,57 @@ def test_progress_render_does_not_restart_animation_for_same_mode() -> None:
     assert application._progress_bar.configures == 0
 
 
+class _ViewDouble:
+    def __init__(self) -> None:
+        self.value = ""
+        self.visible = False
+        self.options: dict[str, str] = {}
+
+    def set(self, value: str) -> None:
+        self.value = value
+
+    def grid(self) -> None:
+        self.visible = True
+
+    def grid_remove(self) -> None:
+        self.visible = False
+
+    def configure(self, **options: str) -> None:
+        self.options.update(options)
+
+
+class _TextDouble(_ViewDouble):
+    def __init__(self) -> None:
+        super().__init__()
+        self.content = ""
+
+    def delete(self, *_args: str) -> None:
+        self.content = ""
+
+    def insert(self, _index: str, content: str) -> None:
+        self.content += content
+
+
+def _result_application() -> installer_app.InstallerApplication:
+    application = object.__new__(installer_app.InstallerApplication)
+    application._progress_running = False
+    application._progress_bar = _ViewDouble()
+    application._result_actions = _ViewDouble()
+    application._progress_status_var = _ViewDouble()
+    application._progress_detail_var = _ViewDouble()
+    application._open_folder_button = _ViewDouble()
+    application._retry_button = _ViewDouble()
+    application._copy_button = _ViewDouble()
+    application._transfer_log_frame = _ViewDouble()
+    application._transfer_log_text = _TextDouble()
+    application._skipped_frame = _ViewDouble()
+    application._skipped_text = _TextDouble()
+    return application
+
+
 def test_completion_renders_prebuilt_and_local_transfer_details(
     tmp_path: Path,
 ) -> None:
-    class ViewDouble:
-        def __init__(self) -> None:
-            self.value = ""
-            self.visible = False
-            self.options: dict[str, str] = {}
-
-        def set(self, value: str) -> None:
-            self.value = value
-
-        def grid(self) -> None:
-            self.visible = True
-
-        def grid_remove(self) -> None:
-            self.visible = False
-
-        def configure(self, **options: str) -> None:
-            self.options.update(options)
-
-    class TextDouble(ViewDouble):
-        def __init__(self) -> None:
-            super().__init__()
-            self.content = ""
-
-        def delete(self, *_args: str) -> None:
-            self.content = ""
-
-        def insert(self, _index: str, content: str) -> None:
-            self.content += content
-
-
     target = tmp_path / "save" / "EDIT00000000"
     log_path = tmp_path / "save" / "FLDailyEditLogs" / "transfer-log.md"
     log_path.parent.mkdir(parents=True)
@@ -1002,17 +1024,7 @@ def test_completion_renders_prebuilt_and_local_transfer_details(
         "- Zidane moved\n",
         encoding="utf-8",
     )
-    application = object.__new__(installer_app.InstallerApplication)
-    application._progress_running = False
-    application._progress_bar = ViewDouble()
-    application._result_actions = ViewDouble()
-    application._progress_status_var = ViewDouble()
-    application._progress_detail_var = ViewDouble()
-    application._open_folder_button = ViewDouble()
-    application._retry_button = ViewDouble()
-    application._copy_button = ViewDouble()
-    application._transfer_log_frame = ViewDouble()
-    application._transfer_log_text = TextDouble()
+    application = _result_application()
     state = InstallerState(
         step=WizardStep.RESULT,
         result=InstallResult(target, None, "a" * 64, log_path),
@@ -1061,6 +1073,64 @@ def test_completion_renders_prebuilt_and_local_transfer_details(
     assert "Safety skipped: 4" in application._progress_detail_var.value
     assert "uncertain changes are never forced" in application._progress_detail_var.value
     assert application._transfer_log_text.content == local_log
+    assert "Not applied" not in application._progress_detail_var.value
+    assert application._skipped_frame.visible is False
+    assert application._skipped_text.content == ""
+
+
+def test_local_completion_lists_not_applied_transfers_relevant_first(
+    tmp_path: Path,
+) -> None:
+    def skipped_row(name: str, *, relevant: bool, fotmob_id: int | None) -> dict:
+        return {
+            "player_name": name,
+            "from_team": "Old FC",
+            "to_team": "New FC",
+            "date": "2026-09-01",
+            "source": "fotmob",
+            "reason": "player_not_in_save",
+            "detail": f"{name} is not in this save",
+            "relevant": relevant,
+            "fotmob_player_id": fotmob_id,
+            "candidates": [],
+        }
+
+    application = _result_application()
+    state = InstallerState(
+        mode=InstallerMode.LOCAL,
+        step=WizardStep.RESULT,
+        result=LocalUpdateResult(
+            target_path=tmp_path / "EDIT00000000",
+            backup_path=None,
+            installed_sha256="b" * 64,
+            transfer_applied=0,
+            shirt_numbers_changed=0,
+            unchanged=0,
+            safety_skipped=0,
+            skipped=(
+                skipped_row("Outside Player", relevant=False, fotmob_id=None),
+                skipped_row("Inside Player", relevant=True, fotmob_id=4242),
+            ),
+        ),
+    )
+
+    application._render_result(state)
+
+    detail = application._progress_detail_var.value
+    assert "Not applied: 2 (1 touch your save)" in detail
+    assert "never created" in detail
+    assert application._skipped_frame.visible is True
+    listing = application._skipped_text.content
+    assert listing.index("Inside Player") < listing.index("Outside Player")
+    assert "Old FC → New FC" in listing
+    assert "2026-09-01" in listing
+    assert "player_not_in_save" in listing
+    assert "Inside Player is not in this save" in listing
+    assert "FotMob id 4242" in listing
+    outside_line = next(
+        line for line in listing.splitlines() if "Outside Player" in line
+    )
+    assert "FotMob id" not in outside_line
 
 
 def test_close_disposition_cancels_before_commit_and_blocks_during_commit() -> None:
@@ -1170,6 +1240,115 @@ def test_catalog_failure_retry_reloads_catalog_and_locations() -> None:
     assert controller.state.step is WizardStep.UPDATE
     assert controller.state.error_title is None
     assert calls == ["catalog", "locations"]
+
+
+def _local_controller_at(tmp_path: Path, step: WizardStep) -> InstallerController:
+    location = _local_location(tmp_path)
+    controller = InstallerController()
+    controller.select_mode(InstallerMode.LOCAL)
+    controller.set_locations((location,))
+    while controller.state.step is not step:
+        if controller.state.step is WizardStep.SAVE:
+            controller.select_location(location)
+        assert controller.next() is True
+    return controller
+
+
+def _polling_application(
+    controller: InstallerController,
+) -> installer_app.InstallerApplication:
+    application = object.__new__(installer_app.InstallerApplication)
+    application.controller = controller
+    application.worker = type("Worker", (), {"events": SimpleQueue()})()
+    application._closed = False
+    application._close_pending = False
+    application._cancel_requested = False
+    application._commit_lock_observed = False
+    application._failure_operation = None
+    application._deferred_catalog_error = None
+    application._error_code = None
+    application._schedule_poll = lambda: None
+    return application
+
+
+def test_late_catalog_failure_does_not_abort_running_local_update(
+    tmp_path: Path,
+) -> None:
+    controller = _local_controller_at(tmp_path, WizardStep.PROGRESS)
+    application = _polling_application(controller)
+    result = LocalUpdateResult(
+        target_path=controller.state.selected_location.edit_file,
+        backup_path=tmp_path / "backup",
+        installed_sha256="a" * 64,
+        transfer_applied=1,
+        shirt_numbers_changed=0,
+        unchanged=0,
+        safety_skipped=0,
+    )
+    application.worker.events.put(
+        WorkerFailed(CatalogError("network_error", "offline"), "catalog")
+    )
+    application.worker.events.put(LocalUpdateCompleted(result))
+
+    application._poll_worker()
+
+    assert controller.state.step is WizardStep.RESULT
+    assert controller.state.result is result
+    assert controller.state.error_title is None
+
+
+def test_deferred_catalog_failure_surfaces_when_leaving_local_mode(
+    tmp_path: Path,
+) -> None:
+    controller = _local_controller_at(tmp_path, WizardStep.UPDATE)
+    application = _polling_application(controller)
+    application.worker.events.put(
+        WorkerFailed(CatalogError("network_error", "offline"), "catalog")
+    )
+    application._poll_worker()
+    assert controller.state.step is WizardStep.UPDATE
+
+    application._mode_var = type(
+        "ModeVar", (), {"get": lambda self: InstallerMode.RELEASE.value}
+    )()
+    application._select_mode()
+
+    assert controller.state.step is WizardStep.RESULT
+    assert controller.state.error_title == "No internet connection"
+    assert application._failure_operation == "catalog"
+
+
+def test_pending_app_update_download_blocks_local_apply_and_retry(
+    tmp_path: Path,
+) -> None:
+    controller = _local_controller_at(tmp_path, WizardStep.REVIEW)
+    started: list[SaveLocation] = []
+
+    class Worker:
+        def start_local_update(self, location: SaveLocation, **_kwargs) -> None:
+            started.append(location)
+
+    application = _polling_application(controller)
+    application.worker = Worker()
+    application._app_update_downloading = True
+
+    application._next()
+
+    assert controller.state.step is WizardStep.REVIEW
+    assert started == []
+
+    application._app_update_downloading = False
+    application._next()
+    assert controller.state.step is WizardStep.PROGRESS
+    assert len(started) == 1
+
+    assert controller.fail(LocalUpdateError("scrape_failed", "offline"))
+    application._failure_operation = "local"
+    application._app_update_downloading = True
+    application._retry()
+
+    assert controller.state.step is WizardStep.RESULT
+    assert len(started) == 1
 
 
 def test_worker_runs_location_discovery_and_browse_validation_off_main_thread(

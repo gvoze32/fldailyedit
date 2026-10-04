@@ -61,53 +61,25 @@ def create_backup(edit_file_path: Path) -> Path:
     logger.info(f"Backup created: {backup_path} ({backup_size:,} bytes)")
 
     # Auto-cleanup old backups
-    _cleanup_old_backups(edit_file_path.name)
+    _cleanup_old_backups(edit_file_path.name, keep=backup_path)
 
     return backup_path
 
 
-def _cleanup_old_backups(original_filename: str):
-    """Delete oldest backups beyond the configured limit."""
+def _cleanup_old_backups(original_filename: str, keep: Path):
+    """Delete oldest backups beyond the configured limit, never ``keep``.
+
+    Backups are ordered by the creation timestamp embedded in their name;
+    file mtimes are unreliable because copies may preserve the source mtime.
+    """
     backup_dir = config.BACKUP_DIR
-    if not backup_dir.exists():
-        return
+    prefix = f"{original_filename}.bak."
+    backups = sorted(
+        (path for path in backup_dir.glob(f"{prefix}*") if path != keep),
+        key=lambda p: p.name[len(prefix):],
+    )
 
-    pattern = f"{original_filename}.bak.*"
-    backups = sorted(backup_dir.glob(pattern), key=lambda p: p.stat().st_mtime)
-
-    while len(backups) > config.MAX_BACKUPS:
+    while len(backups) + 1 > config.MAX_BACKUPS and backups:
         oldest = backups.pop(0)
         oldest.unlink()
         logger.info(f"Removed old backup: {oldest.name}")
-
-
-def list_backups(original_filename: str = "edit00000000") -> list[Path]:
-    """List all existing backups, newest first."""
-    backup_dir = config.BACKUP_DIR
-    if not backup_dir.exists():
-        return []
-
-    pattern = f"{original_filename}.bak.*"
-    return sorted(backup_dir.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
-
-
-def restore_backup(backup_path: Path, restore_to: Path) -> Path:
-    """
-    Restore a backup file.
-
-    Args:
-        backup_path: Path to the backup file.
-        restore_to: Where to restore the file.
-
-    Returns:
-        Path to the restored file.
-    """
-    backup_path = Path(backup_path)
-    restore_to = Path(restore_to)
-
-    if not backup_path.exists():
-        raise FileNotFoundError(f"Backup not found: {backup_path}")
-
-    shutil.copy2(backup_path, restore_to)
-    logger.info(f"Restored backup {backup_path.name} → {restore_to}")
-    return restore_to

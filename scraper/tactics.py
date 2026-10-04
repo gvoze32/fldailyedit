@@ -378,7 +378,6 @@ def _league_decisions(entry: dict) -> dict[int, tuple[dict[str, int], int]]:
             "containment_area",
             "pressuring",
             "defensive_line",
-            "compactness",
         )
     }
     for team_id, profile in normalized.items():
@@ -416,7 +415,6 @@ def _league_decisions(entry: dict) -> dict[int, tuple[dict[str, int], int]]:
                 "defensive_style",
                 "pressuring",
                 "defensive_line",
-                "compactness",
             ):
                 sample_counts[setting][team_id] = final_third[1]
 
@@ -451,8 +449,9 @@ def _league_decisions(entry: dict) -> dict[int, tuple[dict[str, int], int]]:
             low_value=1,  # conservative
             high_value=0,  # aggressive
         ),
+        # No parsed FotMob metric measures block compactness independently of
+        # final-third recoveries; compactness stays as saved.
         "defensive_line": _league_slider_decisions(final_third_wins),
-        "compactness": _league_slider_decisions(final_third_wins),
     }
 
     result: dict[int, tuple[dict[str, int], int]] = {}

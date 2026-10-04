@@ -3,6 +3,7 @@ Save-change logging — structured JSONL output for audit trail and rollback.
 """
 import json
 import logging
+from collections.abc import Sequence
 from html import escape
 from datetime import datetime, timezone
 from pathlib import Path
@@ -244,7 +245,63 @@ def _report_metrics(entries: list[dict]) -> dict[str, int]:
     }
 
 
+SKIPPED_TRANSFERS_FILENAME = "skipped_transfers.jsonl"
 
+
+def _skipped_groups(skipped: Sequence[dict]) -> list[tuple[str, list[dict]]]:
+    """Group skipped transfers by reason; save-relevant rows lead each group.
+
+    Groups containing save-relevant transfers come first, then by size.
+    """
+    groups: dict[str, list[dict]] = {}
+    for item in skipped:
+        reason = str(item.get("reason") or "unknown")
+        groups.setdefault(reason, []).append(item)
+    for items in groups.values():
+        items.sort(key=lambda item: not item.get("relevant"))
+    return sorted(
+        groups.items(),
+        key=lambda group: (
+            not any(item.get("relevant") for item in group[1]),
+            -len(group[1]),
+            group[0],
+        ),
+    )
+
+
+def _skipped_markdown(skipped: Sequence[dict]) -> list[str]:
+    if not skipped:
+        return []
+    relevant = sum(1 for item in skipped if item.get("relevant"))
+    md = [
+        f"### Not applied ({len(skipped)})",
+        "",
+        (
+            f"> {relevant} touch a club in this save. Players missing from the "
+            "save are never created; they are listed here instead."
+        ),
+        "",
+    ]
+    for reason, items in _skipped_groups(skipped):
+        md.extend([
+            f"#### `{_markdown_cell(reason)}` ({len(items)})",
+            "",
+            "| Save club | Player | FotMob ID | From | To | Date | Source | Detail |",
+            "|:---:|---|---:|---|---|---|---|---|",
+        ])
+        for item in items:
+            md.append(
+                f"| {'yes' if item.get('relevant') else 'no'} "
+                f"| **{_markdown_cell(item.get('player_name'))}** "
+                f"| {_markdown_cell(item.get('fotmob_player_id'))} "
+                f"| {_markdown_cell(item.get('from_team'))} "
+                f"| {_markdown_cell(item.get('to_team'))} "
+                f"| {_markdown_cell(item.get('date'))} "
+                f"| {_markdown_cell(item.get('source'))} "
+                f"| {_markdown_cell(item.get('detail'))} |"
+            )
+        md.append("")
+    return md
 
 
 def _markdown_cell(value) -> str:
@@ -282,16 +339,31 @@ def generate_markdown_report(
     entries: list[dict],
     title: str = "Football Life Live Sync Report",
     include_table: bool = True,
+    skipped: Sequence[dict] = (),
 ) -> str:
-    """Generate a report for transfers, shirt-number, and captain changes."""
+    """Generate a report for transfers, role changes, and skipped transfers."""
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     entries = _active_entries(entries)
+    if include_table:
+        skipped_lines = _skipped_markdown(skipped)
+    elif skipped:
+        relevant = sum(1 for item in skipped if item.get("relevant"))
+        skipped_lines = [
+            f"> Not applied: {len(skipped)} transfers "
+            f"({relevant} touching clubs in this save); see the full report.",
+            "",
+        ]
+    else:
+        skipped_lines = []
     if not entries:
-        return (
-            f"## ⚽ {title}\n\n"
-            f"**Generated:** `{now_str}`\n\n"
-            "> No save changes were needed in this run.\n"
-        )
+        return "\n".join([
+            f"## ⚽ {title}",
+            "",
+            f"**Generated:** `{now_str}`",
+            "",
+            "> No save changes were needed in this run.",
+            *(["", *skipped_lines] if skipped_lines else []),
+        ]).rstrip("\n") + "\n"
 
     metrics = _report_metrics(entries)
     captain_entries = [
@@ -416,14 +488,16 @@ def generate_markdown_report(
             )
         md.append("")
 
+    md.extend(skipped_lines)
     return "\n".join(md) + "\n"
 
 
 def generate_html_report(
     entries: list[dict],
     title: str = "Football Life Live Sync Report",
+    skipped: Sequence[dict] = (),
 ) -> str:
-    """Generate a responsive report for transfers and role changes."""
+    """Generate a responsive report for transfers, role changes, and skips."""
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     entries = _active_entries(entries)
     metrics = _report_metrics(entries)
@@ -548,6 +622,38 @@ def generate_html_report(
         if captain_entries
         else ""
     )
+    relevant_badge = '<span class="badge badge-dry">Yes</span>'
+    skipped_groups_html = "".join(
+        f"<h3 class='reason'><code>{value(reason)}</code> <span>{len(items)}</span></h3>"
+        "<div class='table-wrap' role='region' "
+        f"aria-label='Not applied: {value(reason)}' tabindex='0'><table><thead><tr>"
+        "<th>Save club</th><th>Player</th><th>FotMob ID</th><th>From</th><th>To</th>"
+        "<th>Date</th><th>Source</th><th>Detail</th></tr></thead><tbody>"
+        + "".join(
+            "<tr>"
+            f"<td>{relevant_badge if item.get('relevant') else 'No'}</td>"
+            f"<td><strong>{value(item.get('player_name'), 'Unknown')}</strong></td>"
+            f"<td class='numeric'>{value(item.get('fotmob_player_id'))}</td>"
+            f"<td>{value(item.get('from_team'))}</td>"
+            f"<td>{value(item.get('to_team'))}</td>"
+            f"<td>{value(item.get('date'))}</td>"
+            f"<td>{value(item.get('source'))}</td>"
+            f"<td>{value(item.get('detail'))}</td>"
+            "</tr>"
+            for item in items
+        )
+        + "</tbody></table></div>"
+        for reason, items in _skipped_groups(skipped)
+    )
+    skipped_relevant = sum(1 for item in skipped if item.get("relevant"))
+    skipped_section = (
+        f"""<section class="report-section skipped-section">
+        <div class="section-heading"><div><h2>Not applied</h2><p>{skipped_relevant} touch a club in this save. Players missing from the save are never created.</p></div><span class="count">{len(skipped)}</span></div>
+        {skipped_groups_html}
+      </section>"""
+        if skipped
+        else ""
+    )
     empty_state = (
         '<section class="empty"><strong>Everything already current.</strong><p>No save changes were needed in this run.</p></section>'
         if not entries
@@ -583,7 +689,9 @@ def generate_html_report(
   th,td {{ padding:.88rem 1rem; text-align:left; border-bottom:1px solid var(--line); }} th {{ color:var(--muted); font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; }} tbody tr:last-child td {{ border-bottom:0; }} tbody tr:hover {{ background:#18291f; }}
   .badge {{ display:inline-flex; align-items:center; white-space:nowrap; padding:.24rem .58rem; border-radius:999px; font-size:.72rem; font-weight:750; }}
   .badge-applied {{ color:#baf8ce; background:#174b2c; }} .badge-number {{ color:#c9f3ff; background:#124354; }} .badge-captain {{ color:#e2d3ff; background:#3c2860; }} .badge-release {{ color:#ffd2c8; background:#5b2118; }} .badge-dry {{ color:#ffe5a3; background:#55400e; }}
-
+  .reason {{ margin:0; padding:1rem 1.4rem .4rem; font-size:.9rem; color:var(--amber); }} .reason span {{ color:var(--muted); font-weight:500; }}
+</style>
+</head>
 <body>
   <main class="shell">
     <header class="masthead"><p class="kicker">FL26 · verified sync</p><h1>{escape(title)}</h1><p class="generated">Generated {now_str} · {metrics['total_changes']} save changes</p></header>
@@ -597,7 +705,7 @@ def generate_html_report(
       <div class="metric"><strong>{metrics['dry_run']}</strong><span>Dry-run</span></div>
     </section>
     <p class="action-line">Roster actions · <strong>{metrics['moves']}</strong> direct moves · <strong>{metrics['signings']}</strong> signings · <strong>{metrics['releases']}</strong> releases</p>
-    {transfer_section}{release_section}{shirt_section}{captain_section}{empty_state}
+    {transfer_section}{release_section}{shirt_section}{captain_section}{empty_state}{skipped_section}
   </main>
 </body>
 </html>
@@ -608,18 +716,25 @@ def save_reports(
     entries: list[dict],
     output_dir: Path | None = None,
     write_github_summary: bool = True,
+    skipped: Sequence[dict] = (),
 ) -> str:
-    """Save markdown and HTML save-change report cards."""
+    """Save markdown/HTML report cards and the skipped-transfer JSONL.
+
+    ``skipped_transfers.jsonl`` is rewritten on every run (empty when nothing
+    was skipped) so a stale file never describes a previous run.
+    """
     import os
 
     out = output_dir or config.OUTPUT_DIR
     out.mkdir(parents=True, exist_ok=True)
+    skipped = list(skipped)
 
-    md_report = generate_markdown_report(entries)
-    html_report = generate_html_report(entries)
+    md_report = generate_markdown_report(entries, skipped=skipped)
+    html_report = generate_html_report(entries, skipped=skipped)
 
     md_path = out / "transfer_summary.md"
     html_path = out / "transfer_summary.html"
+    skipped_path = out / SKIPPED_TRANSFERS_FILENAME
 
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(md_report)
@@ -627,7 +742,14 @@ def save_reports(
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(html_report)
 
-    logger.info(f"Saved visual report cards: {md_path} and {html_path}")
+    with open(skipped_path, "w", encoding="utf-8") as f:
+        for item in skipped:
+            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+    logger.info(
+        f"Saved visual report cards: {md_path} and {html_path}; "
+        f"{len(skipped)} skipped transfers in {skipped_path}"
+    )
 
     # GitHub Actions Step Summary support (Keep it concise, no huge table)
     if write_github_summary:
@@ -635,7 +757,9 @@ def save_reports(
         if summary_env:
             try:
                 # Generate a short version of the markdown report just for the step summary
-                short_md_report = generate_markdown_report(entries, include_table=False)
+                short_md_report = generate_markdown_report(
+                    entries, include_table=False, skipped=skipped
+                )
                 with open(summary_env, "a", encoding="utf-8") as f:
                     f.write(short_md_report + "\n")
                 logger.info(f"Appended short markdown report to $GITHUB_STEP_SUMMARY")

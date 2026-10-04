@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timezone
 from enum import Enum
@@ -13,6 +14,8 @@ tkinter: Any = None
 filedialog: Any = None
 tkinter_font: Any = None
 ttk: Any = None
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from installer import __version__
 from installer.catalog import Channel, ReleaseRecord
@@ -35,8 +38,10 @@ from installer.state import (
     LocationsDiscovered,
     WizardStep,
     WorkerFailed,
+    WorkerOperation,
 )
 from installer.update import (
+    APP_UPDATE_PUBLIC_KEY,
     AppUpdateManifest,
     AppUpdateError,
     cleanup_staged_app_update,
@@ -129,8 +134,8 @@ _LOCAL_STAGE_COPY = {
 }
 
 _LOCAL_PROGRESS_ORDER = (
-    LocalUpdateStage.SCRAPING.value,
     LocalUpdateStage.VALIDATING.value,
+    LocalUpdateStage.SCRAPING.value,
     LocalUpdateStage.MATCHING.value,
     LocalUpdateStage.APPLYING.value,
     LocalUpdateStage.VERIFYING.value,
@@ -258,6 +263,38 @@ def progress_detail_copy(
             "matches players, and prepares your save. Keep this window open."
         )
     return "Keep this window open while the save is updated."
+
+
+def _set_text_section(section: Any, text: Any, content: str | None) -> None:
+    """Fill a read-only text section, hiding it when there is no content."""
+    text.configure(state="normal")
+    text.delete("1.0", "end")
+    if content is None:
+        section.grid_remove()
+    else:
+        text.insert("1.0", content)
+        section.grid()
+    text.configure(state="disabled")
+
+
+def _skipped_transfer_text(skipped: Sequence[Mapping[str, Any]]) -> str:
+    """Render not-applied transfers, rows touching the save first."""
+    lines = []
+    for row in sorted(skipped, key=lambda item: not item.get("relevant")):
+        marker = "[your save] " if row.get("relevant") else ""
+        line = (
+            f"{marker}{row.get('player_name') or 'Unknown player'}: "
+            f"{row.get('from_team') or '?'} → {row.get('to_team') or '?'}"
+        )
+        if row.get("date"):
+            line += f" ({row['date']})"
+        line += f" — {row.get('reason') or 'not applied'}"
+        if row.get("detail"):
+            line += f": {row['detail']}"
+        if row.get("fotmob_player_id") is not None:
+            line += f" [FotMob id {row['fotmob_player_id']}]"
+        lines.append(line)
+    return "\n".join(lines) + "\n"
 
 
 def _prebuilt_report_counts(markdown: str) -> tuple[int, int, int] | None:
@@ -407,7 +444,8 @@ class InstallerApplication:
         self._close_pending = False
         self._cancel_requested = False
         self._error_code: str | None = None
-        self._failure_operation: str | None = None
+        self._failure_operation: WorkerOperation | None = None
+        self._deferred_catalog_error: Exception | None = None
         self._location_discovery_error: str | None = None
         self._browse_pending = False
         self._commit_lock_observed = False
@@ -422,6 +460,7 @@ class InstallerApplication:
         self._wrapped_labels: list[ttk.Label] = []
         self._app_update_supported = packaged_windows_app()
         self._app_update_pending = False
+        self._app_update_downloading = False
         self._app_update_manifest: AppUpdateManifest | None = None
         self._app_update_staged_executable: Path | None = None
         self._app_update_restarting = False
@@ -868,6 +907,7 @@ class InstallerApplication:
         frame = ttk.Frame(self._body)
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(3, weight=1)
+        frame.rowconfigure(4, weight=1)
 
         self._progress_status_var = tkinter.StringVar(self.root)
         self._wrapped_label(
@@ -894,49 +934,16 @@ class InstallerApplication:
             textvariable=self._progress_detail_var,
         ).grid(row=2, column=0, sticky="ew")
 
-        self._transfer_log_frame = ttk.Frame(frame)
-        self._transfer_log_frame.grid(
-            row=3,
-            column=0,
-            sticky="nsew",
-            pady=(_SPACE_M, 0),
+        self._transfer_log_frame, self._transfer_log_text = (
+            self._scrollable_text_section(frame, "Transfer log", row=3)
         )
-        self._transfer_log_frame.columnconfigure(0, weight=1)
-        self._transfer_log_frame.rowconfigure(1, weight=1)
-        ttk.Label(
-            self._transfer_log_frame,
-            text="Transfer log",
-            style="Wizard.Section.TLabel",
-        ).grid(row=0, column=0, sticky="w", pady=(0, _SPACE_XS))
-        log_view = ttk.Frame(self._transfer_log_frame)
-        log_view.grid(row=1, column=0, sticky="nsew")
-        log_view.columnconfigure(0, weight=1)
-        log_view.rowconfigure(0, weight=1)
-        self._transfer_log_text = tkinter.Text(
-            log_view,
-            height=10,
-            width=1,
-            wrap="word",
-            state="disabled",
-            borderwidth=1,
-            relief="solid",
-            highlightthickness=0,
+        self._skipped_frame, self._skipped_text = (
+            self._scrollable_text_section(frame, "Not applied", row=4)
         )
-        self._transfer_log_text.grid(row=0, column=0, sticky="nsew")
-        transfer_log_scrollbar = ttk.Scrollbar(
-            log_view,
-            orient="vertical",
-            command=self._transfer_log_text.yview,
-        )
-        transfer_log_scrollbar.grid(row=0, column=1, sticky="ns")
-        self._transfer_log_text.configure(
-            yscrollcommand=transfer_log_scrollbar.set
-        )
-        self._transfer_log_frame.grid_remove()
 
         self._result_actions = ttk.Frame(frame)
         self._result_actions.grid(
-            row=4,
+            row=5,
             column=0,
             sticky="w",
             pady=(_SPACE_L, 0),
@@ -969,15 +976,61 @@ class InstallerApplication:
         self._result_actions.grid_remove()
         return frame
 
+    def _scrollable_text_section(
+        self,
+        parent: ttk.Frame,
+        title: str,
+        *,
+        row: int,
+    ) -> tuple[ttk.Frame, tkinter.Text]:
+        section = ttk.Frame(parent)
+        section.grid(
+            row=row,
+            column=0,
+            sticky="nsew",
+            pady=(_SPACE_M, 0),
+        )
+        section.columnconfigure(0, weight=1)
+        section.rowconfigure(1, weight=1)
+        ttk.Label(
+            section,
+            text=title,
+            style="Wizard.Section.TLabel",
+        ).grid(row=0, column=0, sticky="w", pady=(0, _SPACE_XS))
+        view = ttk.Frame(section)
+        view.grid(row=1, column=0, sticky="nsew")
+        view.columnconfigure(0, weight=1)
+        view.rowconfigure(0, weight=1)
+        text = tkinter.Text(
+            view,
+            height=10,
+            width=1,
+            wrap="word",
+            state="disabled",
+            borderwidth=1,
+            relief="solid",
+            highlightthickness=0,
+        )
+        text.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(
+            view,
+            orient="vertical",
+            command=text.yview,
+        )
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        text.configure(yscrollcommand=scrollbar.set)
+        section.grid_remove()
+        return section, text
+
     def _set_transfer_log(self, content: str | None) -> None:
-        self._transfer_log_text.configure(state="normal")
-        self._transfer_log_text.delete("1.0", "end")
-        if content is None:
-            self._transfer_log_frame.grid_remove()
-        else:
-            self._transfer_log_text.insert("1.0", content)
-            self._transfer_log_frame.grid()
-        self._transfer_log_text.configure(state="disabled")
+        _set_text_section(
+            self._transfer_log_frame,
+            self._transfer_log_text,
+            content,
+        )
+
+    def _set_skipped_transfers(self, content: str | None) -> None:
+        _set_text_section(self._skipped_frame, self._skipped_text, content)
 
     def _on_resize(self, event: tkinter.Event[tkinter.Misc]) -> None:
         if event.widget is not self.root:
@@ -1022,6 +1075,7 @@ class InstallerApplication:
 
             if isinstance(event, AppUpdateDownloaded):
                 self._app_update_pending = False
+                self._app_update_downloading = False
                 self._app_update_staged_executable = event.staged_executable
                 try:
                     schedule_app_update(event.staged_executable)
@@ -1050,6 +1104,7 @@ class InstallerApplication:
             if isinstance(event, AppUpdateFailed):
                 self._app_update_restarting = False
                 self._app_update_pending = False
+                self._app_update_downloading = False
                 self._app_update_manifest = None
                 self._app_update_status_var.set(
                     f"App update failed: {event.error}"
@@ -1058,19 +1113,18 @@ class InstallerApplication:
                 continue
 
             terminal = isinstance(
-                event,
-                (InstallCompleted, LocalUpdateCompleted, WorkerFailed),
-            )
-            state_before_event = self.controller.state
+                event, (InstallCompleted, LocalUpdateCompleted)
+            ) or (isinstance(event, WorkerFailed) and event.operation != "catalog")
             if isinstance(event, WorkerFailed):
-                if state_before_event.step is WizardStep.UPDATE:
-                    self._failure_operation = "catalog"
-                elif state_before_event.mode is InstallerMode.LOCAL:
-                    self._failure_operation = "local"
+                if (
+                    event.operation == "catalog"
+                    and self.controller.state.mode is InstallerMode.LOCAL
+                ):
+                    self._deferred_catalog_error = event.error
                 else:
-                    self._failure_operation = "install"
-                self._error_code = getattr(event.error, "code", None)
-                self.controller.handle_event(event)
+                    self._failure_operation = event.operation
+                    self._error_code = getattr(event.error, "code", None)
+                    self.controller.handle_event(event)
             elif isinstance(event, (InstallCompleted, LocalUpdateCompleted)):
                 self._failure_operation = None
                 self._error_code = None
@@ -1104,6 +1158,7 @@ class InstallerApplication:
                 self.controller.handle_event(event)
                 if isinstance(event, CatalogLoaded):
                     self._failure_operation = None
+                    self._deferred_catalog_error = None
                     self.root.after_idle(
                         lambda: self._focus_for_step(WizardStep.UPDATE)
                     )
@@ -1379,6 +1434,7 @@ class InstallerApplication:
             previous_step = getattr(self, "_rendered_visible_step", None)
         if previous_step is not WizardStep.PROGRESS:
             self._set_transfer_log(None)
+            self._set_skipped_transfers(None)
             self._result_actions.grid_remove()
         self._progress_bar.grid()
         presentation = progress_presentation(
@@ -1422,6 +1478,7 @@ class InstallerApplication:
         self._progress_bar.grid_remove()
         self._result_actions.grid()
         transfer_log_content: str | None = None
+        skipped_content: str | None = None
         if state.result is not None:
             if isinstance(state.result, LocalUpdateResult):
                 self._progress_status_var.set("Your local save is ready.")
@@ -1440,6 +1497,19 @@ class InstallerApplication:
                         "\n\nThese entries were left unchanged because the "
                         "current save did not match the verified source state. "
                         "This is intentional: uncertain changes are never forced."
+                    )
+                if state.result.skipped:
+                    relevant_count = sum(
+                        1 for row in state.result.skipped if row.get("relevant")
+                    )
+                    detail += (
+                        f"\n\nNot applied: {len(state.result.skipped)} "
+                        f"({relevant_count} touch your save)"
+                        "\nPlayers missing from this save are never created; "
+                        "their transfers are listed below and were not applied."
+                    )
+                    skipped_content = _skipped_transfer_text(
+                        state.result.skipped
                     )
                 if state.result.diagnostic:
                     detail += f"\n\nWarning:\n{state.result.diagnostic}"
@@ -1478,6 +1548,7 @@ class InstallerApplication:
                 detail += f"\n\nBackup created at:\n{state.result.backup_path}"
             self._progress_detail_var.set(detail)
             self._set_transfer_log(transfer_log_content)
+            self._set_skipped_transfers(skipped_content)
             self._open_folder_button.grid()
             self._open_folder_button.configure(
                 state="normal" if sys.platform == "win32" else "disabled"
@@ -1533,7 +1604,9 @@ class InstallerApplication:
                     and not self._browse_pending
                 )
         elif state.step is WizardStep.REVIEW:
-            next_enabled = self.controller._has_compatible_location()
+            next_enabled = self.controller._has_compatible_location() and not getattr(
+                self, "_app_update_downloading", False
+            )
             next_text = (
                 UI_COPY["apply_local"]
                 if state.mode is InstallerMode.LOCAL
@@ -1543,6 +1616,15 @@ class InstallerApplication:
             text=next_text,
             state="normal" if next_enabled else "disabled",
         )
+        retry_button = getattr(self, "_retry_button", None)
+        if retry_button is not None:
+            retry_button.configure(
+                state=(
+                    "disabled"
+                    if getattr(self, "_app_update_downloading", False)
+                    else "normal"
+                )
+            )
 
         if state.step is WizardStep.RESULT:
             self._cancel_button.configure(text="Close", state="normal")
@@ -1617,6 +1699,7 @@ class InstallerApplication:
         if not accepted:
             return
         self._app_update_pending = True
+        self._app_update_downloading = True
         self._app_update_status_var.set(
             f"{UI_COPY['downloading_app_update']} ({manifest.version})"
         )
@@ -1667,6 +1750,12 @@ class InstallerApplication:
         except ValueError:
             return
         self.controller.select_mode(mode)
+        error = getattr(self, "_deferred_catalog_error", None)
+        if mode is not InstallerMode.LOCAL and error is not None:
+            self._deferred_catalog_error = None
+            self._failure_operation = "catalog"
+            self._error_code = getattr(error, "code", None)
+            self.controller.fail(error)
 
     def _select_local_deep(self) -> None:
         self.controller.set_local_deep(bool(self._local_deep_var.get()))
@@ -1762,6 +1851,10 @@ class InstallerApplication:
 
     def _next(self) -> None:
         previous = self.controller.state.step
+        if previous is WizardStep.REVIEW and getattr(
+            self, "_app_update_downloading", False
+        ):
+            return
         if not self.controller.next():
             return
         if previous is WizardStep.REVIEW:
@@ -1798,6 +1891,8 @@ class InstallerApplication:
             self._error_code = None
             self.worker.load_catalog()
             self.worker.discover_locations()
+            return
+        if getattr(self, "_app_update_downloading", False):
             return
         if not self.controller.retry():
             return
@@ -1913,9 +2008,7 @@ def self_test() -> int:
     import run_pipeline as local_pipeline
 
     required_data = (
-        "fotmob_teams_validated.json",
-        "major_clubs.json",
-        "team_aliases.json",
+        "fotmob_teams.json",
         "FL262_teams.txt",
         "FL2622wc_players.txt",
         "players.csv",
@@ -1932,6 +2025,9 @@ def self_test() -> int:
         )
     if not callable(local_pipeline.read_save_header):
         raise RuntimeError("Installer package is missing save-header parsing support")
+
+    # Proves the native cryptography backend for update signatures is bundled.
+    Ed25519PublicKey.from_public_bytes(APP_UPDATE_PUBLIC_KEY)
 
     _load_tkinter()
     root = tkinter.Tk()

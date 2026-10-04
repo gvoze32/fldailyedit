@@ -8,7 +8,7 @@ from html import unescape
 from html.parser import HTMLParser
 import logging
 import re
-from typing import Iterable
+from typing import Iterable, Mapping
 from urllib.parse import quote
 
 import aiohttp
@@ -20,37 +20,18 @@ from scraper.models import Transfer
 logger = logging.getLogger(__name__)
 
 WIKIPEDIA_API_URL = "https://en.wikipedia.org/w/api.php"
+# MediaWiki caps multi-value parameters such as `titles` at 50 for anonymous
+# clients and answers larger requests with an HTTP 200 `toomanyvalues` error.
+WIKIPEDIA_TITLES_PER_REQUEST = 50
 WIKIPEDIA_HEADERS = {
     "User-Agent": "FLDailyEdit/0.1 (https://github.com/gvoze32/fldailyedit)",
     "Accept": "application/json",
 }
 
-_A_LEAGUE_TEAM_NAMES = {
-    "AIS": "Australian Institute of Sport",
-    "AU": "Adelaide United",
-    "AUC": "Auckland FC",
-    "BR": "Brisbane Roar",
-    "CCM": "Central Coast Mariners",
-    "GC": "Gold Coast United",
-    "GCU": "Gold Coast United",
-    "MAC": "Macarthur FC",
-    "MC": "Melbourne City",
-    "MH": "Melbourne Heart",
-    "MV": "Melbourne Victory",
-    "NJ": "Newcastle Jets",
-    "NQ": "North Queensland Fury",
-    "NQF": "North Queensland Fury",
-    "NQT": "North Queensland Thunder",
-    "NUJ": "Newcastle Jets",
-    "NZK": "New Zealand Knights",
-    "PG": "Perth Glory",
-    "QR": "Queensland Roar",
-    "SFC": "Sydney FC",
-    "SR": "Sydney Rovers",
-    "WP": "Wellington Phoenix",
-    "WSW": "Western Sydney Wanderers",
-    "WU": "Western United",
-}
+_A_LEAGUE_TEMPLATE_RE = re.compile(
+    r"(?is)\{\{\s*A-League team\s*\|\s*([^|{}]+)(?:\|[^{}]*)?\}\}"
+)
+_EXPANSION_MARKER_RE = re.compile(r"@@FLDE(\d+)@@")
 
 
 def _clean_text(value: str) -> str:
@@ -261,14 +242,7 @@ def _clean_wikitext(value: str) -> str:
     value = re.sub(r"(?is)<!--.*?-->", "", value)
     value = re.sub(r"(?is)<ref\b[^>]*>.*?</ref\s*>", "", value)
     value = re.sub(r"(?is)<ref\b[^>]*/\s*>", "", value)
-    value = re.sub(
-        r"(?is)\{\{\s*A-League team\s*\|\s*([^|{}]+)(?:\|[^{}]*)?\}\}",
-        lambda match: _A_LEAGUE_TEAM_NAMES.get(
-            match.group(1).strip().upper(),
-            match.group(1).strip(),
-        ),
-        value,
-    )
+    value = _A_LEAGUE_TEMPLATE_RE.sub(lambda match: match.group(1).strip(), value)
 
     def date_template(match: re.Match) -> str:
         parts = [
@@ -499,15 +473,66 @@ def _parse_wikipedia_club_lists(
     return parsed
 
 
+def _a_league_codes(wikitext: str) -> set[str]:
+    return {
+        match.group(1).strip().upper() for match in _A_LEAGUE_TEMPLATE_RE.finditer(wikitext)
+    }
+
+
+def _substitute_a_league_teams(wikitext: str, team_names: Mapping[str, str]) -> str:
+    """Replace {{A-League team|CODE}} with names expanded by Wikipedia itself."""
+    if not team_names:
+        return wikitext
+
+    def replace(match: re.Match) -> str:
+        code = match.group(1).strip()
+        return team_names.get(code.upper(), match.group(0))
+
+    return _A_LEAGUE_TEMPLATE_RE.sub(replace, wikitext)
+
+
+async def _expand_a_league_teams(
+    session: aiohttp.ClientSession,
+    codes: Iterable[str],
+    cache: dict[str, str],
+) -> None:
+    """Expand A-League team codes through the live template, memoized per run."""
+    pending = sorted({code for code in codes if code} - cache.keys())
+    if not pending:
+        return
+    text = "\n".join(
+        f"@@FLDE{index}@@{{{{A-League team|{code}}}}}"
+        for index, code in enumerate(pending)
+    )
+    payload = await _fetch_json(
+        session,
+        action="expandtemplates",
+        prop="wikitext",
+        title="Template:A-League team",
+        text=text,
+    )
+    expanded = str((payload.get("expandtemplates") or {}).get("wikitext") or "")
+    pieces = _EXPANSION_MARKER_RE.split(expanded)
+    for raw_index, raw_value in zip(pieces[1::2], pieces[2::2]):
+        index = int(raw_index)
+        if index >= len(pending):
+            continue
+        name = _clean_wikitext(raw_value)
+        if name and name.upper() != pending[index]:
+            cache[pending[index]] = name
+
+
 def parse_wikipedia_transfer_wikitext(
     wikitext: str,
     page_title: str,
     *,
     start_date: date | None = None,
     end_date: date | None = None,
+    team_names: Mapping[str, str] | None = None,
 ) -> list[Transfer]:
     """Parse dated table events and undated club-list corroborators."""
     source_url = f"https://en.wikipedia.org/wiki/{quote(page_title.replace(' ', '_'))}"
+    wikitext = _substitute_a_league_teams(wikitext, team_names or {})
     parsed: list[Transfer] = _parse_wikipedia_club_lists(wikitext, source_url)
     for headers, rows in _wikitext_tables(wikitext):
         date_index = _header_index(headers, {"date"})
@@ -620,17 +645,40 @@ async def _fetch_json(session: aiohttp.ClientSession, **params):
             params={"format": "json", "maxlag": "5", **params},
         ) as response:
             if response.status == 200:
-                return await response.json(content_type=None)
-            if response.status in {429, 503} and attempt < 3:
-                retry_header = response.headers.get("Retry-After", "")
-                retry_delay = min(
-                    float(retry_header) if retry_header.isdigit() else 2**attempt,
-                    5.0,
-                )
-            else:
+                payload = await response.json(content_type=None)
+                error = payload.get("error") if isinstance(payload, dict) else None
+                if not error:
+                    return payload
+                if error.get("code") != "maxlag" or attempt >= 3:
+                    raise RuntimeError(
+                        f"Wikipedia API error {error.get('code')}: {error.get('info')}"
+                    )
+            elif response.status not in {429, 503} or attempt >= 3:
                 raise RuntimeError(f"Wikipedia API returned HTTP {response.status}")
+            retry_header = response.headers.get("Retry-After", "")
+            retry_delay = min(
+                float(retry_header) if retry_header.isdigit() else 2**attempt,
+                5.0,
+            )
         await asyncio.sleep(retry_delay)
     raise RuntimeError("Wikipedia API retry limit reached")
+
+
+async def _fetch_query(session: aiohttp.ClientSession, **params) -> list[dict]:
+    """Return every payload of a MediaWiki query, following `continue`."""
+    payloads: list[dict] = []
+    continuation: dict = {}
+    seen: set[tuple] = set()
+    while True:
+        payload = await _fetch_json(session, action="query", **params, **continuation)
+        payloads.append(payload)
+        continuation = payload.get("continue") or {}
+        marker = tuple(sorted(continuation.items()))
+        if not continuation:
+            return payloads
+        if marker in seen:
+            raise RuntimeError(f"Wikipedia query repeated continuation {continuation}")
+        seen.add(marker)
 
 
 async def _fetch_wikipedia_transfers_async(
@@ -660,12 +708,12 @@ async def _fetch_wikipedia_transfers_async(
         connector=connector,
         cookie_jar=aiohttp.DummyCookieJar(),
     ) as session:
+        a_league_names: dict[str, str] = {}
         page_titles: list[str] = []
         for category in _category_candidates(today, since_date, window):
             try:
-                payload = await _fetch_json(
+                payloads = await _fetch_query(
                     session,
-                    action="query",
                     list="categorymembers",
                     cmtitle=category,
                     cmnamespace="0",
@@ -674,28 +722,39 @@ async def _fetch_wikipedia_transfers_async(
             except Exception as exc:
                 logger.warning("Wikipedia category %s unavailable: %s", category, exc)
                 continue
-            members = payload.get("query", {}).get("categorymembers", [])
-            page_titles.extend(
-                str(member.get("title", ""))
-                for member in members
-                if member.get("title")
-                and "women" not in str(member.get("title", "")).casefold()
-            )
+            for payload in payloads:
+                members = payload.get("query", {}).get("categorymembers", [])
+                page_titles.extend(
+                    str(member.get("title", ""))
+                    for member in members
+                    if member.get("title")
+                    and "women" not in str(member.get("title", "")).casefold()
+                )
 
-        # Category membership defines coverage. Fetch every men's page in one
-        # bulk revision request; women's pages are outside FL26's player pool.
+        # Category membership defines coverage. Fetch every men's page through
+        # bulk revision requests capped at the API's per-request title limit;
+        # women's pages are outside FL26's player pool.
         page_titles = list(dict.fromkeys(page_titles))
         batches: list[list[Transfer]] = []
-        if page_titles:
+        for offset in range(0, len(page_titles), WIKIPEDIA_TITLES_PER_REQUEST):
+            titles = page_titles[offset:offset + WIKIPEDIA_TITLES_PER_REQUEST]
             try:
-                payload = await _fetch_json(
+                payloads = await _fetch_query(
                     session,
-                    action="query",
                     prop="revisions",
                     rvprop="content",
                     rvslots="main",
-                    titles="|".join(page_titles),
+                    titles="|".join(titles),
                 )
+            except Exception as exc:
+                logger.warning(
+                    "Wikipedia bulk transfer fetch unavailable for %s pages: %s",
+                    len(titles),
+                    exc,
+                )
+                continue
+            pages_wikitext: list[tuple[str, str]] = []
+            for payload in payloads:
                 pages = payload.get("query", {}).get("pages", {})
                 for page in pages.values():
                     title = str(page.get("title", ""))
@@ -703,16 +762,24 @@ async def _fetch_wikipedia_transfers_async(
                     slot = revisions[0].get("slots", {}).get("main", {}) if revisions else {}
                     wikitext = slot.get("*") or slot.get("content") or ""
                     if title and wikitext:
-                        batches.append(
-                            parse_wikipedia_transfer_wikitext(
-                                wikitext,
-                                title,
-                                start_date=start_date,
-                                end_date=today,
-                            )
-                        )
+                        pages_wikitext.append((title, wikitext))
+            codes = {
+                code for _, wikitext in pages_wikitext for code in _a_league_codes(wikitext)
+            }
+            try:
+                await _expand_a_league_teams(session, codes, a_league_names)
             except Exception as exc:
-                logger.warning("Wikipedia bulk transfer fetch unavailable: %s", exc)
+                logger.warning("Wikipedia A-League team expansion unavailable: %s", exc)
+            for title, wikitext in pages_wikitext:
+                batches.append(
+                    parse_wikipedia_transfer_wikitext(
+                        wikitext,
+                        title,
+                        start_date=start_date,
+                        end_date=today,
+                        team_names=a_league_names,
+                    )
+                )
     transfers = [transfer for batch in batches for transfer in batch]
     logger.info(
         "Wikipedia found %s effective transfers across %s seasonal pages",

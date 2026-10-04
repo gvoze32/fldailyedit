@@ -202,3 +202,66 @@ def test_save_reports_writes_transfer_only_cards(monkeypatch, tmp_path: Path):
     assert "Dry Number" in html
     assert "Player creations" not in summary
     assert "Player updates" not in summary
+
+
+def _skipped(**overrides: object) -> dict:
+    item = {
+        "player_name": "Missing Player",
+        "from_team": "Club A",
+        "to_team": "Club B",
+        "date": "2026-09-30",
+        "source": "fotmob",
+        "reason": "player_not_in_save",
+        "detail": "No save player matched",
+        "relevant": True,
+        "fotmob_player_id": 12345,
+        "candidates": [],
+    }
+    item.update(overrides)
+    return item
+
+
+def test_save_reports_writes_not_applied_section_and_jsonl(tmp_path: Path):
+    skipped = [
+        _skipped(player_name="Foreign Move", relevant=False, reason="team_not_in_save"),
+        _skipped(player_name="Unknown Signing"),
+        _skipped(player_name="Foreign Signing", relevant=False),
+    ]
+
+    markdown = transfer_logger.save_reports(
+        [], output_dir=tmp_path, write_github_summary=False, skipped=skipped
+    )
+
+    html = (tmp_path / "transfer_summary.html").read_text(encoding="utf-8")
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "skipped_transfers.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert [row["player_name"] for row in rows] == [
+        "Foreign Move",
+        "Unknown Signing",
+        "Foreign Signing",
+    ]
+    assert "### Not applied (3)" in markdown
+    # Reason groups with save-relevant entries come first; relevant rows lead.
+    assert markdown.index("`player_not_in_save` (2)") < markdown.index(
+        "`team_not_in_save` (1)"
+    )
+    assert markdown.index("Unknown Signing") < markdown.index("Foreign Signing")
+    assert "12345" in markdown
+    assert "Not applied" in html and "Unknown Signing" in html
+    assert "</style>" in html
+
+
+def test_save_reports_rewrites_empty_skipped_jsonl(tmp_path: Path):
+    stale = tmp_path / "skipped_transfers.jsonl"
+    stale.write_text('{"stale": true}\n', encoding="utf-8")
+
+    markdown = transfer_logger.save_reports(
+        [_entry()], output_dir=tmp_path, write_github_summary=False
+    )
+
+    assert stale.read_text(encoding="utf-8") == ""
+    assert "Not applied" not in markdown

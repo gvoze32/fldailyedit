@@ -1,22 +1,23 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 from collections import Counter
 from dataclasses import dataclass
-from typing import Callable
-from datetime import date
+from typing import Callable, Iterable, Mapping, Sequence
+from datetime import date, datetime, timedelta, timezone
 import hashlib
+import io
 import json
 import logging
 from pathlib import Path
-
 import config
 import native_metadata
 import transfer_planning as planning
 from editor import backup as backup_mod
 from editor import crypto
 from editor.editfile import EditFile
-from editor.roster import normalize_game_plan_formation
+from editor.roster import _game_plan_position_code, normalize_game_plan_formation
 from editor.save_metadata import read_save_header
 from editor import logger as transfer_logger
 from editor.locking import EditFileLock
@@ -27,14 +28,20 @@ from editor.player_catalog import (
     load_legacy_player_names,
 )
 from editor.release_policy import ReleasePolicyError, load_release_policy
+from scraper.club_identity import (
+    UNRESOLVED,
+    ClubIdentityIndex,
+    build_club_identity_index,
+    load_fotmob_teams,
+)
 from scraper.fotmob import (
     IncompleteScrapeError,
+    fetch_clubs_transfers_safely,
     fetch_fotmob_transfers,
+    fetch_squads_for_club_ids,
     get_transfer_window_range,
     merge_transfers,
-    fetch_transfers_for_club_names,
-    fetch_squads_for_club_names,
-    fetch_major_clubs_transfers_safely,
+    parse_iso_datetime,
 )
 from scraper.tactics import fetch_fotmob_tactical_updates
 from scraper.besoccer import fetch_besoccer_transfers
@@ -46,8 +53,10 @@ from scraper.sources import reconcile_transfer_sources
 from scraper.models import (
     CaptainUpdate,
     ScrapeResult,
+    SquadMember,
     SquadSnapshot,
     TacticalUpdate,
+    Transfer,
 )
 from scraper.wikipedia import fetch_wikipedia_transfers
 from scraper.transfermarkt import fetch_transfermarkt_transfers
@@ -63,29 +72,19 @@ from local_update import (
 )
 
 logger = logging.getLogger(__name__)
-_FAST_SQUAD_CLUB_LIMIT = 32
-_FAST_TRANSFERMARKT_TIMEOUT_SECONDS = 120
-_GAMEPLAN_PRIORITY_NAMES: dict[str, tuple[str, ...]] = {
-    # Verified role corrections for players whose current squad position is
-    # otherwise lost when the legacy lineup is compacted.
-    "manchester united": ("Marcus Rashford",),
-    "manu": ("Marcus Rashford",),
-    "liverpool": ("Bradley Barcola",),
-    "chelsea": ("Moisés Caicedo",),
-    "real madrid": ("Arda Güler",),
-}
-_GAMEPLAN_POSITION_OVERRIDES: dict[str, dict[str, str]] = {
-    "liverpool": {"Bradley Barcola": "RWF"},
-    "inter": {
-        "Federico Dimarco": "LB",
-        "Carlos Augusto": "LB",
-    },
-    "atletico": {"Marcos Llorente": "RB"},
-    "real madrid": {
-        "Federico Valverde": "CMF",
-        "Aurélien Tchouaméni": "DMF",
-    },
-}
+# Re-scan a little before the last applied run so events published late
+# (backdated announcements) are still seen.
+_SINCE_SAFETY_MARGIN = timedelta(days=7)
+_NON_CLUB_NAMES = frozenset(
+    {
+        "",
+        "career break",
+        "free agent",
+        "retired",
+        "unattached",
+        "without club",
+    }
+)
 
 _SAFE_MUTATION_FAILURE_CODES = frozenset(
     {
@@ -124,73 +123,212 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _load_represented_fotmob_club_map() -> dict[int, int]:
-    """Load the generated one-to-one FotMob ↔ PES club identity index."""
-    validated_path = config.DATA_DIR / "fotmob_teams_validated.json"
+def _save_club_names(edit_file: EditFile, club_ids: Iterable[int]) -> dict[int, str]:
+    """Return display names for the selected save's playable clubs.
+
+    The external FL26 team reference is tied to the external player
+    reference; PES21 saves and saves without that catalog use their own
+    team names.
+    """
+    is_pes21_save = bool(getattr(edit_file, "is_pes21_save", False))
+    catalog_report = getattr(edit_file, "player_catalog_report", None)
+    current_catalog_entries = (
+        getattr(catalog_report, "current_entries", None)
+        if catalog_report is not None
+        else None
+    )
+    use_external_team_names = (
+        not is_pes21_save
+        and (current_catalog_entries is None or current_catalog_entries > 0)
+    )
+    current_team_names = (
+        load_id_name_text(
+            config.CURRENT_TEAMS_FILE,
+            label="team",
+            minimum_entries=700,
+        )
+        if use_external_team_names
+        else {}
+    )
+    teams_info = edit_file.get_all_team_info()
+    clubs = set(club_ids)
+    return {
+        team_id: current_team_names.get(team_id, team.name)
+        for team_id, team in teams_info.items()
+        if team_id in clubs
+    }
+
+
+def _load_club_identity(
+    edit_file: EditFile,
+    club_ids: Iterable[int],
+    save_scope: str,
+) -> ClubIdentityIndex:
+    """Build the FotMob ↔ save club index for the selected save."""
     try:
-        validated_payload = json.loads(validated_path.read_text(encoding="utf-8"))
-        if not isinstance(validated_payload, list):
-            raise ValueError(f"{validated_path} must contain a JSON array")
-    except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        fotmob_teams = load_fotmob_teams()
+    except (OSError, TypeError, ValueError) as exc:
         raise IncompleteScrapeError(
-            f"Could not load FotMob/PES club identity data: {exc}"
+            f"Could not load FotMob club identity data: {exc}"
         ) from exc
-
-    represented: dict[int, int] = {}
-    represented_pes_ids: set[int] = set()
-    for item in validated_payload:
-        if (
-            not isinstance(item, dict)
-            or "fotmob_id" not in item
-            or "pes_team_id" not in item
-        ):
-            raise IncompleteScrapeError(
-                f"Malformed club identity entry in {validated_path}"
-            )
-        try:
-            fotmob_id = int(item["fotmob_id"])
-            pes_team_id = int(item["pes_team_id"])
-        except (TypeError, ValueError) as exc:
-            raise IncompleteScrapeError(
-                f"Non-numeric club identity in {validated_path}: {exc}"
-            ) from exc
-        if fotmob_id in represented or pes_team_id in represented_pes_ids:
-            raise IncompleteScrapeError(
-                f"Club identity index is not one-to-one at FotMob {fotmob_id} / "
-                f"PES {pes_team_id}"
-            )
-        represented[fotmob_id] = pes_team_id
-        represented_pes_ids.add(pes_team_id)
-
-    if not represented:
-        raise IncompleteScrapeError("Represented FotMob club ID allowlist is empty")
-    return represented
+    index = build_club_identity_index(
+        _save_club_names(edit_file, club_ids),
+        fotmob_teams,
+        cache_path=config.CLUB_IDENTITY_CACHE_FILE,
+        save_scope=save_scope,
+    )
+    print(f"  Club identity index: {len(index.entries())} save clubs bound to FotMob")
+    return index
 
 
-def _load_represented_fotmob_club_ids() -> set[int]:
-    """Return the validated FotMob club IDs used by the transfer guard."""
-    return set(_load_represented_fotmob_club_map())
+def _previous_window_start(today: date) -> date:
+    """Opening date of the transfer window before the latest one to open.
+
+    Windows open on Jan 1 (winter) and Jun 1 (summer). Rebuilds start from the
+    base save, so the default lookback must still cover the previous summer
+    window during January–May.
+    """
+    if today.month >= 6:
+        return date(today.year, 1, 1)
+    return date(today.year - 1, 6, 1)
+
 
 def _default_transfer_since_date(
     window: str,
     since_date: str | None,
+    save_since_date: str | None = None,
 ) -> str | None:
     """Avoid replaying stale history in default global runs."""
     if since_date is not None or (window or "auto").casefold() != "auto":
         return since_date
-    return date.today().replace(month=1, day=1).isoformat()
+    if save_since_date is not None:
+        return save_since_date
+    return _previous_window_start(date.today()).isoformat()
+
+
+def _pending_skipped_dates(save_scope: str) -> list[date]:
+    """Event dates of relevant transfers the previous run left unapplied."""
+    path = config.OUTPUT_DIR / transfer_logger.SKIPPED_TRANSFERS_FILENAME
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    dates: list[date] = []
+    for line in lines:
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if (
+            not isinstance(item, dict)
+            or item.get("save_scope") != save_scope
+            or not item.get("relevant")
+        ):
+            continue
+        parsed = parse_iso_datetime(str(item.get("date") or ""))
+        if parsed is not None:
+            dates.append(parsed.date())
+    return dates
+
+
+def _save_since_date(
+    save_scope: str,
+    *,
+    include_legacy: bool,
+    today: date | None = None,
+) -> str:
+    """Derive the automatic scrape cutoff from this save's own history.
+
+    Starts a safety margin before the last applied change for the save scope,
+    and never later than the oldest relevant event still pending from the
+    previous run. Never earlier than the previous-window rule, which is also
+    the fallback when the save has no applied history.
+    """
+    current = today or date.today()
+    floor = _previous_window_start(current)
+    applied: list[datetime] = []
+    for entry in transfer_logger.read_log(
+        save_scope=save_scope,
+        include_legacy=include_legacy,
+    ):
+        if entry.get("dry_run"):
+            continue
+        parsed = parse_iso_datetime(str(entry.get("timestamp") or ""))
+        if parsed is not None:
+            applied.append(parsed)
+    if not applied:
+        return floor.isoformat()
+    since = max(applied).date() - _SINCE_SAFETY_MARGIN
+    pending = _pending_skipped_dates(save_scope)
+    if pending:
+        since = min(since, min(pending))
+    return max(since, floor).isoformat()
+
+
+def _positive_int(value) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+@dataclass(frozen=True, slots=True)
+class _SaveScrapeContext:
+    """Selected-save knowledge the scrape needs to target club squads."""
+
+    club_identity: ClubIdentityIndex
+    club_ids: frozenset[int]
+    save_since_date: str | None = None
+
+    def save_club(self, names: Sequence[str], fotmob_id) -> int | None | object:
+        """Resolve one transfer side to a save club, None, or UNRESOLVED."""
+        fotmob_team_id = _positive_int(fotmob_id)
+        if fotmob_team_id is not None:
+            bound = self.club_identity.pes_for_fotmob(fotmob_team_id)
+            if bound is not None:
+                return bound if bound in self.club_ids else None
+        unsure = False
+        for name in names:
+            clean = (name or "").strip()
+            if clean.casefold() in _NON_CLUB_NAMES:
+                continue
+            resolved = self.club_identity.resolve_name(clean)
+            if resolved is UNRESOLVED:
+                unsure = True
+            elif resolved is not None and resolved in self.club_ids:
+                return resolved
+        return UNRESOLVED if unsure else None
+
+    def touches_save(self, transfer) -> bool:
+        """True when either side is (or may be) a club of the selected save."""
+        return any(
+            self.save_club(names, fotmob_id) is not None
+            for names, fotmob_id in _transfer_sides(transfer)
+        )
+
+
+def _transfer_sides(transfer) -> tuple[tuple[tuple[str, ...], object], ...]:
+    return (
+        (
+            (
+                getattr(transfer, "to_club_full_name", "") or "",
+                getattr(transfer, "to_club", "") or "",
+            ),
+            getattr(transfer, "to_club_id_fotmob", None),
+        ),
+        (
+            (
+                getattr(transfer, "from_club_full_name", "") or "",
+                getattr(transfer, "from_club", "") or "",
+            ),
+            getattr(transfer, "from_club_id_fotmob", None),
+        ),
+    )
 
 
 def _supplemental_target_clubs(transfer_batches) -> tuple[str, ...]:
     """Return relevant clubs used to filter supplemental transfer routes."""
-    non_clubs = {
-        "",
-        "career break",
-        "free agent",
-        "retired",
-        "unattached",
-        "without club",
-    }
     targets: list[str] = []
     seen: set[str] = set()
     for batch in transfer_batches:
@@ -205,69 +343,80 @@ def _supplemental_target_clubs(transfer_batches) -> tuple[str, ...]:
             ).strip()
             target = (
                 source
-                if destination.casefold() in non_clubs
+                if destination.casefold() in _NON_CLUB_NAMES
                 else destination
             )
             key = target.casefold()
-            if key and key not in non_clubs and key not in seen:
+            if key and key not in _NON_CLUB_NAMES and key not in seen:
                 seen.add(key)
                 targets.append(target)
     return tuple(targets)
 
-def _fast_squad_target_clubs(transfer_batches) -> tuple[str, ...]:
-    """Return the most active recent-transfer clubs for a fast squad refresh."""
-    non_clubs = {
-        "",
-        "career break",
-        "free agent",
-        "retired",
-        "unattached",
-        "without club",
-    }
-    activity: dict[tuple[str, int | str], int] = {}
-    first_seen: dict[tuple[str, int | str], int] = {}
-    display_names: dict[tuple[str, int | str], str] = {}
-    order = 0
+
+def _fast_squad_target_ids(
+    transfer_batches,
+    context: _SaveScrapeContext,
+) -> tuple[int, ...]:
+    """FotMob IDs of every save club touched by any merged transfer event.
+
+    Unbound FotMob clubs whose name may be a save club are included too: their
+    current squad is the evidence that binds them to a save club.
+    """
+    identity = context.club_identity
+    targets: list[int] = []
+    seen: set[int] = set()
+
+    def add(fotmob_team_id: int | None) -> None:
+        if fotmob_team_id is not None and fotmob_team_id not in seen:
+            seen.add(fotmob_team_id)
+            targets.append(fotmob_team_id)
 
     for batch in transfer_batches:
         for transfer in batch:
-            for candidate, raw_team_id in (
-                (
-                    transfer.to_club_full_name or transfer.to_club,
-                    transfer.to_club_id_fotmob,
-                ),
-                (
-                    transfer.from_club_full_name or transfer.from_club,
-                    transfer.from_club_id_fotmob,
-                ),
-            ):
-                clean = candidate.strip()
-                name_key = clean.casefold()
-                if not clean or name_key in non_clubs:
+            for names, raw_fotmob_id in _transfer_sides(transfer):
+                fotmob_team_id = _positive_int(raw_fotmob_id)
+                resolved = context.save_club(names, fotmob_team_id)
+                if resolved is None:
                     continue
-                try:
-                    team_id = int(raw_team_id)
-                except (TypeError, ValueError):
-                    team_id = 0
-                identity = (
-                    ("id", team_id)
-                    if team_id > 0
-                    else ("name", name_key)
-                )
-                if identity not in first_seen:
-                    first_seen[identity] = order
-                    display_names[identity] = clean
-                    order += 1
-                activity[identity] = activity.get(identity, 0) + 1
+                if fotmob_team_id is not None:
+                    add(fotmob_team_id)
+                elif resolved is not UNRESOLVED:
+                    add(identity.fotmob_for_pes(resolved))
+    return tuple(targets)
 
-    ranked = sorted(
-        activity,
-        key=lambda identity: (-activity[identity], first_seen[identity]),
-    )
-    return tuple(
-        display_names[identity]
-        for identity in ranked[:_FAST_SQUAD_CLUB_LIMIT]
-    )
+
+def _club_filter_fotmob_ids(
+    clubs: Sequence[str],
+    context: _SaveScrapeContext | None,
+) -> tuple[int, ...]:
+    """Resolve ``--club`` values (FotMob IDs or save club names) to FotMob IDs."""
+    resolved_ids: list[int] = []
+    unresolved: list[str] = []
+    for club in clubs:
+        if club.isdigit():
+            resolved_ids.append(int(club))
+            continue
+        pes_team_id = (
+            context.club_identity.resolve_name(club)
+            if context is not None
+            else None
+        )
+        fotmob_team_id = (
+            context.club_identity.fotmob_for_pes(pes_team_id)
+            if isinstance(pes_team_id, int)
+            else None
+        )
+        if fotmob_team_id is None:
+            unresolved.append(club)
+        else:
+            resolved_ids.append(fotmob_team_id)
+    if unresolved:
+        raise IncompleteScrapeError(
+            "Could not resolve requested clubs to FotMob IDs for this save: "
+            + ", ".join(unresolved)
+            + " (use the FotMob team ID instead)"
+        )
+    return tuple(dict.fromkeys(resolved_ids))
 
 
 
@@ -303,9 +452,14 @@ def _scrape_roster_updates(batch) -> tuple:
 def _scrape_run_transfers(
     args,
     *,
+    context: _SaveScrapeContext | None = None,
     progress: Callable[[str, int, int], None] | None = None,
 ):
-    """Fetch, merge, order, and preview transfers for one pipeline run."""
+    """Fetch, merge, order, and preview transfers for one pipeline run.
+
+    ``context`` describes the selected save. Without it (a dry run with no
+    save) squads cannot be targeted, so only provider transfer feeds run.
+    """
     popular_only = bool(getattr(args, "popular", False))
     window = getattr(args, "window", "auto") or "auto"
     since_date = getattr(args, "since", None)
@@ -315,7 +469,11 @@ def _scrape_run_transfers(
     scrape_since_date = (
         since_date
         if club_filter
-        else _default_transfer_since_date(window, since_date)
+        else _default_transfer_since_date(
+            window,
+            since_date,
+            context.save_since_date if context is not None else None,
+        )
     )
 
     start_date, end_date = get_transfer_window_range(window)
@@ -328,48 +486,70 @@ def _scrape_run_transfers(
     roster_updates = []
     captain_updates: list[CaptainUpdate] = []
     squad_snapshots = []
+    pending_transfers: list[Transfer] = []
+
+    def collect_club_batch(batch) -> None:
+        transfer_batches.append(_scrape_transfer_events(batch))
+        roster_updates.extend(_scrape_roster_updates(batch))
+        squad_snapshots.extend(getattr(batch, "squad_snapshots", ()))
+        captain_updates.extend(getattr(batch, "captain_updates", ()))
+        pending_transfers.extend(getattr(batch, "pending_transfers", ()))
+
     if club_filter:
         clubs = [club.strip() for club in club_filter.split(",") if club.strip()]
+        club_ids = _club_filter_fotmob_ids(clubs, context)
         print(
             f"\n🎯 Scraping club-focused transfers for: {', '.join(clubs)} "
             f"({cutoff_info})..."
         )
-        club_batch = fetch_transfers_for_club_names(
-            clubs,
-            since_date=since_date,
-            window=window,
+        collect_club_batch(
+            fetch_clubs_transfers_safely(
+                club_ids,
+                since_date=since_date,
+                window=window,
+            )
         )
-        transfer_batches.append(_scrape_transfer_events(club_batch))
-        roster_updates.extend(_scrape_roster_updates(club_batch))
-        squad_snapshots.extend(getattr(club_batch, "squad_snapshots", ()))
-        captain_updates.extend(getattr(club_batch, "captain_updates", ()))
     elif deep_mode:
-        print(
-            "\n🌪️ Deep Mode: Scraping transfers and squads for indexed clubs "
-            f"({cutoff_info})..."
+        if context is None:
+            raise IncompleteScrapeError(
+                "Deep mode needs the selected save to know which clubs to scrape"
+            )
+        deep_club_ids = sorted(
+            {
+                int(entry["fotmob_id"])
+                for entry in context.club_identity.entries()
+            }
         )
-        deep_batch = fetch_major_clubs_transfers_safely(
+        if not deep_club_ids:
+            raise IncompleteScrapeError(
+                "No save club is bound to a FotMob club; deep mode has nothing to scrape"
+            )
+        print(
+            "\n🌪️ Deep Mode: Scraping transfers and squads for "
+            f"{len(deep_club_ids)} save clubs ({cutoff_info})..."
+        )
+        deep_batch = fetch_clubs_transfers_safely(
+            deep_club_ids,
             since_date=scrape_since_date,
             window=window,
             progress=progress,
         )
-        transfer_batches.append(_scrape_transfer_events(deep_batch))
-        roster_updates.extend(_scrape_roster_updates(deep_batch))
-        squad_snapshots.extend(getattr(deep_batch, "squad_snapshots", ()))
-        deep_captains = getattr(deep_batch, "captain_updates", ())
-        captain_updates.extend(deep_captains)
-        print(f"  Deep captain sync found {len(deep_captains)} markers")
+        collect_club_batch(deep_batch)
+        print(
+            "  Deep captain sync found "
+            f"{len(getattr(deep_batch, 'captain_updates', ()))} markers"
+        )
         print(
             "\n📡 Adding Live Global Feed to catch other minor leagues "
             f"({cutoff_info}, automatic pagination)..."
         )
-        transfer_batches.append(
-            fetch_fotmob_transfers(
-                popular_only=popular_only,
-                since_date=scrape_since_date,
-                window=window,
-            )
+        live_transfers = fetch_fotmob_transfers(
+            popular_only=popular_only,
+            since_date=scrape_since_date,
+            window=window,
         )
+        transfer_batches.append(live_transfers)
+        pending_transfers.extend(getattr(live_transfers, "pending_transfers", ()))
     else:
         print(
             f"\n⚡ Fast Mode: Scraping live transfers from FotMob "
@@ -381,32 +561,7 @@ def _scrape_run_transfers(
             window=window,
         )
         transfer_batches.append(live_transfers)
-
-        squad_targets = _fast_squad_target_clubs((live_transfers,))
-        if squad_targets:
-            print(
-                "\n👕 Fast Mode: Refreshing current squad membership, numbers, and captains for "
-                f"{len(squad_targets)} affected clubs..."
-            )
-            try:
-                squad_updates = fetch_squads_for_club_names(list(squad_targets))
-            except IncompleteScrapeError as error:
-                logger.warning("Fast squad sync skipped: %s", error)
-            transfer_batches.append(_scrape_transfer_events(squad_updates))
-            roster_updates.extend(_scrape_roster_updates(squad_updates))
-            squad_snapshots.extend(getattr(squad_updates, "squad_snapshots", ()))
-            fast_captains = getattr(squad_updates, "captain_updates", ())
-            captain_updates.extend(fast_captains)
-            membership_updates = sum(
-                len(snapshot.members)
-                for snapshot in getattr(squad_updates, "squad_snapshots", ())
-            )
-            shirt_updates = len(_scrape_roster_updates(squad_updates))
-            print(
-                "  Squad sync found "
-                f"{membership_updates} memberships and {shirt_updates} shirt numbers"
-            )
-            print(f"  Captain sync found {len(fast_captains)} markers")
+        pending_transfers.extend(getattr(live_transfers, "pending_transfers", ()))
     fast_signals = []
     corroborators = []
     if not club_filter and not fotmob_only:
@@ -439,17 +594,8 @@ def _scrape_run_transfers(
         print(f"  Sortitoutsi found {len(fast_signals)} enabled signals")
 
         print("\n🔎 Adding verified Transfermarkt detailed transfers...")
-        transfermarkt_timeout = (
-            None if deep_mode else _FAST_TRANSFERMARKT_TIMEOUT_SECONDS
-        )
-        if transfermarkt_timeout is not None:
-            print(
-                "  Fast Transfermarkt scan budget: "
-                f"{transfermarkt_timeout} seconds"
-            )
         transfermarkt_events = fetch_transfermarkt_transfers(
             since_date=scrape_since_date or start_date,
-            timeout_seconds=transfermarkt_timeout,
         )
         transfer_batches.append(transfermarkt_events)
         print(
@@ -492,6 +638,13 @@ def _scrape_run_transfers(
             f"  Soccerway found {len(soccerway_corroborators)} corroboration routes"
         )
 
+    if not club_filter and not deep_mode:
+        _refresh_fast_squads(
+            [*transfer_batches, fast_signals, pending_transfers],
+            context,
+            collect_club_batch,
+        )
+
     transfers = (
         reconcile_transfer_sources(
             transfer_batches,
@@ -518,6 +671,10 @@ def _scrape_run_transfers(
         print(f"  {transfer}")
     if len(transfers) > 5:
         print(f"  ... and {len(transfers) - 5} more")
+    if pending_transfers:
+        print(
+            f"Provider events not yet effective or undated: {len(pending_transfers)}"
+        )
     print(f"Current captain markers to process: {len(captain_updates)}")
     roster_updates = merge_transfers([roster_updates])
     print(f"Current roster updates to process: {len(roster_updates)}")
@@ -541,6 +698,44 @@ def _scrape_run_transfers(
         squad_snapshots,
         roster_updates,
         tactical_updates=tactical_updates,
+        pending_transfers=pending_transfers,
+    )
+
+
+def _refresh_fast_squads(
+    transfer_batches,
+    context: _SaveScrapeContext | None,
+    collect_club_batch: Callable[[ScrapeResult], None],
+) -> None:
+    """Refresh current squads of every save club touched by any event."""
+    if context is None:
+        print(
+            "\n👕 Fast Mode: no selected save; current squads are not refreshed."
+        )
+        return
+    squad_targets = _fast_squad_target_ids(transfer_batches, context)
+    if not squad_targets:
+        return
+    print(
+        "\n👕 Fast Mode: Refreshing current squad membership, numbers, and captains for "
+        f"{len(squad_targets)} save clubs touched by this run's transfers..."
+    )
+    try:
+        squad_updates = fetch_squads_for_club_ids(squad_targets)
+    except IncompleteScrapeError as error:
+        logger.warning("Fast squad sync skipped: %s", error)
+        return
+    collect_club_batch(squad_updates)
+    snapshots = getattr(squad_updates, "squad_snapshots", ())
+    membership_updates = sum(len(snapshot.members) for snapshot in snapshots)
+    shirt_updates = len(_scrape_roster_updates(squad_updates))
+    print(
+        f"  Squad sync found {len(snapshots)} squads, "
+        f"{membership_updates} memberships and {shirt_updates} shirt numbers"
+    )
+    print(
+        "  Captain sync found "
+        f"{len(getattr(squad_updates, 'captain_updates', ()))} markers"
     )
 
 def _load_match_database(
@@ -618,39 +813,19 @@ def _load_match_database(
             f"{len(release_policy.protected_players)} protected clubs, "
             f"{len(release_policy.usage)} usage snapshots"
         )
-    teams_info = edit_file.get_all_team_info()
     club_ids = edit_file.get_club_team_ids()
     all_rosters = edit_file.get_all_rosters()
     team_player_map = {
         team_id: roster.roster for team_id, roster in all_rosters.items()
     }
-
     current_catalog_entries = (
         getattr(catalog_report, "current_entries", None)
         if catalog_report is not None
         else None
     )
-    # The team reference is tied to the current player reference. If that
-    # SPFL catalog is unavailable, ignore any bundled team file as well: it
-    # may describe a different base than a ULM/vanilla save.
-    use_external_team_names = (
-        not is_pes21_save
-        and (current_catalog_entries is None or current_catalog_entries > 0)
-    )
-    current_team_names = (
-        load_id_name_text(
-            config.CURRENT_TEAMS_FILE,
-            label="team",
-            minimum_entries=700,
-        )
-        if use_external_team_names
-        else {}
-    )
-
     team_name_to_id = {
-        current_team_names.get(team_id, team.name): team_id
-        for team_id, team in teams_info.items()
-        if team_id in club_ids
+        name: team_id
+        for team_id, name in _save_club_names(edit_file, club_ids).items()
     }
 
     # T99 stores localized full names and often surname-only print names.
@@ -706,9 +881,6 @@ def _load_match_database(
             if player.age
         },
     )
-    # The team reference is tied to the current player reference. If that
-    # SPFL catalog is unavailable, ignore any bundled team file as well: it
-    # may describe a different base than a ULM/vanilla save.
     matcher.load_team_db(team_name_to_id, clubs_only=False)
     if current_catalog_entries == 0:
         print(
@@ -731,10 +903,15 @@ def _match_and_plan_transfers(
     edit_file,
     output_path,
     *,
+    club_identity: ClubIdentityIndex | None,
+    report: planning.PlanningReport,
     allow_overflow_release,
     allow_uncovered_source=False,
 ):
-    """Match scraped identities, classify them, and create safe roster actions."""
+    """Match scraped identities, classify them, and create safe roster actions.
+
+    Every event that cannot be applied is recorded on ``report.skipped``.
+    """
 
     print(
         "\n🔍 Matching transfers with roster-aware identity verification "
@@ -745,16 +922,7 @@ def _match_and_plan_transfers(
         save_scope=save_scope,
         include_legacy=(output_path.resolve() == config.OUTPUT_FILE_PATH.resolve()),
     )
-    represented_fotmob_teams = _load_represented_fotmob_club_map()
-    is_pes21_save = bool(getattr(edit_file, "is_pes21_save", False))
-    validated_fotmob_teams = (
-        None if is_pes21_save else represented_fotmob_teams
-    )
-    player_names = {
-        player_id: player.name
-        for player_id, player in getattr(edit_file, "_player_cache", {}).items()
-        if getattr(player, "name", "")
-    }
+    player_names = _player_names(edit_file)
     planning_transfers = [
         *transfers,
         *getattr(transfers, "roster_updates", ()),
@@ -778,15 +946,13 @@ def _match_and_plan_transfers(
         team_player_map,
         club_ids,
         historical_entries=historical_entries,
-        validated_fotmob_ids=(
-            None if is_pes21_save else set(represented_fotmob_teams)
-        ),
-        validated_fotmob_teams=validated_fotmob_teams,
+        club_identity=club_identity,
         squad_snapshots=getattr(transfers, "squad_snapshots", ()),
         fotmob_identity_map=getattr(transfers, "fotmob_identity_map", None),
         player_names=player_names,
         allow_uncovered_source=allow_uncovered_source,
         team_shirt_numbers=team_shirt_numbers,
+        report=report,
     )
     matched, duplicate_shirt_matches = planning._dedupe_shirt_number_matches(matched)
     superseded_loan_sources = planning._build_superseded_loan_sources(
@@ -813,6 +979,7 @@ def _match_and_plan_transfers(
         edit_file,
         superseded_loan_sources,
         allow_overflow_release=allow_overflow_release,
+        report=report,
     )
     print(
         f"  ✓ Fully actionable: {len(fully_matched)} "
@@ -823,104 +990,193 @@ def _match_and_plan_transfers(
         f"{sum(match.transfer.transfer_type == 'shirt_number_update' and match.is_fully_matched for match in matched)})"
     )
     print(f"  ✗ Unmatched: {len(partial)}")
-    if partial:
-        print("\n  Unmatched transfers (preview):")
-        for match in partial[:10]:
-            print(f"    {match}")
     return roster_plan, fully_matched, save_scope
 
-def _plan_gameplan_preferences(
-    snapshots: tuple[SquadSnapshot, ...] | list[SquadSnapshot],
+
+def _player_names(edit_file) -> dict[int, str]:
+    return {
+        player_id: player.name
+        for player_id, player in getattr(edit_file, "_player_cache", {}).items()
+        if getattr(player, "name", "")
+    }
+
+
+def _pending_skipped(
+    pending_transfers: Iterable[Transfer],
+    context: _SaveScrapeContext | None,
+    today: date | None = None,
+) -> list[planning.SkippedTransfer]:
+    """Report provider events that were never applied because of their date."""
+    current = today or datetime.now(timezone.utc).date()
+    skipped: list[planning.SkippedTransfer] = []
+    for transfer in pending_transfers:
+        parsed = parse_iso_datetime(transfer.date or "")
+        if not transfer.date or parsed is None:
+            reason = "undated_in_window"
+            detail = "Provider gives no date inside the bounded scrape window"
+        elif parsed.date() > current:
+            reason = "not_yet_effective"
+            detail = f"Effective {parsed.date().isoformat()}; applied once it starts"
+        else:
+            reason = "outside_scrape_window"
+            detail = "Dated outside this run's scrape window"
+        skipped.append(
+            planning.SkippedTransfer(
+                player_name=transfer.player_name,
+                from_team=transfer.from_club_full_name or transfer.from_club,
+                to_team=transfer.to_club_full_name or transfer.to_club,
+                date=transfer.date,
+                source=",".join(transfer.sources),
+                reason=reason,
+                detail=detail,
+                relevant=context is None or context.touches_save(transfer),
+                fotmob_player_id=_positive_int(transfer.player_id_fotmob),
+                candidates=(),
+            )
+        )
+    return skipped
+
+
+def _skipped_rows(
+    skipped: Iterable[planning.SkippedTransfer],
+    save_scope: str,
+) -> tuple[dict, ...]:
+    """Serialize skipped transfers, save-relevant rows first."""
+    rows = [
+        {**item.to_dict(), "save_scope": save_scope}
+        for item in skipped
+    ]
+    rows.sort(key=lambda row: (not row["relevant"], row["reason"], row["date"]))
+    return tuple(rows)
+
+@dataclass(frozen=True, slots=True)
+class _GameplanPreferences:
+    """Live matchday hints resolved to one roster state of the save."""
+
+    starters: dict[int, tuple[int, ...]]
+    bench: dict[int, tuple[int, ...]]
+    position_overrides: dict[int, dict[int, str]]
+
+
+def _resolve_lineup_member(
+    member: SquadMember,
     matcher: NameMatcher,
-    team_player_map: dict[int, list[int]],
-    club_ids: set[int],
-    validated_fotmob_teams: dict[int, int] | None,
+    team_id: int,
+    team_player_map: Mapping[int, Sequence[int]],
+    fotmob_player_ids: Mapping[int, int],
     threshold: float,
-) -> tuple[dict[int, tuple[int, ...]], dict[int, dict[int, str]]]:
-    """Resolve live XI and positions into fail-closed local game-plan hints."""
-    preferred_starters: dict[int, tuple[int, ...]] = {}
+) -> int | None:
+    """Resolve one lineup member to a player of ``team_id``'s roster.
+
+    The FotMob player identity resolved during matching wins; the guarded
+    name match (with age and nationality) is only a fallback.
+    """
+    roster_ids = set(team_player_map.get(team_id, ()))
+    fotmob_player_id = _positive_int(member.player_id_fotmob)
+    if fotmob_player_id is not None:
+        player_id = fotmob_player_ids.get(fotmob_player_id)
+        if player_id is not None:
+            return player_id if player_id in roster_ids else None
+    minimum = max(float(threshold), 85.0)
+    player_id, _, confidence = matcher.match_player(
+        member.player_name,
+        threshold=minimum,
+        to_team_id=team_id,
+        team_player_map=team_player_map,
+        nationality=member.nationality or None,
+        age=member.age or None,
+    )
+    if player_id is None or confidence < minimum or player_id not in roster_ids:
+        return None
+    return player_id
+
+
+def _plan_gameplan_preferences(
+    snapshots: Sequence[SquadSnapshot],
+    matcher: NameMatcher,
+    team_player_map: Mapping[int, Sequence[int]],
+    club_ids: Iterable[int],
+    fotmob_team_map: Mapping[int, int],
+    threshold: float,
+    *,
+    fotmob_player_ids: Mapping[int, int] | None = None,
+    registered_position: Callable[[int], str | None] | None = None,
+) -> _GameplanPreferences:
+    """Resolve the live XI, bench, and positions into local game-plan hints.
+
+    A starter's detailed matchday position overrides the registered
+    Player.bin position only when the two map to different game-plan codes.
+    """
+    clubs = set(club_ids)
+    identities = fotmob_player_ids or {}
+    starters: dict[int, tuple[int, ...]] = {}
+    bench: dict[int, tuple[int, ...]] = {}
     position_overrides: dict[int, dict[int, str]] = {}
 
     for snapshot in snapshots:
         if not snapshot.complete:
             continue
-        if validated_fotmob_teams is not None:
-            team_id = validated_fotmob_teams.get(snapshot.team_id_fotmob)
-        else:
-            team_id, _, confidence = matcher.match_team(
-                snapshot.club_name,
-                threshold=98.0,
-            )
-            if confidence < 98.0:
-                team_id = None
-        if team_id is None or team_id not in club_ids:
+        team_id = fotmob_team_map.get(snapshot.team_id_fotmob)
+        if team_id is None or team_id not in clubs:
             continue
 
-        roster_ids = set(team_player_map.get(team_id, ()))
-        # Squad-list labels are broad role hints (for example, a CM can be
-        # listed as RB in a current lineup).  Player.bin is the authoritative
-        # tactical position; only explicit, verified corrections override it.
-        resolved_positions: dict[int, str] = {}
-
-        priority_names: tuple[str, ...] = ()
-        club_key = snapshot.club_name.casefold()
-        for name_key, names in _GAMEPLAN_PRIORITY_NAMES.items():
-            if name_key in club_key:
-                priority_names = names
-                break
-
-        for name_key, player_positions in _GAMEPLAN_POSITION_OVERRIDES.items():
-            if name_key not in club_key:
-                continue
-            for player_name, position in player_positions.items():
-                player_id, _, confidence = matcher.match_player(
-                    player_name,
-                    threshold=max(float(threshold), 85.0),
-                    to_team_id=team_id,
-                    team_player_map=team_player_map,
-                )
-                if (
-                    player_id is not None
-                    and confidence >= max(float(threshold), 85.0)
-                    and player_id in roster_ids
-                ):
-                    resolved_positions[player_id] = position
+        def resolve(member: SquadMember) -> int | None:
+            return _resolve_lineup_member(
+                member,
+                matcher,
+                team_id,
+                team_player_map,
+                identities,
+                threshold,
+            )
 
         starter_ids: list[int] = []
-        for player_name in [*priority_names, *(
-            member.player_name for member in snapshot.starter_members
-        )]:
-            player_id, _, confidence = matcher.match_player(
-                player_name,
-                threshold=max(float(threshold), 85.0),
-                to_team_id=team_id,
-                team_player_map=team_player_map,
-            )
-            if (
-                player_id is None
-                or confidence < max(float(threshold), 85.0)
-                or player_id not in roster_ids
-                or player_id in starter_ids
-            ):
+        overrides: dict[int, str] = {}
+        for member in snapshot.starter_members:
+            player_id = resolve(member)
+            if player_id is None or player_id in starter_ids:
                 continue
             starter_ids.append(player_id)
+            live_code = _game_plan_position_code(member.position)
+            if live_code is None:
+                continue
+            registered = (
+                registered_position(player_id)
+                if registered_position is not None
+                else None
+            )
+            if _game_plan_position_code(registered) != live_code:
+                overrides[player_id] = member.position
 
-        # Keep a key even when the current match could not safely resolve XI
-        # identities: starter promotion remains conservative, and any manual
-        # position overrides only classify candidates for existing roles.
-        preferred_starters[team_id] = tuple(starter_ids)
-        if resolved_positions:
-            position_overrides[team_id] = resolved_positions
-    return preferred_starters, position_overrides
+        bench_ids: list[int] = []
+        for member in snapshot.sub_members:
+            player_id = resolve(member)
+            if (
+                player_id is None
+                or player_id in starter_ids
+                or player_id in bench_ids
+            ):
+                continue
+            bench_ids.append(player_id)
+
+        # Keep a key even when no XI identity resolved: the team is still
+        # aligned to its current formation roles.
+        starters[team_id] = tuple(starter_ids)
+        bench[team_id] = tuple(bench_ids)
+        if overrides:
+            position_overrides[team_id] = overrides
+        else:
+            position_overrides.pop(team_id, None)
+    return _GameplanPreferences(starters, bench, position_overrides)
 
 
 def _plan_gameplan_formations(
-    snapshots: tuple[SquadSnapshot, ...] | list[SquadSnapshot],
-    matcher: NameMatcher,
-    club_ids: set[int],
-    validated_fotmob_teams: dict[int, int] | None,
+    snapshots: Sequence[SquadSnapshot],
+    club_ids: Iterable[int],
+    fotmob_team_map: Mapping[int, int],
 ) -> dict[int, str]:
     """Map verified current match shapes to represented local clubs."""
+    clubs = set(club_ids)
     planned: dict[int, str] = {}
     conflicted: set[int] = set()
     for snapshot in snapshots:
@@ -929,16 +1185,8 @@ def _plan_gameplan_formations(
         formation = normalize_game_plan_formation(snapshot.formation)
         if formation is None:
             continue
-        if validated_fotmob_teams is not None:
-            team_id = validated_fotmob_teams.get(snapshot.team_id_fotmob)
-        else:
-            team_id, _, confidence = matcher.match_team(
-                snapshot.club_name,
-                threshold=98.0,
-            )
-            if confidence < 98.0:
-                team_id = None
-        if team_id is None or team_id not in club_ids or team_id in conflicted:
+        team_id = fotmob_team_map.get(snapshot.team_id_fotmob)
+        if team_id is None or team_id not in clubs or team_id in conflicted:
             continue
 
         previous = planned.get(team_id)
@@ -955,25 +1203,17 @@ def _plan_gameplan_formations(
 
 
 def _plan_gameplan_tactics(
-    tactical_updates: tuple[TacticalUpdate, ...] | list[TacticalUpdate],
-    matcher: NameMatcher,
-    club_ids: set[int],
-    validated_fotmob_teams: dict[int, int] | None,
+    tactical_updates: Sequence[TacticalUpdate],
+    club_ids: Iterable[int],
+    fotmob_team_map: Mapping[int, int],
 ) -> dict[int, dict[str, int]]:
     """Resolve FotMob profiles to represented local clubs, failing closed."""
+    clubs = set(club_ids)
     planned: dict[int, dict[str, int]] = {}
     conflicted: set[int] = set()
     for source in tactical_updates:
-        if validated_fotmob_teams is not None:
-            team_id = validated_fotmob_teams.get(source.team_id_fotmob)
-        else:
-            team_id, _, confidence = matcher.match_team(
-                source.club_name,
-                threshold=98.0,
-            )
-            if confidence < 98.0:
-                team_id = None
-        if team_id is None or team_id not in club_ids or team_id in conflicted:
+        team_id = fotmob_team_map.get(source.team_id_fotmob)
+        if team_id is None or team_id not in clubs or team_id in conflicted:
             continue
 
         settings = dict(source.settings)
@@ -993,26 +1233,22 @@ def _plan_gameplan_tactics(
 
 
 def _plan_captain_updates(
-    captain_updates: list[CaptainUpdate] | tuple[CaptainUpdate, ...],
+    captain_updates: Sequence[CaptainUpdate],
     matcher: NameMatcher,
-    team_player_map: dict[int, list[int]],
-    club_ids: set[int],
-    validated_fotmob_teams: dict[int, int] | None,
+    team_player_map: Mapping[int, Sequence[int]],
+    club_ids: Iterable[int],
+    fotmob_team_map: Mapping[int, int],
     threshold: float,
+    *,
+    fotmob_player_ids: Mapping[int, int] | None = None,
 ) -> tuple[_PlannedCaptainUpdate, ...]:
     """Resolve live captain markers to fail-closed local roster targets."""
+    clubs = set(club_ids)
+    identities = fotmob_player_ids or {}
     by_team: dict[int, CaptainUpdate] = {}
     for source in captain_updates:
-        if validated_fotmob_teams is not None:
-            team_id = validated_fotmob_teams.get(source.team_id_fotmob)
-        else:
-            team_id, _, team_confidence = matcher.match_team(
-                source.club_name,
-                threshold=98.0,
-            )
-            if team_confidence < 98.0:
-                team_id = None
-        if team_id is None or team_id not in club_ids:
+        team_id = fotmob_team_map.get(source.team_id_fotmob)
+        if team_id is None or team_id not in clubs:
             logger.warning(
                 "Skipping captain for %s (%s): club identity is not represented",
                 source.club_name or source.team_id_fotmob,
@@ -1036,14 +1272,19 @@ def _plan_captain_updates(
 
     planned: list[_PlannedCaptainUpdate] = []
     for team_id, source in by_team.items():
-        player_id, player_name, confidence = matcher.match_player(
-            source.player_name,
-            threshold=max(float(threshold), 90.0),
-            to_team_id=team_id,
-            team_player_map=team_player_map,
-            nationality=source.nationality or None,
-            age=source.age or None,
-        )
+        roster_ids = set(team_player_map.get(team_id, ()))
+        identity = identities.get(_positive_int(source.player_id_fotmob) or 0)
+        if identity is not None and identity in roster_ids:
+            player_id, player_name, confidence = identity, source.player_name, 100.0
+        else:
+            player_id, player_name, confidence = matcher.match_player(
+                source.player_name,
+                threshold=max(float(threshold), 90.0),
+                to_team_id=team_id,
+                team_player_map=team_player_map,
+                nationality=source.nationality or None,
+                age=source.age or None,
+            )
         if player_id is None:
             logger.warning(
                 "Skipping captain for %s: could not safely match %s",
@@ -1063,23 +1304,27 @@ def _plan_captain_updates(
     return tuple(planned)
 
 
-
-
-
-
 def _print_dry_run(
     edit_file: EditFile,
     roster_plan,
-    captain_plan=(),
     tactical_profiles: dict[int, dict[str, int]] | None = None,
     gameplan_formations: dict[int, str] | None = None,
 ) -> None:
-    """Render roster, captain, tactical, and formation actions."""
+    """Render roster, tactical, and formation actions.
+
+    Captains, XI, and bench depend on the post-transfer rosters; the
+    game-plan preview prints them from an in-memory simulation.
+    """
     print("\n🔍 DRY-RUN — checking each match against the current roster:")
     would_apply = 0
     already_current = 0
     safety_skipped = 0
-    shirt_statuses = _plan_shirt_number_batch(edit_file, roster_plan)
+    arriving = frozenset(
+        (item.match.to_team_id, item.match.player_id)
+        for item in roster_plan
+        if item.action in ("move", "add")
+    )
+    shirt_statuses = _plan_shirt_number_batch(edit_file, roster_plan, arriving)
     for planned_action in roster_plan:
         match = planned_action.match
         action = planned_action.action
@@ -1146,32 +1391,6 @@ def _print_dry_run(
                 f"from team {match.to_team_id}"
             )
         print(f"  WOULD {action.upper()}: {match}")
-    for planned_captain in captain_plan:
-        current_player_id = edit_file.get_team_captain_player(
-            planned_captain.team_id
-        )
-        if current_player_id == planned_captain.player_id:
-            already_current += 1
-            print(
-                f"  ALREADY CURRENT CAPTAIN: {planned_captain.source.club_name} "
-                f"→ {planned_captain.matched_player_name}"
-            )
-            continue
-
-        roster = edit_file.get_team_roster(planned_captain.team_id)
-        if roster is None or roster.player_ids.count(planned_captain.player_id) != 1:
-            safety_skipped += 1
-            print(
-                f"  SAFETY SKIP CAPTAIN ({planned_captain.source.club_name}): "
-                f"{planned_captain.matched_player_name} is not in the current roster"
-            )
-            continue
-
-        would_apply += 1
-        print(
-            f"  WOULD SET CAPTAIN: {planned_captain.source.club_name} → "
-            f"{planned_captain.matched_player_name}"
-        )
     if tactical_profiles:
         print("\nEvidence-gated tactical profiles (main preset):")
         for team_id, settings in sorted(tactical_profiles.items()):
@@ -1184,17 +1403,62 @@ def _print_dry_run(
         for team_id, formation in sorted(gameplan_formations.items()):
             print(f"  Team {team_id}: {formation}")
     print(
-        f"\nDry-run complete. Would apply: {would_apply}, "
-        f"already current: {already_current}, safety-skipped: {safety_skipped}. "
-        "No files were written."
+        f"\nDry-run roster check complete. Would apply: {would_apply}, "
+        f"already current: {already_current}, safety-skipped: {safety_skipped}."
     )
+
+
+def _print_gameplan_diffs(
+    before: Mapping[int, tuple],
+    after: Mapping[int, tuple],
+    player_names: Mapping[int, str],
+    team_names: Mapping[int, str],
+) -> None:
+    """Print the XI, bench, and captain changes a run would make per team."""
+
+    def name(player_id: int | None) -> str:
+        if player_id is None:
+            return "none"
+        return player_names.get(player_id) or f"#{player_id}"
+
+    def delta(old: Sequence[int], new: Sequence[int]) -> str:
+        removed = [name(pid) for pid in old if pid not in new]
+        added = [name(pid) for pid in new if pid not in old]
+        if not removed and not added:
+            return "same players, new order/roles"
+        return ", ".join(
+            [*(f"-{player}" for player in removed), *(f"+{player}" for player in added)]
+        )
+
+    changed = [team_id for team_id in sorted(after) if after[team_id] != before.get(team_id)]
+    if not changed:
+        print("\nGame plans: no XI, bench, or captain changes.")
+        return
+    print(f"\nGame-plan changes ({len(changed)} teams):")
+    for team_id in changed:
+        old_matchday, old_captain = before.get(team_id, (None, None))
+        new_matchday, new_captain = after[team_id]
+        old_xi, old_bench = old_matchday or ((), ())
+        new_xi, new_bench = new_matchday or ((), ())
+        print(f"  {team_names.get(team_id) or 'Team'} ({team_id}):")
+        if tuple(old_xi) != tuple(new_xi):
+            print(f"    XI: {delta(old_xi, new_xi)}")
+        if tuple(old_bench) != tuple(new_bench):
+            print(f"    Bench: {delta(old_bench, new_bench)}")
+        if old_captain != new_captain:
+            print(f"    Captain: {name(old_captain)} → {name(new_captain)}")
 
 
 def _plan_shirt_number_batch(
     edit_file: EditFile,
     actions: list[planning.PlannedRosterAction],
+    arriving: frozenset[tuple[int, int]] = frozenset(),
 ) -> dict[int, tuple[int | None, int | None, str]]:
-    """Classify shirt updates so planned number swaps can be applied together."""
+    """Classify shirt updates so planned number swaps can be applied together.
+
+    ``arriving`` holds (team_id, player_id) pairs not yet on the live roster that
+    an earlier planned move/add will register; any other non-member is skipped.
+    """
     statuses: dict[int, tuple[int | None, int | None, str]] = {}
     grouped: dict[int, list[planning.PlannedRosterAction]] = {}
 
@@ -1214,6 +1478,8 @@ def _plan_shirt_number_batch(
             grouped.setdefault(team_id, []).append(item)
 
     for team_id, group in grouped.items():
+        roster = edit_file.get_team_roster(team_id)
+        members = set(roster.player_ids) if roster is not None else set()
         candidates: list[planning.PlannedRosterAction] = []
         by_target: dict[int, list[planning.PlannedRosterAction]] = {}
         for item in group:
@@ -1221,6 +1487,12 @@ def _plan_shirt_number_batch(
             previous, _, _ = statuses[id(item)]
             target = match.transfer.shirt_number
             if target is None or previous == target:
+                continue
+            if (
+                match.player_id not in members
+                and (team_id, match.player_id) not in arriving
+            ):
+                statuses[id(item)] = (previous, None, "player_not_on_team")
                 continue
             try:
                 valid_target = 1 <= target <= 999
@@ -1255,7 +1527,6 @@ def _plan_shirt_number_batch(
                 f"duplicate_shirt_number:{requested}",
             )
 
-        roster = edit_file.get_team_roster(team_id)
         occupants: dict[int, set[int]] = {}
         if roster is not None:
             for player_id, shirt_number in zip(
@@ -1447,12 +1718,24 @@ class _RunPrepared:
         self.output_existed = output_existed
         self.output_digest = output_digest
         self.output_lock: EditFileLock | None = None
-        self.captain_plan: tuple[_PlannedCaptainUpdate, ...] = ()
-        self.gameplan_preferred_starters: dict[int, tuple[int, ...]] = {}
-        self.gameplan_position_overrides: dict[int, dict[int, str]] = {}
+        self.save_scope = str(output_path.resolve())
+        # Selected-save match context, loaded once before scraping.
+        self.matcher: NameMatcher | None = None
+        self.all_rosters: dict = {}
+        self.team_player_map: dict[int, list[int]] = {}
+        self.club_ids: set[int] = set()
+        self.club_identity: ClubIdentityIndex | None = None
+        self.scrape_context: _SaveScrapeContext | None = None
+        self.match_threshold: float = float(config.MATCH_THRESHOLD_PLAYER)
+        # FotMob club → save club and FotMob player → save player identities.
+        self.fotmob_team_map: dict[int, int] = {}
+        self.fotmob_player_ids: dict[int, int] = {}
+        self.squad_snapshots: tuple[SquadSnapshot, ...] = ()
+        self.captain_sources: tuple[CaptainUpdate, ...] = ()
+        self.roster_plan: list[planning.PlannedRosterAction] = []
         self.gameplan_formations: dict[int, str] = {}
         self.gameplan_tactics: dict[int, dict[str, int]] = {}
-        self.save_scope = str(output_path.resolve())
+        self.skipped: list[planning.SkippedTransfer] = []
         self.backup_path: Path | None = None
         self.original_data = bytes(
             getattr(edit_file, "_data", data_dat.read_bytes())
@@ -1464,6 +1747,9 @@ class _RunPrepared:
         self.pending_logs = []
         self.captain_records = []
         self.run_records = []
+
+    def skipped_rows(self) -> tuple[dict, ...]:
+        return _skipped_rows(self.skipped, self.save_scope)
 
 
 class _RunMutation:
@@ -1477,6 +1763,7 @@ class _RunMutation:
         captains_changed: int = 0,
         tactics_changed: int = 0,
         formations_changed: int = 0,
+        gameplan_changed: bool = False,
     ) -> None:
         self.transfer_applied = transfer_applied
         self.shirt_numbers_changed = shirt_numbers_changed
@@ -1485,6 +1772,7 @@ class _RunMutation:
         self.captains_changed = captains_changed
         self.tactics_changed = tactics_changed
         self.formations_changed = formations_changed
+        self.gameplan_changed = gameplan_changed
 
 
 class _RunLocalUpdateRuntime:
@@ -1527,31 +1815,102 @@ class _RunLocalUpdateRuntime:
             prepared.output_lock.release()
             prepared.output_lock = None
 
+    def _ensure_context(
+        self,
+        request: LocalUpdateRequest,
+        prepared: _RunPrepared,
+    ) -> None:
+        """Load the save's match database and club identity index once."""
+        if prepared.club_identity is not None:
+            return
+        try:
+            if request.release_policy_file is None:
+                loaded = _load_match_database(prepared.edit_file)
+            else:
+                loaded = _load_match_database(
+                    prepared.edit_file,
+                    request.release_policy_file,
+                )
+            matcher, all_rosters, team_player_map, club_ids = loaded
+            club_identity = _load_club_identity(
+                prepared.edit_file,
+                club_ids,
+                prepared.save_scope,
+            )
+        except LocalUpdateError:
+            raise
+        except Exception as error:
+            raise LocalUpdateError(
+                "matching_failed",
+                f"Transfer matching failed: {error}",
+                stage=LocalUpdateStage.MATCHING,
+            ) from error
+        if matcher is not None:
+            matcher.load_team_aliases(club_identity.aliases())
+        prepared.matcher = matcher
+        prepared.all_rosters = all_rosters
+        prepared.team_player_map = team_player_map
+        prepared.club_ids = set(club_ids)
+        prepared.club_identity = club_identity
+        prepared.match_threshold = float(
+            request.threshold or config.MATCH_THRESHOLD_PLAYER
+        )
+
+    def _scrape_context(
+        self,
+        request: LocalUpdateRequest,
+        prepared: _RunPrepared,
+    ) -> _SaveScrapeContext:
+        self._ensure_context(request, prepared)
+        if prepared.scrape_context is None:
+            # Narrow the window from history only when this run continues
+            # the save that history describes; a rebuild from a different
+            # input must replay the previous-window range.
+            save_since_date = (
+                _save_since_date(
+                    prepared.save_scope,
+                    include_legacy=(
+                        prepared.output_path.resolve()
+                        == config.OUTPUT_FILE_PATH.resolve()
+                    ),
+                )
+                if prepared.same_input_output
+                else None
+            )
+            prepared.scrape_context = _SaveScrapeContext(
+                club_identity=prepared.club_identity,
+                club_ids=frozenset(prepared.club_ids),
+                save_since_date=save_since_date,
+            )
+        return prepared.scrape_context
+
     def scrape(
         self,
         request: LocalUpdateRequest,
+        prepared: _RunPrepared,
         _token: CancellationToken,
     ):
-        if not request.dry_run and not request.edit_path.exists():
-            raise LocalUpdateError(
-                "missing_input",
-                f"Edit file not found: {request.edit_path}",
-                stage=LocalUpdateStage.SCRAPING,
-            )
+        context = self._scrape_context(request, prepared)
         args = self._args(request)
         if self._progress is None:
-            return _scrape_run_transfers(args)
+            return _scrape_run_transfers(args, context=context)
         return _scrape_run_transfers(
             args,
+            context=context,
             progress=self._report_scrape_progress,
         )
 
     def validate_and_prepare(
         self,
         request: LocalUpdateRequest,
-        _transfers,
         _token: CancellationToken,
     ) -> _RunPrepared:
+        if not request.edit_path.exists():
+            raise LocalUpdateError(
+                "missing_input",
+                f"Edit file not found: {request.edit_path}",
+                stage=LocalUpdateStage.VALIDATING,
+            )
         output_path = request.target_path
         prepared: _RunPrepared | None = None
         lock = EditFileLock(output_path)
@@ -1585,15 +1944,6 @@ class _RunLocalUpdateRuntime:
                 ) from error
 
             data_dat = temp_dir / "data.dat"
-            if not data_dat.exists():
-                dat_files = list(temp_dir.glob("*.dat"))
-                if not dat_files:
-                    raise LocalUpdateError(
-                        "invalid_save",
-                        f"Decryption produced no data block in {temp_dir}",
-                        stage=LocalUpdateStage.VALIDATING,
-                    )
-                data_dat = max(dat_files, key=lambda path: path.stat().st_size)
 
             edit_file = EditFile()
             edit_file.load(data_dat)
@@ -1667,86 +2017,88 @@ class _RunLocalUpdateRuntime:
         transfers,
         _token: CancellationToken,
     ):
+        self._ensure_context(request, prepared)
         try:
-            if request.release_policy_file is None:
-                matcher, all_rosters, team_player_map, club_ids = (
-                    _load_match_database(prepared.edit_file)
-                )
-            else:
-                matcher, all_rosters, team_player_map, club_ids = (
-                    _load_match_database(
-                        prepared.edit_file,
-                        request.release_policy_file,
-                    )
-                )
-            baseline_integrity = prepared.edit_file.validate_integrity()
+            edit_file = prepared.edit_file
+            matcher = prepared.matcher
+            club_identity = prepared.club_identity
+            baseline_integrity = edit_file.validate_integrity()
             prepared.pre_mutation_integrity_errors = tuple(
                 str(error) for error in baseline_integrity.get("errors", [])
             )
-            match_threshold = request.threshold or config.MATCH_THRESHOLD_PLAYER
+            squad_snapshots = tuple(getattr(transfers, "squad_snapshots", ()))
+            player_names = _player_names(edit_file)
+            learned = 0
+            for snapshot in squad_snapshots:
+                if snapshot.complete and club_identity.learn_from_snapshot(
+                    snapshot,
+                    prepared.team_player_map,
+                    player_names,
+                ) is not None:
+                    learned += 1
+            try:
+                club_identity.save()
+            except OSError as error:
+                logger.warning("Could not cache learned club identities: %s", error)
+            if learned:
+                print(f"  Club identities confirmed from live squads: {learned}")
+
+            report = planning.PlanningReport()
             roster_plan, fully_matched, save_scope = _match_and_plan_transfers(
                 transfers,
                 matcher,
-                match_threshold,
-                team_player_map,
-                all_rosters,
-                club_ids,
-                prepared.edit_file,
+                prepared.match_threshold,
+                prepared.team_player_map,
+                prepared.all_rosters,
+                prepared.club_ids,
+                edit_file,
                 prepared.output_path,
+                club_identity=club_identity,
+                report=report,
                 allow_overflow_release=request.allow_overflow_release,
                 allow_uncovered_source=not request.deep,
             )
-            captain_sources = getattr(transfers, "captain_updates", ())
-            squad_snapshots = tuple(getattr(transfers, "squad_snapshots", ()))
-            tactical_sources = tuple(getattr(transfers, "tactical_updates", ()))
-            is_pes21_save = bool(
-                getattr(prepared.edit_file, "is_pes21_save", False)
+            context = prepared.scrape_context or _SaveScrapeContext(
+                club_identity=club_identity,
+                club_ids=frozenset(prepared.club_ids),
             )
-            team_map = None
-            if (
-                not is_pes21_save
-                and (captain_sources or squad_snapshots or tactical_sources)
-            ):
-                team_map = _load_represented_fotmob_club_map()
-
-            if captain_sources:
-                prepared.captain_plan = _plan_captain_updates(
-                    captain_sources,
-                    matcher,
-                    team_player_map,
-                    club_ids,
-                    team_map,
-                    match_threshold,
-                )
-            if squad_snapshots:
-                (
-                    prepared.gameplan_preferred_starters,
-                    prepared.gameplan_position_overrides,
-                ) = _plan_gameplan_preferences(
-                    squad_snapshots,
-                    matcher,
-                    team_player_map,
-                    club_ids,
-                    team_map,
-                    match_threshold,
-                )
-                prepared.gameplan_formations = _plan_gameplan_formations(
-                    squad_snapshots,
-                    matcher,
-                    club_ids,
-                    team_map,
-                )
+            prepared.skipped = [
+                *report.skipped,
+                *_pending_skipped(
+                    getattr(transfers, "pending_transfers", ()),
+                    context,
+                ),
+            ]
+            prepared.fotmob_player_ids = dict(report.fotmob_player_ids)
+            prepared.fotmob_team_map = {
+                int(entry["fotmob_id"]): int(entry["pes_team_id"])
+                for entry in club_identity.entries()
+            }
+            prepared.squad_snapshots = squad_snapshots
+            prepared.captain_sources = tuple(
+                getattr(transfers, "captain_updates", ())
+            )
+            prepared.gameplan_formations = _plan_gameplan_formations(
+                squad_snapshots,
+                prepared.club_ids,
+                prepared.fotmob_team_map,
+            )
+            tactical_sources = tuple(getattr(transfers, "tactical_updates", ()))
             if tactical_sources:
                 prepared.gameplan_tactics = _plan_gameplan_tactics(
                     tactical_sources,
-                    matcher,
-                    club_ids,
-                    team_map,
+                    prepared.club_ids,
+                    prepared.fotmob_team_map,
                 )
                 print(
                     "Tactical profiles safely mapped to local clubs: "
                     f"{len(prepared.gameplan_tactics)}"
                 )
+            relevant = sum(item.relevant for item in prepared.skipped)
+            print(
+                f"  Not applied: {len(prepared.skipped)} transfers "
+                f"({relevant} touch this save)"
+            )
             prepared.roster_plan = roster_plan
             prepared.save_scope = save_scope
             return roster_plan, fully_matched
@@ -1759,6 +2111,24 @@ class _RunLocalUpdateRuntime:
                 stage=LocalUpdateStage.MATCHING,
             ) from error
 
+    def _gameplan_preferences(
+        self,
+        prepared: _RunPrepared,
+        team_player_map: Mapping[int, Sequence[int]],
+    ) -> _GameplanPreferences:
+        return _plan_gameplan_preferences(
+            prepared.squad_snapshots,
+            prepared.matcher,
+            team_player_map,
+            prepared.club_ids,
+            prepared.fotmob_team_map,
+            prepared.match_threshold,
+            fotmob_player_ids=prepared.fotmob_player_ids,
+            registered_position=getattr(
+                prepared.edit_file, "get_player_position", None
+            ),
+        )
+
     def apply(
         self,
         request: LocalUpdateRequest,
@@ -1766,117 +2136,53 @@ class _RunLocalUpdateRuntime:
         _plan,
         token: CancellationToken,
     ):
-        captain_plan = tuple(getattr(prepared, "captain_plan", ()))
-        captain_getter = getattr(
-            prepared.edit_file,
-            "get_team_captain_player",
-            None,
+        print(
+            "\n⚡ Applying verified transfers, squad membership, shirt-number, "
+            "game-plan, and captain changes..."
         )
-        captain_actionable = bool(captain_plan) and (
-            not callable(captain_getter)
-            or any(
-                captain_getter(item.team_id) != item.player_id
-                for item in captain_plan
-            )
+        mutation = self._mutate(request, prepared, token)
+        effective = (
+            mutation.transfer_applied
+            or mutation.shirt_numbers_changed
+            or mutation.captains_changed
+            or mutation.tactics_changed
+            or mutation.formations_changed
+            or mutation.gameplan_changed
         )
-        actionable_roster = any(
-            item.action in {"move", "add", "release", "shirt_update"}
-            for item in prepared.roster_plan
-        )
-        repair_game_plans = getattr(prepared.edit_file, "repair_game_plans", None)
-        repair_kwargs = {"preserve_existing_primary": True}
-        gameplan_formations = getattr(prepared, "gameplan_formations", {})
-        formations_changed = 0
-        formation_setter = getattr(
-            prepared.edit_file,
-            "set_team_formation",
-            None,
-        )
-        if callable(formation_setter):
-            for team_id, formation in gameplan_formations.items():
-                token.raise_if_cancelled()
-                changed = formation_setter(team_id, formation)
-                if type(changed) is int and changed > 0:
-                    formations_changed += 1
-        if (
-            getattr(prepared, "gameplan_preferred_starters", None)
-            or getattr(prepared, "gameplan_position_overrides", None)
-            or gameplan_formations
-        ):
-            repair_kwargs.update(
-                preferred_starters=prepared.gameplan_preferred_starters,
-                position_overrides=prepared.gameplan_position_overrides,
-                align_positions=True,
-            )
-        repair_metrics = (
-            repair_game_plans(**repair_kwargs)
-            if not actionable_roster and callable(repair_game_plans)
-            else {}
-        )
-        gameplan_changed = any(
-            repair_metrics.get(key, 0)
-            for key in (
-                "repaired_lineups",
-                "repaired_goalkeeper_roles",
-                "repaired_position_bytes",
-                "reset_roles",
-            )
-        )
-        tactics_changed = 0
-        tactical_setter = getattr(
-            prepared.edit_file,
-            "set_team_tactical_settings",
-            None,
-        )
-        if callable(tactical_setter):
-            for team_id, settings in prepared.gameplan_tactics.items():
-                token.raise_if_cancelled()
-                changed = tactical_setter(team_id, settings)
-                if type(changed) is int and changed > 0:
-                    tactics_changed += changed
-        if (
-            not actionable_roster
-            and not gameplan_changed
-            and not captain_actionable
-            and not tactics_changed
-            and not formations_changed
-        ):
-            unchanged = sum(
-                item.action == "noop" for item in prepared.roster_plan
-            )
-            safety_skipped = sum(
-                item.action == "skip" for item in prepared.roster_plan
-            )
+        if not effective:
             print(
                 "No effective transfer, squad, captain, tactical, or "
                 "formation changes to apply. Exiting."
             )
+            try:
+                # Keep the not-applied report current: it also seeds the next
+                # run's scrape window with still-pending relevant events.
+                transfer_logger.save_reports([], skipped=prepared.skipped_rows())
+            except OSError as error:
+                print(f"\n⚠ Could not write the not-applied report: {error}")
             return LocalUpdateResult(
                 target_path=prepared.output_path,
                 backup_path=None,
                 installed_sha256=None,
                 transfer_applied=0,
                 shirt_numbers_changed=0,
-                unchanged=unchanged,
-                safety_skipped=safety_skipped,
+                unchanged=mutation.unchanged,
+                safety_skipped=mutation.safety_skipped,
                 no_changes=True,
+                skipped=prepared.skipped_rows(),
             )
-        if gameplan_changed:
-            print(
-                "\n🧭 Repairing game-plan lineup mappings: "
-                f"{repair_metrics.get('repaired_lineups', 0)} lineups, "
-                f"{repair_metrics.get('repaired_goalkeeper_roles', 0)} goalkeeper roles, "
-                f"{repair_metrics.get('repaired_position_bytes', 0)} position bytes"
-            )
-        if tactics_changed:
-            print(f"  Tactical settings changed: {tactics_changed}")
-        if formations_changed:
-            print(f"  Game-plan formations changed: {formations_changed} clubs")
 
         token.raise_if_cancelled()
         print("\n💾 Creating backup...")
+        # Back up the save publish() overwrites: when writing to a separate,
+        # existing output, that file (not the unchanged input) is replaced.
+        backup_source = (
+            prepared.output_path
+            if not prepared.same_input_output and prepared.output_existed
+            else prepared.edit_path
+        )
         try:
-            prepared.backup_path = backup_mod.create_backup(prepared.edit_path)
+            prepared.backup_path = backup_mod.create_backup(backup_source)
         except Exception as error:
             raise LocalUpdateError(
                 "backup_failed",
@@ -1884,14 +2190,55 @@ class _RunLocalUpdateRuntime:
                 stage=LocalUpdateStage.APPLYING,
             ) from error
         print(f"  Backup: {prepared.backup_path}")
+        return mutation
 
-        print("\n⚡ Applying verified transfers, squad membership, shirt-number, and captain changes...")
+    def _mutate(
+        self,
+        request: LocalUpdateRequest,
+        prepared: _RunPrepared,
+        token: CancellationToken,
+    ) -> _RunMutation:
+        """Apply every planned change to the in-memory save only."""
+        edit_file = prepared.edit_file
+        formations_changed = 0
+        formation_setter = getattr(edit_file, "set_team_formation", None)
+        if callable(formation_setter):
+            for team_id, formation in prepared.gameplan_formations.items():
+                token.raise_if_cancelled()
+                changed = formation_setter(team_id, formation)
+                if type(changed) is int and changed > 0:
+                    formations_changed += 1
+        if formations_changed:
+            print(f"  Game-plan formations changed: {formations_changed} clubs")
+
+        tactics_changed = 0
+        tactical_setter = getattr(edit_file, "set_team_tactical_settings", None)
+        if callable(tactical_setter):
+            for team_id, settings in prepared.gameplan_tactics.items():
+                token.raise_if_cancelled()
+                changed = tactical_setter(team_id, settings)
+                if type(changed) is int and changed > 0:
+                    tactics_changed += changed
+        if tactics_changed:
+            print(f"  Tactical settings changed: {tactics_changed}")
+
+        # Removal backfills prefer the live XI of the pre-transfer roster.
+        starter_hint = getattr(edit_file, "set_game_plan_preferred_starters", None)
+        if callable(starter_hint) and prepared.squad_snapshots:
+            starter_hint(
+                self._gameplan_preferences(
+                    prepared,
+                    prepared.team_player_map,
+                ).starters
+            )
+
         transfer_applied = 0
         shirt_numbers_applied = 0
         captains_changed = 0
         unchanged = 0
         safety_skipped = 0
         original_data = prepared.original_data
+        touched_teams: set[int] = set()
         shirt_batch_states: dict[
             int, dict[int, tuple[int | None, int | None, str]]
         ] = {}
@@ -2023,6 +2370,7 @@ class _RunLocalUpdateRuntime:
                     shirt_number=preferred_shirt,
                     position=transfer.position,
                     allow_overflow_release=request.allow_overflow_release,
+                    planned_overflow_player_id=planned_action.overflow_player_id,
                 )
             elif action == "release":
                 ok = prepared.edit_file.release_player(
@@ -2048,6 +2396,15 @@ class _RunLocalUpdateRuntime:
                         f"{match.matched_player_name or transfer.player_name}: "
                         f"{failure_detail or failure_code}"
                     )
+                    if action != "shirt_update":
+                        prepared.skipped.append(
+                            planning.SkippedTransfer.from_match(
+                                match,
+                                failure_code,
+                                failure_detail,
+                                club_ids=prepared.club_ids,
+                            )
+                        )
                     continue
                 prepared.edit_file._data = bytearray(original_data)
                 detail = f" Reason: {failure_detail}" if failure_detail else ""
@@ -2063,6 +2420,11 @@ class _RunLocalUpdateRuntime:
                 shirt_numbers_applied += 1
             else:
                 transfer_applied += 1
+                touched_teams.update(
+                    team_id
+                    for team_id in (current_team_id, match.from_team_id, to_team_id)
+                    if team_id is not None and team_id in prepared.club_ids
+                )
             prepared.pending_logs.append((match, previous_shirt, action))
             prepared.run_records.append(
                 {
@@ -2086,19 +2448,19 @@ class _RunLocalUpdateRuntime:
                 }
             )
 
-        if callable(repair_game_plans) and actionable_roster:
-            repair_metrics = repair_game_plans(**repair_kwargs)
-        if actionable_roster:
-            repaired_roles = repair_metrics.get("repaired_goalkeeper_roles", 0)
-            repaired_lineups = repair_metrics.get("repaired_lineups", 0)
-            repaired_positions = repair_metrics.get("repaired_position_bytes", 0)
-            if repaired_roles or repaired_lineups or repaired_positions:
-                print(
-                    "  Game-plan repairs: "
-                    f"{repaired_lineups} lineups, {repaired_roles} goalkeeper roles, "
-                    f"{repaired_positions} position bytes"
-                )
-        captain_setter = getattr(prepared.edit_file, "set_team_captain", None)
+        gameplan_changed = self._align_game_plans(prepared, touched_teams)
+
+        captain_getter = getattr(edit_file, "get_team_captain_player", None)
+        captain_setter = getattr(edit_file, "set_team_captain", None)
+        captain_plan = _plan_captain_updates(
+            prepared.captain_sources,
+            prepared.matcher,
+            self._current_team_player_map(edit_file),
+            prepared.club_ids,
+            prepared.fotmob_team_map,
+            prepared.match_threshold,
+            fotmob_player_ids=prepared.fotmob_player_ids,
+        ) if prepared.captain_sources else ()
         for planned_captain in captain_plan:
             token.raise_if_cancelled()
             current_player_id = (
@@ -2178,7 +2540,61 @@ class _RunLocalUpdateRuntime:
             captains_changed=captains_changed,
             tactics_changed=tactics_changed,
             formations_changed=formations_changed,
+            gameplan_changed=gameplan_changed,
         )
+
+    @staticmethod
+    def _current_team_player_map(edit_file) -> dict[int, list[int]]:
+        return {
+            team_id: list(roster.roster)
+            for team_id, roster in edit_file.get_all_rosters().items()
+        }
+
+    def _align_game_plans(
+        self,
+        prepared: _RunPrepared,
+        touched_teams: set[int],
+    ) -> bool:
+        """Resolve the live matchday against post-transfer rosters and align.
+
+        Runs after every roster mutation so this run's signings can enter
+        the XI and bench; teams changed by roster actions are always aligned.
+        """
+        edit_file = prepared.edit_file
+        repair_game_plans = getattr(edit_file, "repair_game_plans", None)
+        if not callable(repair_game_plans):
+            return False
+        repair_kwargs: dict[str, object] = {"preserve_existing_primary": True}
+        if prepared.squad_snapshots or touched_teams or prepared.gameplan_formations:
+            preferences = (
+                self._gameplan_preferences(
+                    prepared,
+                    self._current_team_player_map(edit_file),
+                )
+                if prepared.squad_snapshots
+                else _GameplanPreferences({}, {}, {})
+            )
+            repair_kwargs.update(
+                preferred_starters={
+                    **{team_id: () for team_id in touched_teams},
+                    **preferences.starters,
+                },
+                preferred_bench=preferences.bench,
+                position_overrides=preferences.position_overrides,
+                align_positions=True,
+            )
+        metrics = repair_game_plans(**repair_kwargs)
+        changed = {
+            key: value
+            for key, value in (metrics or {}).items()
+            if key != "checked" and value
+        }
+        if changed:
+            print(
+                "  Game-plan repairs: "
+                + ", ".join(f"{key}={value}" for key, value in sorted(changed.items()))
+            )
+        return bool(changed)
 
     def verify(
         self,
@@ -2337,7 +2753,10 @@ class _RunLocalUpdateRuntime:
                 *prepared.run_records,
                 *captain_records,
             ]
-            transfer_log_content = transfer_logger.save_reports(report_records)
+            transfer_log_content = transfer_logger.save_reports(
+                report_records,
+                skipped=prepared.skipped_rows(),
+            )
         except Exception as error:
             diagnostic = (
                 "Save published, but transfer logging/report generation failed: "
@@ -2362,22 +2781,24 @@ class _RunLocalUpdateRuntime:
             captains_changed=mutation.captains_changed,
             tactics_changed=mutation.tactics_changed,
             formations_changed=mutation.formations_changed,
+            skipped=prepared.skipped_rows(),
         )
 
     def preview(
         self,
-        _request: LocalUpdateRequest,
+        request: LocalUpdateRequest,
         prepared: _RunPrepared,
         plan,
-        _token: CancellationToken,
+        token: CancellationToken,
     ) -> LocalUpdateResult:
         _print_dry_run(
             prepared.edit_file,
             plan[0] if isinstance(plan, tuple) else plan,
-            getattr(prepared, "captain_plan", ()),
-            getattr(prepared, "gameplan_tactics", {}),
-            getattr(prepared, "gameplan_formations", {}),
+            prepared.gameplan_tactics,
+            prepared.gameplan_formations,
         )
+        self._print_gameplan_preview(request, prepared, token)
+        print("No files were written.")
         return LocalUpdateResult(
             target_path=prepared.output_path,
             backup_path=None,
@@ -2387,6 +2808,46 @@ class _RunLocalUpdateRuntime:
             unchanged=0,
             safety_skipped=0,
             no_changes=True,
+            skipped=prepared.skipped_rows(),
+        )
+
+    def _print_gameplan_preview(
+        self,
+        request: LocalUpdateRequest,
+        prepared: _RunPrepared,
+        token: CancellationToken,
+    ) -> None:
+        """Simulate the run in memory and print per-team XI/bench/captain diffs."""
+        edit_file = prepared.edit_file
+        matchday = getattr(edit_file, "get_team_matchday", None)
+        captain_getter = getattr(edit_file, "get_team_captain_player", None)
+        if not callable(matchday) or not callable(captain_getter):
+            return
+
+        def state() -> dict[int, tuple]:
+            return {
+                team_id: (matchday(team_id), captain_getter(team_id))
+                for team_id in sorted(prepared.club_ids)
+            }
+
+        before = state()
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self._mutate(request, prepared, token)
+            after = state()
+        except LocalUpdateError as error:
+            print(f"\n⚠ Game-plan preview unavailable: {error}")
+            return
+        finally:
+            edit_file._data = bytearray(prepared.original_data)
+            prepared.pending_logs.clear()
+            prepared.run_records.clear()
+            prepared.captain_records.clear()
+        _print_gameplan_diffs(
+            before,
+            after,
+            _player_names(edit_file),
+            _save_club_names(edit_file, prepared.club_ids),
         )
 
     @staticmethod

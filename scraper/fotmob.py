@@ -11,13 +11,12 @@ import json
 import logging
 import os
 import re
-import unicodedata
 from calendar import monthrange
 from dataclasses import replace
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Callable, Optional, Union
+from typing import Callable, Iterable, Optional, Union
 from urllib.parse import urljoin, urlsplit
 
 import aiohttp
@@ -29,7 +28,9 @@ from scraper.models import (
     SquadMember,
     SquadSnapshot,
     Transfer,
+    adopt_event_type,
 )
+from scraper.text import fold_text
 
 logger = logging.getLogger(__name__)
 
@@ -54,71 +55,101 @@ DEFAULT_HEADERS = {
 }
 
 
-_FOTMOB_CACHE_VERSION = 1
+_FOTMOB_CACHE_VERSION = 2
+# Team payloads fetched this recently are reused without a network request.
+# Shorter than the daily sync cadence, so scheduled syncs always revalidate.
+FOTMOB_TEAM_CACHE_TTL = timedelta(hours=6)
+_MISSING = object()
 
 
 class _FotmobTeamPayloadCache:
-    """Small atomic cache for conditional requests against team payloads."""
+    """Per-team atomic cache for team payloads and their match-page formations.
 
-    def __init__(self, path: Path | str | None) -> None:
-        self.path = Path(path) if path else None
-        self._entries: dict[int, dict[str, object]] = {}
-        self._load()
+    Each team lives in ``<dir>/<team_id>.json``: one JSON metadata line, then
+    the payload JSON whose raw bytes the metadata's SHA-256 covers. Entries
+    are read lazily and only changed entries are written back.
+    """
 
-    @staticmethod
-    def _payload_hash(payload: dict) -> str:
-        encoded = json.dumps(
-            payload,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        return hashlib.sha256(encoded).hexdigest()
+    def __init__(
+        self,
+        directory: Path | str | None,
+        ttl: timedelta = FOTMOB_TEAM_CACHE_TTL,
+    ) -> None:
+        self.directory = Path(directory) if directory else None
+        self.ttl = ttl
+        self._entries: dict[int, dict[str, object] | None] = {}
+        self._dirty: set[int] = set()
 
-    def _load(self) -> None:
-        if self.path is None or not self.path.is_file():
-            return
+    def _path(self, team_id: int) -> Path:
+        assert self.directory is not None
+        return self.directory / f"{team_id}.json"
+
+    def _load(self, team_id: int) -> dict[str, object] | None:
+        if self.directory is None:
+            return None
         try:
-            cached = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, TypeError, ValueError) as error:
-            logger.warning("Ignoring unreadable FotMob team cache: %s", error)
-            return
-        if (
-            not isinstance(cached, dict)
-            or cached.get("version") != _FOTMOB_CACHE_VERSION
-            or not isinstance(cached.get("teams"), dict)
-        ):
-            logger.warning("Ignoring incompatible FotMob team cache")
-            return
-        for raw_team_id, raw_entry in cached["teams"].items():
-            try:
-                team_id = int(raw_team_id)
-            except (TypeError, ValueError):
-                continue
-            if (
-                team_id <= 0
-                or not isinstance(raw_entry, dict)
-                or not isinstance(raw_entry.get("payload"), dict)
-            ):
-                continue
-            payload = raw_entry["payload"]
-            expected_hash = str(raw_entry.get("payload_sha256") or "")
-            if expected_hash and expected_hash != self._payload_hash(payload):
-                logger.warning(
-                    "Ignoring corrupted FotMob cache entry for team %s",
-                    team_id,
-                )
-                continue
-            self._entries[team_id] = {
-                "etag": str(raw_entry.get("etag") or ""),
-                "last_modified": str(raw_entry.get("last_modified") or ""),
-                "fetched_at": str(raw_entry.get("fetched_at") or ""),
-                "payload_sha256": self._payload_hash(payload),
-                "payload": payload,
-            }
+            raw = self._path(team_id).read_bytes()
+        except FileNotFoundError:
+            return None
+        except OSError as error:
+            logger.warning("Ignoring unreadable FotMob cache entry %s: %s", team_id, error)
+            return None
+        header, separator, body = raw.partition(b"\n")
+        try:
+            meta = json.loads(header) if separator else None
+        except ValueError:
+            meta = None
+        if not isinstance(meta, dict) or meta.get("version") != _FOTMOB_CACHE_VERSION:
+            logger.warning("Ignoring incompatible FotMob cache entry for team %s", team_id)
+            return None
+        expected_hash = str(meta.get("payload_sha256") or "")
+        if not expected_hash or expected_hash != hashlib.sha256(body).hexdigest():
+            logger.warning("Ignoring corrupted FotMob cache entry for team %s", team_id)
+            return None
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            payload = None
+        if not isinstance(payload, dict):
+            logger.warning("Ignoring corrupted FotMob cache entry for team %s", team_id)
+            return None
+        formation = meta.get("formation")
+        return {
+            "etag": str(meta.get("etag") or ""),
+            "last_modified": str(meta.get("last_modified") or ""),
+            "fetched_at": str(meta.get("fetched_at") or ""),
+            "formation": formation if isinstance(formation, dict) else None,
+            "payload": payload,
+        }
 
     def get(self, team_id: int) -> dict[str, object] | None:
-        return self._entries.get(int(team_id))
+        team_id = int(team_id)
+        if team_id not in self._entries:
+            self._entries[team_id] = self._load(team_id)
+        return self._entries[team_id]
+
+    def fresh_payload(
+        self,
+        team_id: int,
+        now: datetime | None = None,
+    ) -> dict | None:
+        """Return a payload fetched within the TTL, else None."""
+        entry = self.get(team_id)
+        if entry is None:
+            return None
+        try:
+            fetched_at = datetime.fromisoformat(
+                str(entry.get("fetched_at") or "").replace("Z", "+00:00")
+            )
+        except ValueError:
+            return None
+        if fetched_at.tzinfo is None:
+            fetched_at = fetched_at.replace(tzinfo=timezone.utc)
+        age = (now or datetime.now(timezone.utc)) - fetched_at
+        if not timedelta(0) <= age < self.ttl:
+            return None
+        payload = entry.get("payload")
+        return payload if isinstance(payload, dict) else None
 
     def conditional_headers(self, team_id: int) -> dict[str, str]:
         entry = self.get(team_id)
@@ -138,6 +169,7 @@ class _FotmobTeamPayloadCache:
         headers: dict[str, str] | None = None,
     ) -> None:
         response_headers = headers or {}
+        previous = self._entries.get(int(team_id))
         self._entries[int(team_id)] = {
             "etag": str(
                 response_headers.get("ETag")
@@ -150,44 +182,96 @@ class _FotmobTeamPayloadCache:
                 or ""
             ),
             "fetched_at": datetime.now(timezone.utc).isoformat(),
-            "payload_sha256": self._payload_hash(payload),
+            # Formation cache entries are keyed by match page and team names.
+            "formation": previous.get("formation") if previous else None,
             "payload": payload,
         }
+        self._dirty.add(int(team_id))
 
     def touch(self, team_id: int) -> None:
         entry = self.get(team_id)
         if entry is not None:
             entry["fetched_at"] = datetime.now(timezone.utc).isoformat()
+            self._dirty.add(int(team_id))
+
+    @staticmethod
+    def _formation_key(page_url: str, visible_names: tuple[str, ...]) -> str:
+        return json.dumps([page_url, list(visible_names)], ensure_ascii=False)
+
+    def formation(
+        self,
+        team_id: int,
+        page_url: str,
+        visible_names: tuple[str, ...],
+    ):
+        """Cached parse of a fetched match page, or ``_MISSING``."""
+        entry = self.get(team_id)
+        cached = entry.get("formation") if entry is not None else None
+        if not isinstance(cached, dict) or cached.get("key") != self._formation_key(
+            page_url, visible_names
+        ):
+            return _MISSING
+        value = cached.get("formation")
+        return value if isinstance(value, str) and value else None
+
+    def set_formation(
+        self,
+        team_id: int,
+        page_url: str,
+        visible_names: tuple[str, ...],
+        formation: str | None,
+    ) -> None:
+        entry = self.get(team_id)
+        if entry is None:
+            return
+        entry["formation"] = {
+            "key": self._formation_key(page_url, visible_names),
+            "formation": formation,
+        }
+        self._dirty.add(int(team_id))
 
     def save(self) -> None:
-        if self.path is None or not self._entries:
+        if self.directory is None or not self._dirty:
             return
-        temporary = self.path.with_name(f"{self.path.name}.tmp")
-        serialized = {
-            "version": _FOTMOB_CACHE_VERSION,
-            "teams": {
-                str(team_id): entry
-                for team_id, entry in sorted(self._entries.items())
-            },
-        }
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            temporary.write_text(
-                json.dumps(
-                    serialized,
+            self.directory.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            logger.warning("Could not save FotMob team cache: %s", error)
+            return
+        for team_id in sorted(self._dirty):
+            entry = self._entries.get(team_id)
+            if entry is None:
+                continue
+            path = self._path(team_id)
+            temporary = path.with_name(f"{path.name}.tmp")
+            try:
+                body = json.dumps(
+                    entry["payload"],
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+                header = json.dumps(
+                    {
+                        "version": _FOTMOB_CACHE_VERSION,
+                        "etag": entry.get("etag") or "",
+                        "last_modified": entry.get("last_modified") or "",
+                        "fetched_at": entry.get("fetched_at") or "",
+                        "formation": entry.get("formation"),
+                        "payload_sha256": hashlib.sha256(body).hexdigest(),
+                    },
                     ensure_ascii=False,
                     sort_keys=True,
                     separators=(",", ":"),
-                ),
-                encoding="utf-8",
-            )
-            os.replace(temporary, self.path)
-        except (OSError, TypeError, ValueError) as error:
-            logger.warning("Could not save FotMob team cache: %s", error)
-            try:
-                temporary.unlink()
-            except OSError:
-                pass
+                ).encode("utf-8")
+                temporary.write_bytes(header + b"\n" + body)
+                os.replace(temporary, path)
+            except (OSError, TypeError, ValueError) as error:
+                logger.warning("Could not save FotMob team cache entry %s: %s", team_id, error)
+                try:
+                    temporary.unlink()
+                except OSError:
+                    pass
+        self._dirty.clear()
 
 
 class IncompleteScrapeError(RuntimeError):
@@ -289,8 +373,7 @@ class _VisibleHTMLText(HTMLParser):
 
 
 def _normalized_team_label(value: str) -> str:
-    normalized = unicodedata.normalize("NFKD", value).casefold()
-    return "".join(character for character in normalized if character.isalnum())
+    return "".join(character for character in fold_text(value) if character.isalnum())
 
 
 def _latest_team_match_page(
@@ -427,6 +510,30 @@ def _primary_squad_position(raw_member: dict) -> str:
     )
 
 
+def _window_disposition(
+    transfer: Transfer,
+    start_date: Optional[date],
+    end_date: Optional[date],
+) -> str:
+    """
+    Classify a provider event against the scrape window.
+
+    Returns "keep" (inside the window), "pending" (signed but not yet
+    effective, or undated inside a bounded window: never applied, but reported)
+    or "drop" (effective before the window or after a closed past window).
+    """
+    item_date = parse_iso_date(transfer.date)
+    if item_date is None:
+        return "pending" if (start_date or end_date) else "keep"
+    if item_date > datetime.now(timezone.utc).date():
+        return "pending"
+    if end_date and item_date > end_date:
+        return "drop"
+    if start_date and item_date < start_date:
+        return "drop"
+    return "keep"
+
+
 def _resolve_date_range(
     since_date: Optional[Union[str, date]],
     window: str,
@@ -454,13 +561,6 @@ def _resolve_date_range(
     return None, today
 
 
-def _normalize_key_text(value: str) -> str:
-    """Normalize human-readable names for deterministic deduplication."""
-    decomposed = unicodedata.normalize("NFKD", value or "")
-    ascii_text = "".join(char for char in decomposed if not unicodedata.combining(char))
-    return " ".join(ascii_text.casefold().split())
-
-
 class FotmobScraper:
     """Scraper for football transfer data from FotMob."""
 
@@ -474,7 +574,7 @@ class FotmobScraper:
         popular_only: bool = False,
         since_date: Optional[Union[str, date]] = None,
         window: str = "auto",
-    ) -> list[Transfer]:
+    ) -> ScrapeResult:
         """
         Fetch transfers asynchronously from FotMob API.
 
@@ -484,6 +584,7 @@ class FotmobScraper:
         a safe pagination stop signal.
         """
         transfers: list[Transfer] = []
+        pending: list[Transfer] = []
         popular_param = "true" if popular_only else "false"
 
         start_date, end_date = _resolve_date_range(since_date, window)
@@ -500,22 +601,20 @@ class FotmobScraper:
                 logger.debug(f"Fetching FotMob API page {page_num}: {api_url}")
 
                 try:
-                    async with session.get(api_url) as resp:
-                        if resp.status != 200:
-                            raise IncompleteScrapeError(
-                                f"FotMob page {page_num} returned HTTP {resp.status}"
-                            )
-                        data = await resp.json(content_type=None)
+                    status, data, _headers = await self._fetch_json_response_async(
+                        session,
+                        api_url,
+                        f"FotMob page {page_num}",
+                    )
                 except IncompleteScrapeError:
                     raise
                 except Exception as e:
                     raise IncompleteScrapeError(
                         f"Failed to fetch FotMob page {page_num}: {e}"
                     ) from e
-
-                if not isinstance(data, dict):
+                if data is None:
                     raise IncompleteScrapeError(
-                        f"FotMob page {page_num} returned a non-object JSON payload"
+                        f"FotMob page {page_num} returned HTTP {status}"
                     )
                 raw_transfers = data.get("transfers", [])
                 if not isinstance(raw_transfers, list):
@@ -553,22 +652,11 @@ class FotmobScraper:
                         continue
                     parsed_items += 1
 
-                    item_date = parse_iso_date(t.date)
-                    if (start_date or end_date) and item_date is None:
-                        logger.warning(
-                            "Skipping undated transfer inside a bounded window: %s (%s -> %s)",
-                            t.player_name,
-                            t.from_club,
-                            t.to_club,
-                        )
-                        continue
-                    if item_date:
-                        if end_date and item_date > end_date:
-                            continue
-                        if start_date and item_date < start_date:
-                            continue
-
-                    transfers.append(t)
+                    disposition = _window_disposition(t, start_date, end_date)
+                    if disposition == "keep":
+                        transfers.append(t)
+                    elif disposition == "pending":
+                        pending.append(t)
 
                 if eligible_items and parsed_items == 0:
                     raise IncompleteScrapeError(
@@ -586,7 +674,12 @@ class FotmobScraper:
                     "before an empty or repeated page"
                 )
 
-        return transfers
+        if pending:
+            logger.info(
+                "FotMob feed holds %s pending (future-dated or undated) transfers",
+                len(pending),
+            )
+        return ScrapeResult(transfers, pending_transfers=pending)
 
     def _parse_fotmob_item(self, item: dict, ignore_extensions: bool = True) -> Optional[Transfer]:
         """Parse a single raw FotMob transfer item into a Transfer dataclass."""
@@ -684,7 +777,7 @@ class FotmobScraper:
         popular_only: bool = False,
         since_date: Optional[Union[str, date]] = None,
         window: str = "auto",
-    ) -> list[Transfer]:
+    ) -> ScrapeResult:
         """Synchronous wrapper to fetch global transfers."""
         return asyncio.run(
             self._fetch_transfers_async(
@@ -718,14 +811,14 @@ class FotmobScraper:
             FOTMOB_RETRY_MAX_DELAY_SECONDS,
         )
 
-    async def _fetch_team_response_async(
+    async def _fetch_json_response_async(
         self,
         session: aiohttp.ClientSession,
-        team_id: int,
+        url: str,
+        label: str,
         request_headers: dict[str, str] | None = None,
     ) -> tuple[int, dict | None, dict[str, str]]:
-        """Fetch a team response with bounded retries for transient failures."""
-        url = f"https://www.fotmob.com/api/data/teams?id={team_id}"
+        """Fetch a JSON object with bounded retries for transient failures."""
         for attempt in range(FOTMOB_REQUEST_MAX_ATTEMPTS):
             try:
                 request = (
@@ -745,8 +838,7 @@ class FotmobScraper:
                         data = await resp.json(content_type=None)
                         if not isinstance(data, dict):
                             raise IncompleteScrapeError(
-                                f"FotMob team API {team_id} returned a "
-                                "non-object JSON payload"
+                                f"{label} returned a non-object JSON payload"
                             )
                         return 200, data, response_headers
                     if (
@@ -754,7 +846,7 @@ class FotmobScraper:
                         or attempt + 1 >= FOTMOB_REQUEST_MAX_ATTEMPTS
                     ):
                         raise IncompleteScrapeError(
-                            f"FotMob team API {team_id} returned HTTP {resp.status}"
+                            f"{label} returned HTTP {resp.status}"
                         )
                     retry_delay = self._retry_delay(attempt, response_headers)
                 if retry_delay is not None:
@@ -765,13 +857,11 @@ class FotmobScraper:
             except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as error:
                 if attempt + 1 >= FOTMOB_REQUEST_MAX_ATTEMPTS:
                     raise IncompleteScrapeError(
-                        f"Error fetching FotMob team {team_id}: {error}"
+                        f"Error fetching {label}: {error}"
                     ) from error
                 await asyncio.sleep(self._retry_delay(attempt))
 
-        raise IncompleteScrapeError(
-            f"FotMob team API {team_id} exhausted retry attempts"
-        )
+        raise IncompleteScrapeError(f"{label} exhausted retry attempts")
 
     async def _fetch_club_data_async(
         self,
@@ -781,7 +871,11 @@ class FotmobScraper:
         """Fetch raw team data JSON from FotMob API."""
         try:
             status, data, response_headers = (
-                await self._fetch_team_response_async(session, team_id)
+                await self._fetch_json_response_async(
+                    session,
+                    f"https://www.fotmob.com/api/data/teams?id={team_id}",
+                    f"FotMob team API {team_id}",
+                )
             )
             if status != 200 or data is None:
                 raise IncompleteScrapeError(
@@ -816,9 +910,10 @@ class FotmobScraper:
 
         try:
             status, data, response_headers = (
-                await self._fetch_team_response_async(
+                await self._fetch_json_response_async(
                     session,
-                    team_id,
+                    f"https://www.fotmob.com/api/data/teams?id={team_id}",
+                    f"FotMob team API {team_id}",
                     conditional_headers,
                 )
             )
@@ -849,6 +944,7 @@ class FotmobScraper:
         data: dict,
         team_id: int,
         team_name: str,
+        cache: _FotmobTeamPayloadCache | None = None,
     ) -> tuple[str | None, str | None]:
         """Read a team's shape from its latest finished FotMob match page."""
         match_page = _latest_team_match_page(data, team_id)
@@ -866,6 +962,10 @@ class FotmobScraper:
                 for key in ("name", "shortName")
             )
         visible_names = tuple(dict.fromkeys(name for name in team_names if name))
+        if cache is not None:
+            cached = cache.formation(team_id, page_url, visible_names)
+            if cached is not _MISSING:
+                return (cached, page_url) if cached else (None, None)
         page_headers = {
             "Accept": "text/html,application/xhtml+xml",
             "Referer": "https://www.fotmob.com/",
@@ -909,6 +1009,8 @@ class FotmobScraper:
             if isinstance(html, str)
             else None
         )
+        if cache is not None and isinstance(html, str):
+            cache.set_formation(team_id, page_url, visible_names, formation)
         if formation is None:
             logger.debug(
                 "No named lineup formation found on FotMob match page %s",
@@ -936,8 +1038,13 @@ class FotmobScraper:
         data: dict,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        pending: list[Transfer] | None = None,
     ) -> list[Transfer]:
-        """Extract Transfer objects from FotMob team API payload."""
+        """
+        Extract Transfer objects from FotMob team API payload.
+
+        Future-dated and undated-in-window items go to `pending` when given.
+        """
         results: list[Transfer] = []
         transfers_section = data.get("transfers", {})
         if not isinstance(transfers_section, dict):
@@ -957,22 +1064,11 @@ class FotmobScraper:
                 if not t:
                     continue
 
-                item_date = parse_iso_date(t.date)
-                if (start_date or end_date) and item_date is None:
-                    logger.warning(
-                        "Skipping undated club transfer inside a bounded window: %s (%s -> %s)",
-                        t.player_name,
-                        t.from_club,
-                        t.to_club,
-                    )
-                    continue
-                if item_date:
-                    if end_date and item_date > end_date:
-                        continue
-                    if start_date and item_date < start_date:
-                        continue
-
-                results.append(t)
+                disposition = _window_disposition(t, start_date, end_date)
+                if disposition == "keep":
+                    results.append(t)
+                elif disposition == "pending" and pending is not None:
+                    pending.append(t)
 
         return results
 
@@ -1063,26 +1159,65 @@ class FotmobScraper:
 
         return tuple(members)
 
+    @staticmethod
+    def _payload_position_labels(data: dict) -> dict[int, str]:
+        """Learn FotMob positionId -> label pairs from this payload's own squad."""
+        squad = data.get("squad")
+        sections = squad.get("squad") if isinstance(squad, dict) else None
+        observed: dict[int, set[str]] = {}
+        for section in sections if isinstance(sections, list) else ():
+            raw_members = section.get("members") if isinstance(section, dict) else None
+            for raw_member in raw_members if isinstance(raw_members, list) else ():
+                if not isinstance(raw_member, dict):
+                    continue
+                raw_ids = raw_member.get("positionIds")
+                raw_labels = raw_member.get("positionIdsDesc")
+                if not isinstance(raw_ids, str) or not isinstance(raw_labels, str):
+                    continue
+                ids = raw_ids.split(",")
+                labels = raw_labels.split(",")
+                if len(ids) != len(labels):
+                    continue
+                for raw_id, raw_label in zip(ids, labels):
+                    position_id = _optional_positive_int(raw_id.strip())
+                    label = raw_label.strip().upper()
+                    if position_id is not None and label:
+                        observed.setdefault(position_id, set()).add(label)
+        return {
+            position_id: next(iter(labels))
+            for position_id, labels in observed.items()
+            if len(labels) == 1
+        }
+
     def _extract_last_lineup_members(
         self,
         data: dict,
         members: tuple[SquadMember, ...],
+        group: str = "starters",
     ) -> tuple[SquadMember, ...]:
-        """Return the latest starting XI with squad metadata attached."""
+        """
+        Return one latest-lineup group ("starters" or "subs") with squad metadata.
+
+        Each member's position is the detailed positionIdsDesc label: the
+        match-day positionId resolved through this payload's own squad
+        positionIds/positionIdsDesc pairs when available, else the player's
+        primary squad label.
+        """
         overview = data.get("overview")
         last_lineup = (
             overview.get("lastLineupStats")
             if isinstance(overview, dict)
             else None
         )
-        raw_starters = (
-            last_lineup.get("starters")
+        raw_group = (
+            last_lineup.get(group)
             if isinstance(last_lineup, dict)
             else None
         )
-        if not isinstance(raw_starters, list):
+        if not isinstance(raw_group, list):
             return ()
 
+        position_labels = self._payload_position_labels(data)
         by_id = {
             member.player_id_fotmob: member
             for member in members
@@ -1092,9 +1227,9 @@ class FotmobScraper:
             member.player_name.casefold(): member
             for member in members
         }
-        starters: list[SquadMember] = []
+        lineup: list[SquadMember] = []
         seen: set[tuple[str, int | str]] = set()
-        for raw_member in raw_starters:
+        for raw_member in raw_group:
             if not isinstance(raw_member, dict):
                 continue
             name = str(raw_member.get("name") or "").strip()
@@ -1108,32 +1243,39 @@ class FotmobScraper:
                 continue
             seen.add(key)
 
+            match_position = position_labels.get(
+                _optional_positive_int(raw_member.get("positionId")) or 0,
+                "",
+            )
             squad_member = (
                 by_id.get(player_id)
                 if player_id is not None
                 else by_name.get(name.casefold())
             )
             if squad_member is not None:
-                starters.append(squad_member)
+                lineup.append(
+                    replace(squad_member, position=match_position)
+                    if match_position and match_position != squad_member.position
+                    else squad_member
+                )
                 continue
 
-            position = _primary_squad_position(raw_member)
             try:
                 age = int(raw_member.get("age") or 0)
             except (TypeError, ValueError):
                 age = 0
-            starters.append(
+            lineup.append(
                 SquadMember(
                     player_name=name,
                     player_id_fotmob=player_id,
-                    position=position,
+                    position=match_position or _primary_squad_position(raw_member),
                     nationality=str(
                         raw_member.get("countryName") or ""
                     ).strip(),
                     age=age,
                 )
             )
-        return tuple(starters)
+        return tuple(lineup)
 
     def _extract_squad_snapshot_from_team_data(
         self,
@@ -1148,6 +1290,7 @@ class FotmobScraper:
             team_name,
         )
         starter_members = self._extract_last_lineup_members(data, members)
+        sub_members = self._extract_last_lineup_members(data, members, "subs")
         overview = data.get("overview")
         last_lineup = (
             overview.get("lastLineupStats")
@@ -1179,6 +1322,7 @@ class FotmobScraper:
             source_url=source_url,
             complete=len(members) >= _MIN_COMPLETE_SQUAD_MEMBERS,
             starter_members=starter_members,
+            sub_members=sub_members,
             primary_league_id=primary_league_id,
             formation=formation,
             formation_source_url=source_url if formation else "",
@@ -1189,6 +1333,7 @@ class FotmobScraper:
         session: aiohttp.ClientSession,
         data: dict,
         snapshot: SquadSnapshot,
+        cache: _FotmobTeamPayloadCache | None = None,
     ) -> SquadSnapshot:
         if not snapshot.complete or snapshot.formation:
             return snapshot
@@ -1197,6 +1342,7 @@ class FotmobScraper:
             data,
             snapshot.team_id_fotmob,
             snapshot.club_name,
+            cache,
         )
         if formation is None:
             return snapshot
@@ -1310,119 +1456,134 @@ class FotmobScraper:
             )
         ]
 
-
-
-    async def fetch_major_clubs_transfers_safely_async(
+    async def fetch_clubs_async(
         self,
+        club_ids: Iterable[int],
+        *,
         since_date: Optional[Union[str, date]] = None,
         window: str = "auto",
+        include_transfers: bool = True,
+        strict: bool = True,
         progress: Callable[[str, int, int], None] | None = None,
     ) -> ScrapeResult:
-        """Fetch current transfers, squads, and captains for indexed clubs."""
+        """
+        Fetch cached team payloads for FotMob club IDs and extract squads,
+        shirt numbers, captains, and (optionally) dated club transfers.
+
+        `strict` aborts on the first failed club; otherwise failed clubs are
+        logged and skipped.
+        """
+        targets = list(
+            dict.fromkeys(
+                team_id
+                for team_id in (_optional_positive_int(raw) for raw in club_ids)
+                if team_id is not None
+            )
+        )
+        if not targets:
+            return ScrapeResult()
         start_date, end_date = _resolve_date_range(since_date, window)
-
-        timeout = aiohttp.ClientTimeout(total=15)
-        deep_clubs = get_deep_clubs()
-        total_clubs = len(deep_clubs)
-        if total_clubs == 0:
-            raise IncompleteScrapeError("Deep-club index is empty")
-
+        total_clubs = len(targets)
         semaphore = asyncio.Semaphore(FOTMOB_DEEP_CONCURRENCY)
+        cache = _FotmobTeamPayloadCache(
+            getattr(config, "FOTMOB_TEAM_CACHE_DIR", None)
+        )
 
         async def fetch_club(
             index: int,
-            club_name: str,
             team_id: int,
             session: aiohttp.ClientSession,
         ):
             async with semaphore:
                 if progress is not None:
                     progress(
-                        f"Deep mode: checking indexed club "
-                        f"{index}/{total_clubs} — {club_name}",
+                        f"Checking FotMob club {index}/{total_clubs} — {team_id}",
                         index,
                         total_clubs,
                     )
                 logger.info(
-                    "Deep fetching %s (ID: %s) [%s/%s]...",
-                    club_name,
+                    "Fetching FotMob club %s [%s/%s]...",
                     team_id,
                     index,
                     total_clubs,
                 )
+                data = cache.fresh_payload(team_id)
+                used_network = data is None
                 try:
-                    data = await self._fetch_club_data_cached_async(
-                        session,
-                        team_id,
-                        cache,
-                    )
+                    if data is None:
+                        data = await self._fetch_club_data_cached_async(
+                            session,
+                            team_id,
+                            cache,
+                        )
                 except IncompleteScrapeError as error:
-                    raise IncompleteScrapeError(
-                        f"Deep scrape incomplete at {club_name} ({team_id}): {error}"
-                    ) from error
+                    if strict:
+                        raise IncompleteScrapeError(
+                            f"Club scrape incomplete at FotMob team {team_id}: {error}"
+                        ) from error
+                    logger.warning(
+                        "Skipping squad sync for FotMob team %s: %s",
+                        team_id,
+                        error,
+                    )
+                    return None
 
-                club_transfers = self._extract_transfers_from_team_data(
-                    data,
-                    start_date,
-                    end_date,
+                team_name = _payload_team_name(data, str(team_id))
+                club_pending: list[Transfer] = []
+                club_transfers = (
+                    self._extract_transfers_from_team_data(
+                        data,
+                        start_date,
+                        end_date,
+                        club_pending,
+                    )
+                    if include_transfers
+                    else []
                 )
                 club_roster_updates = self._extract_squad_from_team_data(
                     data,
                     team_id,
-                    club_name,
+                    team_name,
                 )
                 snapshot = self._extract_squad_snapshot_from_team_data(
                     data,
                     team_id,
-                    club_name,
+                    team_name,
                 )
                 snapshot = await self._enrich_squad_snapshot_formation_async(
                     session,
                     data,
                     snapshot,
+                    cache,
                 )
                 captain_updates = self._extract_captain_from_team_data(
                     data,
                     team_id,
-                    club_name,
+                    team_name,
                 )
 
-                # Keep the existing per-club cooldown while allowing independent
-                # clubs to progress concurrently.
-                await asyncio.sleep(0.5)
+                # Per-club cooldown while independent clubs progress
+                # concurrently; payloads served from the fresh cache made no
+                # team API request.
+                if used_network:
+                    await asyncio.sleep(0.5)
                 return (
                     club_transfers,
+                    club_pending,
                     club_roster_updates,
                     snapshot,
                     captain_updates,
                 )
 
-        all_transfers: list[Transfer] = []
-        roster_updates: list[Transfer] = []
-        captain_updates: list[CaptainUpdate] = []
-        squad_snapshots: list[SquadSnapshot] = []
-        cache = _FotmobTeamPayloadCache(
-            getattr(config, "FOTMOB_TEAM_CACHE_FILE", None)
-        )
-        club_results: list[tuple[
-            list[Transfer],
-            list[Transfer],
-            SquadSnapshot,
-            list[CaptainUpdate],
-        ]] = []
+        club_results = []
         try:
             async with aiohttp.ClientSession(
                 headers=self.headers,
-                timeout=timeout,
+                timeout=aiohttp.ClientTimeout(total=15),
             ) as session:
                 tasks = [
-                    asyncio.create_task(
-                        fetch_club(index, club_name, team_id, session)
-                    )
-                    for index, (club_name, team_id) in enumerate(
-                        deep_clubs.items(),
-                        1,
-                    )
+                    asyncio.create_task(fetch_club(index, team_id, session))
+                    for index, team_id in enumerate(targets, 1)
                 ]
                 try:
                     club_results = await asyncio.gather(*tasks)
@@ -1435,13 +1596,23 @@ class FotmobScraper:
         finally:
             cache.save()
 
-        for (
-            club_transfers,
-            club_roster_updates,
-            snapshot,
-            club_captains,
-        ) in club_results:
+        all_transfers: list[Transfer] = []
+        pending_transfers: list[Transfer] = []
+        roster_updates: list[Transfer] = []
+        captain_updates: list[CaptainUpdate] = []
+        squad_snapshots: list[SquadSnapshot] = []
+        for club_result in club_results:
+            if club_result is None:
+                continue
+            (
+                club_transfers,
+                club_pending,
+                club_roster_updates,
+                snapshot,
+                club_captains,
+            ) = club_result
             all_transfers.extend(club_transfers)
+            pending_transfers.extend(club_pending)
             roster_updates.extend(club_roster_updates)
             if snapshot.complete:
                 squad_snapshots.append(snapshot)
@@ -1452,90 +1623,8 @@ class FotmobScraper:
             captain_updates,
             squad_snapshots,
             merge_transfers([roster_updates]),
+            pending_transfers=merge_transfers([pending_transfers]),
         )
-
-
-
-def get_deep_clubs() -> dict[str, int]:
-    """Load deep-scrape clubs from project-relative, validated data files."""
-    clubs: dict[str, int] = {}
-
-    major_path = config.DATA_DIR / "major_clubs.json"
-    if major_path.exists():
-        try:
-            with open(major_path, "r", encoding="utf-8") as f:
-                major_teams = json.load(f)
-            if not isinstance(major_teams, dict):
-                raise ValueError("expected a JSON object")
-            parsed_major = {
-                str(name): int(team_id)
-                for name, team_id in major_teams.items()
-            }
-            clubs.update(parsed_major)
-        except Exception as e:
-            raise IncompleteScrapeError(f"Failed to load {major_path}: {e}") from e
-
-    json_path = config.DATA_DIR / "fotmob_teams_validated.json"
-    if json_path.exists():
-        try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                teams = json.load(f)
-            if not isinstance(teams, list):
-                raise ValueError("expected a JSON array")
-            parsed_teams: list[tuple[str, int]] = []
-            for t in teams:
-                if not isinstance(t, dict) or "fotmob_id" not in t:
-                    raise ValueError("team entry is missing fotmob_id")
-                name = t.get("name") or t.get("slug", "Unknown")
-                parsed_teams.append((str(name), int(t["fotmob_id"])))
-            for name, team_id in parsed_teams:
-                if name not in clubs and team_id not in clubs.values():
-                    clubs[name] = team_id
-        except Exception as e:
-            raise IncompleteScrapeError(f"Failed to load {json_path}: {e}") from e
-
-    return clubs
-
-
-def _resolve_club_targets(
-    club_names: list[str],
-    available_clubs: dict[str, int],
-) -> list[tuple[str, int]]:
-    """Resolve requested club names without arbitrary first-substring matches."""
-    targets: list[tuple[str, int]] = []
-    seen_ids: set[int] = set()
-    normalized = [(_normalize_key_text(name), name, int(team_id)) for name, team_id in available_clubs.items()]
-
-    for requested in club_names:
-        clean = requested.strip()
-        if not clean:
-            continue
-
-        if clean.isdigit():
-            team_id = int(clean)
-            known_name = next((name for name, cid in available_clubs.items() if int(cid) == team_id), clean)
-        else:
-            query = _normalize_key_text(clean)
-            exact = [(name, team_id) for norm, name, team_id in normalized if norm == query]
-            if len(exact) == 1:
-                known_name, team_id = exact[0]
-            else:
-                partial = [
-                    (name, candidate_id)
-                    for norm, name, candidate_id in normalized
-                    if query and (query in norm or norm in query)
-                ]
-                if len(partial) != 1:
-                    reason = "ambiguous" if partial else "not found"
-                    logger.warning("Club %r is %s in the FotMob club index; skipping", clean, reason)
-                    continue
-                known_name, team_id = partial[0]
-
-        if team_id not in seen_ids:
-            targets.append((known_name, team_id))
-            seen_ids.add(team_id)
-
-    return targets
 
 
 def _payload_team_name(data: dict, fallback: str) -> str:
@@ -1558,7 +1647,7 @@ def merge_transfers(transfer_lists: list[list[Transfer]]) -> list[Transfer]:
     for transfer in all_transfers:
         if transfer.player_id_fotmob is not None:
             player_ids_by_name.setdefault(
-                _normalize_key_text(transfer.player_name), set()
+                fold_text(transfer.player_name), set()
             ).add(int(transfer.player_id_fotmob))
     canonical_player_ids = {
         name: next(iter(player_ids))
@@ -1582,7 +1671,7 @@ def merge_transfers(transfer_lists: list[list[Transfer]]) -> list[Transfer]:
             if club_id is None:
                 continue
             for club_name in (short_name, full_name):
-                normalized = _normalize_key_text(club_name)
+                normalized = fold_text(club_name)
                 if normalized:
                     club_ids_by_name.setdefault(normalized, set()).add(club_id)
 
@@ -1596,16 +1685,16 @@ def merge_transfers(transfer_lists: list[list[Transfer]]) -> list[Transfer]:
         if club_id is not None:
             return f"id:{club_id}"
         for club_name in (full_name, short_name):
-            normalized = _normalize_key_text(club_name)
+            normalized = fold_text(club_name)
             inferred_id = canonical_club_ids.get(normalized)
             if inferred_id is not None:
                 return f"id:{inferred_id}"
-        return f"name:{_normalize_key_text(full_name or short_name)}"
+        return f"name:{fold_text(full_name or short_name)}"
 
     def player_key(transfer: Transfer) -> str:
         if transfer.player_id_fotmob is not None:
             return f"id:{int(transfer.player_id_fotmob)}"
-        normalized = _normalize_key_text(transfer.player_name)
+        normalized = fold_text(transfer.player_name)
         inferred_id = canonical_player_ids.get(normalized)
         return f"id:{inferred_id}" if inferred_id is not None else f"name:{normalized}"
 
@@ -1653,6 +1742,7 @@ def merge_transfers(transfer_lists: list[list[Transfer]]) -> list[Transfer]:
             ):
                 if not getattr(existing, attr) and getattr(t, attr):
                     setattr(existing, attr, getattr(t, attr))
+            adopt_event_type(existing, t)
             existing.sources = tuple(dict.fromkeys((*existing.sources, *t.sources)))
             existing.source_urls = tuple(
                 dict.fromkeys((*existing.source_urls, *t.source_urls))
@@ -1662,9 +1752,6 @@ def merge_transfers(transfer_lists: list[list[Transfer]]) -> list[Transfer]:
             )
             if "T" not in (existing.date or "") and "T" in (t.date or ""):
                 existing.date = t.date
-            if existing.transfer_type == "transfer" and t.transfer_type != "transfer":
-                existing.transfer_type = t.transfer_type
-                existing.is_loan = t.is_loan
 
     return list(seen.values())
 
@@ -1674,7 +1761,7 @@ def fetch_fotmob_transfers(
     popular_only: bool = False,
     since_date: Optional[Union[str, date]] = None,
     window: str = "auto",
-) -> list[Transfer]:
+) -> ScrapeResult:
     """Convenience function to fetch transfers from FotMob."""
     scraper = FotmobScraper()
     return scraper.fetch_transfers(
@@ -1685,15 +1772,24 @@ def fetch_fotmob_transfers(
     )
 
 
-def fetch_major_clubs_transfers_safely(
+def fetch_clubs_transfers_safely(
+    club_ids: Iterable[int],
+    *,
     since_date: Optional[Union[str, date]] = None,
     window: str = "auto",
     progress: Callable[[str, int, int], None] | None = None,
 ) -> ScrapeResult:
-    """Deep-fetch transfers, squad membership, numbers, and captains for indexed clubs."""
+    """
+    Fetch transfers, squads, numbers, and captains for caller-supplied FotMob
+    club IDs; any failed club aborts the scrape.
+    """
+    requested = list(club_ids)
+    if not any(_optional_positive_int(raw) is not None for raw in requested):
+        raise IncompleteScrapeError("No FotMob club IDs requested")
     scraper = FotmobScraper()
     return asyncio.run(
-        scraper.fetch_major_clubs_transfers_safely_async(
+        scraper.fetch_clubs_async(
+            requested,
             since_date=since_date,
             window=window,
             progress=progress,
@@ -1701,174 +1797,17 @@ def fetch_major_clubs_transfers_safely(
     )
 
 
+def fetch_squads_for_club_ids(club_ids: Iterable[int]) -> ScrapeResult:
+    """
+    Fetch current squad membership, numbers, and captains for FotMob club IDs.
 
-
-def fetch_squads_for_club_names(club_names: list[str]) -> ScrapeResult:
-    """Fetch current squad membership, numbers, and captains."""
-    requested = [name.strip() for name in club_names if name.strip()]
-    if not requested:
-        return ScrapeResult()
-
-    try:
-        available_clubs = get_deep_clubs()
-    except IncompleteScrapeError as error:
-        logger.warning("Skipping targeted squad sync: %s", error)
-        return ScrapeResult()
-
-    targets = _resolve_club_targets(requested, available_clubs)
-    if not targets:
-        logger.warning(
-            "Skipping targeted squad sync; no requested clubs resolved safely"
-        )
-        return ScrapeResult()
-
+    Payloads are revalidated through the team cache; failed clubs are skipped.
+    """
     scraper = FotmobScraper()
-    roster_updates: list[Transfer] = []
-    captain_updates: list[CaptainUpdate] = []
-    squad_snapshots: list[SquadSnapshot] = []
-    team_cache = _FotmobTeamPayloadCache(
-        getattr(config, "FOTMOB_TEAM_CACHE_FILE", None)
-    )
-
-    async def fetch_subset():
-        async with aiohttp.ClientSession(
-            headers=scraper.headers,
-            timeout=aiohttp.ClientTimeout(total=15),
-        ) as session:
-            for club_name, team_id in targets:
-                try:
-                    data = await scraper._fetch_club_data_cached_async(
-                        session,
-                        team_id,
-                        team_cache,
-                    )
-                except IncompleteScrapeError as error:
-                    logger.warning(
-                        "Skipping squad sync for %s (%s): %s",
-                        club_name,
-                        team_id,
-                        error,
-                    )
-                    continue
-                if data:
-                    team_name = _payload_team_name(data, club_name)
-                    snapshot = scraper._extract_squad_snapshot_from_team_data(
-                        data,
-                        team_id,
-                        team_name,
-                    )
-                    snapshot = await scraper._enrich_squad_snapshot_formation_async(
-                        session,
-                        data,
-                        snapshot,
-                    )
-                    if snapshot.complete:
-                        squad_snapshots.append(snapshot)
-                    roster_updates.extend(
-                        scraper._extract_squad_from_team_data(
-                            data,
-                            team_id,
-                            team_name,
-                        )
-                    )
-                    captain_updates.extend(
-                        scraper._extract_captain_from_team_data(
-                            data,
-                            team_id,
-                            team_name,
-                        )
-                    )
-
-    try:
-        asyncio.run(fetch_subset())
-    finally:
-        team_cache.save()
-    return ScrapeResult(
-        (),
-        captain_updates,
-        squad_snapshots,
-        merge_transfers([roster_updates]),
-    )
-
-
-def fetch_transfers_for_club_names(
-    club_names: list[str],
-    since_date: Optional[Union[str, date]] = None,
-    window: str = "auto",
-) -> ScrapeResult:
-    """Fetch transfers, squad membership, and captains."""
-    requested = {name.strip().casefold() for name in club_names if name.strip()}
-    targets = _resolve_club_targets(club_names, get_deep_clubs())
-    if not targets or len(targets) < len(requested):
-        resolved = ", ".join(name for name, _ in targets) or "none"
-        raise IncompleteScrapeError(
-            f"Could not resolve every requested club safely (resolved: {resolved})"
+    return asyncio.run(
+        scraper.fetch_clubs_async(
+            club_ids,
+            include_transfers=False,
+            strict=False,
         )
-    scraper = FotmobScraper()
-    start_date, end_date = _resolve_date_range(since_date, window)
-
-    all_transfers: list[Transfer] = []
-    roster_updates: list[Transfer] = []
-    captain_updates: list[CaptainUpdate] = []
-    squad_snapshots: list[SquadSnapshot] = []
-    team_cache = _FotmobTeamPayloadCache(
-        getattr(config, "FOTMOB_TEAM_CACHE_FILE", None)
-    )
-
-    async def fetch_subset():
-        async with aiohttp.ClientSession(
-            headers=scraper.headers,
-            timeout=aiohttp.ClientTimeout(total=15),
-        ) as sess:
-            for requested_name, tid in targets:
-                data = await scraper._fetch_club_data_cached_async(
-                    sess,
-                    tid,
-                    team_cache,
-                )
-                if data:
-                    all_transfers.extend(
-                        scraper._extract_transfers_from_team_data(
-                            data,
-                            start_date,
-                            end_date,
-                        )
-                    )
-                    team_name = _payload_team_name(data, requested_name)
-                    snapshot = scraper._extract_squad_snapshot_from_team_data(
-                        data,
-                        tid,
-                        team_name,
-                    )
-                    snapshot = await scraper._enrich_squad_snapshot_formation_async(
-                        sess,
-                        data,
-                        snapshot,
-                    )
-                    if snapshot.complete:
-                        squad_snapshots.append(snapshot)
-                    roster_updates.extend(
-                        scraper._extract_squad_from_team_data(
-                            data,
-                            tid,
-                            team_name,
-                        )
-                    )
-                    captain_updates.extend(
-                        scraper._extract_captain_from_team_data(
-                            data,
-                            tid,
-                            team_name,
-                        )
-                    )
-
-    try:
-        asyncio.run(fetch_subset())
-    finally:
-        team_cache.save()
-    return ScrapeResult(
-        merge_transfers([all_transfers]),
-        captain_updates,
-        squad_snapshots,
-        merge_transfers([roster_updates]),
     )

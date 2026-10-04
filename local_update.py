@@ -8,8 +8,8 @@ from typing import Any, Callable, Protocol, Sequence
 
 
 class LocalUpdateStage(str, Enum):
-    SCRAPING = "scraping"
     VALIDATING = "validating"
+    SCRAPING = "scraping"
     MATCHING = "matching"
     APPLYING = "applying"
     VERIFYING = "verifying"
@@ -62,6 +62,10 @@ class LocalUpdateResult:
     captains_changed: int = 0
     tactics_changed: int = 0
     formations_changed: int = 0
+    # Relevant and irrelevant transfer events this run did not apply, as
+    # ``SkippedTransfer.to_dict()`` rows (relevant/save-touching rows first).
+    skipped: tuple[dict, ...] = ()
+
 
 class LocalUpdateError(RuntimeError):
     """Stable service error suitable for CLI and beginner-facing GUI copy."""
@@ -121,16 +125,18 @@ class CancellationToken:
 
 
 class LocalUpdateRuntime(Protocol):
-    def scrape(
-        self, request: LocalUpdateRequest, token: CancellationToken
-    ) -> Sequence[Any]: ...
-
     def validate_and_prepare(
         self,
         request: LocalUpdateRequest,
-        transfers: Sequence[Any],
         token: CancellationToken,
     ) -> Any: ...
+
+    def scrape(
+        self,
+        request: LocalUpdateRequest,
+        prepared: Any,
+        token: CancellationToken,
+    ) -> Sequence[Any]: ...
 
     def match_and_plan(
         self,
@@ -196,9 +202,15 @@ class LocalUpdateService:
         prepared: Any = None
 
         try:
+            # The selected save is loaded first: its clubs and learned club
+            # identities decide which FotMob squads the scrape must refresh.
+            emit(LocalUpdateProgress(LocalUpdateStage.VALIDATING))
+            prepared = self._runtime.validate_and_prepare(request, cancellation)
+            cancellation.raise_if_cancelled()
+
             emit(LocalUpdateProgress(LocalUpdateStage.SCRAPING))
             try:
-                transfers = self._runtime.scrape(request, cancellation)
+                transfers = self._runtime.scrape(request, prepared, cancellation)
             except LocalUpdateError:
                 raise
             except Exception as error:
@@ -219,14 +231,6 @@ class LocalUpdateService:
                     safety_skipped=0,
                     no_changes=True,
                 )
-
-            emit(LocalUpdateProgress(LocalUpdateStage.VALIDATING))
-            prepared = self._runtime.validate_and_prepare(
-                request,
-                transfers,
-                cancellation,
-            )
-            cancellation.raise_if_cancelled()
 
             emit(LocalUpdateProgress(LocalUpdateStage.MATCHING))
             plan = self._runtime.match_and_plan(

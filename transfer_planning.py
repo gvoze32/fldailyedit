@@ -1,16 +1,23 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from collections.abc import Mapping
+from collections.abc import Collection, Iterable, Mapping
 import logging
 from math import ceil
+from typing import TYPE_CHECKING
 
+import config
 from editor.editfile import EditFile
 from editor.roster import MIN_CLUB_ROSTER_SIZE
+from scraper.club_identity import UNRESOLVED
 from scraper.fotmob import parse_iso_datetime
-from scraper.matcher import NameMatcher, _normalize
+from scraper.matcher import NameMatcher
 from scraper.models import MatchedTransfer, SquadMember, SquadSnapshot, Transfer
+from scraper.text import fold_text
+
+if TYPE_CHECKING:
+    from scraper.club_identity import ClubIdentityIndex
 
 logger = logging.getLogger(__name__)
 
@@ -18,12 +25,96 @@ UNRESOLVED_TEAM_ID = -1
 _NON_CLUB_LABELS = {"", "free agent", "without club", "unattached", "career break", "retired"}
 _MIN_COMPLETE_SQUAD_MEMBERS = 11
 _MIN_CURRENT_SQUAD_MATCH_RATIO = 0.75
+_STRONG_TEAM_NAME_SCORE = 98.0
 
 _ATTACKING_SHORT_ALIAS_POSITIONS = frozenset(
     {"AMF", "CAM", "AM", "SS", "LWF", "RWF", "LW", "RW", "LMF", "RMF"}
 )
 
 _MIN_SHORT_ALIAS_SCORE = 80.0
+_SNAPSHOT_SOURCE = "fotmob_squad"
+
+
+def _team_touches_save(team_id: int | None, club_ids: Collection[int] | None) -> bool:
+    """True when a resolved side is a save club or an unresolved (maybe-save) club."""
+    if team_id is None:
+        return False
+    if team_id == UNRESOLVED_TEAM_ID or club_ids is None:
+        return True
+    return team_id in club_ids
+
+
+@dataclass(frozen=True, slots=True)
+class SkippedTransfer:
+    """One transfer the plan did not apply, with an explicit reason code.
+
+    ``relevant`` is False only when both clubs confidently sit outside the
+    selected save, so real misses are not hidden among foreign-league noise.
+    """
+
+    player_name: str
+    from_team: str
+    to_team: str
+    date: str
+    source: str
+    reason: str
+    detail: str
+    relevant: bool
+    fotmob_player_id: int | None
+    candidates: tuple[str, ...]
+
+    def to_dict(self) -> dict:
+        payload = asdict(self)
+        payload["candidates"] = list(self.candidates)
+        return payload
+
+    @classmethod
+    def from_match(
+        cls,
+        match: MatchedTransfer,
+        reason: str,
+        detail: str = "",
+        *,
+        candidates: Iterable[str] = (),
+        club_ids: Collection[int] | None = None,
+    ) -> SkippedTransfer:
+        transfer = match.transfer
+        return cls(
+            player_name=transfer.player_name,
+            from_team=transfer.from_club_full_name or transfer.from_club,
+            to_team=transfer.to_club_full_name or transfer.to_club,
+            date=transfer.date,
+            source=",".join(transfer.sources),
+            reason=reason,
+            detail=detail,
+            relevant=(
+                _team_touches_save(match.from_team_id, club_ids)
+                or _team_touches_save(match.to_team_id, club_ids)
+            ),
+            fotmob_player_id=_optional_positive_int(transfer.player_id_fotmob),
+            candidates=tuple(candidates),
+        )
+
+
+@dataclass
+class PlanningReport:
+    """Diagnostics shared by matching and roster planning for one run.
+
+    ``skipped`` collects every event the plan could not apply. ``live_squad_ids``
+    maps each save club to the PES players its complete live FotMob squad
+    contains; planning uses it as reconciliation evidence and overflow
+    protection. ``fotmob_player_ids`` maps FotMob player IDs to unique PES
+    player IDs (live snapshot identity preferred over transfer-log history).
+    ``match_reasons`` carries matching-stage skip reasons keyed by ``id()`` of
+    the ``MatchedTransfer`` they belong to.
+    """
+
+    skipped: list[SkippedTransfer] = field(default_factory=list)
+    live_squad_ids: dict[int, frozenset[int]] = field(default_factory=dict)
+    fotmob_player_ids: dict[int, int] = field(default_factory=dict)
+    match_reasons: dict[int, tuple[str, str, tuple[str, ...]]] = field(
+        default_factory=dict
+    )
 
 
 @dataclass
@@ -34,6 +125,7 @@ class PlannedRosterAction:
     reason: str = ""
     overflow_player_id: int | None = None
     overflow_details: dict[str, object] | None = None
+    detail: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +147,30 @@ def _optional_positive_int(value) -> int | None:
         return None
     return parsed if parsed > 0 else None
 
+
+def _resolve_snapshot_club(
+    matcher: NameMatcher,
+    club_identity: ClubIdentityIndex | None,
+    fotmob_team_id: int,
+    club_name: str,
+) -> int | None:
+    """Map one live FotMob club to a save club, or None when not provably one."""
+    if club_identity is not None:
+        team_id = club_identity.pes_for_fotmob(fotmob_team_id)
+        if team_id is not None:
+            return team_id
+        resolved = club_identity.resolve_name(club_name)
+        if resolved is UNRESOLVED or resolved is None:
+            return None
+        bound = club_identity.fotmob_for_pes(resolved)
+        return resolved if bound in (None, fotmob_team_id) else None
+    matched_team_id, _, confidence = matcher.match_team(
+        club_name,
+        threshold=_STRONG_TEAM_NAME_SCORE,
+    )
+    return matched_team_id if confidence >= _STRONG_TEAM_NAME_SCORE else None
+
+
 def _transfer_sort_key(transfer):
     """Apply dated transfers chronologically and shirt-number updates last."""
     parsed_date = parse_iso_datetime(transfer.date)
@@ -65,39 +181,78 @@ def _transfer_sort_key(transfer):
     )
 
 
+def _resolve_identity_team(
+    matcher: NameMatcher,
+    club_identity: ClubIdentityIndex,
+    fotmob_id: int | None,
+    names: list[str],
+) -> tuple[int | None, str, float]:
+    """Resolve a club via learned FotMob bindings, then selected-save names."""
+    if fotmob_id is not None:
+        team_id = club_identity.pes_for_fotmob(fotmob_id)
+        if team_id is not None:
+            return team_id, names[0] if names else "", 100.0
+
+    resolved_ids: set[int] = set()
+    unsure = False
+    for name in names:
+        resolved = club_identity.resolve_name(name)
+        if resolved is UNRESOLVED:
+            unsure = True
+        elif resolved is not None:
+            bound = club_identity.fotmob_for_pes(resolved)
+            if fotmob_id is not None and bound is not None and bound != fotmob_id:
+                # The name points at a save club already bound to another
+                # provider club: this is a different (possibly reserve) club.
+                unsure = True
+            else:
+                resolved_ids.add(resolved)
+    if len(resolved_ids) > 1:
+        logger.warning(
+            "Conflicting club identities for %s: %s", names, sorted(resolved_ids)
+        )
+        return UNRESOLVED_TEAM_ID, "", 0.0
+    if resolved_ids:
+        team_id = next(iter(resolved_ids))
+        return team_id, matcher.get_team_name(team_id) or names[0], 100.0
+    if unsure:
+        return UNRESOLVED_TEAM_ID, "", 0.0
+    return None, "", 100.0
+
+
 def _match_transfer_team(
     matcher: NameMatcher,
     short_name: str,
     full_name: str = "",
     fotmob_id: int | str | None = None,
-    validated_fotmob_ids: set[int] | None = None,
-    validated_fotmob_teams: dict[int, int] | None = None,
+    club_identity: ClubIdentityIndex | None = None,
 ) -> tuple[int | None, str, float]:
-    """Resolve validated IDs before falling back to club-name matching."""
+    """Resolve a transfer club to a save club, None (outside), or UNRESOLVED.
+
+    A weak or unvalidated name never becomes "outside the save": that would
+    turn a move into a save club into a release. It is UNRESOLVED instead.
+    """
     raw_names = [full_name or "", short_name or ""]
     if any(name.strip().casefold() in _NON_CLUB_LABELS for name in raw_names if name.strip()):
         return None, "", 100.0
 
-    id_is_validated: bool | None = None
-    validated_team_id: int | None = None
+    normalized_fotmob_id: int | None = None
     if fotmob_id is not None:
         try:
             normalized_fotmob_id = int(fotmob_id)
         except (TypeError, ValueError):
             return UNRESOLVED_TEAM_ID, "", 0.0
-        if validated_fotmob_ids is not None:
-            id_is_validated = normalized_fotmob_id in validated_fotmob_ids
-        if validated_fotmob_teams is not None:
-            validated_team_id = validated_fotmob_teams.get(normalized_fotmob_id)
-    if validated_team_id is not None:
-        return validated_team_id, full_name or short_name, 100.0
-
 
     names: list[str] = []
     for value in (full_name, short_name):
         clean = (value or "").strip()
         if clean and clean.casefold() not in {name.casefold() for name in names}:
             names.append(clean)
+
+    if club_identity is not None:
+        return _resolve_identity_team(
+            matcher, club_identity, normalized_fotmob_id, names
+        )
 
     results = [matcher.match_team(name) for name in names]
     matched_ids = {team_id for team_id, _, _ in results if team_id is not None}
@@ -116,21 +271,9 @@ def _match_transfer_team(
             (result for result in results if result[0] == team_id),
             key=lambda result: result[2],
         )
-        if id_is_validated is False:
-            if best_result[2] >= 98.0:
-                logger.warning(
-                    "FotMob club %s (%s) strongly matches PES but its ID is not "
-                    "validated; skipping mutations until the identity index is fixed",
-                    full_name or short_name,
-                    fotmob_id,
-                )
-                return UNRESOLVED_TEAM_ID, "", best_result[2]
-            # A weakly similar, non-allowlisted ID is treated as a club that is
-            # genuinely absent from PES, enabling a safe release/signing.
-            return None, "", best_result[2]
-        if fotmob_id is None and best_result[2] < 98.0:
+        if best_result[2] < _STRONG_TEAM_NAME_SCORE:
             logger.warning(
-                "Rejecting ID-less fuzzy club match for %s at %.1f%%",
+                "Rejecting weak club name match for %s at %.1f%%",
                 full_name or short_name,
                 best_result[2],
             )
@@ -139,7 +282,8 @@ def _match_transfer_team(
     best_unresolved_confidence = max(
         (confidence for _, _, confidence in results), default=0.0
     )
-    if id_is_validated is True or best_unresolved_confidence >= 98.0:
+    if best_unresolved_confidence >= float(config.MATCH_THRESHOLD_TEAM):
+        # Similar save clubs exist but none uniquely: unsure, not outside.
         return UNRESOLVED_TEAM_ID, "", best_unresolved_confidence
     return None, "", best_unresolved_confidence
 
@@ -180,6 +324,15 @@ def _snapshot_identity_map(
 
 
 
+def _all_roster_ids(team_player_map: Mapping[int, Iterable[int]]) -> frozenset[int]:
+    return frozenset(
+        player_id
+        for roster in team_player_map.values()
+        for player_id in roster
+        if player_id
+    )
+
+
 def _match_snapshot_member(
     matcher: NameMatcher,
     member: SquadMember,
@@ -187,14 +340,15 @@ def _match_snapshot_member(
     team_player_map: dict[int, list[int]],
     threshold: float,
     team_shirt_numbers: Mapping[int, Mapping[int, int]] | None = None,
+    all_roster_ids: frozenset[int] | None = None,
 ) -> tuple[int | None, str, float]:
-    """Resolve a snapshot identity before using a guarded fuzzy fallback."""
-    all_roster_ids = {
-        player_id
-        for roster in team_player_map.values()
-        for player_id in roster
-        if player_id
-    }
+    """Resolve a snapshot identity before using a guarded fuzzy fallback.
+
+    ``all_roster_ids`` may be precomputed by callers matching many members
+    against an unchanged ``team_player_map``.
+    """
+    if all_roster_ids is None:
+        all_roster_ids = _all_roster_ids(team_player_map)
     team_roster_ids = {
         player_id
         for player_id in team_player_map.get(team_id, ())
@@ -202,7 +356,7 @@ def _match_snapshot_member(
     }
     exact_records = list(
         getattr(matcher, "_player_candidates", {}).get(
-            _normalize(member.player_name),
+            fold_text(member.player_name),
             (),
         )
     )
@@ -279,7 +433,7 @@ def _match_snapshot_member(
         # safe to restore from a complete current-squad snapshot only when
         # the provider supplies a multi-token identity.
         if len(age_compatible) == 1 and len(
-            _normalize(member.player_name).split()
+            fold_text(member.player_name).split()
         ) >= 2:
             candidate = age_compatible[0]
             if (
@@ -296,7 +450,7 @@ def _match_snapshot_member(
 
         # Multi-token exact names are safe enough to resolve from another
         # current club (the normal inferred-move case).
-        if len(_normalize(member.player_name).split()) > 1:
+        if len(fold_text(member.player_name).split()) > 1:
             roster_candidates = [
                 candidate
                 for candidate in age_compatible
@@ -333,7 +487,7 @@ def _match_snapshot_member(
     # Search only the snapshot club's local roster before falling back to a
     # global fuzzy match. This handles abbreviated provider names without
     # allowing a short exact name from an unrelated club to win.
-    query_norm = _normalize(member.player_name)
+    query_norm = fold_text(member.player_name)
     contextual_scores: dict[int, tuple[float, str]] = {}
     for candidate_id in team_roster_ids:
         for candidate_norm, candidate_name in getattr(
@@ -407,7 +561,7 @@ def _match_short_name_by_current_shirt(
     team_shirt_numbers: Mapping[int, Mapping[int, int]] | None,
 ) -> tuple[int, str, float] | None:
     """Resolve a single-token alias only with unique roster and shirt evidence."""
-    query_tokens = _normalize(member.player_name).split()
+    query_tokens = fold_text(member.player_name).split()
     shirt_number = _optional_positive_int(member.shirt_number)
     if (
         len(query_tokens) != 1
@@ -475,8 +629,7 @@ def _build_fotmob_identity_index(
     team_player_map: dict[int, list[int]],
     club_ids: set[int],
     threshold: float,
-    validated_fotmob_ids: set[int] | None,
-    validated_fotmob_teams: dict[int, int] | None,
+    club_identity: ClubIdentityIndex | None,
     squad_snapshots: tuple[SquadSnapshot, ...] | list[SquadSnapshot],
     fotmob_identity_map: Mapping[
         int,
@@ -484,8 +637,16 @@ def _build_fotmob_identity_index(
     ]
     | None = None,
     team_shirt_numbers: Mapping[int, Mapping[int, int]] | None = None,
-) -> tuple[dict[int, int], dict[int, str], Mapping[int, tuple[tuple[int, str, SquadMember], ...]]]:
-    """Resolve current FotMob IDs to unique PES players once per snapshot."""
+) -> tuple[
+    dict[int, int],
+    dict[int, str],
+    Mapping[int, tuple[tuple[int, str, SquadMember], ...]],
+    dict[int, frozenset[int]],
+]:
+    """Resolve current FotMob IDs to unique PES players once per snapshot.
+
+    Also returns each save club's live squad as unique PES player IDs.
+    """
     identity_map = (
         fotmob_identity_map
         if fotmob_identity_map is not None
@@ -495,6 +656,7 @@ def _build_fotmob_identity_index(
     names: dict[int, str] = {}
     team_cache: dict[int, int | None] = {}
     provider_local_teams: dict[int, set[int]] = {}
+    all_roster_ids = _all_roster_ids(team_player_map)
 
     for fotmob_player_id, observations in identity_map.items():
         normalized_player_id = _optional_positive_int(fotmob_player_id)
@@ -509,28 +671,10 @@ def _build_fotmob_identity_index(
             normalized_team_id = _optional_positive_int(fotmob_team_id)
             if normalized_team_id is None:
                 continue
-            if (
-                validated_fotmob_ids is not None
-                and normalized_team_id not in validated_fotmob_ids
-            ):
-                continue
             if normalized_team_id not in team_cache:
-                local_team_id = (
-                    validated_fotmob_teams.get(normalized_team_id)
-                    if validated_fotmob_teams is not None
-                    else None
+                team_cache[normalized_team_id] = _resolve_snapshot_club(
+                    matcher, club_identity, normalized_team_id, club_name
                 )
-                if local_team_id is None and validated_fotmob_teams is None:
-                    matched_team_id, _, team_confidence = matcher.match_team(
-                        club_name,
-                        threshold=98.0,
-                    )
-                    local_team_id = (
-                        matched_team_id
-                        if team_confidence >= 98.0
-                        else None
-                    )
-                team_cache[normalized_team_id] = local_team_id
             local_team_id = team_cache[normalized_team_id]
             if local_team_id is None or local_team_id not in club_ids:
                 continue
@@ -541,6 +685,7 @@ def _build_fotmob_identity_index(
                 team_player_map,
                 threshold,
                 team_shirt_numbers,
+                all_roster_ids,
             )
             if player_id is None:
                 continue
@@ -604,7 +749,19 @@ def _build_fotmob_identity_index(
         for fotmob_player_id in unique
         if fotmob_player_id in names
     }
-    return unique, unique_names, identity_map
+    live_squad_ids = {
+        team_id: frozenset(
+            unique[fotmob_player_id]
+            for fotmob_player_id in unique
+            if team_id in provider_local_teams.get(fotmob_player_id, ())
+        )
+        for team_id in {
+            team_id
+            for teams in provider_local_teams.values()
+            for team_id in teams
+        }
+    }
+    return unique, unique_names, identity_map, live_squad_ids
 
 def _build_snapshot_roster_coverage(
     matcher: NameMatcher,
@@ -613,13 +770,13 @@ def _build_snapshot_roster_coverage(
     club_ids: set[int],
     squad_snapshots: tuple[SquadSnapshot, ...] | list[SquadSnapshot],
     fotmob_to_pes: dict[int, int],
-    validated_fotmob_ids: set[int] | None,
-    validated_fotmob_teams: dict[int, int] | None,
+    club_identity: ClubIdentityIndex | None,
     team_shirt_numbers: Mapping[int, Mapping[int, int]] | None = None,
 ) -> dict[int, _SnapshotRosterCoverage]:
     """Classify snapshots before allowing destructive roster reconciliation."""
     coverage: dict[int, _SnapshotRosterCoverage] = {}
     seen_team_ids: set[int] = set()
+    all_roster_ids = _all_roster_ids(virtual_rosters)
 
     for snapshot in squad_snapshots:
         if (
@@ -631,17 +788,12 @@ def _build_snapshot_roster_coverage(
         fotmob_team_id = _optional_positive_int(snapshot.team_id_fotmob)
         if fotmob_team_id is None:
             continue
-        team_id, team_name, _ = _match_transfer_team(
-            matcher,
-            snapshot.club_name,
-            snapshot.club_name,
-            fotmob_team_id,
-            validated_fotmob_ids,
-            validated_fotmob_teams,
+        team_id = _resolve_snapshot_club(
+            matcher, club_identity, fotmob_team_id, snapshot.club_name
         )
+        team_name = snapshot.club_name
         if (
             team_id is None
-            or team_id == UNRESOLVED_TEAM_ID
             or team_id not in club_ids
             or team_id in seen_team_ids
         ):
@@ -674,6 +826,7 @@ def _build_snapshot_roster_coverage(
                 virtual_rosters,
                 threshold,
                 team_shirt_numbers,
+                all_roster_ids,
             )
             if (
                 player_id is not None
@@ -709,6 +862,30 @@ def _build_snapshot_roster_coverage(
     return coverage
 
 
+def _snapshot_skip(
+    member: SquadMember,
+    fotmob_player_id: int,
+    source_name: str,
+    destination_name: str,
+    reason: str,
+    detail: str,
+    candidates: Iterable[str] = (),
+) -> SkippedTransfer:
+    """Describe a live-squad move into a save club that was not planned."""
+    return SkippedTransfer(
+        player_name=member.player_name,
+        from_team=source_name,
+        to_team=destination_name,
+        date="",
+        source=_SNAPSHOT_SOURCE,
+        reason=reason,
+        detail=detail,
+        relevant=True,
+        fotmob_player_id=fotmob_player_id,
+        candidates=tuple(candidates),
+    )
+
+
 def _append_current_squad_moves(
     matched: list[MatchedTransfer],
     matcher: NameMatcher,
@@ -717,14 +894,24 @@ def _append_current_squad_moves(
     identity_map: Mapping[int, tuple[tuple[int, str, SquadMember], ...]],
     fotmob_to_pes: dict[int, int],
     fotmob_identity_names: dict[int, str],
-    validated_fotmob_teams: dict[int, int] | None,
+    club_identity: ClubIdentityIndex | None,
     snapshot_coverage: Mapping[int, _SnapshotRosterCoverage],
     allow_uncovered_source: bool = False,
+    skipped: list[SkippedTransfer] | None = None,
 ) -> None:
-    """Create safe moves and destination-only registrations from snapshots."""
+    """Create safe moves and destination-only registrations from snapshots.
+
+    Every live-squad player who sits elsewhere in the save but cannot be moved
+    safely is recorded in ``skipped`` with a reason code.
+    """
     seen: set[tuple[int, int]] = set()
     uncovered_source_ids: set[int] = set()
     destination_cache: dict[int, int | None] = {}
+
+    def team_label(team_id: int | None) -> str:
+        if team_id is None:
+            return "Free Agent"
+        return matcher.get_team_name(team_id) or f"Team {team_id}"
 
     for raw_fotmob_id, observations in identity_map.items():
         fotmob_player_id = _optional_positive_int(raw_fotmob_id)
@@ -748,22 +935,9 @@ def _append_current_squad_moves(
             if normalized_team_id is None:
                 continue
             if normalized_team_id not in destination_cache:
-                destination_id = (
-                    validated_fotmob_teams.get(normalized_team_id)
-                    if validated_fotmob_teams is not None
-                    else None
+                destination_cache[normalized_team_id] = _resolve_snapshot_club(
+                    matcher, club_identity, normalized_team_id, club_name
                 )
-                if destination_id is None and validated_fotmob_teams is None:
-                    matched_team_id, _, team_confidence = matcher.match_team(
-                        club_name,
-                        threshold=98.0,
-                    )
-                    destination_id = (
-                        matched_team_id
-                        if team_confidence >= 98.0
-                        else None
-                    )
-                destination_cache[normalized_team_id] = destination_id
             destination_id = destination_cache[normalized_team_id]
             if destination_id is None:
                 continue
@@ -777,23 +951,72 @@ def _append_current_squad_moves(
                 )
             )
 
-        if len(destination_ids) != 1:
+        save_destination_ids = destination_ids & club_ids
+        if not save_destination_ids:
             continue
-        destination_id = next(iter(destination_ids))
-        if destination_id not in club_ids:
-            continue
-
         current_clubs = [
             team_id
             for team_id, roster in virtual_rosters.items()
             if team_id in club_ids and player_id in roster
         ]
+        first_member = next(
+            member
+            for team_id, _, _, member in destination_observations
+            if team_id in save_destination_ids
+        )
+
+        def record(
+            reason: str,
+            detail: str,
+            destination_name: str,
+            candidates: Iterable[str] = (),
+        ) -> None:
+            if skipped is not None:
+                skipped.append(
+                    _snapshot_skip(
+                        first_member,
+                        fotmob_player_id,
+                        ", ".join(team_label(team_id) for team_id in current_clubs)
+                        or "Free Agent",
+                        destination_name,
+                        reason,
+                        detail,
+                        candidates,
+                    )
+                )
+
+        if len(destination_ids) != 1:
+            if not save_destination_ids.issubset(current_clubs):
+                names = [team_label(team_id) for team_id in sorted(destination_ids)]
+                record(
+                    "snapshot_conflicting_clubs",
+                    "player appears in several live squads",
+                    ", ".join(names),
+                    names,
+                )
+            continue
+        destination_id = next(iter(destination_ids))
+        destination_label = team_label(destination_id)
+
+        if destination_id in current_clubs and len(current_clubs) == 1:
+            continue
         if len(current_clubs) > 1:
+            record(
+                "duplicate_registration",
+                f"save registers player at {sorted(current_clubs)}",
+                destination_label,
+                [team_label(team_id) for team_id in current_clubs],
+            )
             continue
         source_id = current_clubs[0] if current_clubs else None
 
         destination_coverage = snapshot_coverage.get(destination_id)
         if destination_coverage is None:
+            record(
+                "snapshot_incomplete",
+                "destination live squad is incomplete or duplicated",
+                destination_label,
+            )
             continue
         # A complete destination snapshot is sufficient evidence for a
         # non-destructive registration of a uniquely resolved catalog player.
@@ -804,6 +1027,13 @@ def _append_current_squad_moves(
             and bool(destination_coverage.current_player_ids)
             and source_id is not None
         ):
+            record(
+                "snapshot_coverage_low",
+                f"{len(destination_coverage.snapshot_player_ids)}/"
+                f"{len(destination_coverage.current_player_ids)} destination "
+                "roster players confirmed by live squad",
+                destination_label,
+            )
             continue
 
         # A healthy complete destination snapshot is authoritative for current
@@ -817,16 +1047,20 @@ def _append_current_squad_moves(
                 and not destination_coverage.healthy
             ):
                 if source_id not in uncovered_source_ids:
-                    source_name = matcher.get_team_name(source_id) or f"Team {source_id}"
                     logger.warning(
                         "Skipping current-squad moves from %s (%s): source roster "
                         "snapshot is missing",
-                        source_name,
+                        team_label(source_id),
                         source_id,
                     )
                     uncovered_source_ids.add(source_id)
+                record(
+                    "source_snapshot_missing",
+                    "source club has no live squad and destination coverage is low",
+                    destination_label,
+                )
                 continue
-        if source_id == destination_id or (player_id, destination_id) in seen:
+        if (player_id, destination_id) in seen:
             continue
 
         source_name = (
@@ -836,6 +1070,11 @@ def _append_current_squad_moves(
         )
         destination_name = matcher.get_team_name(destination_id)
         if (source_id is not None and not source_name) or not destination_name:
+            record(
+                "team_name_missing",
+                "save club has no loaded name",
+                destination_label,
+            )
             continue
         seen.add((player_id, destination_id))
         _, raw_team_id, _, member = destination_observations[0]
@@ -896,8 +1135,8 @@ def _append_current_squad_releases(
     player_names: dict[int, str] | None,
 ) -> None:
     """Insert safe releases before shirt updates for healthy snapshots."""
-    released_ids = {
-        match.player_id
+    released_routes = {
+        (match.player_id, match.from_team_id)
         for match in matched
         if match.is_release and match.player_id is not None
     }
@@ -933,12 +1172,9 @@ def _append_current_squad_releases(
                 normalized_player_id := _optional_positive_int(raw_player_id)
             ) is not None
         }
-        if len(current_ids) <= MIN_CLUB_ROSTER_SIZE:
-            continue
-
         for player_id in sorted(current_ids - coverage.snapshot_player_ids):
             if (
-                player_id in released_ids
+                (player_id, team_id) in released_routes
                 or player_id in protected_destination_ids.get(team_id, set())
             ):
                 continue
@@ -967,7 +1203,7 @@ def _append_current_squad_releases(
                 )
             )
             insert_at += 1
-            released_ids.add(player_id)
+            released_routes.add((player_id, team_id))
 
 
 
@@ -978,8 +1214,7 @@ def _match_transfers_statefully(
     team_player_map: dict[int, list[int]],
     club_ids: set[int],
     historical_entries: list[dict] | None = None,
-    validated_fotmob_ids: set[int] | None = None,
-    validated_fotmob_teams: dict[int, int] | None = None,
+    club_identity: ClubIdentityIndex | None = None,
     squad_snapshots: tuple[SquadSnapshot, ...] | list[SquadSnapshot] = (),
     fotmob_identity_map: Mapping[
         int,
@@ -989,8 +1224,14 @@ def _match_transfers_statefully(
     player_names: dict[int, str] | None = None,
     allow_uncovered_source: bool = False,
     team_shirt_numbers: Mapping[int, Mapping[int, int]] | None = None,
+    report: PlanningReport | None = None,
 ) -> list[MatchedTransfer]:
-    """Match transfer events and derive releases from complete live squads."""
+    """Match transfer events and derive releases from complete live squads.
+
+    ``report`` (optional) receives live-squad membership, the final FotMob
+    player identity map, live-squad skips, and matching-stage skip reasons.
+    """
+    report = report if report is not None else PlanningReport()
     virtual_rosters = {
         team_id: list(player_ids)
         for team_id, player_ids in team_player_map.items()
@@ -1038,29 +1279,41 @@ def _match_transfers_statefully(
                     (destination, event_datetime)
                 )
 
-    snapshot_fotmob_to_pes, snapshot_identity_names, identity_map = (
-        _build_fotmob_identity_index(
-            matcher,
-            team_player_map,
-            club_ids,
-            threshold,
-            validated_fotmob_ids,
-            validated_fotmob_teams,
-            squad_snapshots,
-            fotmob_identity_map,
-            team_shirt_numbers,
-        )
+    (
+        snapshot_fotmob_to_pes,
+        snapshot_identity_names,
+        identity_map,
+        live_squad_ids,
+    ) = _build_fotmob_identity_index(
+        matcher,
+        team_player_map,
+        club_ids,
+        threshold,
+        club_identity,
+        squad_snapshots,
+        fotmob_identity_map,
+        team_shirt_numbers,
     )
-    for fotmob_player_id, player_id in snapshot_fotmob_to_pes.items():
-        fotmob_identity_candidates.setdefault(fotmob_player_id, set()).add(
-            player_id
-        )
+    report.live_squad_ids.update(live_squad_ids)
     fotmob_identity_names.update(snapshot_identity_names)
     fotmob_to_pes = {
         fotmob_player_id: next(iter(player_ids))
         for fotmob_player_id, player_ids in fotmob_identity_candidates.items()
         if len(player_ids) == 1
     }
+    # The current live squad is fresher evidence than any logged identity: a
+    # single bad log entry must not block a player forever.
+    for fotmob_player_id, player_id in snapshot_fotmob_to_pes.items():
+        logged = fotmob_identity_candidates.get(fotmob_player_id, set())
+        if logged and logged != {player_id}:
+            logger.warning(
+                "FotMob player %s: live squad identity %s overrides transfer "
+                "log identities %s",
+                fotmob_player_id,
+                player_id,
+                sorted(logged),
+            )
+        fotmob_to_pes[fotmob_player_id] = player_id
 
     ordered_transfers = [
         transfer
@@ -1080,17 +1333,16 @@ def _match_transfers_statefully(
             transfer.from_club,
             transfer.from_club_full_name,
             transfer.from_club_id_fotmob,
-            validated_fotmob_ids,
-            validated_fotmob_teams,
+            club_identity,
         )
         ttid, ttname, ttconf = _match_transfer_team(
             matcher,
             transfer.to_club,
             transfer.to_club_full_name,
             transfer.to_club_id_fotmob,
-            validated_fotmob_ids,
-            validated_fotmob_teams,
+            club_identity,
         )
+        skip_reason: tuple[str, str, tuple[str, ...]] | None = None
 
         context_map = virtual_rosters
         parent_loaned = loaned_by_parent.get(ftid, set()) if ftid is not None else set()
@@ -1117,16 +1369,9 @@ def _match_transfers_statefully(
             else None
         )
         known_pid = (
-            snapshot_known_pid
-            if (
-                transfer.transfer_type == "shirt_number_update"
-                and snapshot_known_pid is not None
-            )
-            else (
-                fotmob_to_pes.get(fotmob_player_id)
-                if fotmob_player_id is not None
-                else None
-            )
+            fotmob_to_pes.get(fotmob_player_id)
+            if fotmob_player_id is not None
+            else None
         )
         if (
             transfer.transfer_type == "shirt_number_update"
@@ -1163,6 +1408,12 @@ def _match_transfers_statefully(
                     known_pid,
                 )
                 pid, pname = None, ""
+                skip_reason = (
+                    "provider_identity_metadata_conflict",
+                    f"FotMob identity maps to PES player {known_pid} whose "
+                    "position/age contradicts this event",
+                    (fotmob_identity_names.get(fotmob_player_id, ""),),
+                )
             else:
                 # Historical provider IDs remain the only evidence for
                 # legitimate public-name changes when no metadata contradicts
@@ -1173,13 +1424,68 @@ def _match_transfers_statefully(
                 )
                 pconf = 100.0
         elif known_pid is not None and pid != known_pid:
-            logger.warning(
-                "FotMob player %s conflicts with PES history (%s vs %s); skipping",
-                transfer.player_id_fotmob,
-                known_pid,
-                pid,
-            )
-            pid, pname = None, ""
+            if known_pid == snapshot_known_pid:
+                logger.warning(
+                    "FotMob player %s: name matched PES %s but the live squad "
+                    "identifies PES %s; using live squad identity",
+                    transfer.player_id_fotmob,
+                    pid,
+                    known_pid,
+                )
+                pid = known_pid
+                pname = fotmob_identity_names.get(
+                    fotmob_player_id, transfer.player_name
+                )
+                pconf = 100.0
+            else:
+                event_rosters = {
+                    player_id
+                    for team_id in (ftid, ttid)
+                    if team_id is not None and team_id >= 0
+                    for player_id in context_map.get(team_id, ())
+                }
+                name_on_route = pid in event_rosters
+                logged_on_route = known_pid in event_rosters
+                if name_on_route and not logged_on_route:
+                    logger.warning(
+                        "FotMob player %s: transfer log identity %s is stale; "
+                        "event clubs register name-matched PES %s",
+                        transfer.player_id_fotmob,
+                        known_pid,
+                        pid,
+                    )
+                    fotmob_to_pes[fotmob_player_id] = pid
+                    fotmob_identity_names[fotmob_player_id] = (
+                        pname or transfer.player_name
+                    )
+                elif logged_on_route and not name_on_route:
+                    pid = known_pid
+                    pname = fotmob_identity_names.get(
+                        fotmob_player_id, transfer.player_name
+                    )
+                    pconf = 100.0
+                else:
+                    logger.warning(
+                        "FotMob player %s conflicts with PES history (%s vs %s); "
+                        "no roster evidence decides",
+                        transfer.player_id_fotmob,
+                        known_pid,
+                        pid,
+                    )
+                    skip_reason = (
+                        "provider_identity_conflict",
+                        f"transfer log maps FotMob player to PES {known_pid}, "
+                        f"name matches PES {pid}",
+                        tuple(
+                            name
+                            for name in (
+                                fotmob_identity_names.get(fotmob_player_id, ""),
+                                pname,
+                            )
+                            if name
+                        ),
+                    )
+                    pid, pname = None, ""
 
         current_clubs = (
             [
@@ -1227,6 +1533,15 @@ def _match_transfers_statefully(
                 ftid = UNRESOLVED_TEAM_ID
                 ftname = ""
                 ftconf = 0.0
+                skip_reason = (
+                    "source_not_inferable",
+                    "destination-only signal needs a verified proof, an exact "
+                    "player match, and one unique current save club",
+                    tuple(
+                        matcher.get_team_name(team_id) or f"Team {team_id}"
+                        for team_id in current_clubs
+                    ),
+                )
 
         is_loan_transfer = (
             transfer.is_loan or transfer.transfer_type == "loan"
@@ -1282,10 +1597,13 @@ def _match_transfers_statefully(
             matched_to_team=ttname,
         )
         matched.append(match)
+        if skip_reason is not None:
+            report.match_reasons[id(match)] = skip_reason
 
         if (
             pid is None
             or ftid == UNRESOLVED_TEAM_ID
+            or ttid == UNRESOLVED_TEAM_ID
             or transfer.transfer_type == "shirt_number_update"
         ):
             continue
@@ -1307,15 +1625,32 @@ def _match_transfers_statefully(
             and pid in loaned_by_parent.get(ftid, set())
             and current_team_id is not None
         )
+        live_at_destination = ttid is not None and pid in live_squad_ids.get(
+            ttid, ()
+        )
 
-        if ftid is not None and ttid is not None and (
-            current_team_id == ftid or can_move_from_parent
-        ):
-            virtual_rosters[current_team_id].remove(pid)
-            if pid not in virtual_rosters.setdefault(ttid, []):
-                virtual_rosters[ttid].append(pid)
-        elif ftid is None and ttid is not None and current_team_id is None:
-            virtual_rosters.setdefault(ttid, []).append(pid)
+        # Mirror the plan's reconciliation so later events see the same state.
+        if ftid is not None and ttid is not None:
+            if current_team_id is not None and current_team_id != ttid and (
+                current_team_id == ftid
+                or can_move_from_parent
+                or live_at_destination
+            ):
+                virtual_rosters[current_team_id].remove(pid)
+                if pid not in virtual_rosters.setdefault(ttid, []):
+                    virtual_rosters[ttid].append(pid)
+            elif not current_clubs:
+                virtual_rosters.setdefault(ttid, []).append(pid)
+        elif ftid is None and ttid is not None:
+            if not current_clubs:
+                virtual_rosters.setdefault(ttid, []).append(pid)
+            elif current_team_id is not None and current_team_id != ttid and (
+                pid in loaned_by_parent.get(current_team_id, set())
+                or live_at_destination
+            ):
+                virtual_rosters[current_team_id].remove(pid)
+                if pid not in virtual_rosters.setdefault(ttid, []):
+                    virtual_rosters[ttid].append(pid)
         elif ftid is not None and ttid is None and current_team_id == ftid:
             virtual_rosters[ftid].remove(pid)
 
@@ -1331,8 +1666,7 @@ def _match_transfers_statefully(
         club_ids,
         squad_snapshots,
         fotmob_to_pes,
-        validated_fotmob_ids,
-        validated_fotmob_teams,
+        club_identity,
         team_shirt_numbers,
     )
     _append_current_squad_moves(
@@ -1343,9 +1677,10 @@ def _match_transfers_statefully(
         identity_map,
         snapshot_fotmob_to_pes,
         snapshot_identity_names,
-        validated_fotmob_teams,
+        club_identity,
         snapshot_coverage,
         allow_uncovered_source=allow_uncovered_source,
+        skipped=report.skipped,
     )
     _append_current_squad_releases(
         matched,
@@ -1353,6 +1688,7 @@ def _match_transfers_statefully(
         snapshot_coverage,
         player_names,
     )
+    report.fotmob_player_ids.update(fotmob_to_pes)
     return matched
 
 
@@ -1361,52 +1697,70 @@ def _decide_roster_action(
     from_team_id: int | None,
     to_team_id: int | None,
     transfer_type: str,
-    superseded_loan_team_ids: frozenset[int] = frozenset(),
-) -> str:
-    """Choose a fail-closed roster mutation from the verified current state."""
+    reconcilable_team_ids: frozenset[int] = frozenset(),
+) -> tuple[str, str]:
+    """Choose a roster mutation from the verified current state.
+
+    Returns ``(action, reason)``; ``reason`` is a code, set for every skip.
+    ``reconcilable_team_ids`` are clubs other than the named source from
+    which evidence (an earlier loan, the destination's live squad, or a later
+    event from the destination) authorizes moving the player.
+    """
     if transfer_type == "shirt_number_update":
-        return "shirt_update" if to_team_id is not None and current_team_id == to_team_id else "skip"
+        if to_team_id is not None and current_team_id == to_team_id:
+            return "shirt_update", ""
+        return "skip", "shirt_player_not_at_club"
 
     if from_team_id is not None and to_team_id is not None:
         if current_team_id == to_team_id:
-            return "noop"
+            return "noop", ""
         if (
             current_team_id == from_team_id
-            or current_team_id in superseded_loan_team_ids
+            or current_team_id in reconcilable_team_ids
         ):
-            return "move"
-        return "skip"
+            return "move", ""
+        if current_team_id is None:
+            # Unattached in the save (e.g. an earlier loan outside the save
+            # released him): the known destination is still authoritative.
+            return "add", ""
+        return "skip", "current_club_mismatch"
 
     if from_team_id is None and to_team_id is not None:
         if current_team_id == to_team_id:
-            return "noop"
+            return "noop", ""
         if current_team_id is None:
-            return "add"
-        return "skip"
+            return "add", ""
+        if current_team_id in reconcilable_team_ids:
+            return "move", ""
+        return "skip", "already_registered_elsewhere"
 
     if from_team_id is not None and to_team_id is None:
         if current_team_id == from_team_id:
-            return "release"
+            return "release", ""
         if current_team_id is None:
-            return "noop"
-        return "skip"
+            return "noop", ""
+        return "skip", "current_club_mismatch"
 
-    return "skip"
+    return "skip", "outside_save"
 
 
 def _build_superseded_loan_sources(
     matches: list[MatchedTransfer],
     historical_entries: list[dict] | None = None,
 ) -> dict[int, frozenset[int]]:
-    """Authorize newer parent-club moves from an earlier loan destination.
+    """Authorize moves from the club a feed-omitted loan return left stale.
 
     Transfer feeds commonly omit the synthetic loan-return event. For example,
     PSG -> Tottenham (loan) followed by PSG -> Juventus (permanent) leaves a
     current PES roster at Tottenham even though the newer event names PSG as
-    its source. Only a strictly earlier, fully matched loan from that same
-    parent club can authorize the stale loan club as the actual move source.
+    its source. Only a strictly earlier loan from that same parent club can
+    authorize the stale loan club as the actual move source.
+
+    Likewise, for an event from a club outside the save, a strictly earlier
+    loan from a save club to a club outside the save authorizes moving the
+    player from that parent club, where the save still registers him.
     """
-    prior_loans: dict[int, list[tuple[int, int, datetime]]] = {}
+    prior_loans: dict[int, list[tuple[int, int | None, datetime]]] = {}
     allowed_sources: dict[int, frozenset[int]] = {}
 
     for entry in historical_entries or []:
@@ -1421,9 +1775,9 @@ def _build_superseded_loan_sources(
         transfer_date = parse_iso_datetime(
             str(entry.get("transfer_date") or entry.get("timestamp") or "")
         )
-        if player_id and parent_team_id and loan_team_id and transfer_date:
+        if player_id and parent_team_id > 0 and transfer_date:
             prior_loans.setdefault(player_id, []).append(
-                (parent_team_id, loan_team_id, transfer_date)
+                (parent_team_id, loan_team_id if loan_team_id > 0 else None, transfer_date)
             )
 
     for match in matches:
@@ -1432,7 +1786,8 @@ def _build_superseded_loan_sources(
         if (
             player_id is not None
             and match.from_team_id is not None
-            and match.to_team_id is not None
+            and match.from_team_id >= 0
+            and match.to_team_id != UNRESOLVED_TEAM_ID
             and transfer_date is not None
             and (match.transfer.is_loan or match.transfer.transfer_type == "loan")
         ):
@@ -1444,22 +1799,56 @@ def _build_superseded_loan_sources(
         player_id = match.player_id
         transfer_date = parse_iso_datetime(match.transfer.date)
         if (
-            player_id is not None
-            and match.from_team_id is not None
-            and match.to_team_id is not None
-            and transfer_date is not None
+            player_id is None
+            or match.to_team_id is None
+            or match.to_team_id < 0
+            or transfer_date is None
         ):
+            continue
+        loans = prior_loans.get(player_id, [])
+        if match.from_team_id is None:
+            allowed_sources[id(match)] = frozenset(
+                parent_team_id
+                for parent_team_id, loan_team_id, loan_date in loans
+                if loan_team_id is None
+                and parent_team_id != match.to_team_id
+                and loan_date < transfer_date
+            )
+        else:
             allowed_sources[id(match)] = frozenset(
                 loan_team_id
-                for parent_team_id, loan_team_id, loan_date in prior_loans.get(
-                    player_id, []
-                )
+                for parent_team_id, loan_team_id, loan_date in loans
                 if parent_team_id == match.from_team_id
+                and loan_team_id is not None
                 and loan_team_id != match.to_team_id
                 and loan_date < transfer_date
             )
 
     return allowed_sources
+
+
+def _unmatched_skip_reason(match: MatchedTransfer) -> tuple[str, str]:
+    """Explain why matching could not produce an actionable event."""
+    transfer = match.transfer
+    if match.player_id is None:
+        fotmob_id = _optional_positive_int(transfer.player_id_fotmob)
+        return "player_not_matched", (
+            f"no unique save player matches {transfer.player_name!r}"
+            + (f" (FotMob {fotmob_id})" if fotmob_id is not None else "")
+        )
+    if match.from_team_id == UNRESOLVED_TEAM_ID:
+        return "source_team_not_matched", (
+            f"club {transfer.from_club_full_name or transfer.from_club!r}"
+            f" (FotMob {transfer.from_club_id_fotmob}) is not confidently "
+            "resolved in the save"
+        )
+    if match.to_team_id == UNRESOLVED_TEAM_ID:
+        return "destination_team_not_matched", (
+            f"club {transfer.to_club_full_name or transfer.to_club!r}"
+            f" (FotMob {transfer.to_club_id_fotmob}) is not confidently "
+            "resolved in the save"
+        )
+    return "outside_save", "neither club is in the save"
 
 
 def _plan_roster_actions(
@@ -1469,8 +1858,19 @@ def _plan_roster_actions(
     edit_file: EditFile,
     superseded_loan_sources: dict[int, frozenset[int]],
     allow_overflow_release: bool = True,
+    report: PlanningReport | None = None,
 ) -> list[PlannedRosterAction]:
-    """Build one chronological roster plan and simulate every accepted action."""
+    """Build one chronological roster plan and simulate every accepted action.
+
+    A move whose named source disagrees with the save is reconciled from the
+    player's actual club when the destination's live squad, a later event
+    from the destination, or an earlier loan proves where he belongs. A
+    departure that would leave a club below the roster minimum is deferred
+    to the end of the plan and applied only if the plan backfilled the club.
+    Every skipped transfer is recorded in ``report.skipped``.
+    """
+    report = report if report is not None else PlanningReport()
+    live_squad_ids = report.live_squad_ids
     rosters = {
         team_id: list(roster.player_ids)
         for team_id, roster in all_rosters.items()
@@ -1482,15 +1882,61 @@ def _plan_roster_actions(
             if player_id:
                 player_clubs.setdefault(player_id, set()).add(team_id)
 
+    team_names: dict[int, str] = {}
+    for match in matches:
+        for team_id, name in (
+            (match.from_team_id, match.matched_from_team),
+            (match.to_team_id, match.matched_to_team),
+        ):
+            if team_id is not None and team_id >= 0 and name:
+                team_names.setdefault(team_id, name)
+
+    def team_label(team_id: int) -> str:
+        name = team_names.get(team_id)
+        return f"{name} ({team_id})" if name else f"club {team_id}"
+
+    # Later events proving where each player went: a later event leaving
+    # club X, or a live shirt observation at X, shows he reached X.
+    later_evidence: dict[int, list[tuple[int, int]]] = {}
+    for index, match in enumerate(matches):
+        if match.player_id is None or not match.is_fully_matched:
+            continue
+        if match.transfer.transfer_type == "shirt_number_update":
+            evidence_team_id = match.to_team_id
+        else:
+            evidence_team_id = match.from_team_id
+        if evidence_team_id is not None and evidence_team_id >= 0:
+            later_evidence.setdefault(match.player_id, []).append(
+                (index, evidence_team_id)
+            )
+
+    def has_destination_evidence(index: int, match: MatchedTransfer) -> bool:
+        destination = match.to_team_id
+        if destination is None or destination < 0:
+            return False
+        if match.player_id in live_squad_ids.get(destination, ()):
+            return True
+        return any(
+            later_index > index and team_id == destination
+            for later_index, team_id in later_evidence.get(match.player_id, ())
+        )
+
     planned: list[PlannedRosterAction] = []
     transferred_in_plan: set[int] = set()
+    # Players a later plan step releases from a club. A full club drops one
+    # of them before any player the club still wants.
+    pending_releases: dict[int, set[int]] = {}
+    for match in matches:
+        if match.is_release:
+            pending_releases.setdefault(match.from_team_id, set()).add(
+                match.player_id
+            )
 
     def remove_from_roster(team_id: int, player_id: int) -> None:
-        roster = rosters[team_id]
-        player_index = roster.index(player_id)
-        last_index = max(index for index, value in enumerate(roster) if value)
-        roster[player_index] = roster[last_index]
-        roster[last_index] = 0
+        # Leave a hole instead of compacting like the editor does: every
+        # remaining player keeps the slot, and so the game-plan role, that
+        # overflow ranking reads from the unmodified live file.
+        rosters[team_id][rosters[team_id].index(player_id)] = 0
         player_clubs.get(player_id, set()).discard(team_id)
 
     def add_to_roster(team_id: int, player_id: int) -> None:
@@ -1498,50 +1944,105 @@ def _plan_roster_actions(
         roster[roster.index(0)] = player_id
         player_clubs.setdefault(player_id, set()).add(team_id)
 
-    for match in matches:
+    def select_overflow_candidate(
+        team_id: int, incoming_player_id: int
+    ) -> tuple[int, set[int]]:
+        roster_ids = {pid for pid in rosters[team_id] if pid}
+        # Current live-squad members are never the overflow casualty.
+        live_protected = transferred_in_plan | (
+            set(live_squad_ids.get(team_id, ())) & roster_ids
+        )
+        releasable = {
+            pid
+            for pid in pending_releases.get(team_id, set()) & roster_ids
+            if pid != incoming_player_id
+            and pid not in live_protected
+            and player_clubs.get(pid) == {team_id}
+        }
+        if releasable:
+            protected = live_protected | (roster_ids - releasable)
+            _, candidate = edit_file.find_overflow_release_candidate(
+                team_id,
+                exclude_player_id=incoming_player_id,
+                roster_player_ids=rosters[team_id],
+                protected_player_ids=protected,
+            )
+            if candidate in releasable:
+                return candidate, protected
+        _, candidate = edit_file.find_overflow_release_candidate(
+            team_id,
+            exclude_player_id=incoming_player_id,
+            roster_player_ids=rosters[team_id],
+            protected_player_ids=live_protected,
+        )
+        return candidate, live_protected
+
+    def plan_match(
+        index: int, match: MatchedTransfer, *, may_defer: bool
+    ) -> PlannedRosterAction | None:
+        """Simulate one match; None means deferred for the roster minimum."""
         if not match.is_fully_matched:
-            if match.player_id is None:
-                reason = "player_not_matched"
-            elif match.from_team_id == UNRESOLVED_TEAM_ID:
-                reason = "source_team_not_matched"
-            elif match.to_team_id == UNRESOLVED_TEAM_ID:
-                reason = "destination_team_not_matched"
-            else:
-                reason = "transfer_not_fully_matched"
-            planned.append(PlannedRosterAction(match, "skip", None, reason))
-            continue
+            reason, detail, _ = report.match_reasons.get(id(match), (
+                *_unmatched_skip_reason(match),
+                (),
+            ))
+            return PlannedRosterAction(match, "skip", None, reason, detail=detail)
 
         player_id = match.player_id
-
         current_clubs = sorted(player_clubs.get(player_id, set()))
         if len(current_clubs) > 1:
-            planned.append(
-                PlannedRosterAction(
-                    match,
-                    "skip",
-                    None,
-                    f"duplicate_registration:{current_clubs}",
-                )
+            return PlannedRosterAction(
+                match,
+                "skip",
+                None,
+                "duplicate_registration",
+                detail="save registers player at "
+                + ", ".join(team_label(team_id) for team_id in current_clubs),
             )
-            continue
 
         current_team_id = current_clubs[0] if current_clubs else None
-        action = _decide_roster_action(
+        reconcilable = superseded_loan_sources.get(id(match), frozenset())
+        if (
+            current_team_id is not None
+            and current_team_id not in (match.from_team_id, match.to_team_id)
+            and match.transfer.transfer_type != "shirt_number_update"
+            and has_destination_evidence(index, match)
+        ):
+            reconcilable = reconcilable | {current_team_id}
+        action, reason = _decide_roster_action(
             current_team_id,
             match.from_team_id,
             match.to_team_id,
             match.transfer.transfer_type,
-            superseded_loan_sources.get(id(match), frozenset()),
+            reconcilable,
         )
-        item = PlannedRosterAction(match, action, current_team_id)
+        detail = (
+            f"save registers player at {team_label(current_team_id)}"
+            if reason and current_team_id is not None
+            else ""
+        )
+        item = PlannedRosterAction(match, action, current_team_id, reason, detail=detail)
+        if action == "move" and current_team_id != match.from_team_id:
+            logger.info(
+                "Reconciled %s from actual save club %s (event source %s)",
+                match.transfer.player_name,
+                current_team_id,
+                match.from_team_id,
+            )
         if (
             action in {"move", "release"}
             and current_team_id in rosters
             and sum(player_id != 0 for player_id in rosters[current_team_id])
             <= MIN_CLUB_ROSTER_SIZE
         ):
+            if may_defer:
+                return None
             item.action = "skip"
-            item.reason = "source_roster_minimum"
+            item.reason = "roster_minimum"
+            item.detail = (
+                f"{team_label(current_team_id)} would drop below "
+                f"{MIN_CLUB_ROSTER_SIZE} players and this run signs no replacement"
+            )
 
         if item.action in {"move", "add"}:
             destination = match.to_team_id
@@ -1553,15 +2054,16 @@ def _plan_roster_actions(
                     item.action = "skip"
                     item.reason = "destination_roster_full"
                 else:
-                    _, overflow_player_id = edit_file.find_overflow_release_candidate(
-                        destination,
-                        exclude_player_id=player_id,
-                        roster_player_ids=rosters[destination],
-                        protected_player_ids=transferred_in_plan,
+                    overflow_player_id, protected_ids = select_overflow_candidate(
+                        destination, player_id
                     )
                     if not overflow_player_id:
                         item.action = "skip"
                         item.reason = "no_safe_overflow_candidate"
+                        item.detail = (
+                            f"{team_label(destination)} is full and every "
+                            "player is protected"
+                        )
                     else:
                         item.overflow_player_id = overflow_player_id
                         describe = getattr(
@@ -1574,7 +2076,7 @@ def _plan_roster_actions(
                                 destination,
                                 overflow_player_id,
                                 roster_player_ids=rosters[destination],
-                                protected_player_ids=transferred_in_plan,
+                                protected_player_ids=protected_ids,
                             )
                         remove_from_roster(destination, overflow_player_id)
 
@@ -1591,9 +2093,63 @@ def _plan_roster_actions(
             transferred_in_plan.add(player_id)
         elif item.action == "release" and current_team_id is not None:
             remove_from_roster(current_team_id, player_id)
+        return item
 
+    # Matches waiting for the roster minimum, in order; a deferred player's
+    # later events wait too so his own history stays chronological.
+    deferred: list[tuple[int, MatchedTransfer]] = []
+    deferred_players: set[int] = set()
+    for index, match in enumerate(matches):
+        if match.is_release:
+            pending_releases.get(match.from_team_id, set()).discard(
+                match.player_id
+            )
+        if match.player_id is not None and match.player_id in deferred_players:
+            deferred.append((index, match))
+            continue
+        item = plan_match(index, match, may_defer=True)
+        if item is None:
+            deferred.append((index, match))
+            deferred_players.add(match.player_id)
+            continue
         planned.append(item)
 
+    while deferred:
+        waiting: list[tuple[int, MatchedTransfer]] = []
+        blocked_players: set[int] = set()
+        for index, match in deferred:
+            if match.player_id in blocked_players:
+                waiting.append((index, match))
+                continue
+            item = plan_match(index, match, may_defer=True)
+            if item is None:
+                waiting.append((index, match))
+                blocked_players.add(match.player_id)
+                continue
+            planned.append(item)
+        if len(waiting) == len(deferred):
+            for index, match in waiting:
+                planned.append(plan_match(index, match, may_defer=False))
+            break
+        deferred = waiting
+
+    for item in planned:
+        if (
+            item.action == "skip"
+            and item.match.transfer.transfer_type != "shirt_number_update"
+        ):
+            _, _, candidates = report.match_reasons.get(
+                id(item.match), ("", "", ())
+            )
+            report.skipped.append(
+                SkippedTransfer.from_match(
+                    item.match,
+                    item.reason,
+                    item.detail,
+                    candidates=candidates,
+                    club_ids=club_ids,
+                )
+            )
     return planned
 
 

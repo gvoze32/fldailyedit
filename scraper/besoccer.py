@@ -11,6 +11,7 @@ import aiohttp
 
 from scraper.models import Transfer
 from scraper.source_utils import date_in_range, resolve_source_date_range
+from scraper.text import fold_text
 
 
 logger = logging.getLogger(__name__)
@@ -140,9 +141,9 @@ def parse_besoccer_transfer_markdown(
             continue
 
         key = (
-            player_name.casefold(),
-            from_club.casefold(),
-            to_club.casefold(),
+            fold_text(player_name),
+            fold_text(from_club),
+            fold_text(to_club),
             event_date.isoformat(),
         )
         if key in seen:

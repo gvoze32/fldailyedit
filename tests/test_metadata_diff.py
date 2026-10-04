@@ -143,6 +143,32 @@ def test_compare_cli_emits_bounded_json(monkeypatch, tmp_path, capsys):
     ]
 
 
+def test_compare_loads_native_members_from_cpk(monkeypatch, tmp_path):
+    import run
+    import native_metadata
+    from types import SimpleNamespace
+
+    cpk_path = tmp_path / "data.cpk"
+    reads = []
+
+    def fake_read(path, member):
+        reads.append((path, member))
+        return member.encode()
+
+    monkeypatch.setattr(run, "read_cpk_file", fake_read)
+    for name in ("PlayerBinDatabase", "TeamBinDatabase", "PlayerAssignmentDatabase"):
+        monkeypatch.setattr(
+            run, name, SimpleNamespace(from_bytes=lambda payload: payload.decode())
+        )
+
+    assert run._load_metadata_variant_from_cpk(cpk_path) == (
+        native_metadata._PLAYER_BIN_CPK_MEMBER,
+        native_metadata._TEAM_BIN_CPK_MEMBER,
+        native_metadata._PLAYER_ASSIGNMENT_CPK_MEMBER,
+    )
+    assert [path for path, _member in reads] == [cpk_path] * 3
+
+
 @pytest.mark.skipif(
     not (
         Path("reference/data_s2526.cpk").exists()

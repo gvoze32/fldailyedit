@@ -28,6 +28,7 @@ from editor.teambin import TeamBinDatabase, TeamBinRecord
 from editor.roster import (
     COMPETITION_SECTION_SIZE,
     FIRST_TEAM_SLOT_COUNT,
+    GAME_PLAN_ROLE_NAMES,
     GAME_PLAN_ENTRY_SIZE,
     GP_ATTACK_PLAYERS,
     GP_LINEUP,
@@ -172,6 +173,8 @@ class EditFile(RosterGamePlanMixin):
 
         # Track players transferred in the current session to protect them from overflow auto-release
         self.transferred_player_ids: set[int] = set()
+        # Live-XI player IDs per team, used to rank removal backfills.
+        self.game_plan_preferred_starters: dict[int, tuple[int, ...]] = {}
         self.last_mutation_error_code: str | None = None
         self.last_mutation_error: str = ""
     def attach_save_header(self, header: SaveHeader | None) -> None:
@@ -1004,17 +1007,24 @@ class EditFile(RosterGamePlanMixin):
 
             role_offsets = list(GP_SINGLE_PLAYER_ROLES)
             role_offsets.extend(GP_ATTACK_PLAYERS + index for index in range(3))
+            empty_roles: list[str] = []
             for role_offset in role_offsets:
                 value = self._data[offset + role_offset]
-                if value != 0xFF and value >= TP_MAX_PLAYERS:
+                if value == 0xFF:
+                    empty_roles.append(GAME_PLAN_ROLE_NAMES[role_offset])
+                elif value >= TP_MAX_PLAYERS:
                     errors.append(
                         f"Team {tid} game-plan role at 0x{role_offset:X} has invalid slot {value}"
                     )
-                elif value != 0xFF and value not in active_slots:
+                elif value not in active_slots:
                     errors.append(
                         f"Team {tid} game-plan role at 0x{role_offset:X} points to "
                         f"empty roster slot {value}"
                     )
+            if empty_roles and len(active_slots) >= FIRST_TEAM_SLOT_COUNT:
+                warnings.append(
+                    f"Team {tid} game plan has empty roles: {', '.join(empty_roles)}"
+                )
 
         metrics = {
             "data_size": len(self._data),

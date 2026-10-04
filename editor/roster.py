@@ -19,12 +19,16 @@ TP_TEAM_ID = 0x00          # 4 bytes uint32 LE
 TP_PLAYER_IDS = 0x04       # 40 × 4 bytes (160 bytes total)
 TP_SHIRT_NUMBERS = 0xA4    # 40 × 2 bytes (80 bytes total)
 TP_MAX_PLAYERS = 40
+_TP_PLAYER_IDS_STRUCT = struct.Struct(f"<{TP_MAX_PLAYERS}I")
 MIN_CLUB_ROSTER_SIZE = 16
 FIRST_TEAM_SLOT_COUNT = 11
 MATCHDAY_SQUAD_SLOT_COUNT = 18
 MIN_GOALKEEPERS = 2
 # Keep high/reserved IDs out of the overflow pool when a native reserve exists.
 RESERVED_PLAYER_ID_MIN = 0x100000
+# Scoring bonus that lets any position-compatible live-XI player beat the
+# incumbent (+20) and exact-position (+45 over line match) advantages.
+_LIVE_STARTER_BONUS = 200
 
 # Game plan entry
 GP_TEAM_ID = 0x000         # 4 bytes uint32 LE
@@ -41,6 +45,15 @@ GP_SINGLE_PLAYER_ROLES = (
     GP_PK,
     GP_CAPTAIN,
 )
+GAME_PLAN_ROLE_NAMES = {
+    GP_LEFT_CK: "left_corner",
+    GP_RIGHT_CK: "right_corner",
+    GP_PK: "penalty",
+    GP_CAPTAIN: "captain",
+    GP_ATTACK_PLAYERS: "attack_player_1",
+    GP_ATTACK_PLAYERS + 1: "attack_player_2",
+    GP_ATTACK_PLAYERS + 2: "attack_player_3",
+}
 
 # Each preset stores three 11-byte tactical position arrays before GP_LINEUP.
 # Position codes use the same order as Player.bin's registered positions.
@@ -156,6 +169,19 @@ _FORMATION_LINE_LAYOUTS = {
             ("LMF", 16, 3),
         ),
     },
+    # Five-row shapes only: the central band between holding and attacking
+    # midfielders (the "2" in 4-1-2-1-2).
+    "central": {
+        1: (("CMF", 52, 0),),
+        2: (("CMF", 64, 0), ("CMF", 40, 0)),
+        3: (("CMF", 52, 0), ("RMF", 84, 2), ("LMF", 20, 2)),
+        4: (
+            ("CMF", 40, 0),
+            ("CMF", 64, 0),
+            ("RMF", 88, 2),
+            ("LMF", 16, 2),
+        ),
+    },
     "attacking": {
         1: (("AMF", 52, 0),),
         2: (("AMF", 40, 0), ("AMF", 64, 0)),
@@ -185,11 +211,41 @@ _FORMATION_LINE_LAYOUTS = {
             ("LWF", 16, -2),
         ),
     },
+    # Five-row shapes only: a withdrawn striker band (3-4-1-1-1).
+    "support": {
+        1: (("SS", 52, 0),),
+        2: (("SS", 64, 0), ("SS", 40, 0)),
+    },
 }
 _FORMATION_ROW_POSITIONS = {
     3: (11, 24, 43),
     4: (11, 19, 33, 43),
+    5: (11, 17, 24, 33, 43),
 }
+
+
+def _formation_line_kinds(counts: tuple[int, ...]) -> list[str]:
+    """Return the layout family for each formation row."""
+    if len(counts) == 5:
+        # 4-1-2-1-2 → holding/central/attacking; 3-4-1-1-1 → the single
+        # third-row player is an AMF and the fourth row a second striker.
+        if counts[2] >= 2:
+            return ["defense", "midfield", "central", "attacking", "forward"]
+        return ["defense", "midfield", "attacking", "support", "forward"]
+    middle_count = len(counts) - 2
+    line_kinds = ["defense"]
+    line_kinds.extend(
+        "midfield"
+        if (
+            middle_index == 0
+            or middle_count == 1
+            or counts[middle_index + 1] >= 4
+        )
+        else "attacking"
+        for middle_index in range(middle_count)
+    )
+    line_kinds.append("forward")
+    return line_kinds
 
 
 def normalize_game_plan_formation(formation: object) -> str | None:
@@ -222,19 +278,7 @@ def game_plan_formation_layout(
         return None
 
     counts = tuple(int(part) for part in normalized.split("-"))
-    middle_count = len(counts) - 2
-    line_kinds = ["defense"]
-    line_kinds.extend(
-        "midfield"
-        if (
-            middle_index == 0
-            or middle_count == 1
-            or counts[middle_index + 1] >= 4
-        )
-        else "attacking"
-        for middle_index in range(middle_count)
-    )
-    line_kinds.append("forward")
+    line_kinds = _formation_line_kinds(counts)
 
     role_codes = [0]
     coordinates = [(3, 52)]
@@ -328,12 +372,45 @@ class RosterGamePlanMixin:
             tid = struct.unpack_from("<I", self._data, entry_offset + TP_TEAM_ID)[0]
             if club_ids and tid not in club_ids:
                 continue
-            for j in range(TP_MAX_PLAYERS):
-                pid = struct.unpack_from("<I", self._data, entry_offset + TP_PLAYER_IDS + j * 4)[0]
-                if pid == player_id:
-                    teams.append(tid)
-                    break
+            if player_id in _TP_PLAYER_IDS_STRUCT.unpack_from(
+                self._data, entry_offset + TP_PLAYER_IDS
+            ):
+                teams.append(tid)
         return teams
+
+    def get_team_matchday(
+        self, team_id: int
+    ) -> tuple[tuple[int, ...], tuple[int, ...]] | None:
+        """Return (XI player IDs for roles 0-10, matchday bench roles 11-17)."""
+        game_plan_offset = self._find_game_plan_offset(team_id)
+        roster = self.get_team_roster(team_id)
+        if (
+            game_plan_offset is None
+            or game_plan_offset + GAME_PLAN_ENTRY_SIZE > len(self._data)
+            or roster is None
+        ):
+            return None
+        lineup = self._data[
+            game_plan_offset + GP_LINEUP :
+            game_plan_offset + GP_LINEUP + min(MATCHDAY_SQUAD_SLOT_COUNT, roster.roster_size)
+        ]
+        player_ids = tuple(
+            roster.player_ids[slot] if slot < TP_MAX_PLAYERS else 0
+            for slot in lineup
+        )
+        return (
+            player_ids[:FIRST_TEAM_SLOT_COUNT],
+            player_ids[FIRST_TEAM_SLOT_COUNT:],
+        )
+
+    def set_game_plan_preferred_starters(
+        self, preferred_starters: Mapping[int, Sequence[int]]
+    ) -> None:
+        """Register live-XI player IDs used to rank removal backfills."""
+        self.game_plan_preferred_starters = {
+            team_id: tuple(player_ids)
+            for team_id, player_ids in preferred_starters.items()
+        }
 
     def get_team_captain_player(self, team_id: int) -> int | None:
         """Return the player currently stored as a team's captain."""
@@ -416,7 +493,11 @@ class RosterGamePlanMixin:
         return changed
 
     def set_team_formation(self, team_id: int, formation: object) -> int:
-        """Set the main preset's role and coordinate arrays in all phases."""
+        """Set role and coordinate arrays for every preset and phase.
+
+        Presets 0xA4 and 0x144 mirror the main preset so switching presets
+        in-game never reverts to a stale shape with mismatched role codes.
+        """
         layout = game_plan_formation_layout(formation)
         game_plan_offset = self._find_game_plan_offset(team_id)
         if layout is None:
@@ -436,39 +517,29 @@ class RosterGamePlanMixin:
             return 0
 
         role_codes, coordinates = layout
-        preset_offset = game_plan_offset + GP_POSITION_PRESETS[0]
         changed = 0
-        for phase_index, phase_offset in enumerate(GP_POSITION_PHASE_OFFSETS):
-            role_offset = preset_offset + phase_offset
-            coordinate_offset = (
-                preset_offset + GP_POSITION_COORDINATE_OFFSETS[phase_index]
-            )
-            if (
-                role_offset + len(role_codes) > len(self._data)
-                or coordinate_offset
-                + len(coordinates) * GP_POSITION_COORDINATE_ENTRY_SIZE
-                > len(self._data)
-            ):
-                self._set_mutation_failure(
-                    "game_plan_out_of_bounds",
-                    f"Game plan for team {team_id} is truncated",
+        for preset in GP_POSITION_PRESETS:
+            preset_offset = game_plan_offset + preset
+            for phase_index, phase_offset in enumerate(GP_POSITION_PHASE_OFFSETS):
+                role_offset = preset_offset + phase_offset
+                coordinate_offset = (
+                    preset_offset + GP_POSITION_COORDINATE_OFFSETS[phase_index]
                 )
-                return 0
-            for role, code in enumerate(role_codes):
-                address = role_offset + role * GP_POSITION_ENTRY_SIZE
-                if self._data[address] != code:
-                    self._data[address] = code
-                    changed += 1
-            for role, (vertical, horizontal) in enumerate(coordinates):
-                address = (
-                    coordinate_offset
-                    + role * GP_POSITION_COORDINATE_ENTRY_SIZE
-                )
-                pair = bytes((vertical, horizontal))
-                end = address + GP_POSITION_COORDINATE_ENTRY_SIZE
-                if self._data[address:end] != pair:
-                    self._data[address:end] = pair
-                    changed += GP_POSITION_COORDINATE_ENTRY_SIZE
+                for role, code in enumerate(role_codes):
+                    address = role_offset + role * GP_POSITION_ENTRY_SIZE
+                    if self._data[address] != code:
+                        self._data[address] = code
+                        changed += 1
+                for role, (vertical, horizontal) in enumerate(coordinates):
+                    address = (
+                        coordinate_offset
+                        + role * GP_POSITION_COORDINATE_ENTRY_SIZE
+                    )
+                    pair = bytes((vertical, horizontal))
+                    end = address + GP_POSITION_COORDINATE_ENTRY_SIZE
+                    if self._data[address:end] != pair:
+                        self._data[address:end] = pair
+                        changed += GP_POSITION_COORDINATE_ENTRY_SIZE
         return changed
 
 
@@ -987,13 +1058,17 @@ class RosterGamePlanMixin:
         """
         from_entry = self._find_team_player_entry_offset(from_team_id)
         if from_entry is None:
-            logger.error(f"Team {from_team_id} not found in Team-Player table")
+            detail = f"Team {from_team_id} not found in Team-Player table"
+            self._set_mutation_failure("source_team_missing", detail)
+            logger.error(detail)
             return False
 
         from_roster = self._read_team_player_entry(from_entry)
         player_idx = from_roster.player_index(player_id)
         if player_idx == -1:
-            logger.error(f"Player {player_id} not found on team {from_team_id}")
+            detail = f"Player {player_id} not found on team {from_team_id}"
+            self._set_mutation_failure("source_player_missing", detail)
+            logger.error(detail)
             return False
 
         self._remove_roster_player(
@@ -1016,6 +1091,7 @@ class RosterGamePlanMixin:
         position: str = "",
         allow_overflow_release: bool = True,
         protected_player_ids: set[int] | None = None,
+        planned_overflow_player_id: int | None = None,
     ) -> bool:
         """
         Sign a player from Free Agent into a team.
@@ -1025,6 +1101,7 @@ class RosterGamePlanMixin:
             to_team_id: Destination team ID.
             position: Player position label.
             protected_player_ids: Player IDs that must not be auto-released.
+            planned_overflow_player_id: Candidate selected by the verified roster plan.
 
         Returns:
             True if added successfully, False otherwise.
@@ -1033,50 +1110,77 @@ class RosterGamePlanMixin:
 
         to_entry = self._find_team_player_entry_offset(to_team_id)
         if to_entry is None:
-            logger.error(f"Team {to_team_id} not found in Team-Player table")
+            detail = f"Team {to_team_id} not found in Team-Player table"
+            self._set_mutation_failure("destination_team_missing", detail)
+            logger.error(detail)
             return False
 
         to_roster = self._read_team_player_entry(to_entry)
         if to_roster.has_player(player_id):
-            logger.warning(f"Player {player_id} already on team {to_team_id}")
+            detail = f"Player {player_id} already on team {to_team_id}"
+            self._set_mutation_failure("destination_player_exists", detail)
+            logger.warning(detail)
             return False
 
         current_clubs = self.find_player_teams(player_id, club_only=True)
         if current_clubs:
-            logger.error(
+            detail = (
                 f"Player {player_id} is already registered to club(s) {current_clubs}; "
                 f"cannot add to team {to_team_id} as a free agent"
             )
+            self._set_mutation_failure("duplicate_club_registration", detail)
+            logger.error(detail)
             return False
 
         if to_roster.is_full:
             if not allow_overflow_release:
-                logger.error(
+                detail = (
                     f"Team {to_team_id} roster is full (40/40); "
                     "overflow release was not authorized"
                 )
+                self._set_mutation_failure("overflow_not_authorized", detail)
+                logger.error(detail)
                 return False
-            slot_to_rel, pid_to_rel = self.find_overflow_release_candidate(
-                to_team_id,
-                exclude_player_id=player_id,
-                protected_player_ids=protected_player_ids,
-            )
+            if planned_overflow_player_id is not None:
+                pid_to_rel = planned_overflow_player_id
+                if pid_to_rel == player_id or not to_roster.has_player(pid_to_rel):
+                    detail = (
+                        f"Planned overflow player {pid_to_rel} is not present "
+                        f"on destination team {to_team_id}"
+                    )
+                    self._set_mutation_failure("overflow_candidate_stale", detail)
+                    logger.error(detail)
+                    return False
+            else:
+                _, pid_to_rel = self.find_overflow_release_candidate(
+                    to_team_id,
+                    exclude_player_id=player_id,
+                    protected_player_ids=protected_player_ids,
+                )
             if pid_to_rel == 0:
-                logger.error(f"No safe overflow release candidate for team {to_team_id}")
+                detail = f"No safe overflow release candidate for team {to_team_id}"
+                self._set_mutation_failure("no_safe_overflow_candidate", detail)
+                logger.error(detail)
                 return False
             logger.warning(
                 f"Team {to_team_id} roster is full (40/40). "
-                f"Auto-releasing deepest reserve player {pid_to_rel} (slot {slot_to_rel}) "
-                "to Free Agent."
+                f"Auto-releasing deepest reserve player {pid_to_rel} to Free Agent."
             )
             if not self.release_player(pid_to_rel, to_team_id):
-                logger.error(f"Could not release overflow player {pid_to_rel} from team {to_team_id}")
+                detail = (
+                    f"Could not release overflow player {pid_to_rel} "
+                    f"from team {to_team_id}"
+                )
+                self._set_mutation_failure("overflow_release_failed", detail)
+                logger.error(detail)
                 return False
             to_roster = self._read_team_player_entry(to_entry)
 
         dest_slot = to_roster.first_empty_slot()
         if dest_slot == -1:
-            logger.error(f"Team {to_team_id} roster is full (40 players)")
+            detail = f"Team {to_team_id} roster is full (40 players)"
+            self._set_mutation_failure("destination_no_empty_slot", detail)
+            logger.error(detail)
             return False
 
         effective_pos = self._mutation_player_position(player_id, position)
@@ -1170,8 +1274,17 @@ class RosterGamePlanMixin:
         removed_role: int,
         *,
         target_position_code: int | None = None,
+        copied_slot: int | None = None,
     ) -> int | None:
-        """Choose a bench player compatible with a vacated starter role."""
+        """Rank every non-starter for a vacated starter role.
+
+        Exact formation-role players win, then same-line players, then any
+        other outfield player, so the vacated role is always backfilled in
+        place instead of shifting later roles. Within one tier, live-XI
+        players (``game_plan_preferred_starters``) win, then offline usage,
+        then the existing bench order. Returns ``None`` only when no
+        candidate can legally take the role.
+        """
         roster = self.get_team_roster(team_id)
         if roster is None:
             return None
@@ -1193,44 +1306,64 @@ class RosterGamePlanMixin:
             and removed_role == 0
         )
         target_line = _game_plan_position_line(role_position_code)
+        preferred = {
+            player_id: rank
+            for rank, player_id in enumerate(
+                getattr(self, "game_plan_preferred_starters", {}).get(team_id, ())
+            )
+        }
+        usage = getattr(self, "release_usage", {})
 
-        known_same_position: list[int] = []
-        same_position_line: list[int] = []
-        for slot in candidate_slots:
-            player_id = roster.player_ids[slot]
+        # Slot zero is the historical keeper only when it still holds its
+        # original player, not the copied last-slot player after compaction.
+        native_slot_zero = copied_slot != 0
+        ranked: list[tuple[tuple[int, ...], int]] = []
+        for order, slot in enumerate(candidate_slots):
+            player_id = roster.player_ids[slot] if 0 <= slot < TP_MAX_PLAYERS else 0
             if not player_id:
                 continue
-            position = (self.get_player_position(player_id) or "").strip().upper()
-            position_code = _game_plan_position_code(position)
-            if (
-                role_position_code is not None
-                and position_code == role_position_code
-            ):
-                known_same_position.append(slot)
-            if (
-                target_line is not None
-                and _game_plan_position_line(position_code) == target_line
-            ):
-                same_position_line.append(slot)
-
-        if known_same_position:
-            return known_same_position[0]
-        if target_is_goalkeeper:
-            # Prefer the historical slot-zero fallback, then the first
-            # matchday reserve.  Leaving the copied last roster slot in role
-            # zero can put an outfield player in the goalkeeper location when
-            # metadata is unavailable.
-            return next(
-                (
-                    slot
-                    for slot in candidate_slots
-                    if slot == 0
-                ),
-                candidate_slots[0] if candidate_slots else None,
+            position_code = _game_plan_position_code(
+                self.get_player_position(player_id)
             )
-        if same_position_line:
-            return same_position_line[0]
-        return None
+            if target_is_goalkeeper:
+                if position_code == 0:
+                    tier = 0
+                elif position_code is None:
+                    # Without metadata, slot zero is the historical keeper.
+                    tier = 1 if slot == 0 and native_slot_zero else 2
+                else:
+                    continue
+            else:
+                if position_code == 0:
+                    continue
+                if role_position_code is not None and position_code == role_position_code:
+                    tier = 0
+                elif (
+                    target_line is not None
+                    and _game_plan_position_line(position_code) == target_line
+                ):
+                    tier = 1
+                elif position_code is None and slot == 0 and native_slot_zero:
+                    # Unknown slot-zero players are usually goalkeepers.
+                    tier = 3
+                else:
+                    tier = 2
+            player_usage = usage.get(player_id)
+            ranked.append(
+                (
+                    (
+                        tier,
+                        preferred.get(player_id, len(preferred)),
+                        -(player_usage.starts if player_usage else 0),
+                        -(player_usage.minutes if player_usage else 0),
+                        order,
+                    ),
+                    slot,
+                )
+            )
+        if not ranked:
+            return None
+        return min(ranked)[1]
 
 
     def _repair_game_plan_goalkeeper_positions(
@@ -1553,9 +1686,9 @@ class RosterGamePlanMixin:
                 return -10_000
             preferred_index = preferred_rank.get(slot)
             if preferred_index is not None:
-                # Live-XI order breaks ties only after line and side
-                # compatibility have been established.
-                value += max(0, 24 - preferred_index)
+                # A compatible live-XI player always beats a non-live
+                # incumbent; live order only ranks live players.
+                value += _LIVE_STARTER_BONUS + max(0, 24 - preferred_index)
             if slot in current_role:
                 value += 8
             if current_role.get(slot) == role:
@@ -1571,14 +1704,27 @@ class RosterGamePlanMixin:
                 value += 40
             return value
 
-        assigned: dict[int, int] = {0: current_slots[0]} if starter_count else {}
-        used_slots: set[int] = {current_slots[0]} if starter_count else set()
+        primary_slot = current_slots[0] if starter_count else None
+        live_goalkeeper = next(
+            (slot for slot in preferred_slots if player_code(slot) == 0),
+            None,
+        )
+        if starter_count and live_goalkeeper is not None:
+            # The live XI names the first-choice keeper; it replaces the
+            # incumbent role-zero player instead of waiting on the bench.
+            primary_slot = live_goalkeeper
+        assigned: dict[int, int] = (
+            {0: primary_slot} if primary_slot is not None else {}
+        )
+        used_slots: set[int] = (
+            {primary_slot} if primary_slot is not None else set()
+        )
         roles = list(range(1, starter_count))
 
         # Reserve roles with no safe candidate. Other roles must not steal
         # their incumbent and force a cross-line or opposite-wing fallback.
         for role in roles:
-            if any(
+            if current_slots[role] in used_slots or any(
                 compatibility(role, slot) is not None
                 for slot in candidate_slots
             ):
@@ -1671,10 +1817,10 @@ class RosterGamePlanMixin:
         Keep game-plan roles attached to players after roster compaction.
 
         Team-Player removal copies the last active player into the removed
-        roster slot.  Rebuild the active lineup from the old role order,
-        remap that copied player, and promote a compatible bench player only
-        when a starter was removed.  Invalid/custom active prefixes remain
-        untouched.
+        roster slot; that player keeps their own role.  A vacated starter
+        role is backfilled in place from the non-starters, so no other role
+        index ever shifts (including when the removed player held the last
+        roster slot).  Invalid/custom active prefixes remain untouched.
         """
         gp_offset = self._find_game_plan_offset(team_id)
         if gp_offset is None or gp_offset + GAME_PLAN_ENTRY_SIZE > len(self._data):
@@ -1714,14 +1860,15 @@ class RosterGamePlanMixin:
                 "preserving it during removal"
             )
             return
-        replacement_player_id = (
-            roster.player_ids[removed_idx]
-            if replacement_idx >= 0 and 0 <= removed_idx < TP_MAX_PLAYERS
-            else None
-        )
 
+        def remap(slot: int) -> int | None:
+            if slot == removed_idx:
+                return None
+            if slot == replacement_idx:
+                return removed_idx
+            return slot
 
-
+        roles: list[int | None] = [remap(slot) for slot in active_order]
         removed_role = active_order.index(removed_idx)
         target_position_code: int | None = None
         if removed_role < FIRST_TEAM_SLOT_COUNT:
@@ -1731,16 +1878,15 @@ class RosterGamePlanMixin:
                 + GP_POSITION_PHASE_OFFSETS[0]
                 + removed_role * GP_POSITION_ENTRY_SIZE
             )
-            if position_address < len(self._data):
-                raw_position_code = self._data[position_address]
-                if removed_role == 0 or raw_position_code != 0:
-                    target_position_code = raw_position_code
+            raw_position_code = self._data[position_address]
+            if removed_role == 0 or raw_position_code != 0:
+                target_position_code = raw_position_code
         promoted_slot: int | None = None
         if removed_role < FIRST_TEAM_SLOT_COUNT and old_active_count > FIRST_TEAM_SLOT_COUNT:
             promotion_candidates = [
                 slot
-                for slot in active_order[FIRST_TEAM_SLOT_COUNT:]
-                if slot not in {removed_idx, replacement_idx}
+                for slot in roles[FIRST_TEAM_SLOT_COUNT:]
+                if slot is not None
             ]
             promoted_slot = self._select_game_plan_promotion_slot(
                 team_id,
@@ -1748,59 +1894,17 @@ class RosterGamePlanMixin:
                 removed_player_id,
                 removed_role,
                 target_position_code=target_position_code,
+                copied_slot=removed_idx if replacement_idx >= 0 else None,
             )
-            if promoted_slot is None:
-                removed_position_known = bool(
-                    removed_player_id is not None
-                    and self.get_player_position(removed_player_id)
-                )
-                stale_role = active_order.index(stale_slot)
-                goalkeeper_role = (
-                    active_order.index(0) if 0 in active_order else None
-                )
-                goalkeeper_would_enter_starters = (
-                    stale_role < FIRST_TEAM_SLOT_COUNT
-                    and goalkeeper_role is not None
-                    and goalkeeper_role > stale_role
-                    and goalkeeper_role - 1 < FIRST_TEAM_SLOT_COUNT
-                )
-                if not removed_position_known and goalkeeper_would_enter_starters:
-                    promoted_slot = next(
-                        (slot for slot in promotion_candidates if slot != 0),
-                        None,
-                    )
 
         if promoted_slot is not None:
-            new_active: list[int] = []
-            for slot in active_order:
-                if slot == removed_idx:
-                    new_active.append(promoted_slot)
-                elif slot == replacement_idx:
-                    new_active.append(removed_idx)
-                elif slot == promoted_slot:
-                    continue
-                else:
-                    new_active.append(slot)
-        elif removed_role < FIRST_TEAM_SLOT_COUNT:
-            # A copied last-slot player replaces a removed starter at the
-            # departed player's role when no compatible promotion exists.
-            new_active = [
-                slot for slot in active_order if slot != stale_slot
-            ]
-        elif replacement_idx >= 0:
-            # For a reserve removal, keep the copied player's former role and
-            # remove the departed reserve's role.  Dropping stale_slot alone
-            # would shift every later role and move a starter into the wrong
-            # tactical position.
-            new_active = [
-                removed_idx if slot == replacement_idx else slot
-                for slot in active_order
-                if slot != removed_idx
-            ]
-        else:
-            new_active = [
-                slot for slot in active_order if slot != removed_idx
-            ]
+            del roles[roles.index(promoted_slot, FIRST_TEAM_SLOT_COUNT)]
+            roles[removed_role] = promoted_slot
+        elif removed_role < FIRST_TEAM_SLOT_COUNT and removed_role < len(roles) - 1:
+            # No non-starter can take the role: move the last role's player
+            # into the vacated index so no starter role shifts.
+            roles[removed_role] = roles.pop()
+        new_active = [slot for slot in roles if slot is not None]
 
         if (
             len(new_active) != len(new_active_slots)
@@ -1856,10 +1960,12 @@ class RosterGamePlanMixin:
         added_position: str = "",
     ) -> None:
         """
-        Append a newly registered player to the active game-plan bench.
+        Register a newly signed player as the first substitute (role 11).
 
-        Existing role order is preserved.  The roster slot can be sparse in a
-        legacy save, so it must not be used as a formation-role index.
+        Existing starter roles are untouched; later bench roles move down by
+        one so the signing is inside the matchday 18 instead of at the tail.
+        The roster slot can be sparse in a legacy save, so it must not be used
+        as a formation-role index.
         """
         gp_offset = self._find_game_plan_offset(team_id)
         if gp_offset is None or gp_offset + GAME_PLAN_ENTRY_SIZE > len(self._data):
@@ -1891,17 +1997,18 @@ class RosterGamePlanMixin:
         ):
             return
 
-        try:
-            added_role = lineup.index(added_slot, old_active_count)
-        except ValueError:
-            added_role = -1
-        if added_role < 0:
-            lineup[old_active_count] = added_slot
-        elif added_role != old_active_count:
-            lineup[added_role], lineup[old_active_count] = (
-                lineup[old_active_count],
-                lineup[added_role],
-            )
+        tail = lineup[old_active_count:]
+        if added_slot in tail:
+            tail.remove(added_slot)
+        else:
+            del tail[0]
+        insert_role = min(old_active_count, FIRST_TEAM_SLOT_COUNT)
+        lineup = [
+            *active_prefix[:insert_role],
+            added_slot,
+            *active_prefix[insert_role:],
+            *tail,
+        ]
         self._data[lineup_offset : lineup_offset + TP_MAX_PLAYERS] = bytes(
             lineup
         )
@@ -1937,19 +2044,31 @@ class RosterGamePlanMixin:
         preferred_starters: Mapping[int, Sequence[int]] | None = None,
         position_overrides: Mapping[int, Mapping[int, str]] | None = None,
         align_positions: bool = False,
+        preferred_bench: Mapping[int, Sequence[int]] | None = None,
     ) -> dict[str, int]:
         """Repair roster mappings and optionally reconcile current starters.
 
         Existing valid roster-slot references keep their relative order by
         default. When ``preferred_starters`` is supplied, candidates can be
         promoted into the existing formation roles, but the position arrays
-        themselves remain untouched except for goalkeeper invariants.
+        themselves remain untouched except for goalkeeper invariants. A live
+        goalkeeper in ``preferred_starters`` takes role zero.
+
+        Teams with ``preferred_bench`` entries or signings from this session
+        get their matchday bench (roles 11-17) ordered live substitutes
+        first, then signings, with a second goalkeeper guaranteed. Empty
+        captain, set-piece, and attack-player roles are filled from save
+        data for every team.
         """
         rosters = self.get_all_rosters()
+        bench_preferences = preferred_bench or {}
+        signings = getattr(self, "transferred_player_ids", set())
         repaired_lineups = 0
         repaired_goalkeeper_roles = 0
         repaired_position_bytes = 0
         reset_roles = 0
+        filled_roles = 0
+        reordered_benches = 0
         checked = 0
 
         for i in range(min(self.game_plan_count, MAX_GAME_PLANS)):
@@ -1984,13 +2103,18 @@ class RosterGamePlanMixin:
                 )
                 repaired_lineups += 1
 
+            team_preferred = (
+                tuple(preferred_starters.get(tid, ()))
+                if preferred_starters is not None
+                else ()
+            )
             if align_positions and preferred_starters is not None:
                 starter_changed, aligned_positions = (
                     self._repair_game_plan_starter_assignments(
                         offset,
                         roster,
                         lineup,
-                        preferred_starters=preferred_starters.get(tid, ()),
+                        preferred_starters=team_preferred,
                         position_overrides=(
                             position_overrides or {}
                         ).get(tid, {}),
@@ -2000,14 +2124,37 @@ class RosterGamePlanMixin:
                     repaired_lineups += 1
                 repaired_position_bytes += aligned_positions
 
+            # A live first-choice keeper placed in role zero must not be
+            # swapped back for the lowest-slot goalkeeper.
+            role0_player = roster.player_ids[lineup[0]] if lineup[0] < TP_MAX_PLAYERS else 0
+            live_primary = (
+                align_positions
+                and role0_player in team_preferred
+                and _game_plan_position_code(self.get_player_position(role0_player)) == 0
+            )
             role_repairs, position_repairs = self._repair_game_plan_goalkeeper_positions(
                 offset,
                 roster,
                 lineup,
-                preserve_existing_primary=preserve_existing_primary,
+                preserve_existing_primary=preserve_existing_primary or live_primary,
             )
             repaired_goalkeeper_roles += role_repairs
             repaired_position_bytes += position_repairs
+
+            team_bench = tuple(bench_preferences.get(tid, ()))
+            team_signings = tuple(
+                player_id for player_id in roster.player_ids
+                if player_id and player_id in signings
+            )
+            if (team_bench or team_signings) and self._order_game_plan_bench(
+                offset,
+                roster,
+                lineup,
+                live_bench=team_bench,
+                signings=team_signings,
+            ):
+                reordered_benches += 1
+
             role_offsets = list(GP_SINGLE_PLAYER_ROLES)
             role_offsets.extend(GP_ATTACK_PLAYERS + index for index in range(3))
             for role_offset in role_offsets:
@@ -2016,11 +2163,259 @@ class RosterGamePlanMixin:
                 if value != 0xFF and value not in active_set:
                     self._data[role_address] = 0xFF
                     reset_roles += 1
+            filled_roles += len(
+                self._assign_missing_game_plan_roles_at(offset, roster)
+            )
 
         return {
             "checked_game_plans": checked,
             "repaired_lineups": repaired_lineups,
             "reset_roles": reset_roles,
+            "filled_roles": filled_roles,
+            "reordered_benches": reordered_benches,
             "repaired_goalkeeper_roles": repaired_goalkeeper_roles,
             "repaired_position_bytes": repaired_position_bytes,
         }
+
+    def _order_game_plan_bench(
+        self,
+        game_plan_offset: int,
+        roster: TeamData,
+        lineup: list[int],
+        *,
+        live_bench: Sequence[int] = (),
+        signings: Sequence[int] = (),
+    ) -> bool:
+        """Order roles 11+ as live subs, then signings, then the old order.
+
+        A second goalkeeper is guaranteed inside the matchday 18 when one is
+        registered. Starter roles are never touched.
+        """
+        active_count = roster.roster_size
+        if active_count <= FIRST_TEAM_SLOT_COUNT or len(lineup) < active_count:
+            return False
+        bench = lineup[FIRST_TEAM_SLOT_COUNT:active_count]
+        slot_by_player = {
+            player_id: slot
+            for slot, player_id in enumerate(roster.player_ids)
+            if player_id
+        }
+        bench_set = set(bench)
+        ordered: list[int] = []
+        for player_id in (*live_bench, *signings):
+            slot = slot_by_player.get(player_id)
+            if slot in bench_set and slot not in ordered:
+                ordered.append(slot)
+        ordered.extend(slot for slot in bench if slot not in ordered)
+
+        matchday_bench = MATCHDAY_SQUAD_SLOT_COUNT - FIRST_TEAM_SLOT_COUNT
+
+        def is_goalkeeper(slot: int) -> bool:
+            return _game_plan_position_code(
+                self.get_player_position(roster.player_ids[slot])
+            ) == 0
+
+        if not any(is_goalkeeper(slot) for slot in ordered[:matchday_bench]):
+            reserve_goalkeeper = next(
+                (slot for slot in ordered[matchday_bench:] if is_goalkeeper(slot)),
+                None,
+            )
+            if reserve_goalkeeper is not None:
+                ordered.remove(reserve_goalkeeper)
+                ordered.insert(matchday_bench - 1, reserve_goalkeeper)
+
+        if ordered == bench:
+            return False
+        lineup[FIRST_TEAM_SLOT_COUNT:active_count] = ordered
+        self._data[
+            game_plan_offset + GP_LINEUP : game_plan_offset + GP_LINEUP + TP_MAX_PLAYERS
+        ] = bytes(lineup)
+        return True
+
+    def assign_missing_game_plan_roles(self, team_id: int) -> list[str]:
+        """Fill empty (0xFF) captain, set-piece and attack-player roles."""
+        game_plan_offset = self._find_game_plan_offset(team_id)
+        roster = self.get_team_roster(team_id)
+        if (
+            game_plan_offset is None
+            or game_plan_offset + GAME_PLAN_ENTRY_SIZE > len(self._data)
+            or roster is None
+        ):
+            return []
+        return self._assign_missing_game_plan_roles_at(game_plan_offset, roster)
+
+    def _assign_missing_game_plan_roles_at(
+        self,
+        game_plan_offset: int,
+        roster: TeamData,
+    ) -> list[str]:
+        """Fill 0xFF role bytes from the starting XI using save metadata.
+
+        * captain: most caps, then age, then market value (Player.bin);
+          skipped when no starter has any such metadata.
+        * corners: CMF/LMF/RMF/AMF/LWF/RWF starters whose strong foot
+          matches the side, then same-side position, then market value.
+        * penalty: CF/SS, else AMF/wingers, else any outfield starter, by
+          market value.
+        * attack players: the most advanced starter roles by the main
+          preset's vertical coordinate.
+
+        Positions come from player metadata, falling back to the formation
+        role code. Returns the names of the roles that were filled.
+        """
+        active_count = roster.roster_size
+        lineup = list(
+            self._data[
+                game_plan_offset + GP_LINEUP :
+                game_plan_offset + GP_LINEUP + TP_MAX_PLAYERS
+            ]
+        )
+        starter_count = min(FIRST_TEAM_SLOT_COUNT, active_count)
+        starters = [
+            (role, slot)
+            for role, slot in enumerate(lineup[:starter_count])
+            if 0 <= slot < TP_MAX_PLAYERS and roster.player_ids[slot]
+        ]
+        if not starters:
+            return []
+
+        role_addresses = {
+            "captain": GP_CAPTAIN,
+            "left_corner": GP_LEFT_CK,
+            "right_corner": GP_RIGHT_CK,
+            "penalty": GP_PK,
+        }
+        missing = [
+            name
+            for name, role_offset in role_addresses.items()
+            if self._data[game_plan_offset + role_offset] == 0xFF
+        ]
+        attack_missing = [
+            index
+            for index in range(3)
+            if self._data[game_plan_offset + GP_ATTACK_PLAYERS + index] == 0xFF
+        ]
+        if not missing and not attack_missing:
+            return []
+
+        database = getattr(self, "playerbin_db", None)
+        main_preset = game_plan_offset + GP_POSITION_PRESETS[0]
+
+        def record(slot: int):
+            return (
+                database.get(roster.player_ids[slot])
+                if database is not None
+                else None
+            )
+
+        def market_value(slot: int) -> int:
+            player_record = record(slot)
+            return player_record.market_value_eur if player_record else 0
+
+        def position_code(role: int, slot: int) -> int:
+            code = _game_plan_position_code(
+                self.get_player_position(roster.player_ids[slot])
+            )
+            if code is not None:
+                return code
+            return self._data[main_preset + GP_POSITION_PHASE_OFFSETS[0] + role]
+
+        foot_getter = getattr(self, "get_player_preferred_foot", None)
+
+        def foot(slot: int) -> str | None:
+            return foot_getter(roster.player_ids[slot]) if callable(foot_getter) else None
+
+        codes = {slot: position_code(role, slot) for role, slot in starters}
+        role_of = {slot: role for role, slot in starters}
+        outfield = [slot for _role, slot in starters if codes[slot] != 0]
+        filled: list[str] = []
+
+        def write(name: str, slot: int | None) -> None:
+            if slot is None:
+                return
+            self._data[game_plan_offset + role_addresses[name]] = slot
+            filled.append(name)
+
+        if "captain" in missing:
+            profiles = {}
+            for _role, slot in starters:
+                player_record = record(slot)
+                metadata = self._player_metadata(roster.player_ids[slot]) if hasattr(
+                    self, "_player_metadata"
+                ) else None
+                caps = player_record.caps if player_record else 0
+                age = (player_record.age if player_record else 0) or (
+                    metadata.age if metadata is not None and metadata.age else 0
+                )
+                profiles[slot] = (caps, age, market_value(slot))
+            if any(any(profile) for profile in profiles.values()):
+                write(
+                    "captain",
+                    max(profiles, key=lambda slot: (profiles[slot], -role_of[slot])),
+                )
+
+        corner_codes = (5, 6, 7, 8, 9, 10)
+        for name, side, near_codes, far_codes in (
+            ("left_corner", "L", (6, 9), (7, 10)),
+            ("right_corner", "R", (7, 10), (6, 9)),
+        ):
+            if name not in missing:
+                continue
+            pool = [slot for slot in outfield if codes[slot] in corner_codes] or outfield
+            if not pool:
+                continue
+            write(
+                name,
+                min(
+                    pool,
+                    key=lambda slot: (
+                        foot(slot) != side,
+                        0 if codes[slot] in near_codes
+                        else 2 if codes[slot] in far_codes
+                        else 1,
+                        -market_value(slot),
+                        role_of[slot],
+                    ),
+                ),
+            )
+
+        if "penalty" in missing:
+            pool = (
+                [slot for slot in outfield if codes[slot] in (11, 12)]
+                or [slot for slot in outfield if codes[slot] in (8, 9, 10)]
+                or outfield
+            )
+            if pool:
+                write(
+                    "penalty",
+                    min(
+                        pool,
+                        key=lambda slot: (-market_value(slot), -codes[slot], role_of[slot]),
+                    ),
+                )
+
+        if attack_missing:
+            coordinate_base = main_preset + GP_POSITION_COORDINATE_OFFSETS[0]
+            assigned_attackers = {
+                self._data[game_plan_offset + GP_ATTACK_PLAYERS + index]
+                for index in range(3)
+            }
+            advanced = sorted(
+                (
+                    slot
+                    for slot in outfield
+                    if slot not in assigned_attackers
+                ),
+                key=lambda slot: (
+                    -self._data[
+                        coordinate_base
+                        + role_of[slot] * GP_POSITION_COORDINATE_ENTRY_SIZE
+                    ],
+                    -codes[slot],
+                    role_of[slot],
+                ),
+            )
+            for index, slot in zip(attack_missing, advanced):
+                self._data[game_plan_offset + GP_ATTACK_PLAYERS + index] = slot
+                filled.append(f"attack_player_{index + 1}")
+        return filled

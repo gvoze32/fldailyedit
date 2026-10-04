@@ -12,9 +12,7 @@ CRYPTO_BINARIES = [
     ),
 ]
 RUNTIME_DATA = [
-    ("data/major_clubs.json", "data"),
-    ("data/fotmob_teams_validated.json", "data"),
-    ("data/team_aliases.json", "data"),
+    ("data/fotmob_teams.json", "data"),
     ("data/FL262_teams.txt", "data"),
     ("data/FL2622wc_players.txt", "data"),
     ("data/players.csv", "data"),
@@ -25,7 +23,8 @@ a = Analysis(
     pathex=["."],
     binaries=CRYPTO_BINARIES,
     datas=RUNTIME_DATA,
-    hiddenimports=[],
+    # Self-update signature verification (installer/update.py).
+    hiddenimports=["cryptography.hazmat.primitives.asymmetric.ed25519"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

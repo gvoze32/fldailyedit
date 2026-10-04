@@ -70,19 +70,13 @@ def decrypt(edit_file_path: Path) -> Path:
                 f"stderr: {result.stderr}"
             )
 
-        # Verify data.dat was created
+        # The vendored decrypter always writes data.dat; encrypt() reads only that.
         data_dat = temp_dir / "data.dat"
         if not data_dat.exists():
-            # Some versions output with different names — check for any .dat file
-            dat_files = list(temp_dir.glob("*.dat"))
-            if not dat_files:
-                raise CryptoError(
-                    f"Decryption produced no .dat files in {temp_dir}. "
-                    f"Contents: {list(temp_dir.iterdir())}"
-                )
-            # Use the largest .dat file (likely the data block)
-            data_dat = max(dat_files, key=lambda f: f.stat().st_size)
-            logger.info(f"data.dat not found, using largest .dat: {data_dat.name}")
+            raise CryptoError(
+                f"Decryption produced no data.dat in {temp_dir}. "
+                f"Contents: {list(temp_dir.iterdir())}"
+            )
 
         logger.info(f"Decrypted successfully. Data: {data_dat} ({data_dat.stat().st_size:,} bytes)")
         return temp_dir

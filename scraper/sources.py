@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import replace
+from functools import lru_cache
 import logging
-import unicodedata
 
 from rapidfuzz import fuzz, process
 
 from scraper.fotmob import merge_transfers, parse_iso_date
-from scraper.models import Transfer
+from scraper.models import Transfer, adopt_event_type, source_priority
+from scraper.text import fold_text
 
 
 logger = logging.getLogger(__name__)
+# Reconciliation compares the same few thousand date strings millions of times.
+_parse_date = lru_cache(maxsize=1 << 16)(parse_iso_date)
 _NON_CLUB_LABELS = {
     "",
     "free agent",
@@ -22,11 +26,6 @@ _NON_CLUB_LABELS = {
     "retired",
 }
 
-_SOURCE_PRIORITY = {
-    "fotmob": 0,
-    "transfermarkt": 1,
-    "wikipedia": 2,
-}
 _PLAYER_ID_FIELDS = (
     "player_id_fotmob",
     "player_id_transfermarkt",
@@ -60,18 +59,19 @@ def _same_player(left: Transfer, right: Transfer) -> bool:
     return _same_player_name(left.player_name, right.player_name)
 
 
-
-
-def _source_priority(transfer: Transfer) -> int:
-    """Return the strongest provenance rank carried by an event."""
-    return min(
-        (_SOURCE_PRIORITY.get(source.casefold(), 3) for source in transfer.sources),
-        default=3,
-    )
-
-
 class _FuzzyKeyIndex:
-    """Resolve normalized fuzzy keys once and reuse the matching key set."""
+    """
+    Resolve normalized fuzzy keys once and reuse the matching key set.
+
+    Exact ``token_set_ratio >= cutoff`` matches without scoring every choice:
+    choices sharing a token with the query are scored directly; for the rest
+    the intersection is empty, so token_set_ratio equals plain ``ratio`` of the
+    sorted token sets, which rapidfuzz prefilters fast. Every hit is confirmed
+    with token_set_ratio, so the result equals a full scan.
+    """
+
+    # Absorbs float rounding between the ratio prefilter and token_set_ratio.
+    _PREFILTER_MARGIN = 1.0
 
     def __init__(self, values, score_cutoff: int) -> None:
         choices: list[str] = []
@@ -82,6 +82,13 @@ class _FuzzyKeyIndex:
                 choices.append(key)
                 seen.add(key)
         self._choices = tuple(choices)
+        self._sorted_token_choices = tuple(
+            " ".join(sorted(set(choice.split()))) for choice in choices
+        )
+        self._choices_by_token: dict[str, list[int]] = defaultdict(list)
+        for choice_index, choice in enumerate(choices):
+            for token in set(choice.split()):
+                self._choices_by_token[token].append(choice_index)
         self._score_cutoff = score_cutoff
         self._matches: dict[str, tuple[str, ...]] = {}
 
@@ -94,17 +101,34 @@ class _FuzzyKeyIndex:
         if cached is not None:
             return cached
 
-        matches = tuple(
-            choice
-            for choice, _score, _index in process.extract(
-                query,
-                self._choices,
-                scorer=fuzz.token_set_ratio,
-                score_cutoff=self._score_cutoff,
-                limit=None,
-                processor=None,
-            )
-        )
+        choices = self._choices
+        cutoff = self._score_cutoff
+        query_tokens = set(query.split())
+        sharing = {
+            choice_index
+            for token in query_tokens
+            for choice_index in self._choices_by_token.get(token, ())
+        }
+        scored: list[tuple[float, int]] = []
+        for choice_index in sharing:
+            score = fuzz.token_set_ratio(query, choices[choice_index])
+            if score >= cutoff:
+                scored.append((score, choice_index))
+        for _choice, _ratio, choice_index in process.extract(
+            " ".join(sorted(query_tokens)),
+            self._sorted_token_choices,
+            scorer=fuzz.ratio,
+            score_cutoff=cutoff - self._PREFILTER_MARGIN,
+            limit=None,
+            processor=None,
+        ):
+            if choice_index in sharing:
+                continue
+            score = fuzz.token_set_ratio(query, choices[choice_index])
+            if score >= cutoff:
+                scored.append((score, choice_index))
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        matches = tuple(choices[choice_index] for _score, choice_index in scored)
         self._matches[query] = matches
         return matches
 
@@ -120,7 +144,7 @@ CompositeKey = tuple[str, str, str, str, str]
 
 
 def _transfer_event_date_key(transfer: Transfer) -> str:
-    event_date = parse_iso_date(transfer.date)
+    event_date = _parse_date(transfer.date)
     return event_date.isoformat() if event_date is not None else ""
 
 
@@ -158,7 +182,7 @@ class _TransferCandidateIndex:
                 transfer.to_club_full_name or transfer.to_club,
             )
         ]
-        self._club_index = _FuzzyKeyIndex(club_values, score_cutoff=92)
+        self.club_index = _FuzzyKeyIndex(club_values, score_cutoff=92)
         self._by_route: dict[tuple[str, str], list[Transfer]] = defaultdict(list)
         self._by_destination: dict[str, list[Transfer]] = defaultdict(list)
         self._free_by_destination: dict[str, list[Transfer]] = defaultdict(list)
@@ -444,7 +468,7 @@ class _TransferCandidateIndex:
         destination_key = _transfer_club_key(transfer, source=False)
         if not destination_key:
             return []
-        destination_keys = self._club_index.matching_keys(destination_key)
+        destination_keys = self.club_index.matching_keys(destination_key)
         return self._collect(self._by_destination, destination_keys)
 
     def route_candidates(self, transfer: Transfer) -> list[Transfer]:
@@ -467,14 +491,14 @@ class _TransferCandidateIndex:
         if not source_key and not free_transfer:
             return []
 
-        destination_keys = self._club_index.matching_keys(destination_key)
+        destination_keys = self.club_index.matching_keys(destination_key)
         if not destination_keys:
             return []
 
         candidates: list[Transfer] = []
         seen: set[int] = set()
         if source_key:
-            source_keys = self._club_index.matching_keys(source_key)
+            source_keys = self.club_index.matching_keys(source_key)
             for source_match in source_keys:
                 for destination_match in destination_keys:
                     for candidate in self._by_route.get(
@@ -512,7 +536,7 @@ def _prefer_primary_routes(transfers: list[Transfer]) -> list[Transfer]:
     groups: dict[tuple[str, object], list[Transfer]] = {}
     ungrouped: list[Transfer] = []
     for transfer in transfers:
-        event_date = parse_iso_date(transfer.date)
+        event_date = _parse_date(transfer.date)
         if event_date is None:
             ungrouped.append(transfer)
             continue
@@ -530,11 +554,11 @@ def _prefer_primary_routes(transfers: list[Transfer]) -> list[Transfer]:
             selected.extend(group)
             continue
 
-        strongest = min(_source_priority(transfer) for transfer in distinct_routes)
+        strongest = min(source_priority(transfer) for transfer in distinct_routes)
         preferred_routes = [
             transfer
             for transfer in distinct_routes
-            if _source_priority(transfer) == strongest
+            if source_priority(transfer) == strongest
         ]
         preferred = [
             transfer
@@ -554,10 +578,9 @@ def _prefer_primary_routes(transfers: list[Transfer]) -> list[Transfer]:
     return selected
 
 
+@lru_cache(maxsize=1 << 18)
 def _normalize(value: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", value or "")
-    plain = "".join(char for char in decomposed if not unicodedata.combining(char))
-    return " ".join(plain.casefold().replace(".", " ").split())
+    return " ".join(fold_text(value).replace(".", " ").split())
 
 
 def _is_non_club(value: str) -> bool:
@@ -565,8 +588,8 @@ def _is_non_club(value: str) -> bool:
 
 
 def _same_or_adjacent_date(left: str, right: str) -> bool:
-    left_date = parse_iso_date(left)
-    right_date = parse_iso_date(right)
+    left_date = _parse_date(left)
+    right_date = _parse_date(right)
     if left_date is None or right_date is None:
         return True
     return abs((left_date - right_date).days) <= 1
@@ -620,6 +643,7 @@ def _compatible_event_type(left: Transfer, right: Transfer) -> bool:
 
 
 def _merge_provenance(target: Transfer, source: Transfer) -> None:
+    adopt_event_type(target, source)
     target.sources = tuple(dict.fromkeys((*target.sources, *source.sources)))
     target.source_urls = tuple(
         dict.fromkeys((*target.source_urls, *source.source_urls))
@@ -647,9 +671,6 @@ def _merge_provenance(target: Transfer, source: Transfer) -> None:
     for attr in ("position", "fee", "nationality", "age", "market_value"):
         if not getattr(target, attr) and getattr(source, attr):
             setattr(target, attr, getattr(source, attr))
-    if target.transfer_type == "transfer" and source.transfer_type != "transfer":
-        target.transfer_type = source.transfer_type
-        target.is_loan = source.is_loan
 
 
 def _merge_verified_batches(
@@ -678,6 +699,123 @@ def _merge_verified_batches(
     return _prefer_primary_routes(merged)
 
 
+_CORROBORATION_DATE_TOLERANCE_DAYS = 3
+_MIN_INDEPENDENT_SOURCES = 2
+
+
+def _within_corroboration_window(left: str, right: str) -> bool:
+    left_date = _parse_date(left)
+    right_date = _parse_date(right)
+    if left_date is None or right_date is None:
+        return True
+    return abs((left_date - right_date).days) <= _CORROBORATION_DATE_TOLERANCE_DAYS
+
+
+def _agrees_with_cluster(cluster: list[Transfer], transfer: Transfer) -> bool:
+    # Cheap date/type checks first; every predicate is pure, so order is free.
+    return all(
+        _within_corroboration_window(member.date, transfer.date)
+        and _compatible_event_type(member, transfer)
+        and _same_destination(member, transfer)
+        and _same_player(member, transfer)
+        for member in cluster
+    )
+
+
+def _cluster_source_club(cluster: list[Transfer]) -> Transfer | None:
+    """Return the member naming the agreed source club, or None on conflict."""
+    named = [
+        member
+        for member in cluster
+        if not _is_non_club(member.from_club_full_name or member.from_club)
+    ]
+    for left in named:
+        for right in named:
+            if left is not right and not _same_source(left, right):
+                return None
+    return named[0] if named else cluster[0]
+
+
+def _events_from_agreeing_corroborators(
+    unmatched: list[Transfer],
+    club_index: _FuzzyKeyIndex,
+) -> tuple[list[Transfer], int]:
+    """
+    Create events from corroborator-only routes that independent sources agree on.
+
+    Agreement: same player and destination, compatible event type, dates within
+    three days whenever both are dated, at least two distinct source names, and
+    no conflicting named source club. Returns the events and how many
+    corroborators they consumed. ``club_index`` must contain every unmatched
+    destination club.
+    """
+    clusters: list[list[Transfer]] = []
+    # A cluster can only accept a transfer whose destination fuzzily matches
+    # the cluster's first member, so bucket clusters by that member's
+    # destination key and scan only matching buckets, oldest cluster first.
+    clusters_by_destination: dict[str, list[int]] = defaultdict(list)
+    for transfer in unmatched:
+        destination_key = _transfer_club_key(transfer, source=False)
+        cluster = None
+        if destination_key:
+            candidate_ids = sorted(
+                cluster_id
+                for matching_key in club_index.matching_keys(destination_key)
+                for cluster_id in clusters_by_destination.get(matching_key, ())
+            )
+            cluster = next(
+                (
+                    clusters[cluster_id]
+                    for cluster_id in candidate_ids
+                    if _agrees_with_cluster(clusters[cluster_id], transfer)
+                ),
+                None,
+            )
+        if cluster is None:
+            clusters_by_destination[destination_key].append(len(clusters))
+            clusters.append([transfer])
+        else:
+            cluster.append(transfer)
+
+    created: list[Transfer] = []
+    consumed = 0
+    for cluster in clusters:
+        independent_sources = {
+            source.casefold()
+            for member in cluster
+            for source in member.sources
+        }
+        if len(independent_sources) < _MIN_INDEPENDENT_SOURCES:
+            continue
+        source_member = _cluster_source_club(cluster)
+        if source_member is None:
+            logger.warning(
+                "Corroborators agree on %s -> %s but name conflicting source clubs; "
+                "not creating an event",
+                cluster[0].player_name,
+                cluster[0].to_club,
+            )
+            continue
+        dated = sorted(
+            (member for member in cluster if _parse_date(member.date)),
+            key=lambda member: (source_priority(member), member.date),
+        )
+        representative = dated[0] if dated else cluster[0]
+        event = replace(
+            representative,
+            from_club=source_member.from_club,
+            from_club_full_name=source_member.from_club_full_name,
+            verification_status="corroborated",
+            infer_from_current_roster=False,
+        )
+        for member in cluster:
+            if member is not representative:
+                _merge_provenance(event, member)
+        created.append(event)
+        consumed += len(cluster)
+    return created, consumed
+
+
 def reconcile_transfer_sources(
     verified_batches: list[list[Transfer]],
     fast_signals: list[Transfer] | None = None,
@@ -687,8 +825,10 @@ def reconcile_transfer_sources(
     Merge complete routes, then reconcile destination-only community signals.
 
     Sortitoutsi signals may enrich or infer a route under their adapter's
-    explicit-date rules. Other sources are corroboration-only: they can merge
-    provenance into one verified event, but never create a new event.
+    explicit-date rules. Other sources corroborate: they merge provenance into
+    one verified event, and an unmatched route becomes an event only when at
+    least two independent corroborating sources agree on player, destination
+    and (when dated) a date within three days.
     """
     verified = _merge_verified_batches(verified_batches)
     inferred_signals = 0
@@ -732,6 +872,7 @@ def reconcile_transfer_sources(
                 signal.to_club,
             )
 
+    unmatched_routes: list[Transfer] = []
     for corroborator in corroborators:
         candidates = [
             transfer
@@ -747,26 +888,36 @@ def reconcile_transfer_sources(
             _merge_provenance(target, corroborator)
             index.refresh(target)
             corroborated_routes += 1
-        else:
+        elif candidates:
             ignored_routes += 1
-            if len(candidates) > 1:
-                logger.warning(
-                    "Ignoring ambiguous route corroborator for %s: %s -> %s",
-                    corroborator.player_name,
-                    corroborator.from_club,
-                    corroborator.to_club,
-                )
+            logger.warning(
+                "Ignoring ambiguous route corroborator for %s: %s -> %s",
+                corroborator.player_name,
+                corroborator.from_club,
+                corroborator.to_club,
+            )
+        else:
+            unmatched_routes.append(corroborator)
+
+    agreed_events, agreed_routes = _events_from_agreeing_corroborators(
+        unmatched_routes,
+        index.club_index,
+    )
+    ignored_routes += len(unmatched_routes) - agreed_routes
+    verified.extend(agreed_events)
 
     logger.info(
         "Cross-source reconciliation: %s fast signals corroborated, "
         "%s roster-inference candidates, %s submission-only signals ignored, "
         "%s ambiguous signals ignored, %s complete routes corroborated, "
+        "%s events created from agreeing corroborators, "
         "%s route corroborators ignored",
         corroborated_signals,
         inferred_signals,
         ignored_signals,
         ambiguous_signals,
         corroborated_routes,
+        len(agreed_events),
         ignored_routes,
     )
     return verified

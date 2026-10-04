@@ -12,7 +12,7 @@ CommandRunner = Callable[[list[str]], subprocess.CompletedProcess[str]]
 
 
 class ReleasePublishError(RuntimeError):
-    """A release asset pair could not be published consistently."""
+    """A release asset set could not be published consistently."""
 
 
 def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -122,10 +122,10 @@ def _delete_asset(
     )
 
 
-def _rollback_pair(
+def _rollback_assets(
     repository: str,
     tag: str,
-    asset_paths: tuple[Path, Path],
+    asset_paths: Sequence[Path],
     backups: dict[str, Path],
     runner: CommandRunner,
 ) -> list[tuple[str, BaseException]]:
@@ -150,18 +150,18 @@ def _rollback_pair(
     return failures
 
 
-def publish_asset_pair(
+def publish_asset_set(
     repository: str,
     tag: str,
-    asset_paths: tuple[Path, Path],
+    asset_paths: Sequence[Path],
     *,
     runner: CommandRunner | None = None,
 ) -> None:
     if not repository or not tag:
         raise ValueError("repository and tag must be non-empty")
-    if len(asset_paths) != 2:
-        raise ValueError("exactly two release assets are required")
-    if asset_paths[0].name == asset_paths[1].name:
+    if len(asset_paths) < 2:
+        raise ValueError("at least two release assets are required")
+    if len({asset_path.name for asset_path in asset_paths}) != len(asset_paths):
         raise ValueError("release asset names must be distinct")
     for asset_path in asset_paths:
         if not asset_path.is_file():
@@ -186,14 +186,14 @@ def publish_asset_pair(
             for asset_path in asset_paths:
                 _upload_asset(repository, tag, asset_path, command_runner)
         except BaseException as publication_error:
-            rollback_failures = _rollback_pair(
+            rollback_failures = _rollback_assets(
                 repository,
                 tag,
                 asset_paths,
                 backups,
                 command_runner,
             )
-            message = "release asset pair publication failed"
+            message = "release asset set publication failed"
             if rollback_failures:
                 details = ", ".join(
                     f"{name}: {_error_detail(error)}"
@@ -205,21 +205,17 @@ def publish_asset_pair(
 
 def _argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Publish a pair of GitHub release assets with rollback"
+        description="Publish a set of GitHub release assets with rollback"
     )
     parser.add_argument("--repo", required=True)
     parser.add_argument("--tag", required=True)
-    parser.add_argument("assets", nargs=2, type=Path)
+    parser.add_argument("assets", nargs="+", type=Path)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _argument_parser().parse_args(argv)
-    publish_asset_pair(
-        arguments.repo,
-        arguments.tag,
-        (arguments.assets[0], arguments.assets[1]),
-    )
+    publish_asset_set(arguments.repo, arguments.tag, arguments.assets)
     return 0
 
 

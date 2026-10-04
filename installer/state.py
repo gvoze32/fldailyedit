@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Literal
 
 from installer.catalog import Catalog, Channel, ReleaseRecord
 from installer.install import InstallResult
@@ -112,9 +112,13 @@ class InstallCompleted:
     result: InstallResult
 
 
+WorkerOperation = Literal["catalog", "install", "local"]
+
+
 @dataclass(frozen=True, slots=True)
 class WorkerFailed:
     error: Exception
+    operation: WorkerOperation
 
 
 WorkerEvent = (

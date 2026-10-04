@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.publish_release_assets import ReleasePublishError, publish_asset_pair
+from tools.publish_release_assets import ReleasePublishError, publish_asset_set
 
 
 REPOSITORY = "gvoze32/fldailyedit"
@@ -72,7 +72,7 @@ def test_second_upload_failure_restores_exact_prior_pair(tmp_path: Path) -> None
     gh = _FakeGh(original, failing_uploads={2})
 
     with pytest.raises(ReleasePublishError, match="publication failed"):
-        publish_asset_pair(REPOSITORY, TAG, (first, second), runner=gh)
+        publish_asset_set(REPOSITORY, TAG, (first, second), runner=gh)
 
     assert gh.assets == original
     assert gh.upload_count == 4
@@ -85,7 +85,7 @@ def test_second_upload_failure_removes_new_assets_when_pair_was_absent(
     gh = _FakeGh({"unrelated.exe": b"leave alone"}, failing_uploads={2})
 
     with pytest.raises(ReleasePublishError, match="publication failed"):
-        publish_asset_pair(REPOSITORY, TAG, (first, second), runner=gh)
+        publish_asset_set(REPOSITORY, TAG, (first, second), runner=gh)
 
     assert gh.assets == {"unrelated.exe": b"leave alone"}
     delete_commands = [command for command in gh.commands if command[2] == "delete-asset"]
@@ -100,7 +100,7 @@ def test_rollback_attempts_every_restore_and_reports_failures(tmp_path: Path) ->
     )
 
     with pytest.raises(ReleasePublishError) as caught:
-        publish_asset_pair(REPOSITORY, TAG, (first, second), runner=gh)
+        publish_asset_set(REPOSITORY, TAG, (first, second), runner=gh)
 
     assert "rollback failed" in str(caught.value)
     assert first.name in str(caught.value)
@@ -114,10 +114,27 @@ def test_every_gh_release_operation_uses_explicit_repository(tmp_path: Path) -> 
     pair = _pair(tmp_path)
     gh = _FakeGh({})
 
-    publish_asset_pair(REPOSITORY, TAG, pair, runner=gh)
+    publish_asset_set(REPOSITORY, TAG, pair, runner=gh)
 
     release_commands = [command for command in gh.commands if command[:2] == ["gh", "release"]]
     assert release_commands
     for command in release_commands:
         repo_position = command.index("--repo")
         assert command[repo_position + 1] == REPOSITORY
+
+
+def test_late_upload_failure_restores_every_asset_in_the_set(tmp_path: Path) -> None:
+    first, second = _pair(tmp_path)
+    third = tmp_path / "installer-update.json"
+    third.write_bytes(b"new manifest")
+    original = {
+        first.name: b"old first",
+        second.name: b"old second",
+        third.name: b"old manifest",
+    }
+    gh = _FakeGh(original, failing_uploads={3})
+
+    with pytest.raises(ReleasePublishError, match="publication failed"):
+        publish_asset_set(REPOSITORY, TAG, (first, second, third), runner=gh)
+
+    assert gh.assets == original

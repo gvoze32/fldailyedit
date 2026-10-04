@@ -496,7 +496,10 @@ def test_removal_repairs_goalkeeper_position_bytes_after_slot_compaction():
             game_plan_offset + GP_LINEUP : game_plan_offset + GP_LINEUP + 40
         ]
     )
-    assert updated_lineup[:2] == [1, 0]
+    # The vacated CB role is backfilled by the first substitute in place; the
+    # copied backup GK keeps its own bench role instead of shifting roles.
+    assert updated_lineup[:2] == [0, 11]
+    assert updated_lineup.index(1) == 38
     for preset_offset in GP_POSITION_PRESETS:
         for phase_offset in GP_POSITION_PHASE_OFFSETS:
             assert (
@@ -1873,3 +1876,199 @@ def test_runtime_loads_team_and_assignment_indexes_from_game_download(
     assert assignments.team_keys_for(162196) == (12, 320)
     assert assignment_source == f"{extra}::PlayerAssignment.bin"
 
+
+
+def _game_plan_team(
+    positions: list[str],
+    *,
+    caps: dict[int, int] | None = None,
+    ages: dict[int, int] | None = None,
+    values: dict[int, int] | None = None,
+    first_id: int = 5000,
+):
+    from tests.test_editor import _build_mock_data
+
+    player_ids = list(range(first_id, first_id + len(positions)))
+    data = _build_mock_data(
+        num_players=0,
+        num_teams=1,
+        num_team_player=1,
+        num_game_plans=1,
+        team_player_entries=[
+            (101, player_ids, list(range(1, len(player_ids) + 1))),
+        ],
+        league_team_ids=[101],
+    )
+    edit_file = EditFile()
+    edit_file.load_bytes(data)
+    edit_file.attach_playerbin(
+        PlayerBinDatabase(
+            {
+                player_id: PlayerBinRecord(
+                    player_id,
+                    f"Player {player_id}",
+                    (ages or {}).get(player_id, 24),
+                    position,
+                    (values or {}).get(player_id, 0),
+                    caps=(caps or {}).get(player_id, 0),
+                )
+                for player_id, position in zip(player_ids, positions)
+            }
+        )
+    )
+    return edit_file, player_ids
+
+
+def _lineup(edit_file: EditFile) -> list[int]:
+    offset = edit_file.game_plan_start + GP_LINEUP
+    return list(edit_file._data[offset : offset + 40])
+
+
+def _set_lineup(edit_file: EditFile, lineup: list[int]) -> None:
+    offset = edit_file.game_plan_start + GP_LINEUP
+    edit_file._data[offset : offset + 40] = bytes(lineup)
+
+
+_FOUR_THREE_THREE = [
+    "GK", "CB", "CB", "RB", "LB", "DMF", "CMF", "CMF", "CF", "RWF", "LWF",
+]
+
+
+def test_repair_fills_empty_captain_set_pieces_and_attackers_from_save_data():
+    edit_file, ids = _game_plan_team(
+        _FOUR_THREE_THREE + ["GK", "CB", "CMF", "CF", "RB"],
+        caps={5004: 80, 5002: 80, 5008: 10},
+        ages={5004: 31, 5002: 28},
+        values={5008: 90_000_000, 5009: 60_000_000, 5014: 99_000_000},
+    )
+    assert edit_file.set_team_formation(101, "4-3-3") > 0
+    feet = {5007: "L", 5010: "R"}
+    edit_file.get_player_preferred_foot = lambda pid: feet.get(pid, "R")
+    base = edit_file.game_plan_start
+    for role_offset in (GP_CAPTAIN, GP_LEFT_CK, GP_RIGHT_CK, GP_PK):
+        edit_file._data[base + role_offset] = 0xFF
+    edit_file._data[base + GP_ATTACK_PLAYERS : base + GP_ATTACK_PLAYERS + 3] = b"\xff" * 3
+
+    warnings = edit_file.validate_integrity()["warnings"]
+    assert any("empty roles" in warning and "captain" in warning for warning in warnings)
+
+    metrics = edit_file.repair_game_plans()
+
+    assert metrics["filled_roles"] == 7
+    # Captain: most caps (5004 and 5002 tie), then the older player.
+    assert edit_file.get_team_captain_player(101) == 5004
+    # Left corner: the left-footed CMF beats the right-footed LWF.
+    assert edit_file._data[base + GP_LEFT_CK] == ids.index(5007)
+    # Right corner: right-footed right winger.
+    assert edit_file._data[base + GP_RIGHT_CK] == ids.index(5009)
+    # Penalty: the starting CF, never the more valuable benched striker.
+    assert edit_file._data[base + GP_PK] == ids.index(5008)
+    # Attack players: CF row first, then the wingers.
+    assert list(edit_file._data[base + GP_ATTACK_PLAYERS : base + GP_ATTACK_PLAYERS + 3]) == [8, 9, 10]
+    assert not any(
+        "empty roles" in warning
+        for warning in edit_file.validate_integrity()["warnings"]
+    )
+    assert edit_file.assign_missing_game_plan_roles(101) == []
+
+
+def test_captain_stays_empty_without_any_metadata():
+    from tests.test_editor import _build_mock_data
+
+    data = _build_mock_data(
+        num_players=0,
+        num_teams=1,
+        num_team_player=1,
+        num_game_plans=1,
+        team_player_entries=[(101, list(range(1000, 1016)), list(range(1, 17)))],
+        league_team_ids=[101],
+    )
+    edit_file = EditFile()
+    edit_file.load_bytes(data)
+    edit_file._data[edit_file.game_plan_start + GP_CAPTAIN] = 0xFF
+
+    filled = edit_file.assign_missing_game_plan_roles(101)
+
+    assert "captain" not in filled
+    assert edit_file._data[edit_file.game_plan_start + GP_CAPTAIN] == 0xFF
+
+
+def test_signing_joins_bench_and_preferred_bench_orders_matchday_squad():
+    positions = _FOUR_THREE_THREE + ["CB"] * 8 + ["GK"]
+    edit_file, ids = _game_plan_team(positions)
+
+    assert edit_file.add_player(9999, 101, position="CMF")
+
+    roster = edit_file.get_team_roster(101)
+    signing_slot = roster.player_ids.index(9999)
+    lineup = _lineup(edit_file)
+    assert lineup[:11] == list(range(11))
+    assert lineup[11] == signing_slot
+    xi, bench = edit_file.get_team_matchday(101)
+    assert xi == tuple(ids[:11])
+    assert bench[0] == 9999 and len(bench) == 7
+
+    live_sub = ids[15]
+    metrics = edit_file.repair_game_plans(preferred_bench={101: (live_sub,)})
+
+    lineup = _lineup(edit_file)
+    assert metrics["reordered_benches"] == 1
+    assert lineup[:11] == list(range(11))
+    assert lineup[11] == ids.index(live_sub)
+    assert lineup[12] == signing_slot
+    # The only reserve goalkeeper (roster slot 19) is pulled into role 17.
+    assert lineup[17] == 19
+    assert edit_file.validate_integrity()["valid"] is True
+
+
+def test_removing_last_slot_starter_backfills_role_without_shift():
+    positions = _FOUR_THREE_THREE + ["GK", "CB", "CMF", "CB", "CF", "RB", "DMF"]
+    edit_file, ids = _game_plan_team(positions)
+    # The DMF in roster slot 17 holds starter role 5 (code 1 in the mock).
+    lineup = [0, 1, 2, 3, 4, 17, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 5]
+    lineup.extend(range(18, 40))
+    _set_lineup(edit_file, lineup)
+    edit_file.set_game_plan_preferred_starters({101: (ids[14],)})
+
+    assert edit_file.release_player(ids[17], 101)
+
+    updated = _lineup(edit_file)
+    # Two bench CBs exist (slots 12, 14); the live starter (slot 14) wins
+    # and takes the departed role index; no other starter role moves.
+    assert updated[:11] == [0, 1, 2, 3, 4, 14, 6, 7, 8, 9, 10]
+    assert updated[11:17] == [11, 12, 13, 15, 16, 5]
+    assert edit_file.validate_integrity()["valid"] is True
+
+
+def test_live_goalkeeper_replaces_incumbent_primary():
+    edit_file, ids = _game_plan_team(_FOUR_THREE_THREE + ["GK"] + ["CB"] * 5)
+    edit_file.set_team_formation(101, "4-3-3")
+
+    edit_file.repair_game_plans(
+        preserve_existing_primary=True,
+        preferred_starters={101: (ids[11], *ids[1:11])},
+        align_positions=True,
+    )
+
+    lineup = _lineup(edit_file)
+    assert lineup[0] == 11
+    assert lineup[11] == 0
+    assert edit_file.validate_integrity()["valid"] is True
+
+
+def test_live_starter_beats_exact_position_incumbent():
+    edit_file, ids = _game_plan_team(_FOUR_THREE_THREE + ["CB", "LWF"])
+    edit_file.set_team_formation(101, "4-3-3")
+    live_cb_for_rb = ids[11]
+
+    edit_file.repair_game_plans(
+        preferred_starters={101: (live_cb_for_rb,)},
+        align_positions=True,
+    )
+
+    roster = edit_file.get_team_roster(101)
+    starters = [roster.player_ids[slot] for slot in _lineup(edit_file)[:11]]
+    # A same-line live CB displaces a non-live defender incumbent.
+    assert live_cb_for_rb in starters
+    assert ids[0] == starters[0]
+    assert ids[12] not in starters

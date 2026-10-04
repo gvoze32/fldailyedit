@@ -7,6 +7,7 @@ CATALOG_URL = (
 )
 APP_INSTALLER_ASSET_NAME = "FLDailyEditInstaller.zip"
 APP_UPDATE_MANIFEST_NAME = "installer-update.json"
+APP_UPDATE_SIGNATURE_NAME = f"{APP_UPDATE_MANIFEST_NAME}.sig"
 APP_INSTALLER_URL = (
     "https://github.com/gvoze32/fldailyedit/"
     f"releases/download/{RELEASE_TAG}/{APP_INSTALLER_ASSET_NAME}"
@@ -14,4 +15,8 @@ APP_INSTALLER_URL = (
 APP_UPDATE_MANIFEST_URL = (
     "https://github.com/gvoze32/fldailyedit/"
     f"releases/download/{RELEASE_TAG}/{APP_UPDATE_MANIFEST_NAME}"
+)
+APP_UPDATE_SIGNATURE_URL = (
+    "https://github.com/gvoze32/fldailyedit/"
+    f"releases/download/{RELEASE_TAG}/{APP_UPDATE_SIGNATURE_NAME}"
 )

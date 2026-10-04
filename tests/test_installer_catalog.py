@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import http.client
 import json
 import threading
 import time
@@ -16,6 +17,7 @@ import pytest
 
 from installer.catalog import (
     MAX_ARCHIVE_BYTES,
+    MAX_CATALOG_BYTES,
     CatalogError,
     Channel,
     DownloadError,
@@ -363,6 +365,66 @@ def test_fetch_catalog_rejects_an_untrusted_initial_url_before_request(
         fetch_catalog("https://example.com/catalog.json", opener=opener)
 
     assert opener.requested_urls == []
+
+
+class _StreamResponse:
+    def __init__(self, headers: dict[str, str], read) -> None:
+        self.headers = headers
+        self._read = read
+
+    def read(self, size: int = -1) -> bytes:
+        return self._read(size)
+
+    def __enter__(self) -> _StreamResponse:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        pass
+
+
+class _StreamOpener:
+    def __init__(self, response: _StreamResponse) -> None:
+        self._response = response
+
+    def open(self, url: str, timeout: float) -> _StreamResponse:
+        return self._response
+
+
+def test_fetch_catalog_rejects_declared_oversized_response(
+    local_server: ThreadingHTTPServer,
+) -> None:
+    body = b" " * (MAX_CATALOG_BYTES + 1)
+    _serve(local_server, "/catalog", body)
+
+    with pytest.raises(CatalogError) as caught:
+        fetch_catalog(opener=_LocalServerOpener(local_server, "/catalog"))
+
+    assert caught.value.code == "invalid_catalog"
+
+
+def test_fetch_catalog_bounds_undeclared_response_body() -> None:
+    oversized = b" " * (2 * MAX_CATALOG_BYTES)
+    requested_sizes: list[int] = []
+
+    def read(size: int) -> bytes:
+        requested_sizes.append(size)
+        return oversized if size < 0 else oversized[:size]
+
+    with pytest.raises(CatalogError) as caught:
+        fetch_catalog(opener=_StreamOpener(_StreamResponse({}, read)))
+
+    assert caught.value.code == "invalid_catalog"
+    assert requested_sizes == [MAX_CATALOG_BYTES + 1]
+
+
+def test_fetch_catalog_maps_truncated_response_to_network_error() -> None:
+    def read(size: int) -> bytes:
+        raise http.client.IncompleteRead(b"{", 10)
+
+    with pytest.raises(CatalogError) as caught:
+        fetch_catalog(opener=_StreamOpener(_StreamResponse({}, read)))
+
+    assert caught.value.code == "network_error"
 
 
 def test_trusted_redirect_handler_allows_only_https_github_hosts() -> None:

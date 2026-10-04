@@ -406,7 +406,7 @@ class InstallerWorker:
                 try:
                     catalog = self._fetch_catalog()
                 except Exception as error:
-                    self.events.put(WorkerFailed(error))
+                    self.events.put(WorkerFailed(error, "catalog"))
                 else:
                     self.events.put(CatalogLoaded(catalog))
                 continue
@@ -493,7 +493,7 @@ class InstallerWorker:
                     )
                 except Exception as error:
                     terminal_event: LocalUpdateCompleted | WorkerFailed = WorkerFailed(
-                        error
+                        error, "local"
                     )
                 else:
                     terminal_event = LocalUpdateCompleted(result)
@@ -506,7 +506,9 @@ class InstallerWorker:
             try:
                 result = self._perform_install(command.record, command.location)
             except Exception as error:
-                terminal_event: InstallCompleted | WorkerFailed = WorkerFailed(error)
+                terminal_event: InstallCompleted | WorkerFailed = WorkerFailed(
+                    error, "install"
+                )
             else:
                 terminal_event = InstallCompleted(result)
             with self._state_lock:

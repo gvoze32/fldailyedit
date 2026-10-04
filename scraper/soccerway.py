@@ -8,13 +8,13 @@ from dataclasses import dataclass, field
 from datetime import date
 import logging
 import re
-import unicodedata
 from typing import Any
 
 import aiohttp
 
 from scraper.models import Transfer
 from scraper.source_utils import date_in_range, parse_external_date, resolve_source_date_range
+from scraper.text import fold_text
 
 
 logger = logging.getLogger(__name__)
@@ -88,13 +88,7 @@ def _clean(value: Any) -> str:
 
 
 def _normalize(value: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", value or "")
-    plain = "".join(
-        character
-        for character in decomposed
-        if not unicodedata.combining(character)
-    )
-    return " ".join(re.sub(r"[^a-z0-9]+", " ", plain.casefold()).split())
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", fold_text(value)).split())
 
 
 def _club_key(value: str) -> str:
@@ -319,7 +313,8 @@ def _candidate_team(payload: Any, requested_name: str) -> _SoccerwayTeam | None:
     if not isinstance(payload, list):
         return None
     requested_has_category = bool(_NON_SENIOR_RE.search(requested_name))
-    candidates: list[_SoccerwayTeam] = []
+    requested_key = _normalize(requested_name)
+    requested_club_key = _club_key(requested_name)
     for item in payload:
         if not isinstance(item, dict):
             continue
@@ -343,12 +338,9 @@ def _candidate_team(payload: Any, requested_name: str) -> _SoccerwayTeam | None:
             or (not requested_has_category and _NON_SENIOR_RE.search(name))
         ):
             continue
-        candidates.append(_SoccerwayTeam(name=requested_name, slug=slug, team_id=team_id))
-        if _normalize(name) == _normalize(requested_name):
-            return candidates[-1]
-        if _club_key(name) == _club_key(requested_name):
-            return candidates[-1]
-    return candidates[0] if candidates else None
+        if _normalize(name) == requested_key or _club_key(name) == requested_club_key:
+            return _SoccerwayTeam(name=requested_name, slug=slug, team_id=team_id)
+    return None
 
 
 async def _fetch_json(

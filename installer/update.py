@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import http.client
 import json
@@ -18,10 +20,14 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import OpenerDirector, build_opener
 
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
 from installer import (
     APP_INSTALLER_ASSET_NAME,
     APP_INSTALLER_URL,
     APP_UPDATE_MANIFEST_URL,
+    APP_UPDATE_SIGNATURE_URL,
     __version__,
 )
 from installer.catalog import TrustedRedirectHandler
@@ -30,6 +36,10 @@ from installer.catalog import TrustedRedirectHandler
 MAX_APP_ARCHIVE_BYTES = 128 * 1024 * 1024
 MAX_APP_EXECUTABLE_BYTES = 128 * 1024 * 1024
 MAX_MANIFEST_BYTES = 64 * 1024
+MAX_SIGNATURE_BYTES = 1024
+# Raw Ed25519 public key; CI signs installer-update.json with the private half.
+APP_UPDATE_PUBLIC_KEY = base64.b64decode("sYH8IUcmk160DJcjyu6TMRm4WEMtTYza4KL/kwKyYsI=")
+_ED25519_SIGNATURE_BYTES = 64
 _DOWNLOAD_CHUNK_BYTES = 64 * 1024
 _STAGING_PREFIX = "fldailyedit-app-update-"
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
@@ -173,37 +183,63 @@ def _network_opener(opener: OpenerDirector | None) -> OpenerDirector:
     return opener if opener is not None else build_opener(TrustedRedirectHandler())
 
 
-def _read_manifest_response(response: Any) -> bytes:
+def verify_app_update_manifest_signature(payload: bytes, signature: bytes) -> None:
+    """Check the detached base64 Ed25519 signature over the raw manifest bytes."""
+
+    try:
+        raw_signature = base64.b64decode(signature.strip(), validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise AppUpdateError(
+            "invalid_signature", "update manifest signature is malformed"
+        ) from error
+    if len(raw_signature) != _ED25519_SIGNATURE_BYTES:
+        raise AppUpdateError(
+            "invalid_signature", "update manifest signature is malformed"
+        )
+    try:
+        Ed25519PublicKey.from_public_bytes(APP_UPDATE_PUBLIC_KEY).verify(
+            raw_signature, payload
+        )
+    except InvalidSignature as error:
+        raise AppUpdateError(
+            "invalid_signature", "update manifest signature is invalid"
+        ) from error
+
+
+def _read_bounded_response(response: Any, limit: int, *, code: str) -> bytes:
     raw_length = response.headers.get("Content-Length")
     if raw_length is not None:
         try:
             content_length = int(raw_length)
         except (TypeError, ValueError) as error:
-            raise AppUpdateError(
-                "invalid_manifest",
-                "update manifest Content-Length is invalid",
-            ) from error
-        if content_length < 0 or content_length > MAX_MANIFEST_BYTES:
-            raise AppUpdateError("manifest_too_large", "update manifest is too large")
-    payload = response.read(MAX_MANIFEST_BYTES + 1)
-    if len(payload) > MAX_MANIFEST_BYTES:
-        raise AppUpdateError("manifest_too_large", "update manifest is too large")
+            raise AppUpdateError(code, "update response Content-Length is invalid") from error
+        if content_length < 0 or content_length > limit:
+            raise AppUpdateError(code, "update response is too large")
+    payload = response.read(limit + 1)
+    if len(payload) > limit:
+        raise AppUpdateError(code, "update response is too large")
     return payload
 
 
-def fetch_app_update_manifest(
-    url: str = APP_UPDATE_MANIFEST_URL,
+def _fetch_update_document(
+    network: OpenerDirector,
+    url: str,
     *,
-    timeout: float = 15.0,
-    opener: OpenerDirector | None = None,
-) -> AppUpdateManifest:
-    _validate_exact_url(url, APP_UPDATE_MANIFEST_URL, code="untrusted_manifest")
+    timeout: float,
+    limit: int,
+    too_large_code: str,
+    missing_code: str | None = None,
+) -> bytes:
     try:
-        with _network_opener(opener).open(url, timeout=timeout) as response:
-            payload = _read_manifest_response(response)
+        with network.open(url, timeout=timeout) as response:
+            return _read_bounded_response(response, limit, code=too_large_code)
     except AppUpdateError:
         raise
     except HTTPError as error:
+        if missing_code is not None and error.code == 404:
+            raise AppUpdateError(
+                missing_code, f"{url.rsplit('/', 1)[-1]} is missing"
+            ) from error
         raise AppUpdateError(
             "update_http_error",
             f"update check failed with HTTP {error.code}",
@@ -215,8 +251,38 @@ def fetch_app_update_manifest(
         raise AppUpdateError("update_network_error", "update check failed") from error
     except (TimeoutError, socket.timeout) as error:
         raise AppUpdateError("update_timeout", "update check timed out") from error
-    except OSError as error:
+    except (OSError, http.client.HTTPException) as error:
         raise AppUpdateError("update_network_error", "update check failed") from error
+
+
+def fetch_app_update_manifest(
+    url: str = APP_UPDATE_MANIFEST_URL,
+    signature_url: str = APP_UPDATE_SIGNATURE_URL,
+    *,
+    timeout: float = 15.0,
+    opener: OpenerDirector | None = None,
+) -> AppUpdateManifest:
+    _validate_exact_url(url, APP_UPDATE_MANIFEST_URL, code="untrusted_manifest")
+    _validate_exact_url(
+        signature_url, APP_UPDATE_SIGNATURE_URL, code="untrusted_manifest"
+    )
+    network = _network_opener(opener)
+    payload = _fetch_update_document(
+        network,
+        url,
+        timeout=timeout,
+        limit=MAX_MANIFEST_BYTES,
+        too_large_code="manifest_too_large",
+    )
+    signature = _fetch_update_document(
+        network,
+        signature_url,
+        timeout=timeout,
+        limit=MAX_SIGNATURE_BYTES,
+        too_large_code="invalid_signature",
+        missing_code="missing_signature",
+    )
+    verify_app_update_manifest_signature(payload, signature)
     return parse_app_update_manifest(payload)
 
 
@@ -412,14 +478,19 @@ def stage_app_update(
         ) from error
 
 
-def cleanup_staged_app_update(staged_executable: Path) -> None:
-    staged_executable = Path(staged_executable)
+def _staging_directory(staged_executable: Path) -> Path | None:
     if (
         staged_executable.name != "FLDailyEditInstaller.exe"
         or not staged_executable.parent.name.startswith(_STAGING_PREFIX)
     ):
-        return
-    shutil.rmtree(staged_executable.parent, ignore_errors=True)
+        return None
+    return staged_executable.parent
+
+
+def cleanup_staged_app_update(staged_executable: Path) -> None:
+    staging_directory = _staging_directory(Path(staged_executable))
+    if staging_directory is not None:
+        shutil.rmtree(staging_directory, ignore_errors=True)
 
 
 def packaged_windows_app() -> bool:
@@ -433,7 +504,7 @@ def _write_update_script() -> Path:
         text=True,
     )
     script_path = Path(raw_path)
-    script = """param(\n    [int]$ParentPid,\n    [string]$Source,\n    [string]$Target\n)\n\ntry {\n    try {\n        Wait-Process -Id $ParentPid -Timeout 120 -ErrorAction SilentlyContinue\n    } catch {\n    }\n\n    for ($attempt = 0; $attempt -lt 120; $attempt++) {\n        try {\n            Move-Item -LiteralPath $Source -Destination $Target -Force -ErrorAction Stop\n            Start-Process -FilePath $Target\n            break\n        } catch {\n            Start-Sleep -Seconds 1\n        }\n    }\n} finally {\n    Remove-Item -LiteralPath $Source -Force -ErrorAction SilentlyContinue\n    Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue\n}\n"""
+    script = """param(\n    [int]$ParentPid,\n    [string]$Source,\n    [string]$Target,\n    [string]$StagingDirectory\n)\n\ntry {\n    try {\n        Wait-Process -Id $ParentPid -Timeout 120 -ErrorAction SilentlyContinue\n    } catch {\n    }\n\n    $moved = $false\n    for ($attempt = 0; $attempt -lt 120; $attempt++) {\n        try {\n            Move-Item -LiteralPath $Source -Destination $Target -Force -ErrorAction Stop\n            $moved = $true\n            break\n        } catch {\n            Start-Sleep -Seconds 1\n        }\n    }\n    if ($moved) {\n        Start-Process -FilePath $Target\n    }\n} finally {\n    Remove-Item -LiteralPath $StagingDirectory -Recurse -Force -ErrorAction SilentlyContinue\n    Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue\n}\n"""
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as output:
             output.write(script)
@@ -462,7 +533,8 @@ def schedule_app_update(
         )
     staged_executable = Path(staged_executable)
     target = Path(sys.executable if current_executable is None else current_executable)
-    if not staged_executable.is_file():
+    staging_directory = _staging_directory(staged_executable)
+    if staging_directory is None or not staged_executable.is_file():
         raise AppUpdateError("update_staging_missing", "staged installer executable is missing")
     if target.name != staged_executable.name or not target.parent.is_dir():
         raise AppUpdateError("update_target_invalid", "current installer path is invalid")
@@ -486,6 +558,7 @@ def schedule_app_update(
                 str(os.getpid()),
                 str(staged_executable),
                 str(target),
+                str(staging_directory),
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,

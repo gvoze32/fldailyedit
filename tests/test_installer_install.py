@@ -298,6 +298,34 @@ def test_missing_target_installs_without_backup(tmp_path: Path) -> None:
     assert not (destination / "FLDailyEditBackups").exists()
     assert list(destination.glob(".fldailyedit-*.tmp")) == []
 
+
+class _CloudPlaceholderStatus:
+    def __init__(self, status: os.stat_result) -> None:
+        self._status = status
+        self.st_file_attributes = 0x400
+        self.st_reparse_tag = 0x9000601A
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._status, name)
+
+
+def test_install_accepts_onedrive_cloud_placeholder_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    new_save = b"new verified save"
+    archive_path, destination, record = _setup(tmp_path, new_save)
+    (destination / SAVE_NAME).write_bytes(b"original")
+    real_lstat = Path.lstat
+    monkeypatch.setattr(
+        Path, "lstat", lambda self: _CloudPlaceholderStatus(real_lstat(self))
+    )
+
+    result = _install(archive_path, destination, record)
+
+    assert result.target_path.read_bytes() == new_save
+    assert result.backup_path is not None
+    assert result.backup_path.read_bytes() == b"original"
+
 def test_prebuilt_install_writes_transfer_log(
     tmp_path: Path,
 ) -> None:
@@ -944,18 +972,6 @@ def test_rollback_preserves_concurrent_target_when_original_was_absent(
     assert not (destination / "FLDailyEditBackups").exists()
     assert list(destination.glob(".fldailyedit-*.tmp")) == []
 
-def test_path_based_recovery_publication_is_disabled(tmp_path: Path) -> None:
-    source = tmp_path / "recovery"
-    target = tmp_path / SAVE_NAME
-    source.write_bytes(b"original")
-
-    with pytest.raises(OSError):
-        install_module._move_no_replace(source, target)
-
-    assert source.read_bytes() == b"original"
-    assert not target.exists()
-
-
 def test_quarantine_preserves_target_replaced_after_last_absent_rollback_check(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -976,7 +992,7 @@ def test_quarantine_preserves_target_replaced_after_last_absent_rollback_check(
         nonlocal ownership_checks
         real_assert(*args, **kwargs)
         ownership_checks += 1
-        if ownership_checks == 2:
+        if ownership_checks == 1:
             target.write_bytes(concurrent)
 
     monkeypatch.setattr(install_module, "_file_sha256", wrong_installed_hash)
@@ -1016,7 +1032,7 @@ def test_quarantine_preserves_target_replaced_after_last_backup_rollback_check(
         nonlocal ownership_checks
         real_assert(*args, **kwargs)
         ownership_checks += 1
-        if ownership_checks == 2:
+        if ownership_checks == 1:
             target.write_bytes(concurrent)
 
     monkeypatch.setattr(install_module, "_file_sha256", wrong_installed_hash)
@@ -1155,14 +1171,14 @@ def test_windows_handle_adapter_rejects_changed_identity_type_size_and_hash() ->
         size=8,
         sha256="a" * 64,
         is_regular=True,
-        is_reparse=False,
+        is_link=False,
     )
     unsafe_snapshots = [
         replace(expected, inode=23),
         replace(expected, size=9),
         replace(expected, sha256="b" * 64),
         replace(expected, is_regular=False),
-        replace(expected, is_reparse=True),
+        replace(expected, is_link=True),
     ]
 
     for unsafe in unsafe_snapshots:
@@ -1206,7 +1222,7 @@ def test_windows_handle_adapter_renames_exact_verified_handle_no_replace() -> No
         size=8,
         sha256="a" * 64,
         is_regular=True,
-        is_reparse=False,
+        is_link=False,
     )
 
     class Backend:
@@ -1258,12 +1274,8 @@ def test_non_windows_rollback_never_publishes_recovery_path(
             return "0" * 64
         return real_hash(path)
 
-    def unexpected_publish(*args, **kwargs):
-        raise AssertionError("non-Windows rollback must not publish a source")
-
     monkeypatch.setattr(install_module, "_WINDOWS", False)
     monkeypatch.setattr(install_module, "_file_sha256", wrong_installed_hash)
-    monkeypatch.setattr(install_module, "_move_no_replace", unexpected_publish)
 
     with pytest.raises(InstallError) as caught:
         _install(archive_path, destination, record)
@@ -1304,7 +1316,7 @@ def test_mismatched_quarantine_is_never_republished(
         nonlocal ownership_checks
         real_assert(*args, **kwargs)
         ownership_checks += 1
-        if ownership_checks == 2:
+        if ownership_checks == 1:
             target.write_bytes(concurrent)
 
     monkeypatch.setattr(install_module, "_WINDOWS", True)

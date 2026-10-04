@@ -16,7 +16,9 @@ verified real-world transfers, squad numbers, and captain roles.
 
 The packaged Windows app checks for a newer installer when it starts. Use the
 **Check for app updates** button to download, verify, and install the latest
-app version; the app restarts automatically after the verified download.
+app version; the app restarts automatically after the verified download. App
+updates are accepted only when `installer-update.json` carries a valid Ed25519
+signature (`installer-update.json.sig`) from the project release key.
 
 The installer verifies the release, backs up the current save, and replaces it
 atomically. For vanilla PES 2021 or T99, choose **Update my local save**, select
@@ -34,8 +36,10 @@ Back up your save, extract `EDIT00000000`, and copy it to:
 
 `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\`
 
-For custom club lists or on-demand runs, fork the repository and use
-**Run workflow** in the Actions tab.
+For on-demand runs, fork the repository and use
+**Run workflow** in the Actions tab. Building the Windows installer additionally
+requires an `INSTALLER_SIGNING_KEY` secret (PEM PKCS#8 Ed25519 private key
+matching the public key in `installer/update.py`).
 
 ## Compatibility & Update Modes
 
@@ -53,10 +57,10 @@ Start a new Master League or Become a Legend career after installing it.
 
 ### Fast vs Deep
 
-| Mode                | Coverage                                                                                                          | Best for        |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------- | --------------- |
-| **Fast (default)**  | Live transfer feed plus squad membership, shirt numbers, and captain roles for up to 32 clubs found in that feed. | Daily updates   |
-| **Deep (`--deep`)** | Current squad membership, shirt numbers, and captain roles for every indexed club.                                | Broad refreshes |
+| Mode                | Coverage                                                                                                     | Best for        |
+| ------------------- | ------------------------------------------------------------------------------------------------------------ | --------------- |
+| **Fast (default)**  | Live transfer feed plus squad membership, shirt numbers, and captain roles for every save club touched by any source's transfer events. | Daily updates   |
+| **Deep (`--deep`)** | Current squad membership, shirt numbers, and captain roles for every save club matched to FotMob.            | Broad refreshes |
 
 Use **Fast** for routine updates, choose **Deep** for broader coverage.
 
@@ -64,6 +68,18 @@ Roster changes come from verified transfer events or complete FotMob squad
 snapshots matched to existing local identities. Short provider aliases require
 matching shirt, age, and compatible-role evidence; ambiguous or low-coverage
 evidence does not force player-specific corrections.
+
+Club identity is learned per selected save, not from curated club lists: save
+club names are matched against the generated FotMob team index
+(`data/fotmob_teams.json`) and confirmed by FotMob squad overlap. Learned
+bindings are cached under `storage/` (or the installer's user-state directory).
+
+Each run loads and validates the save before scraping. When a run continues the
+save it last wrote (in-place or the default incremental output), the transfer
+window starts 7 days before that save's last applied log entry, extended back to
+the oldest still-pending relevant transfer that was not applied. Rebuilds from a
+different input, and saves without a log, use the previous window start
+(Jan 1 / Jun 1); the automatic window never starts earlier than that.
 
 ### PES 2021/T99 patch saves
 
@@ -107,13 +123,15 @@ the existing value. The updater can change all eight supported controls in the
 main preset: attacking style, build-up, attacking area, defensive style,
 containment area, pressuring, defensive line, and compactness.
 
-Formations use FotMob's last-lineup value when present, otherwise the latest
-finished match page with an unambiguous team-name match. Valid 10-player shapes
-are converted into PES role and coordinate layouts for all three phases of the
-main preset; the two alternate presets are untouched. Fast mode applies
-formations only to clubs with refreshed squad snapshots, while Deep mode covers
-all indexed clubs with complete snapshots. Missing or unsupported formation
-evidence preserves the existing bytes.
+Formations, starting XI, bench, and detailed positions come from FotMob's last
+lineup (starters and substitutes), otherwise the latest finished match page
+with an unambiguous team-name match. The game plan is resolved after the run's
+roster changes. Valid 10-player shapes are converted into PES role and
+coordinate layouts for all three phases of the main preset; the two alternate
+presets are untouched. Empty captain and set-piece roles are filled from save
+data. Fast mode applies formations only to clubs with refreshed squad
+snapshots, while Deep mode covers all matched clubs with complete snapshots.
+Missing or unsupported formation evidence preserves the existing bytes.
 
 The updater checks each player's current club and never overwrites an occupied
 shirt number. Clean PES21 saves may retain numbers in empty roster slots, these
@@ -124,6 +142,14 @@ are reported as non-blocking warnings.
 Successful `run` commands append applied transfer, roster, and captain changes
 to `data/transfer_log.jsonl`. `run` also refreshes
 `output/transfer_summary.md` and `output/transfer_summary.html`.
+
+Transfers that could not be applied are never forced into the save: players
+missing from the save are reported, never created. Each run lists them, with a
+reason code, in a **Not applied** report section and in
+`skipped_transfers.jsonl` beside the reports, with transfers touching save
+clubs listed first. The CLI prints the full list grouped by reason, and the
+installer shows the same list after a local update. `--dry-run` also prints
+the per-team XI, bench, and captain changes a run would make.
 
 When applying a prebuilt release, the installer writes and displays the
 bundled transfer report as a timestamped Markdown file under `FLDailyEditLogs`
@@ -142,9 +168,9 @@ the first transfer page per club by default, supports deeper history through
 `max_pages`, and has a 60-second source budget. Optional-source failures do not
 block a run, incomplete or ambiguous events are skipped.
 
-Fast-mode Transfermarkt scans stop after 120 seconds and retain verified rows
-already read; events available only on later pages may be missed. Deep mode
-keeps the full scan.
+Transfermarkt scans continue back to the run's since-date in both modes, so
+events on later pages are not dropped by a time budget. Fast mode has no club
+cap: every save club touched by a transfer event from any source is refreshed.
 
 ## Run locally
 

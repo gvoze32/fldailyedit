@@ -93,15 +93,6 @@ class TestMatchedTransfer:
 
 
 class TestFotmobScraper:
-    def test_deep_index_prioritizes_canonical_asian_club_names(self):
-        from scraper.fotmob import get_deep_clubs
-
-        clubs = get_deep_clubs()
-
-        assert clubs["Vissel Kobe"] == 4688
-        assert clubs["Lion City Sailors"] == 67366
-        assert "Lion City Sailors Fc" not in clubs
-
     def test_parse_fotmob_item_transfer(self):
         from scraper.fotmob import FotmobScraper
 
@@ -328,7 +319,7 @@ class TestScraperSafety:
                     }]
                 },
             },
-            {"status": 503, "payload": {}},
+            *([{"status": 503, "payload": {}}] * 3),
         ]
 
         class FakeResponse:
@@ -361,8 +352,63 @@ class TestScraperSafety:
                 return response
 
         monkeypatch.setattr(fotmob.aiohttp, "ClientSession", FakeSession)
+        monkeypatch.setattr(fotmob, "FOTMOB_RETRY_BACKOFF_SECONDS", 0.0)
         with pytest.raises(fotmob.IncompleteScrapeError, match="page 2"):
             asyncio.run(fotmob.FotmobScraper()._fetch_transfers_async())
+
+    def test_global_feed_retries_transient_page_failure(self, monkeypatch):
+        from scraper import fotmob
+
+        deal = {
+            "name": "Retried Deal",
+            "fromClub": "A",
+            "toClub": "B",
+            "transferDate": "2026-08-01",
+        }
+        responses = [
+            (200, {"transfers": [{**deal, "name": "First Deal"}]}),
+            (429, {}),
+            (200, {"transfers": [deal]}),
+            (200, {"transfers": []}),
+        ]
+
+        class FakeResponse:
+            def __init__(self, status, payload):
+                self.status = status
+                self.payload = payload
+                self.headers = {"Retry-After": "0"}
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                return False
+
+            async def json(self, content_type=None):
+                return self.payload
+
+        class FakeSession:
+            def __init__(self, *_, **__):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                return False
+
+            def get(self, _):
+                return FakeResponse(*responses.pop(0))
+
+        monkeypatch.setattr(fotmob.aiohttp, "ClientSession", FakeSession)
+        transfers = asyncio.run(
+            fotmob.FotmobScraper()._fetch_transfers_async(window="all")
+        )
+
+        assert [transfer.player_name for transfer in transfers] == [
+            "First Deal",
+            "Retried Deal",
+        ]
 
     def test_global_feed_does_not_stop_on_old_item_in_last_modified_order(self, monkeypatch):
         from scraper import fotmob
@@ -482,10 +528,13 @@ class TestScraperSafety:
         assert [transfer.player_name for transfer in transfers] == ["Repeated Deal"]
         assert FakeSession.calls == 2
 
-    def test_bounded_window_skips_undated_transfer(self):
-        from datetime import date
+    def test_bounded_window_keeps_undated_and_future_transfers_pending(self):
+        from datetime import date, datetime, timedelta, timezone
         from scraper.fotmob import FotmobScraper
 
+        future = (
+            datetime.now(timezone.utc).date() + timedelta(days=30)
+        ).isoformat()
         payload = {
             "transfers": {
                 "data": {
@@ -497,14 +546,88 @@ class TestScraperSafety:
                             "toClub": "B",
                             "transferDate": "2026-07-01",
                         },
+                        {
+                            "name": "Signed Ahead",
+                            "fromClub": "A",
+                            "toClub": "B",
+                            "transferDate": future,
+                        },
+                        {
+                            "name": "Too Old",
+                            "fromClub": "A",
+                            "toClub": "B",
+                            "transferDate": "2026-01-01",
+                        },
                     ]
                 }
             }
         }
+        pending = []
         results = FotmobScraper()._extract_transfers_from_team_data(
-            payload, date(2026, 6, 1), date(2026, 9, 30)
+            payload, date(2026, 6, 1), date(2026, 9, 30), pending
         )
         assert [transfer.player_name for transfer in results] == ["Dated"]
+        assert [transfer.player_name for transfer in pending] == [
+            "No Date",
+            "Signed Ahead",
+        ]
+
+    def test_global_feed_exposes_future_dated_transfers_as_pending(
+        self,
+        monkeypatch,
+    ):
+        from datetime import datetime, timedelta, timezone
+        from scraper import fotmob
+
+        today = datetime.now(timezone.utc).date()
+        pages = {
+            1: {
+                "transfers": [
+                    {
+                        "name": "Effective",
+                        "fromClub": "A",
+                        "toClub": "B",
+                        "transferDate": today.isoformat(),
+                    },
+                    {
+                        "name": "Pre Contract",
+                        "playerId": 77,
+                        "fromClub": "A",
+                        "toClub": "C",
+                        "transferDate": (today + timedelta(days=60)).isoformat(),
+                    },
+                ]
+            },
+            2: {"transfers": []},
+        }
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+        async def fake_fetch(_scraper, _session, url, _label, *_args):
+            page = int(url.split("page=")[1].split("&")[0])
+            return 200, pages[page], {}
+
+        monkeypatch.setattr(
+            fotmob.aiohttp, "ClientSession", lambda **_: FakeSession()
+        )
+        monkeypatch.setattr(
+            fotmob.FotmobScraper, "_fetch_json_response_async", fake_fetch
+        )
+
+        result = fotmob.fetch_fotmob_transfers(
+            since_date=(today - timedelta(days=10)).isoformat()
+        )
+
+        assert [transfer.player_name for transfer in result] == ["Effective"]
+        assert [
+            (transfer.player_name, transfer.player_id_fotmob)
+            for transfer in result.pending_transfers
+        ] == [("Pre Contract", 77)]
 
     def test_bad_squad_member_does_not_discard_valid_members(self):
         from scraper.fotmob import FotmobScraper
@@ -616,6 +739,78 @@ class TestScraperSafety:
             "Player 101",
         ]
         assert snapshot.starter_members[0].position == "CMF"
+        assert snapshot.sub_members == ()
+
+    def test_lineup_starters_and_subs_carry_detailed_positions(self):
+        from scraper.fotmob import FotmobScraper
+
+        members = [
+            {
+                "id": 100,
+                "name": "Winger",
+                "positionIds": "87,83",
+                "positionIdsDesc": "LW,RW",
+                "shirtNumber": 11,
+            },
+            {
+                "id": 101,
+                "name": "Fullback",
+                "positionIds": "32",
+                "positionIdsDesc": "RB",
+            },
+            {
+                "id": 102,
+                "name": "Bench Mid",
+                "positionIds": "73,84",
+                "positionIdsDesc": "CM,CAM",
+            },
+            *(
+                {"id": player_id, "name": f"Player {player_id}"}
+                for player_id in range(103, 111)
+            ),
+        ]
+        payload = {
+            "squad": {"squad": [{"members": members}]},
+            "overview": {
+                "lastLineupStats": {
+                    "starters": [
+                        # Played on the right this match: positionId 83 -> RW.
+                        {"id": 100, "name": "Winger", "positionId": 83},
+                        {"id": 101, "name": "Fullback", "positionId": 999},
+                    ],
+                    "subs": [
+                        {"id": 102, "name": "Bench Mid"},
+                        {
+                            "id": 500,
+                            "name": "Unlisted Sub",
+                            "age": 19,
+                            "countryName": "Exampleland",
+                            "positionId": 32,
+                        },
+                        {"id": 102, "name": "Bench Mid"},
+                    ],
+                }
+            },
+        }
+
+        snapshot = FotmobScraper()._extract_squad_snapshot_from_team_data(
+            payload,
+            42,
+            "Example FC",
+        )
+
+        assert [
+            (member.player_id_fotmob, member.position)
+            for member in snapshot.starter_members
+        ] == [(100, "RW"), (101, "RB")]
+        assert snapshot.starter_members[0].shirt_number == 11
+        assert snapshot.members[0].position == "LW"
+        assert [
+            (member.player_id_fotmob, member.position)
+            for member in snapshot.sub_members
+        ] == [(102, "CM"), (500, "RB")]
+        assert snapshot.sub_members[1].age == 19
+        assert snapshot.sub_members[1].nationality == "Exampleland"
 
     def test_latest_team_match_page_uses_newest_finished_team_result(self):
         from scraper.fotmob import _latest_team_match_page
@@ -691,9 +886,10 @@ class TestScraperSafety:
         assert _formation_from_match_page(html, ("Example FC",)) == "4-2-3-1"
         assert _formation_from_match_page(html, ("Missing FC",)) is None
 
-    def test_complete_snapshot_enriches_formation_from_last_match_page(self):
+    def test_complete_snapshot_enriches_formation_from_last_match_page(self, tmp_path):
         import asyncio
 
+        from scraper import fotmob
         from scraper.fotmob import FotmobScraper
 
         match_html = (
@@ -777,6 +973,23 @@ class TestScraperSafety:
         assert session.urls[0][0] == enriched.formation_source_url
         assert session.urls[0][1] == "text/html,application/xhtml+xml"
 
+        # A cached parse of the same match page is reused without a request.
+        cache = fotmob._FotmobTeamPayloadCache(tmp_path / "team-cache")
+        cache.update(42, payload)
+        first = asyncio.run(
+            scraper._enrich_squad_snapshot_formation_async(session, payload, snapshot, cache)
+        )
+        cache.save()
+        restored = fotmob._FotmobTeamPayloadCache(tmp_path / "team-cache")
+        cached_session = FakeSession()
+        second = asyncio.run(
+            scraper._enrich_squad_snapshot_formation_async(
+                cached_session, payload, snapshot, restored
+            )
+        )
+        assert first == second == enriched
+        assert cached_session.urls == []
+
     def test_squad_snapshot_excludes_coach_sections(self):
         from scraper.fotmob import FotmobScraper
 
@@ -818,25 +1031,14 @@ class TestScraperSafety:
         assert len(snapshot.members) == 11
         assert all(member.player_name != "Current Coach" for member in snapshot.members)
 
-    def test_club_target_resolution_rejects_ambiguous_substring(self):
-        from scraper.fotmob import _resolve_club_targets
-
-        available = {"Manchester United": 1, "Manchester City": 2, "Arsenal": 3}
-        assert _resolve_club_targets(["Arsenal"], available) == [("Arsenal", 3)]
-        assert _resolve_club_targets(["Manchester"], available) == []
-
-    def test_focused_scrape_rejects_any_unresolved_club(self, monkeypatch):
+    def test_club_fetch_requires_fotmob_ids(self):
         from scraper import fotmob
 
-        monkeypatch.setattr(
-            fotmob,
-            "get_deep_clubs",
-            lambda: {"Manchester United": 1, "Manchester City": 2},
-        )
-        with pytest.raises(fotmob.IncompleteScrapeError, match="every requested club"):
-            fotmob.fetch_transfers_for_club_names(["Manchester"])
+        with pytest.raises(fotmob.IncompleteScrapeError, match="No FotMob club IDs"):
+            fotmob.fetch_clubs_transfers_safely([None, 0, "bad"])
+        assert fotmob.fetch_squads_for_club_ids([]) == []
 
-    def test_targeted_squad_fetch_returns_current_numbers(self, monkeypatch):
+    def test_targeted_squad_fetch_returns_current_numbers(self, monkeypatch, tmp_path):
         from scraper import fotmob
 
         payload = {
@@ -881,9 +1083,9 @@ class TestScraperSafety:
             return payload
 
         monkeypatch.setattr(
-            fotmob,
-            "get_deep_clubs",
-            lambda: {"Example FC": 42},
+            fotmob.config,
+            "FOTMOB_TEAM_CACHE_DIR",
+            tmp_path / "team-cache",
         )
         monkeypatch.setattr(
             fotmob.aiohttp,
@@ -896,7 +1098,7 @@ class TestScraperSafety:
             fake_fetch,
         )
 
-        result = fotmob.fetch_squads_for_club_names(["Example FC"])
+        result = fotmob.fetch_squads_for_club_ids([42, "42"])
 
         assert len(result) == 0
         assert result.squad_snapshots == ()
@@ -1092,10 +1294,13 @@ class TestScraperSafety:
         assert session.calls == 3
         assert delays == [0.5, 1.0]
 
-    def test_deep_fetch_collects_captains_for_every_indexed_club(self, monkeypatch):
+    def test_club_fetch_collects_captains_for_every_requested_id(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
         from scraper import fotmob
 
-        indexed_clubs = {"Alpha FC": 1, "Beta FC": 2}
         progress_events = []
         calls = []
 
@@ -1128,7 +1333,11 @@ class TestScraperSafety:
         async def no_sleep(_delay):
             return None
 
-        monkeypatch.setattr(fotmob, "get_deep_clubs", lambda: indexed_clubs)
+        monkeypatch.setattr(
+            fotmob.config,
+            "FOTMOB_TEAM_CACHE_DIR",
+            tmp_path / "team-cache",
+        )
         monkeypatch.setattr(fotmob.aiohttp, "ClientSession", lambda **_: FakeSession())
         monkeypatch.setattr(
             fotmob.FotmobScraper,
@@ -1138,7 +1347,8 @@ class TestScraperSafety:
         monkeypatch.setattr(fotmob.asyncio, "sleep", no_sleep)
 
         result = asyncio.run(
-            fotmob.FotmobScraper().fetch_major_clubs_transfers_safely_async(
+            fotmob.FotmobScraper().fetch_clubs_async(
+                [1, 2],
                 window="all",
                 progress=lambda detail, current, total: progress_events.append(
                     (detail, current, total)
@@ -1148,20 +1358,162 @@ class TestScraperSafety:
 
         assert calls == [1, 2]
         assert progress_events == [
-            ("Deep mode: checking indexed club 1/2 — Alpha FC", 1, 2),
-            ("Deep mode: checking indexed club 2/2 — Beta FC", 2, 2),
+            ("Checking FotMob club 1/2 — 1", 1, 2),
+            ("Checking FotMob club 2/2 — 2", 2, 2),
         ]
         assert [captain.player_id_fotmob for captain in result.captain_updates] == [
             101,
             102,
         ]
+        assert [snapshot.club_name for snapshot in result.squad_snapshots] == []
+        assert [captain.club_name for captain in result.captain_updates] == [
+            "Alpha FC",
+            "Beta FC",
+        ]
 
-
-
-    def test_deep_fetch_bounds_concurrency_and_preserves_order(self, monkeypatch):
+    def test_squad_fetch_skips_failed_ids_and_keeps_payload_order(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
         from scraper import fotmob
 
-        indexed_clubs = {f"Club {index}": index for index in range(1, 7)}
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+        async def fake_fetch(_scraper, _session, team_id):
+            if team_id == 2:
+                raise fotmob.IncompleteScrapeError("HTTP 404")
+            return {
+                "details": {"name": f"Club {team_id}"},
+                "transfers": {
+                    "data": {
+                        "Players in": [
+                            {
+                                "name": "Ignored Transfer",
+                                "fromClub": "A",
+                                "toClub": f"Club {team_id}",
+                                "transferDate": "2026-07-01",
+                            }
+                        ]
+                    }
+                },
+                "squad": {
+                    "squad": [
+                        {
+                            "members": [
+                                {
+                                    "id": team_id * 100 + index,
+                                    "name": f"Player {team_id}-{index}",
+                                }
+                                for index in range(11)
+                            ]
+                        }
+                    ]
+                },
+            }
+
+        async def no_sleep(_delay):
+            return None
+
+        monkeypatch.setattr(
+            fotmob.config,
+            "FOTMOB_TEAM_CACHE_DIR",
+            tmp_path / "team-cache",
+        )
+        monkeypatch.setattr(fotmob.aiohttp, "ClientSession", lambda **_: FakeSession())
+        monkeypatch.setattr(
+            fotmob.FotmobScraper,
+            "_fetch_club_data_async",
+            fake_fetch,
+        )
+        monkeypatch.setattr(fotmob.asyncio, "sleep", no_sleep)
+
+        result = fotmob.fetch_squads_for_club_ids([3, 2, 1])
+
+        assert len(result) == 0
+        assert [
+            (snapshot.team_id_fotmob, snapshot.club_name)
+            for snapshot in result.squad_snapshots
+        ] == [(3, "Club 3"), (1, "Club 1")]
+
+    def test_club_fetch_reuses_fresh_cache_without_network(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from datetime import datetime, timedelta, timezone
+
+        from scraper import fotmob
+
+        calls = []
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+        async def fake_fetch(_scraper, _session, team_id):
+            calls.append(team_id)
+            return {
+                "details": {"name": f"Club {team_id}"},
+                "squad": {
+                    "squad": [
+                        {
+                            "members": [
+                                {"id": team_id * 100 + index, "name": f"P {index}"}
+                                for index in range(11)
+                            ]
+                        }
+                    ]
+                },
+            }
+
+        async def no_sleep(_delay):
+            return None
+
+        cache_dir = tmp_path / "team-cache"
+        monkeypatch.setattr(fotmob.config, "FOTMOB_TEAM_CACHE_DIR", cache_dir)
+        monkeypatch.setattr(fotmob.aiohttp, "ClientSession", lambda **_: FakeSession())
+        monkeypatch.setattr(fotmob.FotmobScraper, "_fetch_club_data_async", fake_fetch)
+        monkeypatch.setattr(fotmob.asyncio, "sleep", no_sleep)
+
+        first = fotmob.fetch_squads_for_club_ids([1, 2])
+        second = fotmob.fetch_squads_for_club_ids([1, 2])
+
+        assert calls == [1, 2]
+        assert first.squad_snapshots == second.squad_snapshots
+
+        cache = fotmob._FotmobTeamPayloadCache(cache_dir)
+        assert cache.fresh_payload(1)["details"]["name"] == "Club 1"
+        stale_now = datetime.now(timezone.utc) + fotmob.FOTMOB_TEAM_CACHE_TTL + timedelta(seconds=1)
+        assert cache.fresh_payload(1, now=stale_now) is None
+
+    def test_team_payload_cache_rejects_corrupted_entry(self, tmp_path):
+        from scraper import fotmob
+
+        cache = fotmob._FotmobTeamPayloadCache(tmp_path / "team-cache")
+        cache.update(7, {"details": {"name": "Example FC"}})
+        cache.save()
+        path = tmp_path / "team-cache" / "7.json"
+        path.write_bytes(path.read_bytes().replace(b"Example", b"Exemple"))
+
+        assert fotmob._FotmobTeamPayloadCache(tmp_path / "team-cache").get(7) is None
+
+
+    def test_club_fetch_bounds_concurrency_and_preserves_order(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from scraper import fotmob
+
         active = 0
         peak = 0
         real_sleep = asyncio.sleep
@@ -1197,7 +1549,11 @@ class TestScraperSafety:
         async def no_cooldown(_delay):
             return None
 
-        monkeypatch.setattr(fotmob, "get_deep_clubs", lambda: indexed_clubs)
+        monkeypatch.setattr(
+            fotmob.config,
+            "FOTMOB_TEAM_CACHE_DIR",
+            tmp_path / "team-cache",
+        )
         monkeypatch.setattr(
             fotmob.aiohttp,
             "ClientSession",
@@ -1212,7 +1568,8 @@ class TestScraperSafety:
         monkeypatch.setattr(fotmob.asyncio, "sleep", no_cooldown)
 
         result = asyncio.run(
-            fotmob.FotmobScraper().fetch_major_clubs_transfers_safely_async(
+            fotmob.FotmobScraper().fetch_clubs_async(
+                range(1, 7),
                 window="all",
             )
         )
@@ -1228,10 +1585,13 @@ class TestScraperSafety:
         ]
 
 
-    def test_deep_fetch_cancels_pending_clubs_after_failure(self, monkeypatch):
+    def test_club_fetch_cancels_pending_clubs_after_failure(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
         from scraper import fotmob
 
-        indexed_clubs = {f"Club {index}": index for index in range(1, 5)}
         started = []
         cancelled = []
         real_sleep = asyncio.sleep
@@ -1257,7 +1617,11 @@ class TestScraperSafety:
         async def no_cooldown(_delay):
             return None
 
-        monkeypatch.setattr(fotmob, "get_deep_clubs", lambda: indexed_clubs)
+        monkeypatch.setattr(
+            fotmob.config,
+            "FOTMOB_TEAM_CACHE_DIR",
+            tmp_path / "team-cache",
+        )
         monkeypatch.setattr(
             fotmob.aiohttp,
             "ClientSession",
@@ -1273,10 +1637,11 @@ class TestScraperSafety:
 
         with pytest.raises(
             fotmob.IncompleteScrapeError,
-            match=r"Deep scrape incomplete at Club 2 \(2\): rate limited",
+            match=r"Club scrape incomplete at FotMob team 2: rate limited",
         ):
             asyncio.run(
-                fotmob.FotmobScraper().fetch_major_clubs_transfers_safely_async(
+                fotmob.FotmobScraper().fetch_clubs_async(
+                    range(1, 5),
                     window="all",
                 )
             )

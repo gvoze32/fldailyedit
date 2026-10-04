@@ -45,6 +45,38 @@ class Transfer:
         return f"{self.player_name}{pos_badge}: {self.from_club} → {self.to_club}{type_badge}"
 
 
+_SOURCE_PRIORITY = {
+    "fotmob": 0,
+    "transfermarkt": 1,
+    "wikipedia": 2,
+}
+
+
+def source_priority(transfer: Transfer) -> int:
+    """Return the strongest provenance rank carried by an event (lower wins)."""
+    return min(
+        (_SOURCE_PRIORITY.get(source.casefold(), 3) for source in transfer.sources),
+        default=3,
+    )
+
+
+def adopt_event_type(target: Transfer, duplicate: Transfer) -> None:
+    """
+    Refine a generic 'transfer' with a duplicate's explicit lifecycle type.
+
+    Only an equally or more trusted duplicate may refine the type: FotMob uses
+    'transfer' for paid permanent moves, so a corroborator's 'loan' must not
+    turn a verified permanent move into a loan. Call before merging sources.
+    """
+    if (
+        target.transfer_type == "transfer"
+        and duplicate.transfer_type != "transfer"
+        and source_priority(duplicate) <= source_priority(target)
+    ):
+        target.transfer_type = duplicate.transfer_type
+        target.is_loan = duplicate.is_loan
+
+
 @dataclass(frozen=True, slots=True)
 class SquadMember:
     """One player entry from a complete current-squad payload."""
@@ -67,6 +99,7 @@ class SquadSnapshot:
     source_url: str
     complete: bool = False
     starter_members: tuple[SquadMember, ...] = ()
+    sub_members: tuple[SquadMember, ...] = ()
     primary_league_id: Optional[int] = None
     formation: str | None = None
     formation_source_url: str = ""
@@ -114,12 +147,16 @@ class ScrapeResult(list[Transfer]):
             tuple[tuple[int, str, SquadMember], ...],
         ] | None = None,
         tactical_updates: list[TacticalUpdate] | tuple[TacticalUpdate, ...] = (),
+        pending_transfers: list[Transfer] | tuple[Transfer, ...] = (),
     ) -> None:
         super().__init__(transfers)
         self.captain_updates = tuple(captain_updates)
         self.squad_snapshots = tuple(squad_snapshots)
         self.roster_updates = tuple(roster_updates)
         self.tactical_updates = tuple(tactical_updates)
+        # Provider events not yet effective (future-dated) or undated inside a
+        # bounded window. Never applied; surfaced so callers can report them.
+        self.pending_transfers = tuple(pending_transfers)
         if fotmob_identity_map is None:
             built_identity_map: dict[
                 int,
@@ -156,6 +193,7 @@ class ScrapeResult(list[Transfer]):
             or self.squad_snapshots
             or self.roster_updates
             or self.tactical_updates
+            or self.pending_transfers
         )
 
 

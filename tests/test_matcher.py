@@ -2,29 +2,30 @@
 Tests for the fuzzy name matcher.
 """
 import pytest
-from scraper.matcher import NameMatcher, _normalize
+from scraper.matcher import NameMatcher, _is_position_compatible
+from scraper.text import fold_text
 
 
 # --- Normalization tests ---
 
 class TestNormalize:
     def test_lowercase(self):
-        assert _normalize("MESSI") == "messi"
+        assert fold_text("MESSI") == "messi"
 
     def test_strip_diacritics(self):
-        assert _normalize("Mbappé") == "mbappe"
-        assert _normalize("Müller") == "muller"
-        assert _normalize("Señor") == "senor"
-        assert _normalize("Čech") == "cech"
+        assert fold_text("Mbappé") == "mbappe"
+        assert fold_text("Müller") == "muller"
+        assert fold_text("Señor") == "senor"
+        assert fold_text("Čech") == "cech"
 
     def test_collapse_whitespace(self):
-        assert _normalize("  Lionel   Messi  ") == "lionel messi"
+        assert fold_text("  Lionel   Messi  ") == "lionel messi"
 
     def test_combined(self):
-        assert _normalize("  Kylian  Mbappé  ") == "kylian mbappe"
+        assert fold_text("  Kylian  Mbappé  ") == "kylian mbappe"
 
     def test_transliterate_non_decomposing_letters(self):
-        assert _normalize("Kenan Yıldız") == "kenan yildiz"
+        assert fold_text("Kenan Yıldız") == "kenan yildiz"
 
 
 
@@ -334,6 +335,59 @@ class TestPlayerMatching:
         assert pid == 8001
         assert name == "Gabriel Magalhaes"
 
+    def test_metadata_cannot_drop_stronger_name_match(self):
+        """Age agreement must not promote a weaker name over a stronger one."""
+        m = NameMatcher()
+        m.load_player_db(
+            players={"Bruno Silva Santos": 8101, "Bruno Sousa": 8102},
+            ages={8101: 25, 8102: 27},
+        )
+
+        pid, name, conf = m.match_player("Bruno Silva", threshold=70, age=27)
+
+        assert (pid, name) == (8101, "Bruno Silva Santos")
+        assert conf >= 95
+
+    def test_tied_candidates_beyond_ten_are_still_scored(self):
+        """Every tied fuzzy candidate competes, not just the first ten."""
+        m = NameMatcher()
+        players = {f"Rodrigo Player{index:02d}": 8200 + index for index in range(12)}
+        m.load_player_db(
+            players=players,
+            nationalities={
+                **{pid: "Brazil" for pid in players.values()},
+                8211: "Spain",
+            },
+        )
+
+        pid, name, conf = m.match_player("Rodrigo", nationality="Spain")
+
+        assert (pid, name) == (8211, "Rodrigo Player11")
+        assert conf == 100.0
+
+    @pytest.mark.parametrize(
+        ("provider_position", "pes_position"),
+        [("LW", "LMF"), ("RW", "RMF"), ("LM", "LWF"), ("RM", "RB")],
+    )
+    def test_wide_players_match_across_lines(self, provider_position, pes_position):
+        assert _is_position_compatible(provider_position, pes_position)
+
+        m = NameMatcher()
+        m.load_player_db(
+            players={"Alejandro Garnacho": 8301},
+            positions={8301: pes_position},
+        )
+
+        assert m.match_player("Alejandro Garnacho", position=provider_position) == (
+            8301,
+            "Alejandro Garnacho",
+            100.0,
+        )
+
+    def test_central_lines_stay_incompatible(self):
+        assert not _is_position_compatible("CF", "DMF")
+        assert not _is_position_compatible("LW", "CB")
+
 
 
 
@@ -362,24 +416,26 @@ class TestTeamMatching:
         assert tid == 2001
         assert conf == 100.0
 
-    def test_low_id_club_is_not_mistaken_for_national_team(self):
+    def test_no_bundled_team_aliases_are_loaded(self):
         m = NameMatcher()
         m.load_team_db({"Manchester United": 100})
-        assert m.match_team("Man Utd") == (100, "Manchester United", 100.0)
+        tid, _, conf = m.match_team("Man Utd")
+        assert (tid, conf) != (100, 100.0)
 
-    def test_alias_target_can_resolve_through_club_affix(self):
+    def test_supplied_alias_target_can_resolve_through_club_affix(self):
         m = NameMatcher()
         m.load_team_db({"Juventus FC": 120})
+        m.load_team_aliases({"Juve": "Juventus"})
         assert m.match_team("Juve") == (120, "Juventus FC", 100.0)
 
-    def test_lion_city_sailors_alias(self):
+    def test_club_affix_variant_matches_cleaned_name(self):
         m = NameMatcher()
         m.load_team_db({"Lion City Sailors": 71134})
 
         assert m.match_team("Lion City Sailors FC") == (
             71134,
             "Lion City Sailors",
-            100.0,
+            98.0,
         )
 
     @pytest.mark.parametrize("name", ["Free Agent", "Without Club", "Retired", ""])
@@ -389,24 +445,13 @@ class TestTeamMatching:
         assert matched_name == ""
         assert conf == 100.0
 
-    @pytest.mark.parametrize("alias", ["Man Utd", "Man United"])
-    def test_alias_match(self, matcher, alias):
-        """Short Manchester United names resolve to the canonical club."""
-        tid, name, conf = matcher.match_team(alias)
-        assert tid == 2001
-        assert conf == 100.0
-
-    def test_alias_psg(self, matcher):
-        tid, name, conf = matcher.match_team("PSG")
-        assert tid == 2006
-        assert conf == 100.0
-
-    def test_alias_bayern(self, matcher):
+    def test_data_derived_alias_match(self, matcher):
+        matcher.load_team_aliases({"Bayern Munich": "FC Bayern München"})
         tid, name, conf = matcher.match_team("Bayern Munich")
-        assert tid == 2005
-        assert conf == 100.0
+        assert (tid, conf) == (2005, 100.0)
 
     def test_alias_lookup_normalizes_diacritics(self, matcher):
+        matcher.load_team_aliases({"Atlético de Madrid": "Atletico Madrid"})
         tid, name, conf = matcher.match_team("Atletico de Madrid")
         assert (tid, name, conf) == (2010, "Atletico Madrid", 100.0)
 
@@ -444,3 +489,38 @@ class TestTeamMatching:
         tid, name, conf = m.match_team("Any Team")
         assert tid is None
         assert conf == 0.0
+
+
+class TestTokenSetIndex:
+    def test_matches_process_extract_exactly(self):
+        import random
+
+        from rapidfuzz import fuzz, process
+
+        from scraper.matcher import _TokenSetIndex
+
+        rng = random.Random(7)
+        letters = "abcdeilmnorstu"
+
+        def word():
+            return "".join(rng.choice(letters) for _ in range(rng.randint(2, 7)))
+
+        names = list(dict.fromkeys(
+            " ".join(word() for _ in range(rng.randint(1, 3))) for _ in range(600)
+        ))
+        index = _TokenSetIndex(names)
+        queries = [" ".join(word() for _ in range(rng.randint(1, 3))) for _ in range(150)]
+        queries += names[:50] + [names[0].split()[0], ""]
+        for cutoff in (0.0, 55.0, 68.0, 83.0):
+            for query in queries:
+                expected = [
+                    tuple(item)
+                    for item in process.extract(
+                        query,
+                        names,
+                        scorer=fuzz.token_set_ratio,
+                        limit=None,
+                        score_cutoff=cutoff,
+                    )
+                ]
+                assert index.extract(query, cutoff) == expected

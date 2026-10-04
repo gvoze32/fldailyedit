@@ -339,9 +339,9 @@ def _load_metadata_variant_from_cpk(path: Path):
         return database_type.from_bytes(read_cpk_file(path, member))
 
     return (
-        load(PlayerBinDatabase, _PLAYER_BIN_CPK_MEMBER),
-        load(TeamBinDatabase, _TEAM_BIN_CPK_MEMBER),
-        load(PlayerAssignmentDatabase, _PLAYER_ASSIGNMENT_CPK_MEMBER),
+        load(PlayerBinDatabase, native_metadata._PLAYER_BIN_CPK_MEMBER),
+        load(TeamBinDatabase, native_metadata._TEAM_BIN_CPK_MEMBER),
+        load(PlayerAssignmentDatabase, native_metadata._PLAYER_ASSIGNMENT_CPK_MEMBER),
     )
 
 
@@ -576,7 +576,7 @@ def cmd_run(args):
         allow_overflow_release=bool(
             getattr(args, "allow_overflow_release", True)
         ),
-        release_policy_file=getattr(args, "release_policy_file", None),
+        release_policy_file=getattr(args, "release_policy", None),
         dry_run=dry_run,
     )
 
@@ -586,6 +586,7 @@ def cmd_run(args):
         print(f"\n❌ {error}")
         sys.exit(1 if error.code in {"missing_input", "decrypt_failed"} else 2)
 
+    _print_skipped_transfers(result.skipped)
     if dry_run:
         return
     if result.no_changes:
@@ -622,9 +623,50 @@ def cmd_run(args):
     print(f"   Backup at:               {result.backup_path}")
     print(f"   Log at:                  {config.TRANSFER_LOG_FILE}")
     print(f"   Visual Summary Report:   {config.OUTPUT_DIR / 'transfer_summary.md'}")
+    if result.skipped:
+        print(
+            "   Not applied (JSONL):     "
+            f"{config.OUTPUT_DIR / transfer_logger.SKIPPED_TRANSFERS_FILENAME}"
+        )
 
 
-
+def _print_skipped_transfers(skipped) -> None:
+    """Print every transfer this run did not apply, grouped by reason."""
+    if not skipped:
+        return
+    groups: dict[str, list[dict]] = {}
+    for item in skipped:
+        groups.setdefault(str(item.get("reason") or "unknown"), []).append(item)
+    relevant = sum(1 for item in skipped if item.get("relevant"))
+    print(
+        f"\n📋 Not applied: {len(skipped)} transfers "
+        f"({relevant} touch this save; players missing from the save are "
+        "reported, never created)"
+    )
+    ordered = sorted(
+        groups.items(),
+        key=lambda group: (
+            -sum(1 for item in group[1] if item.get("relevant")),
+            -len(group[1]),
+            group[0],
+        ),
+    )
+    for reason, items in ordered:
+        print(f"\n  {reason} ({len(items)}):")
+        for item in sorted(items, key=lambda row: not row.get("relevant")):
+            marker = "*" if item.get("relevant") else " "
+            fotmob_id = item.get("fotmob_player_id")
+            line = (
+                f"   {marker} {item.get('player_name')}: "
+                f"{item.get('from_team') or '?'} → {item.get('to_team') or '?'}"
+                f" ({item.get('date') or 'undated'})"
+            )
+            if fotmob_id:
+                line += f" [FotMob {fotmob_id}]"
+            if item.get("detail"):
+                line += f" — {item['detail']}"
+            print(line)
+    print("\n  * touches a club in this save")
 
 
 def cmd_log(args):
@@ -694,12 +736,15 @@ def _add_transfer_feed_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--club",
         type=str,
-        help="Comma-separated club names to focus scrape (e.g. 'Chelsea,Arsenal')",
+        help=(
+            "Comma-separated save club names or FotMob team IDs to focus the "
+            "scrape (e.g. 'Chelsea,8456')"
+        ),
     )
     parser.add_argument(
         "--deep",
         action="store_true",
-        help="Deep fetch across all locally indexed FotMob clubs",
+        help="Deep fetch for every save club bound to a FotMob club",
     )
     parser.add_argument(
         "--window",
@@ -753,12 +798,20 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=__doc__,
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging")
+    # Subcommands also accept -v; SUPPRESS keeps an omitted flag from
+    # overriding a top-level -v given before the subcommand.
+    verbose_parent = argparse.ArgumentParser(add_help=False)
+    verbose_parent.add_argument(
+        "-v", "--verbose", action="store_true", default=argparse.SUPPRESS,
+        help="Enable debug logging",
+    )
 
     sub = parser.add_subparsers(dest="command")
+    common = [verbose_parent]
 
     # run (default)
     p_run = sub.add_parser(
-        "run", help="Apply verified transfers and current squad numbers"
+        "run", parents=common, help="Apply verified transfers and current squad numbers"
     )
     p_run.add_argument("--dry-run", action="store_true", help="Don't modify the edit file")
     run_source = p_run.add_mutually_exclusive_group()
@@ -777,7 +830,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # schedule
     p_sched = sub.add_parser(
-        "schedule",
+        "schedule", parents=common,
         help="Run transfers and squad-number sync continuously on a timer",
     )
     p_sched.add_argument("--interval-hours", type=_positive_float_arg, default=6.0, help="Interval between runs in hours (default: 6.0)")
@@ -796,16 +849,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_sched.set_defaults(func=cmd_schedule)
 
     # cron
-    p_cron = sub.add_parser("cron", help="Generate crontab line for automated scheduling")
+    p_cron = sub.add_parser("cron", parents=common, help="Generate crontab line for automated scheduling")
     p_cron.add_argument("--interval-hours", type=_positive_int_arg, default=6, help="Interval in hours (default: 6)")
     p_cron.set_defaults(func=cmd_cron)
 
+    # inspect
+    p_inspect = sub.add_parser(
+        "inspect", parents=common,
+        help="Show edit-file structure, counts, integrity and divisions",
+    )
+    p_inspect.add_argument("--edit-file", type=str, required=True, help="Path to edit00000000")
+    p_inspect.set_defaults(func=cmd_inspect)
 
 
 
     # metadata audit
     p_audit = sub.add_parser(
-        "audit",
+        "audit", parents=common,
         help="Audit a save against native Player/Team metadata",
     )
     p_audit.add_argument(
@@ -850,7 +910,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # offline usage snapshot importer
     p_usage_import = sub.add_parser(
-        "usage-import",
+        "usage-import", parents=common,
         help="Merge CSV usage counters into the release policy",
     )
     p_usage_import.add_argument(
@@ -870,7 +930,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_usage_import.set_defaults(func=cmd_usage_import)
     # native metadata variant comparison
     p_compare = sub.add_parser(
-        "compare",
+        "compare", parents=common,
         help="Compare native metadata between two CPK variants",
     )
     left_source = p_compare.add_mutually_exclusive_group(required=True)
@@ -905,14 +965,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     # validate
     p_validate = sub.add_parser(
-        "validate", help="Validate an encrypted edit file with a supported PES edit-file layout"
+        "validate", parents=common,
+        help="Validate an encrypted edit file with a supported PES edit-file layout",
     )
     p_validate.add_argument("--edit-file", type=str, required=True, help="Path to edit00000000")
     p_validate.set_defaults(func=cmd_validate)
 
     # repair
     p_repair = sub.add_parser(
-        "repair",
+        "repair", parents=common,
         help="Repair a legacy base without importing reference league memberships",
     )
     p_repair.add_argument(
@@ -932,7 +993,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_repair.set_defaults(func=cmd_repair)
 
     # log
-    p_log = sub.add_parser("log", help="Show recent save-change log")
+    p_log = sub.add_parser("log", parents=common, help="Show recent save-change log")
     p_log.add_argument(
         "--last", type=int, default=20, help="Number of recent entries (default: 20)"
     )
@@ -947,10 +1008,13 @@ def main() -> None:
         "run", "schedule", "cron", "inspect", "audit",
         "usage-import", "compare", "validate", "repair", "log", "-h", "--help",
     }
-    if len(sys.argv) > 1 and sys.argv[1] not in subcommands:
-        sys.argv.insert(1, "run")
-    elif len(sys.argv) == 1:
-        sys.argv.append("run")
+    # Top-level -v/--verbose may precede the subcommand; the implicit `run`
+    # must be inserted after it, not before it.
+    command_index = 1
+    while command_index < len(sys.argv) and sys.argv[command_index] in {"-v", "--verbose"}:
+        command_index += 1
+    if command_index == len(sys.argv) or sys.argv[command_index] not in subcommands:
+        sys.argv.insert(command_index, "run")
 
     args = parser.parse_args()
     setup_logging(args.verbose)

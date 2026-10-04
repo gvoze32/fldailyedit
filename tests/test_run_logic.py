@@ -16,13 +16,14 @@ from run import (
 from run_pipeline import (
     _RunLocalUpdateRuntime,
     _find_shirt_number_conflict,
-    _load_represented_fotmob_club_ids,
     _match_and_plan_transfers,
     _plan_captain_updates,
-    _fast_squad_target_clubs,
+    _fast_squad_target_ids,
 )
 from transfer_planning import (
     PlannedRosterAction,
+    PlanningReport,
+    SkippedTransfer,
     _build_superseded_loan_sources,
     _decide_roster_action,
     _dedupe_shirt_number_matches,
@@ -31,6 +32,7 @@ from transfer_planning import (
     _plan_roster_actions,
     _transfer_sort_key,
 )
+from scraper.club_identity import UNRESOLVED
 from scraper.models import (
     CaptainUpdate,
     MatchedTransfer,
@@ -40,6 +42,105 @@ from scraper.models import (
     Transfer,
 )
 from editor.models import TeamData
+
+
+class _FakeClubIdentity:
+    """ClubIdentityIndex double: fixed FotMob bindings plus save-name lookup."""
+
+    def __init__(self, bindings, matcher=None, names=None):
+        self._bindings = dict(bindings)
+        self._matcher = matcher
+        self._names = dict(names or {})
+
+    def pes_for_fotmob(self, fotmob_id):
+        return self._bindings.get(int(fotmob_id))
+
+    def fotmob_for_pes(self, pes_team_id):
+        return next(
+            (
+                fotmob_id
+                for fotmob_id, team_id in self._bindings.items()
+                if team_id == pes_team_id
+            ),
+            None,
+        )
+
+    def resolve_name(self, name):
+        if name in self._names:
+            return self._names[name]
+        if self._matcher is None:
+            return None
+        team_id, _, confidence = self._matcher.match_team(name)
+        if team_id is None:
+            return UNRESOLVED if confidence >= 75 else None
+        return team_id if confidence >= 98 else UNRESOLVED
+
+    def entries(self):
+        return [
+            {"fotmob_id": fotmob_id, "pes_team_id": team_id}
+            for fotmob_id, team_id in self._bindings.items()
+        ]
+
+    def aliases(self):
+        return {}
+
+    def learn_from_snapshot(self, snapshot, rosters, player_names):
+        return self._bindings.get(snapshot.team_id_fotmob)
+
+    def save(self):
+        return None
+
+
+def _identity(bindings, matcher=None, names=None):
+    return _FakeClubIdentity(bindings, matcher, names)
+
+
+def _scrape_context(bindings, names=None, club_ids=None, save_since_date=None):
+    import run_pipeline as run
+
+    return run._SaveScrapeContext(
+        club_identity=_identity(bindings, names=names),
+        club_ids=frozenset(
+            club_ids if club_ids is not None else bindings.values()
+        ),
+        save_since_date=save_since_date,
+    )
+
+
+def _runtime_prepared(
+    tmp_path,
+    edit_file,
+    *,
+    roster_plan=(),
+    original_data=b"original",
+    same_input_output=False,
+    output_existed=False,
+    output_path=None,
+    **attributes,
+):
+    """Real ``_RunPrepared`` around a fake edit file, as the runtime builds it."""
+    import run_pipeline as run
+
+    edit_path = tmp_path / "input"
+    edit_path.write_bytes(b"encrypted")
+    data_dat = tmp_path / "data.dat"
+    data_dat.write_bytes(original_data)
+    prepared = run._RunPrepared(
+        temp_dir=tmp_path,
+        data_dat=data_dat,
+        edit_file=edit_file,
+        edit_path=edit_path,
+        output_path=output_path or (edit_path if same_input_output else tmp_path / "output"),
+        input_digest="",
+        same_input_output=same_input_output,
+        output_existed=output_existed,
+        output_digest=None,
+    )
+    prepared.original_data = original_data
+    prepared.roster_plan = list(roster_plan)
+    for name, value in attributes.items():
+        setattr(prepared, name, value)
+    return prepared
 
 
 def test_local_update_enables_overflow_release_by_default(tmp_path):
@@ -52,21 +153,22 @@ def test_local_update_enables_overflow_release_by_default(tmp_path):
 @pytest.mark.parametrize(
     ("current", "source", "destination", "transfer_type", "expected"),
     [
-        (10, 10, 20, "transfer", "move"),
-        (20, 10, 20, "transfer", "noop"),
-        (30, 10, 20, "transfer", "skip"),
-        (None, 10, 20, "transfer", "skip"),
-        (None, None, 20, "free transfer", "add"),
-        (20, None, 20, "free transfer", "noop"),
-        (30, None, 20, "free transfer", "skip"),
-        (10, 10, None, "free transfer", "release"),
-        (None, 10, None, "free transfer", "noop"),
-        (30, 10, None, "free transfer", "skip"),
-        (20, 20, 20, "shirt_number_update", "shirt_update"),
-        (30, 20, 20, "shirt_number_update", "skip"),
+        (10, 10, 20, "transfer", ("move", "")),
+        (20, 10, 20, "transfer", ("noop", "")),
+        (30, 10, 20, "transfer", ("skip", "current_club_mismatch")),
+        # Unattached in the save with a known save source: sign him.
+        (None, 10, 20, "transfer", ("add", "")),
+        (None, None, 20, "free transfer", ("add", "")),
+        (20, None, 20, "free transfer", ("noop", "")),
+        (30, None, 20, "free transfer", ("skip", "already_registered_elsewhere")),
+        (10, 10, None, "free transfer", ("release", "")),
+        (None, 10, None, "free transfer", ("noop", "")),
+        (30, 10, None, "free transfer", ("skip", "current_club_mismatch")),
+        (20, 20, 20, "shirt_number_update", ("shirt_update", "")),
+        (30, 20, 20, "shirt_number_update", ("skip", "shirt_player_not_at_club")),
     ],
 )
-def test_decide_roster_action_is_fail_closed(
+def test_decide_roster_action_returns_explicit_reason(
     current, source, destination, transfer_type, expected
 ):
     assert _decide_roster_action(current, source, destination, transfer_type) == expected
@@ -123,7 +225,7 @@ def test_new_parent_club_transfer_can_reconcile_stale_loan_roster():
         juventus,
         "transfer",
         allowed[id(permanent)],
-    ) == "move"
+    ) == ("move", "")
 
 
 def test_unrelated_stale_roster_remains_fail_closed():
@@ -148,7 +250,7 @@ def test_unrelated_stale_roster_remains_fail_closed():
         juventus,
         "transfer",
         allowed[id(permanent)],
-    ) == "skip"
+    ) == ("skip", "current_club_mismatch")
 
 
 def test_historical_loan_log_can_reconcile_a_later_run():
@@ -222,14 +324,15 @@ def test_roster_plan_refuses_to_reduce_a_club_below_sixteen_players():
         ),
     }
 
+    report = PlanningReport()
     plan = _plan_roster_actions(
-        [transfer], rosters, set(rosters), object(), {}
+        [transfer], rosters, set(rosters), object(), {}, report=report
     )
 
-    assert (plan[0].action, plan[0].reason) == (
-        "skip",
-        "source_roster_minimum",
-    )
+    assert (plan[0].action, plan[0].reason) == ("skip", "roster_minimum")
+    assert [(item.reason, item.relevant) for item in report.skipped] == [
+        ("roster_minimum", True)
+    ]
 
 
 def test_roster_plan_enables_overflow_release_by_default():
@@ -287,14 +390,10 @@ def test_local_runtime_apply_forwards_overflow_release_permission(
             return True
 
 
-    edit_path = tmp_path / "EDIT00000000"
-    edit_path.write_bytes(b"encrypted")
     edit_file = FakeEditFile()
-    prepared = SimpleNamespace(
-        edit_file=edit_file,
-        edit_path=edit_path,
-        output_path=edit_path,
-        original_data=b"original",
+    prepared = _runtime_prepared(
+        tmp_path,
+        edit_file,
         roster_plan=(
             PlannedRosterAction(
                 match=_club_match(source=10, destination=20, date="2026-08-02"),
@@ -303,11 +402,10 @@ def test_local_runtime_apply_forwards_overflow_release_permission(
                 overflow_player_id=1030,
             ),
         ),
-        run_records=[],
-        backup_path=None,
-        pending_logs=[],
-        save_scope=str(edit_path),
+        same_input_output=True,
+        output_existed=True,
     )
+    edit_path = prepared.edit_path
     monkeypatch.setattr(
         run.backup_mod,
         "create_backup",
@@ -348,20 +446,9 @@ def test_local_runtime_publishes_gameplan_repair_without_roster_action(
                 "reset_roles": 0,
             }
 
-    edit_path = tmp_path / "EDIT00000000"
-    edit_path.write_bytes(b"encrypted")
     edit_file = FakeEditFile()
-    prepared = SimpleNamespace(
-        edit_file=edit_file,
-        edit_path=edit_path,
-        output_path=tmp_path / "output",
-        original_data=b"original",
-        roster_plan=[],
-        run_records=[],
-        backup_path=None,
-        pending_logs=[],
-        save_scope=str(edit_path),
-    )
+    prepared = _runtime_prepared(tmp_path, edit_file)
+    edit_path = prepared.edit_path
     monkeypatch.setattr(
         "run_pipeline.backup_mod.create_backup",
         lambda _path: tmp_path / "backup",
@@ -424,13 +511,15 @@ def test_team_matching_uses_full_name_and_rejects_conflicts():
     assert _match_transfer_team(
         matcher, "Conflicting short", "Paris Saint-Germain"
     )[0] == -1
+    # A FotMob club whose save-name match is already bound to another
+    # FotMob club is a different club: unsure, never a confident match.
     assert _match_transfer_team(
         matcher,
         "PSG",
         "Paris Saint-Germain",
         fotmob_id=9847,
-        validated_fotmob_ids={1234},
-    ) == (-1, "", 100.0)
+        club_identity=_identity({1234: 114}, matcher),
+    ) == (-1, "", 0.0)
     assert _match_transfer_team(matcher, "Similar Club")[0] == -1
     assert _match_transfer_team(matcher, "Ambiguous Club")[0] == -1
     assert _match_transfer_team(
@@ -438,7 +527,7 @@ def test_team_matching_uses_full_name_and_rejects_conflicts():
         "Free Agent",
         "Free Agent",
         fotmob_id=2,
-        validated_fotmob_ids={1234},
+        club_identity=_identity({1234: 114}, matcher),
     ) == (None, "", 100.0)
 
     assert _match_transfer_team(
@@ -446,8 +535,7 @@ def test_team_matching_uses_full_name_and_rejects_conflicts():
         "Barcelona",
         "Barcelona",
         fotmob_id=8634,
-        validated_fotmob_ids={8634},
-        validated_fotmob_teams={8634: 108},
+        club_identity=_identity({8634: 108}, matcher),
     ) == (108, "Barcelona", 100.0)
 
 
@@ -461,8 +549,7 @@ def test_validated_fotmob_team_id_skips_ambiguous_name_lookup():
         "Barcelona",
         "Barcelona",
         fotmob_id=8634,
-        validated_fotmob_ids={8634},
-        validated_fotmob_teams={8634: 108},
+        club_identity=_identity({8634: 108}),
     ) == (108, "Barcelona", 100.0)
 
     unresolved = MatchedTransfer(
@@ -502,6 +589,8 @@ def test_match_and_plan_retains_partial_matches_for_safety_accounting(
         {102},
         SimpleNamespace(player_catalog_report=None),
         tmp_path / "EDIT00000000",
+        club_identity=None,
+        report=PlanningReport(),
         allow_overflow_release=False,
     )
 
@@ -563,18 +652,13 @@ def test_apply_counts_partial_skip_alongside_action(monkeypatch, tmp_path):
         def move_player(self, *args, **kwargs):
             return True
 
-    prepared = SimpleNamespace(
-        edit_file=FakeEditFile(),
+    prepared = _runtime_prepared(
+        tmp_path,
+        FakeEditFile(),
         roster_plan=[
             PlannedRosterAction(skipped_match, "skip", None, "player_not_matched"),
             PlannedRosterAction(moved_match, "move", 10),
         ],
-        output_path=tmp_path / "output",
-        edit_path=tmp_path / "input",
-        original_data=b"original",
-        backup_path=None,
-        pending_logs=[],
-        run_records=[],
     )
     monkeypatch.setattr(
         run_module.backup_mod,
@@ -627,18 +711,14 @@ def test_local_runtime_safety_skips_known_move_state_failure(
             self.last_mutation_error = ""
             return True
 
-    prepared = SimpleNamespace(
-        edit_file=FakeEditFile(),
+    prepared = _runtime_prepared(
+        tmp_path,
+        FakeEditFile(),
         roster_plan=(
             PlannedRosterAction(first_match, "move", 10),
             PlannedRosterAction(second_match, "move", 10),
         ),
-        output_path=tmp_path / "output",
-        edit_path=tmp_path / "input",
-        original_data=b"original",
-        backup_path=None,
-        pending_logs=[],
-        run_records=[],
+        club_ids={10, 20},
     )
     monkeypatch.setattr(
         run_module.backup_mod,
@@ -656,6 +736,13 @@ def test_local_runtime_safety_skips_known_move_state_failure(
     assert result.transfer_applied == 1
     assert result.safety_skipped == 1
     assert prepared.edit_file.calls == 2
+    # Editor refusals are reported as not-applied transfers with their code.
+    assert [
+        (row["reason"], row["relevant"], row["detail"])
+        for row in prepared.skipped_rows()
+    ] == [
+        ("source_player_missing", True, "Player 115254 not found on team 10")
+    ]
 
 
 def test_stateful_matching_keeps_identity_across_loan_chain():
@@ -718,8 +805,7 @@ def test_stateful_matching_moves_unique_current_squad_registration():
         80,
         {10: [3001] + list(range(3002, 3019)), 20: []},
         {10, 20},
-        validated_fotmob_ids={4688},
-        validated_fotmob_teams={4688: 20},
+        club_identity=_identity({4688: 20}, matcher),
     )
 
     assert matched[0].player_id == 3001
@@ -784,8 +870,7 @@ def test_stateful_matching_uses_snapshot_identity_map_for_current_move():
         80,
         {10: [3001] + list(range(3002, 3019)), 20: []},
         {10, 20},
-        validated_fotmob_ids={4688, 777},
-        validated_fotmob_teams={4688: 20, 777: 10},
+        club_identity=_identity({4688: 20, 777: 10}, matcher),
         squad_snapshots=(source_snapshot, destination_snapshot),
     )
 
@@ -850,8 +935,7 @@ def test_fast_snapshot_move_allows_uncovered_source_and_shirt_identity():
         80,
         {10: source_ids, 20: destination_ids},
         {10, 20},
-        validated_fotmob_ids={200},
-        validated_fotmob_teams={200: 20},
+        club_identity=_identity({200: 20}, matcher),
         squad_snapshots=(snapshot,),
         allow_uncovered_source=True,
     )
@@ -908,8 +992,7 @@ def test_current_squad_registers_catalog_player_missing_from_local_roster():
         80,
         {20: existing_ids},
         {20},
-        validated_fotmob_ids={200},
-        validated_fotmob_teams={200: 20},
+        club_identity=_identity({200: 20}, matcher),
         squad_snapshots=(snapshot,),
     )
 
@@ -969,8 +1052,7 @@ def test_current_squad_registers_catalog_player_with_stale_roster_extras():
         80,
         {20: existing_ids + stale_ids},
         {20},
-        validated_fotmob_ids={200},
-        validated_fotmob_teams={200: 20},
+        club_identity=_identity({200: 20}, matcher),
         squad_snapshots=(snapshot,),
     )
 
@@ -1018,8 +1100,7 @@ def test_current_squad_moves_from_uncovered_source_with_healthy_destination():
         80,
         {10: [source_player_id], 20: destination_ids},
         {10, 20},
-        validated_fotmob_ids={200},
-        validated_fotmob_teams={200: 20},
+        club_identity=_identity({200: 20}, matcher),
         squad_snapshots=(snapshot,),
     )
 
@@ -1088,8 +1169,7 @@ def test_snapshot_identity_collision_keeps_current_roster_anchor():
         80,
         {10: source_ids, 20: destination_ids},
         {10, 20},
-        validated_fotmob_ids={100, 200},
-        validated_fotmob_teams={100: 10, 200: 20},
+        club_identity=_identity({100: 10, 200: 20}, matcher),
         squad_snapshots=(source_snapshot, destination_snapshot),
     )
 
@@ -1138,8 +1218,7 @@ def test_snapshot_prefers_club_roster_over_unrelated_exact_name():
         80,
         {10: current_ids, 20: [5001]},
         {10, 20},
-        validated_fotmob_ids={8633},
-        validated_fotmob_teams={8633: 10},
+        club_identity=_identity({8633: 10}, matcher),
         squad_snapshots=(snapshot,),
     )
 
@@ -1297,8 +1376,7 @@ def test_unhealthy_snapshot_skips_inferred_moves_and_releases():
         80,
         {10: source_ids, 20: destination_ids},
         {10, 20},
-        validated_fotmob_ids={100, 200},
-        validated_fotmob_teams={100: 10, 200: 20},
+        club_identity=_identity({100: 10, 200: 20}, matcher),
         squad_snapshots=(source_snapshot, destination_snapshot),
         player_names={
             player_id: (
@@ -1345,8 +1423,7 @@ def test_stateful_matching_rejects_same_name_player_from_another_age_group():
         80,
         {102: [126046], 394: []},
         {102, 394},
-        validated_fotmob_ids={10163},
-        validated_fotmob_teams={10163: 394},
+        club_identity=_identity({10163: 394}, matcher),
     )
 
     assert matched[0].player_id is None
@@ -1416,8 +1493,7 @@ def test_stateful_matching_rejects_duplicate_name_registration_chain():
         80,
         {10: [3001], 20: [], 30: []},
         {10, 20, 30},
-        validated_fotmob_ids={100, 200, 300},
-        validated_fotmob_teams={100: 10, 200: 20, 300: 30},
+        club_identity=_identity({100: 10, 200: 20, 300: 30}, matcher),
         historical_entries=history,
         player_names={3001: "João Pedro"},
     )
@@ -1454,8 +1530,7 @@ def test_complete_squad_snapshot_releases_stale_current_roster_player():
         80,
         {10: current_ids},
         {10},
-        validated_fotmob_ids={42},
-        validated_fotmob_teams={42: 10},
+        club_identity=_identity({42: 10}, matcher),
         squad_snapshots=(snapshot,),
         player_names={player_id: f"Player {player_id}" for player_id in current_ids},
     )
@@ -1518,8 +1593,7 @@ def test_snapshot_exact_name_survives_position_label_mismatch():
         80,
         {10: current_ids},
         {10},
-        validated_fotmob_ids={42},
-        validated_fotmob_teams={42: 10},
+        club_identity=_identity({42: 10}, matcher),
         squad_snapshots=(snapshot,),
         player_names={player_id: f"Player {player_id}" for player_id in current_ids},
     )
@@ -1642,8 +1716,7 @@ def test_snapshot_short_aliases_use_local_shirt_and_position_before_releases():
         80,
         team_player_map,
         {10, 20, 30},
-        validated_fotmob_ids={42, 43},
-        validated_fotmob_teams={42: 10, 43: 20},
+        club_identity=_identity({42: 10, 43: 20}, matcher),
         squad_snapshots=(city_snapshot, spurs_snapshot),
         player_names=player_names,
         team_shirt_numbers=team_shirt_numbers,
@@ -1697,8 +1770,7 @@ def test_snapshot_does_not_release_player_from_current_transfer_event():
         80,
         {10: source_ids, 20: destination_ids},
         {10, 20},
-        validated_fotmob_ids={42},
-        validated_fotmob_teams={42: 20},
+        club_identity=_identity({42: 20}, matcher),
         squad_snapshots=(snapshot,),
         player_names={
             player_id: f"Player {player_id}"
@@ -1751,8 +1823,7 @@ def test_squad_releases_precede_shirt_updates():
         80,
         {10: current_ids},
         {10},
-        validated_fotmob_ids={42},
-        validated_fotmob_teams={42: 10},
+        club_identity=_identity({42: 10}, matcher),
         squad_snapshots=(snapshot,),
         player_names={player_id: f"Player {player_id}" for player_id in current_ids},
     )
@@ -1799,8 +1870,7 @@ def test_squad_snapshot_falls_back_when_historical_identity_is_stale():
         historical_entries=[
             {"player_id": 9999, "fotmob_player_id": stale_external_id}
         ],
-        validated_fotmob_ids={42},
-        validated_fotmob_teams={42: 10},
+        club_identity=_identity({42: 10}, matcher),
         squad_snapshots=(snapshot,),
         player_names={player_id: f"Player {player_id}" for player_id in current_ids},
     )
@@ -1834,8 +1904,7 @@ def test_incomplete_squad_snapshot_does_not_release_roster_players():
         80,
         {10: current_ids},
         {10},
-        validated_fotmob_ids={42},
-        validated_fotmob_teams={42: 10},
+        club_identity=_identity({42: 10}, matcher),
         squad_snapshots=(snapshot,),
     )
 
@@ -1855,8 +1924,9 @@ def test_local_runtime_rolls_back_unexpected_move_failure(
         def move_player(self, *args, **kwargs):
             return False
 
-    prepared = SimpleNamespace(
-        edit_file=FakeEditFile(),
+    prepared = _runtime_prepared(
+        tmp_path,
+        FakeEditFile(),
         roster_plan=(
             PlannedRosterAction(
                 _club_match(source=10, destination=20, date="2026-08-02"),
@@ -1864,12 +1934,6 @@ def test_local_runtime_rolls_back_unexpected_move_failure(
                 10,
             ),
         ),
-        output_path=tmp_path / "output",
-        edit_path=tmp_path / "input",
-        original_data=b"original",
-        backup_path=None,
-        pending_logs=[],
-        run_records=[],
     )
     monkeypatch.setattr(
         run_module.backup_mod,
@@ -2125,26 +2189,16 @@ def test_competition_section_ends_where_game_plans_begin():
     assert end == fake_edit.game_plan_start
 
 
-def test_runtime_club_identity_index_must_be_one_to_one(monkeypatch, tmp_path):
-    import config
-    from scraper.fotmob import IncompleteScrapeError
-
-    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
-    (tmp_path / "fotmob_teams_validated.json").write_text(
-        json.dumps([
-            {"fotmob_id": 10, "pes_team_id": 1},
-            {"fotmob_id": 11, "pes_team_id": 1},
-        ]),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(IncompleteScrapeError, match="not one-to-one"):
-        _load_represented_fotmob_club_ids()
-    
 def test_transfer_run_syncs_squad_numbers_in_fast_mode(monkeypatch):
     import run_pipeline as run
 
-    transfer = Transfer("Player Two", "A", "B")
+    transfer = Transfer(
+        "Player Two",
+        "A",
+        "B",
+        from_club_id_fotmob=41,
+        to_club_id_fotmob=42,
+    )
     shirt = Transfer(
         "Squad Player",
         "B",
@@ -2172,7 +2226,7 @@ def test_transfer_run_syncs_squad_numbers_in_fast_mode(monkeypatch):
     monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_kwargs: [transfer])
     monkeypatch.setattr(
         run,
-        "fetch_squads_for_club_names",
+        "fetch_squads_for_club_ids",
         lambda clubs: calls.append(tuple(clubs)) or ScrapeResult(
             [shirt],
             [captain],
@@ -2180,10 +2234,10 @@ def test_transfer_run_syncs_squad_numbers_in_fast_mode(monkeypatch):
         ),
     )
 
-    def fail_deep_fetch(**_kwargs):
+    def fail_deep_fetch(*_args, **_kwargs):
         raise AssertionError("Fast mode must not fetch every indexed club")
 
-    monkeypatch.setattr(run, "fetch_major_clubs_transfers_safely", fail_deep_fetch)
+    monkeypatch.setattr(run, "fetch_clubs_transfers_safely", fail_deep_fetch)
 
     result = run._scrape_run_transfers(
         argparse.Namespace(
@@ -2193,10 +2247,11 @@ def test_transfer_run_syncs_squad_numbers_in_fast_mode(monkeypatch):
             popular=False,
             window="auto",
             since=None,
-        )
+        ),
+        context=_scrape_context({41: 10, 42: 20}),
     )
 
-    assert calls == [("B", "A")]
+    assert calls == [(42, 41)]
     assert [item.player_name for item in result] == ["Player Two"]
     assert [item.player_name for item in result.roster_updates] == ["Squad Player"]
 
@@ -2205,64 +2260,16 @@ def test_transfer_run_syncs_squad_numbers_in_fast_mode(monkeypatch):
     assert result.squad_snapshots == (snapshot,)
 
 
-def test_fast_squad_targets_rank_clubs_by_transfer_activity():
-    crowded = [
-        Transfer(
-            f"Player {index}",
-            f"Source {index}",
-            f"Destination {index}",
-            from_club_id_fotmob=1000 + index,
-            to_club_id_fotmob=2000 + index,
-        )
-        for index in range(32)
-    ]
-    juventus_activity = [
-        Transfer(
-            f"Juventus Player {index}",
-            "Juventus",
-            "Juventus",
-            from_club_id_fotmob=9885,
-            to_club_id_fotmob=9885,
-        )
-        for index in range(4)
-    ]
-
-    targets = _fast_squad_target_clubs((crowded + juventus_activity,))
-
-    assert "Juventus" in targets
-
-def test_fast_captain_sync_keeps_existing_squad_club_limit(monkeypatch):
+def test_fast_squad_sync_incomplete_scrape_is_skipped(monkeypatch):
     import run_pipeline as run
 
-    live_transfers = [
-        Transfer(f"Player {index}", f"Source {index}", f"Destination {index}")
-        for index in range(40)
-    ]
-    captain = CaptainUpdate(
-        club_name="Destination 0",
-        team_id_fotmob=42,
-        player_name="Captain Player",
-        player_id_fotmob=987,
-    )
-    calls = []
-    monkeypatch.setattr(
-        run,
-        "fetch_fotmob_transfers",
-        lambda **_kwargs: live_transfers,
-    )
-    monkeypatch.setattr(
-        run,
-        "fetch_squads_for_club_names",
-        lambda clubs: calls.append(tuple(clubs)) or ScrapeResult(
-            [],
-            [captain],
-        ),
-    )
-    monkeypatch.setattr(
-        run,
-        "fetch_major_clubs_transfers_safely",
-        lambda **_kwargs: pytest.fail("fast mode must not use deep fetch"),
-    )
+    transfer = Transfer("Player Two", "A", "B", to_club_id_fotmob=42)
+    monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_kwargs: [transfer])
+
+    def incomplete_squads(_clubs):
+        raise run.IncompleteScrapeError("partial squad scrape")
+
+    monkeypatch.setattr(run, "fetch_squads_for_club_ids", incomplete_squads)
 
     result = run._scrape_run_transfers(
         argparse.Namespace(
@@ -2272,14 +2279,61 @@ def test_fast_captain_sync_keeps_existing_squad_club_limit(monkeypatch):
             popular=False,
             window="auto",
             since=None,
-        )
+        ),
+        context=_scrape_context({42: 20}),
     )
 
-    assert len(calls) == 1
-    assert len(calls[0]) == run._FAST_SQUAD_CLUB_LIMIT
-    assert len(result.captain_updates) == 1
+    assert [item.player_name for item in result] == ["Player Two"]
+    assert result.roster_updates == ()
+    assert result.squad_snapshots == ()
 
-def test_deep_auto_restricts_club_history_to_current_year(monkeypatch):
+
+def test_auto_since_date_keeps_previous_summer_window_in_january():
+    import run_pipeline as run
+
+    assert run._previous_window_start(run.date(2027, 1, 15)) == run.date(2026, 6, 1)
+    assert run._previous_window_start(run.date(2027, 5, 31)) == run.date(2026, 6, 1)
+    assert run._previous_window_start(run.date(2026, 10, 3)) == run.date(2026, 1, 1)
+
+
+def test_fast_squad_targets_include_every_touched_save_club_without_cap():
+    # 40 save clubs touched by FotMob-ID events: all are refreshed, no cap.
+    bindings = {1000 + index: 100 + index for index in range(40)}
+    feed_events = [
+        Transfer(
+            f"Player {index}",
+            "Foreign Club",
+            f"Save Club {index}",
+            from_club_id_fotmob=900_000 + index,
+            to_club_id_fotmob=1000 + index,
+        )
+        for index in range(40)
+    ]
+    # A Transfermarkt event without FotMob IDs resolves by save club name.
+    transfermarkt_event = Transfer("Name Player", "Nowhere FC", "Named Save Club")
+    # An unbound FotMob club that may be a save club is fetched to learn it.
+    unsure_event = Transfer(
+        "Unsure Player",
+        "Foreign Club",
+        "Maybe Save Club",
+        to_club_id_fotmob=777,
+    )
+    context = _scrape_context(
+        {**bindings, 555: 500},
+        names={"Named Save Club": 500, "Maybe Save Club": UNRESOLVED},
+    )
+
+    targets = _fast_squad_target_ids(
+        (feed_events, [transfermarkt_event, unsure_event]),
+        context,
+    )
+
+    assert set(targets) == {*bindings, 555, 777}
+    assert len(targets) == 42
+    assert not any(900_000 <= target for target in targets)
+
+
+def test_deep_mode_targets_every_identity_bound_save_club(monkeypatch):
     import run_pipeline as run
 
     calls = {}
@@ -2289,14 +2343,12 @@ def test_deep_auto_restricts_club_history_to_current_year(monkeypatch):
         player_name="Deep Captain",
         player_id_fotmob=987,
     )
-    monkeypatch.setattr(
-        run,
-        "fetch_major_clubs_transfers_safely",
-        lambda **kwargs: calls.update(kwargs) or ScrapeResult(
-            [],
-            [captain],
-        ),
-    )
+
+    def fetch_clubs(club_ids, **kwargs):
+        calls.update(kwargs, club_ids=tuple(club_ids))
+        return ScrapeResult([], [captain])
+
+    monkeypatch.setattr(run, "fetch_clubs_transfers_safely", fetch_clubs)
     monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_kwargs: [])
 
     transfers = run._scrape_run_transfers(
@@ -2307,16 +2359,29 @@ def test_deep_auto_restricts_club_history_to_current_year(monkeypatch):
             popular=False,
             window="auto",
             since=None,
-        )
+        ),
+        context=_scrape_context({43: 102, 42: 101}),
     )
 
     assert transfers == []
     assert len(transfers.captain_updates) == 1
     assert transfers.captain_updates[0].player_name == "Deep Captain"
+    assert calls["club_ids"] == (42, 43)
     assert calls["window"] == "auto"
     assert calls["since_date"] == (
-        run.date.today().replace(month=1, day=1).isoformat()
+        run._previous_window_start(run.date.today()).isoformat()
     )
+
+
+def test_club_filter_resolves_save_names_and_rejects_unknown_clubs():
+    import run_pipeline as run
+
+    context = _scrape_context({42: 101}, names={"Example FC": 101})
+
+    assert run._club_filter_fotmob_ids(["Example FC", "8456"], context) == (42, 8456)
+    with pytest.raises(run.IncompleteScrapeError, match="Unknown FC"):
+        run._club_filter_fotmob_ids(["Unknown FC"], context)
+
 
 def test_captain_planner_requires_validated_club_and_roster_match():
     from scraper.matcher import NameMatcher
@@ -2347,8 +2412,33 @@ def test_captain_planner_requires_validated_club_and_roster_match():
     assert planned[0].matched_player_name == "Captain Player"
 
 
+def test_captain_planner_prefers_resolved_fotmob_identity_over_name():
+    from scraper.matcher import NameMatcher
 
-def test_fast_auto_restricts_live_feed_to_current_year(monkeypatch):
+    matcher = NameMatcher()
+    matcher.load_player_db([("Somebody Else", 1003), ("Captain Player", 1002)])
+
+    planned = _plan_captain_updates(
+        [
+            CaptainUpdate(
+                club_name="Example FC",
+                team_id_fotmob=42,
+                player_name="Capitão",
+                player_id_fotmob=987,
+            )
+        ],
+        matcher,
+        {101: [1002, 1003]},
+        {101},
+        {42: 101},
+        80,
+        fotmob_player_ids={987: 1002},
+    )
+
+    assert [(item.team_id, item.player_id) for item in planned] == [(101, 1002)]
+
+
+def test_fast_auto_restricts_live_feed_to_previous_window(monkeypatch):
     import run_pipeline as run
 
     calls = {}
@@ -2372,5 +2462,698 @@ def test_fast_auto_restricts_live_feed_to_current_year(monkeypatch):
     assert transfers == []
     assert calls["window"] == "auto"
     assert calls["since_date"] == (
-        run.date.today().replace(month=1, day=1).isoformat()
+        run._previous_window_start(run.date.today()).isoformat()
     )
+
+
+def test_fast_auto_uses_save_derived_since_window(monkeypatch):
+    import run_pipeline as run
+
+    calls = {}
+    monkeypatch.setattr(
+        run,
+        "fetch_fotmob_transfers",
+        lambda **kwargs: calls.update(kwargs) or [],
+    )
+
+    run._scrape_run_transfers(
+        argparse.Namespace(
+            club=None,
+            deep=False,
+            fotmob_only=True,
+            popular=False,
+            window="auto",
+            since=None,
+        ),
+        context=_scrape_context({}, save_since_date="2026-09-20"),
+    )
+
+    assert calls["since_date"] == "2026-09-20"
+
+
+def test_save_since_date_comes_from_log_and_pending_skips(monkeypatch, tmp_path):
+    import config
+    import run_pipeline as run
+
+    scope = str(tmp_path / "EDIT00000000")
+    monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(
+        run.transfer_logger,
+        "read_log",
+        lambda **kwargs: [
+            {"timestamp": "2026-08-01T10:00:00+00:00"},
+            {"timestamp": "2026-09-30T10:00:00+00:00"},
+            {"timestamp": "2026-10-02T10:00:00+00:00", "dry_run": True},
+        ]
+        if kwargs["save_scope"] == scope
+        else [],
+    )
+    today = run.date(2026, 10, 3)
+
+    # Last applied change minus the safety margin.
+    assert run._save_since_date(scope, include_legacy=False, today=today) == "2026-09-23"
+
+    skipped_path = tmp_path / run.transfer_logger.SKIPPED_TRANSFERS_FILENAME
+    skipped_path.write_text(
+        "\n".join(
+            json.dumps(row)
+            for row in (
+                {"save_scope": scope, "relevant": True, "date": "2026-09-05"},
+                {"save_scope": scope, "relevant": False, "date": "2026-02-01"},
+                {"save_scope": "other", "relevant": True, "date": "2026-02-01"},
+            )
+        ),
+        encoding="utf-8",
+    )
+    # The oldest still-pending relevant event of this save widens the window.
+    assert run._save_since_date(scope, include_legacy=False, today=today) == "2026-09-05"
+
+    # Without applied history the previous-window rule applies.
+    assert run._save_since_date("unknown", include_legacy=False, today=today) == "2026-01-01"
+
+
+def test_pending_provider_events_are_reported_with_reason_and_relevance():
+    import run_pipeline as run
+
+    context = _scrape_context({42: 101})
+    future = Transfer(
+        "Future Player",
+        "Foreign Club",
+        "Save Club",
+        date="2026-12-01",
+        to_club_id_fotmob=42,
+        player_id_fotmob=555,
+    )
+    undated = Transfer("Undated Player", "Foreign A", "Foreign B")
+
+    skipped = run._pending_skipped(
+        [future, undated],
+        context,
+        today=run.date(2026, 10, 3),
+    )
+
+    assert [
+        (item.player_name, item.reason, item.relevant, item.fotmob_player_id)
+        for item in skipped
+    ] == [
+        ("Future Player", "not_yet_effective", True, 555),
+        ("Undated Player", "undated_in_window", False, None),
+    ]
+    rows = run._skipped_rows(reversed(skipped), "scope")
+    assert [row["player_name"] for row in rows] == ["Future Player", "Undated Player"]
+    assert all(row["save_scope"] == "scope" for row in rows)
+
+class _LiveRoleOverflowEditFile:
+    """Rank overflow candidates by the live file's slot-to-role map."""
+
+    def __init__(self, live_roles: dict[int, int]):
+        self.live_roles = live_roles
+
+    def find_overflow_release_candidate(
+        self,
+        team_id,
+        exclude_player_id=None,
+        roster_player_ids=None,
+        protected_player_ids=None,
+    ):
+        protected = {exclude_player_id} | set(protected_player_ids or ())
+        candidates = [
+            (slot, player_id)
+            for slot, player_id in enumerate(roster_player_ids)
+            if player_id and player_id not in protected
+        ]
+        return max(
+            candidates,
+            key=lambda item: self.live_roles[item[0]],
+            default=(39, 0),
+        )
+
+
+def _arrival(player_id: int, *, source: int, destination: int) -> MatchedTransfer:
+    return MatchedTransfer(
+        transfer=Transfer(
+            player_name=f"Player {player_id}",
+            from_club="Source",
+            to_club="Destination",
+            date="2026-08-02",
+        ),
+        player_id=player_id,
+        from_team_id=source,
+        to_team_id=destination,
+        player_confidence=100,
+        from_team_confidence=100,
+        to_team_confidence=100,
+    )
+
+
+def test_roster_plan_second_overflow_keeps_live_roles_of_remaining_players():
+    source, destination = 30, 10
+    live_roles = {slot: slot for slot in range(40)}
+    # Slot 39 holds a bench player and slot 20 the deepest reserve.
+    live_roles[20], live_roles[39] = 39, 20
+    rosters = {
+        source: TeamData(source, [501, 502, *range(2001, 2019)] + [0] * 20),
+        destination: TeamData(destination, list(range(1000, 1040))),
+    }
+
+    plan = _plan_roster_actions(
+        [
+            _arrival(501, source=source, destination=destination),
+            _arrival(502, source=source, destination=destination),
+        ],
+        rosters,
+        set(rosters),
+        _LiveRoleOverflowEditFile(live_roles),
+        {},
+    )
+
+    assert [(item.action, item.overflow_player_id) for item in plan] == [
+        ("move", 1020),
+        ("move", 1038),
+    ]
+
+
+def test_roster_plan_overflow_prefers_player_released_later_in_plan():
+    source, destination = 30, 10
+    rosters = {
+        source: TeamData(source, [501, *range(2001, 2019)] + [0] * 21),
+        destination: TeamData(destination, list(range(1000, 1040))),
+    }
+    stale_release = MatchedTransfer(
+        transfer=Transfer(
+            player_name="Player 1005",
+            from_club="Destination",
+            to_club="Free Agent",
+            transfer_type="squad_release",
+        ),
+        player_id=1005,
+        from_team_id=destination,
+        player_confidence=100,
+        from_team_confidence=100,
+    )
+
+    plan = _plan_roster_actions(
+        [_arrival(501, source=source, destination=destination), stale_release],
+        rosters,
+        set(rosters),
+        _LiveRoleOverflowEditFile({slot: slot for slot in range(40)}),
+        {},
+    )
+
+    assert [(item.action, item.overflow_player_id) for item in plan] == [
+        ("move", 1005),
+        ("noop", None),
+    ]
+
+
+def test_snapshot_release_not_suppressed_by_release_from_other_club():
+    from scraper.matcher import NameMatcher
+
+    current_ids = list(range(3001, 3018))
+    other_ids = list(range(4001, 4018))
+    matcher = NameMatcher()
+    matcher.load_player_db(
+        [(f"Player {player_id}", player_id) for player_id in current_ids + other_ids]
+    )
+    matcher.load_team_db({"Example FC": 10, "Other FC": 20})
+    snapshot = SquadSnapshot(
+        club_name="Example FC",
+        team_id_fotmob=42,
+        members=tuple(
+            SquadMember(
+                player_name=f"Player {player_id}",
+                player_id_fotmob=5000 + index,
+            )
+            for index, player_id in enumerate(current_ids[:-1])
+        ),
+        source_url="https://www.fotmob.com/api/data/teams?id=42",
+        complete=True,
+    )
+    stale_feed_release = Transfer(
+        "Player 3017",
+        "Other FC",
+        "Free Agent",
+        date="2026-08-01",
+        transfer_type="free transfer",
+    )
+
+    matched = _match_transfers_statefully(
+        [stale_feed_release],
+        matcher,
+        80,
+        {10: current_ids, 20: other_ids},
+        {10, 20},
+        club_identity=_identity({42: 10}, matcher),
+        squad_snapshots=(snapshot,),
+        player_names={player_id: f"Player {player_id}" for player_id in current_ids},
+    )
+
+    assert (3017, 10, "squad_release") in [
+        (match.player_id, match.from_team_id, match.transfer.transfer_type)
+        for match in matched
+    ]
+
+
+def _team_rosters(**rosters: list[int]) -> dict[int, TeamData]:
+    return {
+        int(team_id.removeprefix("t")): TeamData(
+            int(team_id.removeprefix("t")), ids + [0] * (40 - len(ids))
+        )
+        for team_id, ids in rosters.items()
+    }
+
+
+def test_plan_reports_every_skip_with_reason_code_and_relevance():
+    save_club = 20
+    not_in_save = MatchedTransfer(
+        transfer=Transfer(
+            "Youth Prospect",
+            "Outside FC",
+            "Save FC",
+            date="2026-08-01",
+            player_id_fotmob=901,
+        ),
+        to_team_id=save_club,
+        to_team_confidence=100,
+    )
+    foreign_unknown = MatchedTransfer(
+        transfer=Transfer(
+            "Foreign Player", "Abroad A", "Abroad B", player_id_fotmob=902
+        ),
+    )
+    foreign_known = MatchedTransfer(
+        transfer=Transfer("Known Abroad", "Abroad A", "Abroad B"),
+        player_id=7,
+        player_confidence=100,
+    )
+    unresolved_destination = MatchedTransfer(
+        transfer=Transfer(
+            "Known Player", "Save FC", "Bayern Munich", to_club_id_fotmob=9823
+        ),
+        player_id=1,
+        from_team_id=save_club,
+        to_team_id=-1,
+        player_confidence=100,
+        from_team_confidence=100,
+    )
+    report = PlanningReport()
+
+    plan = _plan_roster_actions(
+        [not_in_save, foreign_unknown, foreign_known, unresolved_destination],
+        _team_rosters(t20=[1, *range(100, 120)]),
+        {save_club},
+        object(),
+        {},
+        report=report,
+    )
+
+    assert all(item.action == "skip" for item in plan)
+    assert [
+        (item.player_name, item.reason, item.relevant, item.fotmob_player_id)
+        for item in report.skipped
+    ] == [
+        ("Youth Prospect", "player_not_matched", True, 901),
+        ("Foreign Player", "player_not_matched", False, 902),
+        ("Known Abroad", "outside_save", False, None),
+        ("Known Player", "destination_team_not_matched", True, None),
+    ]
+    assert "9823" in report.skipped[3].detail
+    payload = report.skipped[0].to_dict()
+    assert set(payload) == {
+        "player_name",
+        "from_team",
+        "to_team",
+        "date",
+        "source",
+        "reason",
+        "detail",
+        "relevant",
+        "fotmob_player_id",
+        "candidates",
+    }
+    assert json.loads(json.dumps(payload))["to_team"] == "Save FC"
+
+
+def test_weak_unvalidated_club_name_is_unresolved_never_a_release():
+    class WeakMatcher:
+        def match_team(self, name):
+            return (30, "Bayern München", 88.0) if name == "Bayern Munich" else (
+                None,
+                "",
+                0.0,
+            )
+
+    # Without an identity index, a weak name stays unresolved even when the
+    # FotMob club ID is unknown.
+    assert _match_transfer_team(
+        WeakMatcher(), "Bayern Munich", fotmob_id=9823
+    )[0] == -1
+
+    from scraper.matcher import NameMatcher
+
+    matcher = NameMatcher()
+    roster = [3001, *range(3002, 3020)]
+    matcher.load_player_db([("Known Player", 3001)])
+    matcher.load_team_db({"Save FC": 10, "Bayern München": 30})
+    transfer = Transfer(
+        "Known Player",
+        "Save FC",
+        "Bayern Munich",
+        date="2026-08-01",
+        from_club_id_fotmob=111,
+        to_club_id_fotmob=9823,
+    )
+    report = PlanningReport()
+
+    matched = _match_transfers_statefully(
+        [transfer],
+        matcher,
+        80,
+        {10: roster, 30: list(range(4001, 4020))},
+        {10, 30},
+        club_identity=_identity(
+            {111: 10}, matcher, names={"Bayern Munich": UNRESOLVED}
+        ),
+        report=report,
+    )
+    plan = _plan_roster_actions(
+        matched,
+        _team_rosters(t10=roster, t30=list(range(4001, 4020))),
+        {10, 30},
+        object(),
+        {},
+        report=report,
+    )
+
+    assert matched[0].to_team_id == -1
+    assert not matched[0].is_release
+    assert [(item.action, item.reason) for item in plan] == [
+        ("skip", "destination_team_not_matched")
+    ]
+    assert [(item.reason, item.relevant) for item in report.skipped] == [
+        ("destination_team_not_matched", True)
+    ]
+
+
+def test_plan_reconciles_stale_source_from_destination_live_squad():
+    source, actual, destination = 10, 30, 20
+    match = _club_match(source=source, destination=destination, date="2026-08-02")
+    rosters = _team_rosters(
+        t10=list(range(1000, 1020)),
+        t30=[115254, *range(2000, 2019)],
+        t20=list(range(3000, 3020)),
+    )
+    report = PlanningReport(live_squad_ids={destination: frozenset({115254})})
+
+    plan = _plan_roster_actions(
+        [match], rosters, set(rosters), object(), {}, report=report
+    )
+
+    assert [(item.action, item.current_team_id) for item in plan] == [
+        ("move", actual)
+    ]
+    assert report.skipped == []
+
+    # Without destination evidence the mismatch is reported, not guessed.
+    blocked_report = PlanningReport()
+    blocked = _plan_roster_actions(
+        [match], rosters, set(rosters), object(), {}, report=blocked_report
+    )
+    assert (blocked[0].action, blocked[0].reason) == (
+        "skip",
+        "current_club_mismatch",
+    )
+    assert "club 30" in blocked[0].detail
+    assert [item.reason for item in blocked_report.skipped] == [
+        "current_club_mismatch"
+    ]
+
+
+def test_plan_reconciles_stale_source_from_later_event_at_destination():
+    first = _club_match(source=10, destination=20, date="2026-07-01")
+    second = _club_match(source=20, destination=40, date="2026-08-01")
+    rosters = _team_rosters(
+        t10=list(range(1000, 1020)),
+        t20=list(range(2000, 2020)),
+        t30=[115254, *range(3000, 3019)],
+        t40=list(range(4000, 4020)),
+    )
+
+    plan = _plan_roster_actions(
+        [first, second], rosters, set(rosters), object(), {}
+    )
+
+    assert [(item.action, item.current_team_id) for item in plan] == [
+        ("move", 30),
+        ("move", 20),
+    ]
+
+
+def test_plan_adds_save_free_agent_with_known_source():
+    match = _club_match(source=10, destination=20, date="2026-08-02")
+    rosters = _team_rosters(
+        t10=list(range(1000, 1020)), t20=list(range(2000, 2020))
+    )
+
+    plan = _plan_roster_actions([match], rosters, set(rosters), object(), {})
+
+    assert [(item.action, item.current_team_id) for item in plan] == [
+        ("add", None)
+    ]
+
+
+def test_return_from_outside_club_moves_from_parent_with_earlier_loan():
+    parent, destination = 30, 20
+    match = MatchedTransfer(
+        transfer=Transfer(
+            "Randal Kolo Muani", "Outside Club", "Destination", date="2026-08-02"
+        ),
+        player_id=115254,
+        to_team_id=destination,
+        player_confidence=100,
+        to_team_confidence=100,
+    )
+    history = [{
+        "player_id": 115254,
+        "from_team_id": parent,
+        "to_team_id": None,
+        "transfer_type": "loan",
+        "transfer_date": "2026-01-10",
+    }]
+    rosters = _team_rosters(
+        t30=[115254, *range(3000, 3019)], t20=list(range(2000, 2020))
+    )
+
+    reconciled = _plan_roster_actions(
+        [match],
+        rosters,
+        set(rosters),
+        object(),
+        _build_superseded_loan_sources([match], historical_entries=history),
+    )
+    unproven = _plan_roster_actions(
+        [match],
+        rosters,
+        set(rosters),
+        object(),
+        _build_superseded_loan_sources([match]),
+    )
+
+    assert [(item.action, item.current_team_id) for item in reconciled] == [
+        ("move", parent)
+    ]
+    assert [(item.action, item.reason) for item in unproven] == [
+        ("skip", "already_registered_elsewhere")
+    ]
+
+
+def test_stale_fotmob_history_identity_does_not_block_player_forever():
+    from scraper.matcher import NameMatcher
+
+    matcher = NameMatcher()
+    matcher.load_player_db([("First Player", 3001), ("Second Player", 3002)])
+    matcher.load_team_db({"Old FC": 10, "New FC": 20, "Other FC": 30})
+    transfer = Transfer(
+        "Second Player", "Old FC", "New FC", player_id_fotmob=777
+    )
+    poisoned_history = [{"player_id": 3001, "fotmob_player_id": 777}]
+    report = PlanningReport()
+
+    matched = _match_transfers_statefully(
+        [transfer],
+        matcher,
+        80,
+        {10: [3002], 20: [], 30: [3001]},
+        {10, 20, 30},
+        poisoned_history,
+        report=report,
+    )
+
+    # The event's clubs register the name-matched player, not the logged one.
+    assert matched[0].player_id == 3002
+    assert report.fotmob_player_ids[777] == 3002
+
+
+def test_live_squad_identity_overrides_conflicting_history():
+    from scraper.matcher import NameMatcher
+
+    matcher = NameMatcher()
+    matcher.load_player_db([("First Player", 3001), ("Second Player", 3002)])
+    matcher.load_team_db({"Old FC": 10, "New FC": 20, "Other FC": 30})
+    snapshot = SquadSnapshot(
+        club_name="Old FC",
+        team_id_fotmob=100,
+        members=(SquadMember("Second Player", player_id_fotmob=777),),
+        source_url="https://www.fotmob.com/api/data/teams?id=100",
+        complete=True,
+    )
+    transfer = Transfer("First Player", "Old FC", "New FC", player_id_fotmob=777)
+    report = PlanningReport()
+
+    matched = _match_transfers_statefully(
+        [transfer],
+        matcher,
+        80,
+        {10: [3002], 20: [], 30: [3001]},
+        {10, 20, 30},
+        [{"player_id": 3001, "fotmob_player_id": 777}],
+        club_identity=_identity({100: 10}, matcher),
+        squad_snapshots=(snapshot,),
+        report=report,
+    )
+
+    assert matched[0].player_id == 3002
+    assert report.fotmob_player_ids[777] == 3002
+    assert report.live_squad_ids[10] == frozenset({3002})
+
+
+def test_undecidable_identity_conflict_is_reported_with_reason():
+    from scraper.matcher import NameMatcher
+
+    matcher = NameMatcher()
+    matcher.load_player_db([("First Player", 3001), ("Second Player", 3002)])
+    matcher.load_team_db({"Old FC": 10, "New FC": 20})
+    transfer = Transfer(
+        "Second Player",
+        "Old FC",
+        "New FC",
+        date="2026-08-01",
+        player_id_fotmob=777,
+    )
+    rosters = {
+        10: [3002, *range(5000, 5017)],
+        20: [3001, *range(6000, 6017)],
+    }
+    report = PlanningReport()
+
+    matched = _match_transfers_statefully(
+        [transfer],
+        matcher,
+        80,
+        rosters,
+        set(rosters),
+        [{"player_id": 3001, "fotmob_player_id": 777}],
+        report=report,
+    )
+    _plan_roster_actions(
+        matched,
+        _team_rosters(t10=rosters[10], t20=rosters[20]),
+        set(rosters),
+        object(),
+        {},
+        report=report,
+    )
+
+    assert matched[0].player_id is None
+    assert [
+        (item.reason, item.relevant, item.fotmob_player_id)
+        for item in report.skipped
+    ] == [("provider_identity_conflict", True, 777)]
+
+
+def test_roster_minimum_departure_waits_for_same_plan_backfill():
+    departure = _club_match(source=10, destination=20, date="2026-07-01")
+    arrival = _arrival(501, source=30, destination=10)
+    rosters = _team_rosters(
+        t10=[115254, *range(1000, 1015)],
+        t20=list(range(2000, 2020)),
+        t30=[501, *range(3000, 3019)],
+    )
+    report = PlanningReport()
+
+    plan = _plan_roster_actions(
+        [departure, arrival], rosters, set(rosters), object(), {}, report=report
+    )
+
+    assert [(item.match.player_id, item.action) for item in plan] == [
+        (501, "move"),
+        (115254, "move"),
+    ]
+    assert report.skipped == []
+
+
+def test_overflow_ranking_protects_live_squad_members():
+    source, destination = 30, 10
+    rosters = _team_rosters(
+        t30=[501, *range(2001, 2019)],
+        t10=list(range(1000, 1040)),
+    )
+    report = PlanningReport(live_squad_ids={destination: frozenset({1039})})
+
+    plan = _plan_roster_actions(
+        [_arrival(501, source=source, destination=destination)],
+        rosters,
+        set(rosters),
+        _LiveRoleOverflowEditFile({slot: slot for slot in range(40)}),
+        {},
+        report=report,
+    )
+
+    # Slot 39 ranks first, but its player is in the live squad.
+    assert [(item.action, item.overflow_player_id) for item in plan] == [
+        ("move", 1038)
+    ]
+
+
+def test_live_squad_move_blocked_by_low_coverage_is_reported():
+    from scraper.matcher import NameMatcher
+
+    destination_ids = list(range(4001, 4031))
+    source_ids = [3001, *range(3002, 3020)]
+    matcher = NameMatcher()
+    matcher.load_player_db(
+        [("Mover Guy", 3001)]
+        + [(f"Player {player_id}", player_id) for player_id in destination_ids]
+    )
+    matcher.load_team_db({"Source FC": 10, "Destination FC": 20})
+    snapshot = SquadSnapshot(
+        club_name="Destination FC",
+        team_id_fotmob=200,
+        members=(
+            SquadMember("Mover Guy", player_id_fotmob=9001),
+            *(
+                SquadMember(f"Player {player_id}", player_id_fotmob=player_id)
+                for player_id in destination_ids[:11]
+            ),
+        ),
+        source_url="https://www.fotmob.com/api/data/teams?id=200",
+        complete=True,
+    )
+    report = PlanningReport()
+
+    matched = _match_transfers_statefully(
+        [],
+        matcher,
+        80,
+        {10: source_ids, 20: destination_ids},
+        {10, 20},
+        club_identity=_identity({200: 20}, matcher),
+        squad_snapshots=(snapshot,),
+        report=report,
+    )
+
+    assert not any(match.player_id == 3001 for match in matched)
+    assert [
+        (item.player_name, item.reason, item.relevant, item.fotmob_player_id)
+        for item in report.skipped
+    ] == [("Mover Guy", "snapshot_coverage_low", True, 9001)]

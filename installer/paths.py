@@ -59,12 +59,27 @@ class DestinationError(OSError):
 _REPARSE_POINT_ATTRIBUTE = getattr(
     stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400
 )
+_NAME_SURROGATE_TAG_BIT = 0x20000000
 
 
-def _is_reparse_status(path_status: os.stat_result) -> bool:
-    return stat.S_ISLNK(path_status.st_mode) or bool(
-        getattr(path_status, "st_file_attributes", 0)
-        & _REPARSE_POINT_ATTRIBUTE
+def is_name_surrogate_reparse_tag(tag: int) -> bool:
+    """True for reparse tags that redirect to another path.
+
+    Symbolic links and junctions (mount points) carry the Windows
+    name-surrogate bit; OneDrive/Cloud Files placeholders do not, so they are
+    ordinary local files for the installer.
+    """
+
+    return bool(tag & _NAME_SURROGATE_TAG_BIT)
+
+
+def is_link_status(path_status: os.stat_result) -> bool:
+    if stat.S_ISLNK(path_status.st_mode):
+        return True
+    if not getattr(path_status, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE:
+        return False
+    return is_name_surrogate_reparse_tag(
+        getattr(path_status, "st_reparse_tag", _NAME_SURROGATE_TAG_BIT)
     )
 
 
@@ -81,7 +96,7 @@ def _reject_reparse_point(path: Path, description: str) -> None:
         raise DestinationError(
             "not_writable", f"{description} cannot be inspected: {path}"
         ) from error
-    if _is_reparse_status(path_status):
+    if is_link_status(path_status):
         raise DestinationError(
             "reparse_point",
             f"{description} must not be a symbolic link, junction, or reparse point: {path}",

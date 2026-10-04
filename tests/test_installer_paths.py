@@ -370,3 +370,58 @@ def test_validate_destination_rejects_symlinked_edit_file(tmp_path: Path) -> Non
 
     assert caught.value.code == "reparse_point"
     assert escaped.read_bytes() == b"outside"
+
+
+_IO_REPARSE_TAG_CLOUD_6 = 0x9000601A
+_IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003
+_IO_REPARSE_TAG_SYMLINK = 0xA000000C
+
+
+class _WindowsReparseStatus:
+    def __init__(self, status: os.stat_result, tag: int | None) -> None:
+        self._status = status
+        self.st_file_attributes = 0x400
+        if tag is not None:
+            self.st_reparse_tag = tag
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._status, name)
+
+
+def _report_reparse_tag(
+    monkeypatch: pytest.MonkeyPatch, tag: int | None
+) -> None:
+    real_lstat = Path.lstat
+    monkeypatch.setattr(
+        Path,
+        "lstat",
+        lambda self: _WindowsReparseStatus(real_lstat(self), tag),
+    )
+
+
+def test_validate_destination_accepts_onedrive_cloud_placeholders(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    save_directory = _make_directory(tmp_path / "save")
+    (save_directory / "EDIT00000000").write_bytes(b"save")
+    _report_reparse_tag(monkeypatch, _IO_REPARSE_TAG_CLOUD_6)
+
+    assert (
+        validate_destination(save_directory, GameTarget.FL26)
+        == save_directory.resolve()
+    )
+
+
+@pytest.mark.parametrize(
+    "tag", [_IO_REPARSE_TAG_MOUNT_POINT, _IO_REPARSE_TAG_SYMLINK, None]
+)
+def test_validate_destination_rejects_name_surrogate_or_unknown_reparse_tags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tag: int | None
+) -> None:
+    save_directory = _make_directory(tmp_path / "save")
+    _report_reparse_tag(monkeypatch, tag)
+
+    with pytest.raises(DestinationError) as caught:
+        validate_destination(save_directory, GameTarget.FL26)
+
+    assert caught.value.code == "reparse_point"

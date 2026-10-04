@@ -38,7 +38,6 @@ def test_league_tactics_follow_extreme_current_season_rates():
             "containment_area": 0,
             "pressuring": 1,
             "defensive_line": 1,
-            "compactness": 1,
         },
         6,
     )
@@ -51,12 +50,11 @@ def test_league_tactics_follow_extreme_current_season_rates():
             "containment_area": 1,
             "pressuring": 0,
             "defensive_line": 10,
-            "compactness": 10,
         },
         6,
     )
     assert decisions[104] == (
-        {"defensive_line": 5, "compactness": 5},
+        {"defensive_line": 5},
         6,
     )
 
@@ -65,10 +63,10 @@ def test_league_tactics_follow_extreme_current_season_rates():
         decisions[team_id][0]["defensive_line"]
         for team_id in range(101, 109)
     ] == [1, 2, 4, 5, 6, 7, 9, 10]
-    assert [
-        decisions[team_id][0]["compactness"]
-        for team_id in range(101, 109)
-    ] == [1, 2, 4, 5, 6, 7, 9, 10]
+    # No independent FotMob metric exists for compactness: never derived.
+    assert all(
+        "compactness" not in settings for settings, _ in decisions.values()
+    )
 
 def test_slider_decisions_require_eight_distinct_current_season_profiles():
     teams = _league_teams()
@@ -154,7 +152,6 @@ def test_cached_fotmob_league_evidence_builds_public_tactical_update(tmp_path):
         "containment_area": 0,
         "pressuring": 1,
         "defensive_line": 1,
-        "compactness": 1,
     }
     assert updates[0].sample_matches == 6
     assert updates[0].source_urls == (source_url,)

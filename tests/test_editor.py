@@ -560,11 +560,12 @@ class TestEditFileHeader:
                 game_plan_base + GP_LINEUP : game_plan_base + GP_LINEUP + TP_MAX_PLAYERS
             ]
         )
+        # The signing (roster slot 0) becomes the first substitute, role 11.
         assert updated_lineup[:11] == list(range(1, 12))
-        assert updated_lineup[-1] == 0
-        assert sorted(updated_lineup) == list(range(TP_MAX_PLAYERS))
+        assert updated_lineup[11] == 0
+        assert updated_lineup[12:] == list(range(12, 40))
 
-    def test_game_plan_removal_updates_active_prefix_with_legacy_tail(self):
+    def test_game_plan_removal_backfills_starter_role_without_shift(self):
         data = _build_mock_data(
             num_players=17,
             num_teams=1,
@@ -591,10 +592,15 @@ class TestEditFileHeader:
                 game_plan_base + GP_LINEUP : game_plan_base + GP_LINEUP + TP_MAX_PLAYERS
             ]
         )
-        assert updated_lineup[:16] == list(range(16))
+        # The copied last-slot player (old slot 16, now slot 5) keeps role 2;
+        # the departed role 6 is backfilled by the first substitute (slot 10)
+        # and no other starter role moves.
+        assert updated_lineup[:16] == [
+            0, 1, 5, 2, 3, 4, 10, 6, 7, 8, 9, 11, 12, 13, 14, 15,
+        ]
         assert edit_file.validate_integrity()["valid"] is True
 
-    def test_game_plan_addition_updates_active_prefix_with_legacy_tail(self):
+    def test_game_plan_addition_places_signing_on_first_bench_role(self):
         data = _build_mock_data(
             num_players=15,
             num_teams=1,
@@ -620,7 +626,7 @@ class TestEditFileHeader:
                 game_plan_base + GP_LINEUP : game_plan_base + GP_LINEUP + TP_MAX_PLAYERS
             ]
         )
-        assert updated_lineup[:16] == list(range(16))
+        assert updated_lineup[:16] == [*range(11), 15, 11, 12, 13, 14]
         assert edit_file.validate_integrity()["valid"] is True
 
 
@@ -816,7 +822,7 @@ class TestTeamRosters:
             )
             assert bytes(ef_with_rosters._data) == unchanged
 
-    def test_game_plan_formation_updates_main_preset_roles_and_geometry(
+    def test_game_plan_formation_mirrors_roles_and_geometry_into_all_presets(
         self,
         ef_with_rosters,
     ):
@@ -851,23 +857,25 @@ class TestTeamRosters:
             ]
         )
         allowed_offsets = set()
-        for phase_index, phase_offset in enumerate(GP_POSITION_PHASE_OFFSETS):
-            role_offset = GP_POSITION_PRESETS[0] + phase_offset
-            allowed_offsets.update(range(role_offset, role_offset + 11))
-            coordinate_offset = (
-                GP_POSITION_PRESETS[0]
-                + GP_POSITION_COORDINATE_OFFSETS[phase_index]
-            )
-            allowed_offsets.update(range(coordinate_offset, coordinate_offset + 22))
+        for preset in GP_POSITION_PRESETS:
+            for phase_index, phase_offset in enumerate(GP_POSITION_PHASE_OFFSETS):
+                role_offset = preset + phase_offset
+                allowed_offsets.update(range(role_offset, role_offset + 11))
+                coordinate_offset = (
+                    preset + GP_POSITION_COORDINATE_OFFSETS[phase_index]
+                )
+                allowed_offsets.update(
+                    range(coordinate_offset, coordinate_offset + 22)
+                )
 
-            assert after[role_offset : role_offset + 11] == bytes(layout[0])
-            expected_coordinates = bytes(
-                value for coordinate in layout[1] for value in coordinate
-            )
-            assert (
-                after[coordinate_offset : coordinate_offset + 22]
-                == expected_coordinates
-            )
+                assert after[role_offset : role_offset + 11] == bytes(layout[0])
+                expected_coordinates = bytes(
+                    value for coordinate in layout[1] for value in coordinate
+                )
+                assert (
+                    after[coordinate_offset : coordinate_offset + 22]
+                    == expected_coordinates
+                )
 
         changed_offsets = {
             offset
@@ -887,6 +895,7 @@ class TestTeamRosters:
             "2-4-4",
             "4-2-2-3",
             "4-2-3-1-0",
+            "4-1-1-1-1-2",
             "4-2-three-1",
         ),
     )
@@ -919,6 +928,25 @@ class TestTeamRosters:
             6,
             12,
         )
+
+    def test_game_plan_formation_layout_supports_five_row_shapes(self):
+        # Diamond: DMF / two CMFs / AMF / two CFs, rows strictly advancing.
+        roles, coordinates = game_plan_formation_layout("4-1-2-1-2")
+        assert roles == (0, 1, 1, 3, 2, 4, 5, 5, 8, 12, 12)
+        verticals = [vertical for vertical, _horizontal in coordinates]
+        assert verticals[5] < verticals[6] < verticals[8] < verticals[9]
+        assert game_plan_formation_layout("3-4-1-1-1")[0] == (
+            0, 1, 1, 1, 5, 5, 7, 6, 8, 11, 12,
+        )
+
+    def test_five_row_formation_is_written_to_every_preset(self, ef_with_rosters):
+        game_plan_base = ef_with_rosters._find_game_plan_offset(101)
+        assert ef_with_rosters.set_team_formation(101, "4-1-2-1-2") > 0
+        roles = bytes(game_plan_formation_layout("4-1-2-1-2")[0])
+        for preset in GP_POSITION_PRESETS:
+            for phase_offset in GP_POSITION_PHASE_OFFSETS:
+                start = game_plan_base + preset + phase_offset
+                assert bytes(ef_with_rosters._data[start : start + 11]) == roles
 
     def test_batch_shirt_updates_support_swaps(self, ef_with_rosters):
         assert ef_with_rosters.update_player_shirt_numbers(
@@ -1112,6 +1140,40 @@ class TestMovePlayer:
         assert 2039 in destination.roster
         assert 1001 in destination.roster
 
+    def _full_destination_file(self):
+        data = _build_mock_data(
+            num_players=1,
+            num_teams=2,
+            num_team_player=2,
+            num_game_plans=2,
+            team_player_entries=[
+                (101, [1001], [7]),
+                (102, list(range(2000, 2040)), list(range(1, 41))),
+            ],
+            league_team_ids=[101, 102],
+        )
+        ef = EditFile()
+        ef.load_bytes(data)
+        return ef
+
+    def test_add_player_uses_planned_overflow_candidate(self):
+        ef = self._full_destination_file()
+
+        assert ef.add_player(3001, to_team_id=102, planned_overflow_player_id=2038)
+
+        destination = ef.get_team_roster(102)
+        assert 2038 not in destination.roster
+        assert 2039 in destination.roster
+        assert 3001 in destination.roster
+
+    def test_add_player_reports_stale_planned_overflow_candidate(self):
+        ef = self._full_destination_file()
+
+        assert not ef.add_player(3001, to_team_id=102, planned_overflow_player_id=9999)
+
+        assert ef.last_mutation_error_code == "overflow_candidate_stale"
+        assert ef.get_team_roster(102).roster == list(range(2000, 2040))
+
 
 class TestTeamDataModel:
     def test_roster_property(self):
@@ -1188,6 +1250,7 @@ class TestReleaseAndAddPlayer:
 
         ok = ef.release_player(9999, from_team_id=101)
         assert ok is False
+        assert ef.last_mutation_error_code == "source_player_missing"
 
     def test_add_player_from_free_agent(self):
         data = self._build_test_data()
@@ -1418,3 +1481,27 @@ class TestReleaseAndAddPlayer:
 
         assert ef.add_player(9999, to_team_id=101, allow_overflow_release=False) is False
         assert ef.get_team_roster(101).roster == list(range(1000, 1040))
+
+
+def test_decrypt_requires_data_dat_instead_of_guessing_other_blocks(monkeypatch, tmp_path):
+    import subprocess
+    from pathlib import Path
+
+    from editor import crypto
+
+    edit_path = tmp_path / "EDIT00000000"
+    edit_path.write_bytes(b"encrypted")
+    created_dirs: list[Path] = []
+
+    def fake_run(args, **_kwargs):
+        out_dir = Path(args[2])
+        created_dirs.append(out_dir)
+        (out_dir / "other.dat").write_bytes(b"x" * 64)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(crypto, "_find_binary", lambda _name: tmp_path / "decrypter21")
+    monkeypatch.setattr(crypto.subprocess, "run", fake_run)
+
+    with pytest.raises(crypto.CryptoError, match="data.dat"):
+        crypto.decrypt(edit_path)
+    assert created_dirs and not created_dirs[0].exists()

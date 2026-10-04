@@ -280,14 +280,47 @@ def test_wikipedia_wikitext_parser_accepts_leading_row_and_dts_date():
     assert transfer.proof_urls == ("https://afcb.example/jimenez",)
 
 
-def test_wikipedia_a_league_template_expands_team_name():
+def test_wikipedia_a_league_template_expands_team_name_via_api(monkeypatch):
+    from scraper import wikipedia
+
+    requests: list[dict] = []
+
+    async def fake_fetch_json(session, **params):
+        requests.append(params)
+        assert params["action"] == "expandtemplates"
+        return {
+            "expandtemplates": {
+                "wikitext": "@@FLDE0@@[[Perth Glory FC|Perth Glory]]",
+            }
+        }
+
+    monkeypatch.setattr(wikipedia, "_fetch_json", fake_fetch_json)
+    cache: dict[str, str] = {}
+    codes = wikipedia._a_league_codes(WIKIPEDIA_A_LEAGUE_WIKITEXT)
+    asyncio.run(wikipedia._expand_a_league_teams(None, codes, cache))
+    asyncio.run(wikipedia._expand_a_league_teams(None, codes, cache))
+
+    assert cache == {"PG": "Perth Glory"}
+    assert len(requests) == 1
+    assert "{{A-League team|PG}}" in requests[0]["text"]
+    transfers = parse_wikipedia_transfer_wikitext(
+        WIKIPEDIA_A_LEAGUE_WIKITEXT,
+        "A-League Men transfers for 2026–27 season",
+        team_names=cache,
+    )
+
+    assert len(transfers) == 1
+    assert transfers[0].to_club == "Perth Glory"
+
+
+def test_wikipedia_a_league_template_without_expansion_keeps_code():
     transfers = parse_wikipedia_transfer_wikitext(
         WIKIPEDIA_A_LEAGUE_WIKITEXT,
         "A-League Men transfers for 2026–27 season",
     )
 
     assert len(transfers) == 1
-    assert transfers[0].to_club == "Perth Glory"
+    assert transfers[0].to_club == "PG"
 
 
 def test_wikipedia_a_league_annotation_sets_lifecycle_type():
@@ -387,6 +420,71 @@ def test_wikipedia_fetch_discovers_every_mens_page_in_season_category(monkeypatc
         "List of Italian football transfers summer 2026",
         "A-League Men transfers for 2026–27 season",
     }
+
+
+def test_wikipedia_fetch_batches_titles_and_follows_continuation(monkeypatch):
+    from scraper import wikipedia
+
+    titles = [f"List of football transfers summer 2026 part {n}" for n in range(55)]
+    revision_batches = []
+
+    async def fake_fetch(_session, **params):
+        if params.get("list") == "categorymembers":
+            chunk = titles[30:] if params.get("cmcontinue") else titles[:30]
+            payload = {"query": {"categorymembers": [{"title": t} for t in chunk]}}
+            if not params.get("cmcontinue"):
+                payload["continue"] = {"cmcontinue": "page|30", "continue": "-||"}
+            return payload
+        requested = params["titles"].split("|")
+        if len(requested) > 50:
+            raise RuntimeError("Wikipedia API error toomanyvalues")
+        revision_batches.append(requested)
+        pages = {
+            str(index): {
+                "title": title,
+                "revisions": [{"slots": {"main": {"*": WIKIPEDIA_WIKITEXT}}}],
+            }
+            for index, title in enumerate(requested)
+            if title == titles[-1]
+        }
+        return {"query": {"pages": pages}}
+
+    monkeypatch.setattr(wikipedia, "_fetch_json", fake_fetch)
+
+    transfers = asyncio.run(
+        wikipedia._fetch_wikipedia_transfers_async(
+            window="summer",
+            ref_date=date(2026, 8, 4),
+        )
+    )
+
+    assert sorted(len(batch) for batch in revision_batches) == [5, 50]
+    assert "Jordan Henderson" in {transfer.player_name for transfer in transfers}
+
+
+def test_wikipedia_api_error_payload_is_not_treated_as_empty(monkeypatch):
+    from scraper import wikipedia
+
+    class FakeResponse:
+        status = 200
+        headers = {}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def json(self, content_type=None):
+            return {"error": {"code": "toomanyvalues", "info": "Too many values"}}
+
+    class FakeSession:
+        def get(self, *_args, **_kwargs):
+            return FakeResponse()
+
+    with pytest.raises(RuntimeError, match="toomanyvalues"):
+        asyncio.run(wikipedia._fetch_json(FakeSession(), action="query"))
+
 
 
 def test_wikipedia_fetch_does_not_replay_wikimedia_rate_limit_cookies(monkeypatch):
@@ -667,10 +765,6 @@ def test_transfermarkt_fetch_has_no_250_transfer_cap(monkeypatch, caplog):
 
     assert len(transfers) == 252
     assert len({item.transfer_id_transfermarkt for item in transfers}) == 252
-    assert any(
-        "latest-feed boundary reached after 84 unique pages" in record.message
-        for record in caplog.records
-    )
 
 
 def test_transfermarkt_fetch_continues_past_future_dated_first_page(monkeypatch):
@@ -694,6 +788,28 @@ def test_transfermarkt_fetch_continues_past_future_dated_first_page(monkeypatch)
     )
 
     assert [item.transfer_id_transfermarkt for item in transfers] == [6481688]
+    assert len(requested) == 2
+
+
+def test_transfermarkt_fetch_stops_when_reader_repeats_future_dated_page(monkeypatch):
+    from scraper import transfermarkt
+
+    requested = []
+    future_page = TRANSFERMARKT_MARKDOWN.replace("03/08/2026", "04/08/2026")
+
+    async def fake_fetch(_session, reader_url):
+        requested.append(reader_url)
+        return future_page
+
+    monkeypatch.setattr(transfermarkt, "_fetch_text", fake_fetch)
+    transfers = asyncio.run(
+        transfermarkt._fetch_transfermarkt_transfers_async(
+            since_date=date(2026, 8, 3),
+            ref_date=date(2026, 8, 3),
+        )
+    )
+
+    assert transfers == []
     assert len(requested) == 2
 
 
@@ -775,6 +891,28 @@ def test_transfermarkt_fetch_falls_back_to_german_reader_domain(monkeypatch):
     assert "transfermarkt.com" in requested[0]
     assert "fldailyedit_refresh=" in requested[1]
     assert "transfermarkt.de" in requested[2]
+
+
+def test_transfermarkt_later_page_failure_keeps_collected_rows(monkeypatch, caplog):
+    from scraper import transfermarkt
+
+    async def fake_fetch(_session, reader_url):
+        if "page=2" in reader_url:
+            raise transfermarkt.TransfermarktUnavailableError("HTTP 429")
+        return TRANSFERMARKT_MARKDOWN
+
+    monkeypatch.setattr(transfermarkt, "_fetch_text", fake_fetch)
+    with caplog.at_level(logging.WARNING, logger=transfermarkt.__name__):
+        transfers = asyncio.run(
+            transfermarkt._fetch_transfermarkt_transfers_async(
+                max_pages=4,
+                since_date=date(2026, 8, 3),
+                ref_date=date(2026, 8, 4),
+            )
+        )
+
+    assert len(transfers) == 3
+    assert any(record.levelno == logging.WARNING for record in caplog.records)
 
 
 def test_transfermarkt_network_outage_is_quiet_fallback(monkeypatch, caplog):
@@ -1115,6 +1253,26 @@ def test_soccerway_parser_resolves_current_feed_routes():
     ]
 
 
+def test_soccerway_search_without_matching_club_resolves_nothing():
+    from scraper import soccerway
+
+    def team(team_id, name):
+        return {
+            "id": team_id,
+            "url": team_id,
+            "name": name,
+            "type": {"id": 2},
+            "sport": {"id": 1},
+        }
+
+    payload = [team("miami-id", "Inter Miami"), team("internacional-id", "Internacional")]
+
+    assert soccerway._candidate_team(payload, "Inter") is None
+    assert soccerway._candidate_team(
+        [*payload, team("inter-id", "Inter")], "Inter"
+    ).team_id == "inter-id"
+
+
 def test_soccerway_fetch_resolves_relevant_club_and_reads_feed(monkeypatch):
     from scraper import soccerway
 
@@ -1363,6 +1521,67 @@ def test_free_transfer_merges_free_agent_and_previous_club_routes():
     assert reconciled[0].from_club == "Brentford FC"
 
 
+def test_lower_priority_sources_cannot_turn_paid_move_into_loan():
+    fotmob = Transfer(
+        "Ada Example",
+        "Old FC",
+        "New FC",
+        date="2026-08-03",
+        fee="€30M",
+    )
+    wikipedia_loan = Transfer(
+        "Ada Example",
+        "Old FC",
+        "New FC",
+        date="2026-08-03",
+        transfer_type="loan",
+        is_loan=True,
+        sources=("wikipedia",),
+    )
+    corroborator_loan = Transfer(
+        "Ada Example",
+        "Old FC",
+        "New FC",
+        date="2026-08-03",
+        transfer_type="loan",
+        is_loan=True,
+        sources=("besoccer",),
+        verification_status="corroborator",
+    )
+
+    reconciled = reconcile_transfer_sources(
+        [[fotmob], [wikipedia_loan]],
+        corroborators=[corroborator_loan],
+    )
+
+    assert len(reconciled) == 1
+    assert reconciled[0].sources == ("fotmob", "wikipedia", "besoccer")
+    assert (reconciled[0].transfer_type, reconciled[0].is_loan) == ("transfer", False)
+
+
+def test_transliterated_player_names_merge_across_sources():
+    fotmob = Transfer(
+        "Łukasz Fabiański",
+        "West Ham United",
+        "Free Agent",
+        date="2026-07-01",
+        transfer_type="free transfer",
+    )
+    transfermarkt = Transfer(
+        "Lukasz Fabianski",
+        "West Ham United",
+        "Free Agent",
+        date="2026-07-01",
+        transfer_type="free transfer",
+        sources=("transfermarkt",),
+    )
+
+    reconciled = reconcile_transfer_sources([[fotmob], [transfermarkt]])
+
+    assert len(reconciled) == 1
+    assert reconciled[0].sources == ("fotmob", "transfermarkt")
+
+
 def _sortitoutsi_signal() -> Transfer:
     return Transfer(
         "Jordan Henderson",
@@ -1435,7 +1654,7 @@ def test_run_pipeline_accepts_transfermarkt_dated_event_without_other_sources(
     monkeypatch,
 ):
     import run_pipeline as run
-    monkeypatch.setattr(run, "fetch_squads_for_club_names", lambda *_: [])
+    monkeypatch.setattr(run, "fetch_squads_for_club_ids", lambda *_: [])
 
     transfermarkt = Transfer(
         "Jordan Henderson",
@@ -1451,8 +1670,8 @@ def test_run_pipeline_accepts_transfermarkt_dated_event_without_other_sources(
     monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_: [])
     monkeypatch.setattr(
         run,
-        "fetch_major_clubs_transfers_safely",
-        lambda **_: [],
+        "fetch_clubs_transfers_safely",
+        lambda *_, **__: [],
     )
     monkeypatch.setattr(run, "fetch_wikipedia_transfers", lambda **_: [])
     monkeypatch.setattr(run, "fetch_sortitoutsi_transfers", lambda **_: [])
@@ -1478,53 +1697,41 @@ def test_run_pipeline_accepts_transfermarkt_dated_event_without_other_sources(
 
     assert transfers == [transfermarkt]
 
-def test_fast_mode_bounds_transfermarkt_scan_but_deep_keeps_full_results(
-    monkeypatch, caplog
-):
+def test_transfermarkt_scan_has_no_time_budget_and_reaches_since_date(monkeypatch):
     import run_pipeline as run
-    from scraper import transfermarkt
 
-    monkeypatch.setattr(run, "_FAST_TRANSFERMARKT_TIMEOUT_SECONDS", 0.1)
-    second_page = TRANSFERMARKT_PAGE_2.replace(
-        "02/08/2026", "03/08/2026"
+    calls = []
+    monkeypatch.setattr(
+        run,
+        "fetch_transfermarkt_transfers",
+        lambda **kwargs: calls.append(kwargs) or [],
     )
-
-    async def fake_fetch(_session, reader_url):
-        if "page=2" in reader_url:
-            await asyncio.sleep(0.25)
-            return second_page
-        if "page=3" in reader_url:
-            return TRANSFERMARKT_PAGE_2
-        return TRANSFERMARKT_MARKDOWN
-
-    monkeypatch.setattr(transfermarkt, "_fetch_text", fake_fetch)
     monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_: [])
-    monkeypatch.setattr(run, "fetch_major_clubs_transfers_safely", lambda **_: [])
     monkeypatch.setattr(run, "fetch_wikipedia_transfers", lambda **_: [])
     monkeypatch.setattr(run, "fetch_sortitoutsi_transfers", lambda **_: [])
     monkeypatch.setattr(run, "fetch_besoccer_transfers", lambda **_: [])
     monkeypatch.setattr(run, "fetch_sofascore_transfers", lambda **_: [])
     monkeypatch.setattr(run, "fetch_soccerway_transfers", lambda **_: [])
-    args = dict(
-        popular=False,
-        window="summer",
-        since="2026-08-03",
-        club=None,
-        fotmob_only=False,
+
+    run._scrape_run_transfers(
+        SimpleNamespace(
+            popular=False,
+            window="summer",
+            since="2026-08-03",
+            club=None,
+            deep=False,
+            fotmob_only=False,
+        )
     )
 
-    with caplog.at_level(logging.WARNING, logger=transfermarkt.__name__):
-        fast = run._scrape_run_transfers(SimpleNamespace(deep=False, **args))
-    deep = run._scrape_run_transfers(SimpleNamespace(deep=True, **args))
-
-    assert len({item.transfer_id_transfermarkt for item in fast}) == 3
-    assert len({item.transfer_id_transfermarkt for item in deep}) == 4
-    assert "reached its 0.1-second budget" in caplog.text
+    # Fast mode pages Transfermarkt back to the since-date: no scan budget.
+    assert calls == [{"since_date": "2026-08-03"}]
+    assert not hasattr(run, "_FAST_TRANSFERMARKT_TIMEOUT_SECONDS")
 
 
 def test_run_pipeline_reconciles_supplemental_sources(monkeypatch):
     import run_pipeline as run
-    monkeypatch.setattr(run, "fetch_squads_for_club_names", lambda *_: [])
+    monkeypatch.setattr(run, "fetch_squads_for_club_ids", lambda *_: [])
 
     fotmob = Transfer(
         "Jordan Henderson", "Brentford", "Chelsea", date="2026-08-03"
@@ -1551,8 +1758,8 @@ def test_run_pipeline_reconciles_supplemental_sources(monkeypatch):
     monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_: [fotmob])
     monkeypatch.setattr(
         run,
-        "fetch_major_clubs_transfers_safely",
-        lambda **_: [],
+        "fetch_clubs_transfers_safely",
+        lambda *_, **__: [],
     )
     monkeypatch.setattr(run, "fetch_wikipedia_transfers", lambda **_: [wikipedia])
     monkeypatch.setattr(run, "fetch_sortitoutsi_transfers", lambda **_: [signal])
@@ -1588,7 +1795,7 @@ def test_run_pipeline_reconciles_supplemental_sources(monkeypatch):
 
 def test_run_pipeline_merges_three_route_corroborators(monkeypatch):
     import run_pipeline as run
-    monkeypatch.setattr(run, "fetch_squads_for_club_names", lambda *_: [])
+    monkeypatch.setattr(run, "fetch_squads_for_club_ids", lambda *_: [])
 
     fotmob = Transfer(
         "Ada Example",
@@ -1623,8 +1830,8 @@ def test_run_pipeline_merges_three_route_corroborators(monkeypatch):
     monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_: [fotmob])
     monkeypatch.setattr(
         run,
-        "fetch_major_clubs_transfers_safely",
-        lambda **_: [],
+        "fetch_clubs_transfers_safely",
+        lambda *_, **__: [],
     )
     monkeypatch.setattr(run, "fetch_wikipedia_transfers", lambda **_: [])
     monkeypatch.setattr(run, "fetch_sortitoutsi_transfers", lambda **_: [])
@@ -1671,7 +1878,7 @@ def test_run_pipeline_merges_three_route_corroborators(monkeypatch):
 
 def test_run_pipeline_treats_undated_wikipedia_route_as_corroborator(monkeypatch):
     import run_pipeline as run
-    monkeypatch.setattr(run, "fetch_squads_for_club_names", lambda *_: [])
+    monkeypatch.setattr(run, "fetch_squads_for_club_ids", lambda *_: [])
 
     fotmob = Transfer(
         "Nathaniel Brown",
@@ -1690,8 +1897,8 @@ def test_run_pipeline_treats_undated_wikipedia_route_as_corroborator(monkeypatch
     monkeypatch.setattr(run, "fetch_fotmob_transfers", lambda **_: [fotmob])
     monkeypatch.setattr(
         run,
-        "fetch_major_clubs_transfers_safely",
-        lambda **_: [],
+        "fetch_clubs_transfers_safely",
+        lambda *_, **__: [],
     )
     monkeypatch.setattr(run, "fetch_wikipedia_transfers", lambda **_: [wikipedia])
     monkeypatch.setattr(run, "fetch_sortitoutsi_transfers", lambda **_: [])
@@ -1719,7 +1926,7 @@ def test_run_pipeline_treats_undated_wikipedia_route_as_corroborator(monkeypatch
 
 def test_fotmob_only_flag_does_not_call_supplemental_sources(monkeypatch):
     import run_pipeline as run
-    monkeypatch.setattr(run, "fetch_squads_for_club_names", lambda *_: [])
+    monkeypatch.setattr(run, "fetch_squads_for_club_ids", lambda *_: [])
 
     monkeypatch.setattr(
         run,
@@ -1728,8 +1935,8 @@ def test_fotmob_only_flag_does_not_call_supplemental_sources(monkeypatch):
     )
     monkeypatch.setattr(
         run,
-        "fetch_major_clubs_transfers_safely",
-        lambda **_: [],
+        "fetch_clubs_transfers_safely",
+        lambda *_, **__: [],
     )
     monkeypatch.setattr(
         run,
@@ -1867,3 +2074,175 @@ def test_reconciliation_uses_exact_composite_before_fuzzy_route():
     fuzzy = next(item for item in reconciled if item.player_id_fotmob == 202)
     assert exact.sources == ("fotmob", "soccerway")
     assert fuzzy.sources == ("fotmob",)
+
+
+def test_two_independent_corroborators_create_event():
+    besoccer = Transfer(
+        "Ada Example",
+        "Old FC",
+        "New FC",
+        date="2026-08-03",
+        sources=("besoccer",),
+        source_urls=("https://besoccer.example/ada",),
+        verification_status="corroborator",
+    )
+    sofascore = Transfer(
+        "Ada Example",
+        "Old",
+        "New",
+        date="2026-08-06",
+        fee="€5M",
+        sources=("sofascore",),
+        source_urls=("https://sofascore.example/ada",),
+        verification_status="corroborator",
+    )
+    undated_wikipedia = Transfer(
+        "Ada Example",
+        "Old FC",
+        "New FC",
+        sources=("wikipedia",),
+        verification_status="corroborator",
+    )
+
+    reconciled = reconcile_transfer_sources(
+        [],
+        corroborators=[besoccer, sofascore, undated_wikipedia],
+    )
+
+    assert len(reconciled) == 1
+    event = reconciled[0]
+    assert (event.player_name, event.from_club, event.to_club, event.date) == (
+        "Ada Example",
+        "Old FC",
+        "New FC",
+        "2026-08-03",
+    )
+    assert event.sources == ("besoccer", "sofascore", "wikipedia")
+    assert event.source_urls == (
+        "https://besoccer.example/ada",
+        "https://sofascore.example/ada",
+    )
+    assert event.fee == "€5M"
+    assert event.verification_status == "corroborated"
+    assert event.infer_from_current_roster is False
+
+
+def test_single_source_corroborators_never_create_events():
+    same_source = [
+        Transfer(
+            "Ada Example",
+            "Old FC",
+            "New FC",
+            date=day,
+            sources=("soccerway",),
+            verification_status="corroborator",
+        )
+        for day in ("2026-08-03", "2026-08-04")
+    ]
+
+    assert reconcile_transfer_sources([], corroborators=same_source[:1]) == []
+    assert reconcile_transfer_sources([], corroborators=same_source) == []
+
+
+def test_disagreeing_corroborators_do_not_create_events():
+    base = Transfer(
+        "Ada Example",
+        "Old FC",
+        "New FC",
+        date="2026-08-03",
+        sources=("besoccer",),
+        verification_status="corroborator",
+    )
+    late = Transfer(
+        "Ada Example",
+        "Old FC",
+        "New FC",
+        date="2026-08-07",
+        sources=("sofascore",),
+        verification_status="corroborator",
+    )
+    other_destination = Transfer(
+        "Ada Example",
+        "Old FC",
+        "Elsewhere United",
+        date="2026-08-03",
+        sources=("soccerway",),
+        verification_status="corroborator",
+    )
+    conflicting_source = Transfer(
+        "Ada Example",
+        "Different Origin",
+        "New FC",
+        date="2026-08-03",
+        sources=("wikipedia",),
+        verification_status="corroborator",
+    )
+
+    assert reconcile_transfer_sources([], corroborators=[base, late]) == []
+    assert reconcile_transfer_sources(
+        [], corroborators=[base, other_destination]
+    ) == []
+    assert reconcile_transfer_sources(
+        [], corroborators=[base, conflicting_source]
+    ) == []
+
+
+def test_matched_corroborators_do_not_also_create_events():
+    primary = Transfer("Ada Example", "Old FC", "New FC", date="2026-08-03")
+    corroborators = [
+        Transfer(
+            "Ada Example",
+            "Old FC",
+            "New FC",
+            date="2026-08-03",
+            sources=(source,),
+            verification_status="corroborator",
+        )
+        for source in ("besoccer", "sofascore")
+    ]
+
+    reconciled = reconcile_transfer_sources([[primary]], corroborators=corroborators)
+
+    assert len(reconciled) == 1
+    assert reconciled[0].sources == ("fotmob", "besoccer", "sofascore")
+
+
+def test_fuzzy_club_index_matches_full_token_set_scan():
+    from rapidfuzz import fuzz
+
+    from scraper.sources import _FuzzyKeyIndex, _normalize
+
+    clubs = [
+        "Manchester City",
+        "City",
+        "Manchester United",
+        "Man. City",
+        "Olympiacos Piraeus",
+        "Olympiakos Piraeus",
+        "Olympiakos",
+        "Olympiacos",
+        "Borussia Dortmund",
+        "Borusia Dortmund",
+        "Bayern München",
+        "Bayern Munchen",
+        "Real Madrid",
+        "Real Madrid Castilla",
+        "Juventus",
+        "Juventis",
+        "Sporting CP",
+        "FC Porto",
+        "Porto FC",
+        "Wolverhampton",
+        "Wolverhamptn",
+    ]
+    index = _FuzzyKeyIndex(clubs, score_cutoff=92)
+    keys = index._choices
+    for club in [*clubs, "Dortmund Borussia", "Unknown Athletic"]:
+        query = _normalize(club)
+        expected = {
+            key for key in keys if fuzz.token_set_ratio(query, key) >= 92
+        }
+        assert set(index.matching_keys(club)) == expected, club
+    # Matches sharing no token come only from the ratio prefilter path.
+    assert "wolverhamptn" in index.matching_keys("Wolverhampton")
+    assert "city" in index.matching_keys("Manchester City")

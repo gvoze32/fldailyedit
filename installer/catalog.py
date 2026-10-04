@@ -34,6 +34,7 @@ TRUSTED_ASSET_NAMES = {
 }
 
 MAX_ARCHIVE_BYTES = 32 * 1024 * 1024
+MAX_CATALOG_BYTES = 1024 * 1024
 _DOWNLOAD_CHUNK_BYTES = 64 * 1024
 
 
@@ -286,6 +287,27 @@ def _network_opener(opener: OpenerDirector | None) -> OpenerDirector:
     return opener if opener is not None else build_opener(TrustedRedirectHandler())
 
 
+def _read_catalog_response(response: Any) -> bytes:
+    raw_length = response.headers.get("Content-Length")
+    if raw_length is not None:
+        try:
+            content_length = int(raw_length)
+        except (TypeError, ValueError) as error:
+            raise CatalogError(
+                "invalid_catalog", "catalog Content-Length is invalid"
+            ) from error
+        if content_length < 0 or content_length > MAX_CATALOG_BYTES:
+            raise CatalogError(
+                "invalid_catalog", f"catalog exceeds {MAX_CATALOG_BYTES} byte limit"
+            )
+    payload = response.read(MAX_CATALOG_BYTES + 1)
+    if len(payload) > MAX_CATALOG_BYTES:
+        raise CatalogError(
+            "invalid_catalog", f"catalog exceeds {MAX_CATALOG_BYTES} byte limit"
+        )
+    return payload
+
+
 def fetch_catalog(
     url: str = CATALOG_URL,
     *,
@@ -295,7 +317,7 @@ def fetch_catalog(
     _validate_catalog_url(url)
     try:
         with _network_opener(opener).open(url, timeout=timeout) as response:
-            payload = response.read()
+            payload = _read_catalog_response(response)
     except HTTPError as error:
         raise CatalogError(
             "http_error", f"catalog request failed with HTTP {error.code}"
@@ -304,7 +326,7 @@ def fetch_catalog(
         raise CatalogError("network_error", "catalog request failed") from error
     except (TimeoutError, socket.timeout) as error:
         raise CatalogError("timeout", "catalog request timed out") from error
-    except OSError as error:
+    except (OSError, http.client.HTTPException) as error:
         raise CatalogError("network_error", "catalog request failed") from error
     return parse_catalog(payload)
 

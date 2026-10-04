@@ -11,11 +11,11 @@ on:
       - "tests/test_release_publisher.py"
       - "tools/publish_release_assets.py"
       - "tools/build_installer_update_manifest.py"
+      - "tools/sign_installer_update_manifest.py"
+      - "FLDailyEditInstaller.spec"
       - "pyproject.toml"
       - ".github/workflows/build-installer.yml"
-      - "data/major_clubs.json"
-      - "data/fotmob_teams_validated.json"
-      - "data/team_aliases.json"
+      - "data/fotmob_teams.json"
       - "data/FL262_teams.txt"
       - "data/FL2622wc_players.txt"
       - "data/players.csv"
@@ -29,6 +29,9 @@ on:
       - "editor/**"
       - "scraper/**"
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Test and package Windows installer
@@ -36,8 +39,17 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - name: Require installer signing key
+        shell: bash
+        env:
+          SIGNING_KEY_CONFIGURED: ${{ secrets.INSTALLER_SIGNING_KEY != '' }}
+        run: |
+          if [ "$SIGNING_KEY_CONFIGURED" != "true" ]; then
+            echo "::error::INSTALLER_SIGNING_KEY secret is required to sign installer-update.json"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
       - name: Install build dependencies
@@ -82,6 +94,7 @@ jobs:
           tests/test_installer_app.py
           tests/test_installer_update.py
           tests/test_release_asset.py
+          tests/test_release_publisher.py
           tests/test_workflow_config.py
           -q
       - name: Run source self-test
@@ -124,7 +137,7 @@ jobs:
           --asset dist/FLDailyEditInstaller.zip
           --output dist/installer-update.json
       - name: Upload internal build artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: installer-${{ github.run_id }}
           path: |
@@ -143,12 +156,25 @@ jobs:
     concurrency:
       group: fldailyedit-latest-release
       cancel-in-progress: false
+      queue: max
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: installer-${{ github.run_id }}
           path: release-payload
+      - name: Install signing dependency
+        run: python -m pip install "cryptography>=44.0.0"
+      - name: Sign installer update manifest
+        env:
+          INSTALLER_SIGNING_KEY: ${{ secrets.INSTALLER_SIGNING_KEY }}
+        run: >-
+          python tools/sign_installer_update_manifest.py
+          --manifest release-payload/installer-update.json
+          --output release-payload/installer-update.json.sig
       - name: Publish rolling release assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -159,13 +185,9 @@ jobs:
             --repo "$GH_REPO" \
             --tag latest \
             release-payload/FLDailyEditInstaller.zip \
-            release-payload/FLDailyEditInstaller.zip.sha256
-      - name: Publish installer update manifest
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          gh release upload latest release-payload/installer-update.json --repo "$GH_REPO" --clobber
+            release-payload/FLDailyEditInstaller.zip.sha256 \
+            release-payload/installer-update.json.sig \
+            release-payload/installer-update.json
       - name: Remove legacy standalone installer assets
         env:
           GH_TOKEN: ${{ github.token }}

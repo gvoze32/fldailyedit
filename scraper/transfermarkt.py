@@ -6,13 +6,13 @@ import asyncio
 import logging
 import re
 import time
-import unicodedata
 from datetime import date, datetime, timezone
 from urllib.parse import urlencode
 
 import aiohttp
 
 from scraper.models import Transfer
+from scraper.text import fold_text
 
 
 TRANSFERMARKT_URL = "https://www.transfermarkt.com/transfers/neuestetransfers/statistik"
@@ -85,11 +85,10 @@ _TABLE_SEPARATOR_RE = re.compile(r":?-{3,}:?$")
 
 
 def _header_key(value: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", _plain_markdown(value).casefold())
     return "".join(
         character
-        for character in decomposed
-        if character.isalnum() and not unicodedata.combining(character)
+        for character in fold_text(_plain_markdown(value))
+        if character.isalnum()
     )
 
 
@@ -308,9 +307,8 @@ async def _fetch_transfermarkt_transfers_async(
     since_date: str | date | None = None,
     *,
     ref_date: date | None = None,
-    timeout_seconds: float | None = None,
 ) -> list[Transfer]:
-    """Read pages until the cutoff, repetition, page limit, or time budget."""
+    """Read pages until the since-date boundary, repetition, or page limit."""
     page_limit = AUTO_PAGE_LIMIT if max_pages is None else max_pages
     if page_limit <= 0:
         return []
@@ -326,21 +324,13 @@ async def _fetch_transfermarkt_transfers_async(
     timeout = aiohttp.ClientTimeout(total=30)
     transfers: list[Transfer] = []
     seen_transfer_ids: set[int] = set()
+    seen_row_ids: set[int] = set()
     unique_pages = 0
-    deadline = (
-        time.monotonic() + timeout_seconds
-        if timeout_seconds is not None
-        else None
-    )
-    budget_exhausted = False
     async with aiohttp.ClientSession(
         headers=TRANSFERMARKT_HEADERS,
         timeout=timeout,
     ) as session:
         for page in range(1, page_limit + 1):
-            if deadline is not None and time.monotonic() >= deadline:
-                budget_exhausted = True
-                break
             params: dict[str, str | int] = {
                 "land_id": 0,
                 "verein_land_id": 0,
@@ -371,33 +361,15 @@ async def _fetch_transfermarkt_transfers_async(
                     )
 
                 for candidate_source_url, candidate_reader_url in reader_candidates:
-                    remaining = (
-                        deadline - time.monotonic()
-                        if deadline is not None
-                        else None
-                    )
-                    if remaining is not None and remaining <= 0:
-                        budget_exhausted = True
-                        break
                     try:
-                        if remaining is None:
-                            markdown = await _fetch_text(
-                                session, candidate_reader_url
-                            )
-                        else:
-                            markdown = await asyncio.wait_for(
-                                _fetch_text(session, candidate_reader_url),
-                                timeout=remaining,
-                            )
+                        markdown = await _fetch_text(session, candidate_reader_url)
                     except (
                         TransfermarktUnavailableError,
                         aiohttp.ClientError,
+                        asyncio.TimeoutError,
                         TimeoutError,
                     ) as exc:
                         last_fetch_error = exc
-                        if deadline is not None and time.monotonic() >= deadline:
-                            budget_exhausted = True
-                            break
                         continue
                     fetched_response = True
                     batch = parse_transfermarkt_markdown(
@@ -412,8 +384,6 @@ async def _fetch_transfermarkt_transfers_async(
                                 page,
                             )
                         break
-                if budget_exhausted:
-                    break
                 if batch:
                     break
                 if fetch_attempt + 1 < fetch_attempts:
@@ -423,16 +393,41 @@ async def _fetch_transfermarkt_transfers_async(
                         page,
                     )
 
-            if budget_exhausted:
-                break
             if not batch:
                 if last_fetch_error is not None and not fetched_response:
-                    raise last_fetch_error
+                    if page == 1:
+                        raise last_fetch_error
+                    logger.warning(
+                        "Transfermarkt scan incomplete: page %s unavailable (%s) "
+                        "after %s unique pages; returning %s verified transfers",
+                        page,
+                        str(last_fetch_error) or type(last_fetch_error).__name__,
+                        unique_pages,
+                        len(transfers),
+                    )
+                    break
                 logger.warning(
                     "Transfermarkt page %s returned no parseable dated rows",
                     page,
                 )
                 break
+
+            batch_ids = {
+                transfer.transfer_id_transfermarkt
+                for transfer in batch
+                if transfer.transfer_id_transfermarkt is not None
+            }
+            if batch_ids and batch_ids <= seen_row_ids:
+                # The reader can ignore the page parameter and serve the same
+                # page again; without this the scan walks every page limit.
+                logger.info(
+                    "Transfermarkt page %s repeated an earlier page; "
+                    "stopping after %s unique pages",
+                    page,
+                    unique_pages,
+                )
+                break
+            seen_row_ids.update(batch_ids)
 
             eligible = [
                 transfer
@@ -474,14 +469,6 @@ async def _fetch_transfermarkt_transfers_async(
             )
             unique_pages += 1
 
-    if budget_exhausted:
-        logger.warning(
-            "Transfermarkt scan reached its %.1f-second budget after %s "
-            "unique pages; returning %s verified transfers",
-            timeout_seconds,
-            unique_pages,
-            len(transfers),
-        )
     logger.info(
         "Transfermarkt found %s verified dated transfers across %s unique pages",
         len(transfers),
@@ -493,19 +480,21 @@ async def _fetch_transfermarkt_transfers_async(
 def fetch_transfermarkt_transfers(
     max_pages: int | None = None,
     since_date: str | date | None = None,
-    *,
-    timeout_seconds: float | None = None,
 ) -> list[Transfer]:
-    """Fetch verified events, retaining rows collected before budget expiry."""
+    """Fetch verified dated events back to the since-date boundary."""
     try:
         return asyncio.run(
             _fetch_transfermarkt_transfers_async(
                 max_pages=max_pages,
                 since_date=since_date,
-                timeout_seconds=timeout_seconds,
             )
         )
-    except (TransfermarktUnavailableError, aiohttp.ClientError, TimeoutError) as exc:
+    except (
+        TransfermarktUnavailableError,
+        aiohttp.ClientError,
+        asyncio.TimeoutError,
+        TimeoutError,
+    ) as exc:
         detail = str(exc) or type(exc).__name__
         logger.debug(
             "Transfermarkt supplemental source unavailable: %s",

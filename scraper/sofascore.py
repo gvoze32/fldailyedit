@@ -7,7 +7,6 @@ import html
 import json
 import logging
 import re
-import unicodedata
 from collections.abc import Iterable
 from datetime import date
 from typing import Any
@@ -16,6 +15,7 @@ from curl_cffi import requests
 
 from scraper.models import Transfer
 from scraper.source_utils import date_in_range, parse_external_date, resolve_source_date_range
+from scraper.text import fold_text
 
 
 logger = logging.getLogger(__name__)
@@ -77,13 +77,7 @@ def _clean(value: Any) -> str:
 
 
 def _normalize(value: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", value or "")
-    plain = "".join(
-        character
-        for character in decomposed
-        if not unicodedata.combining(character)
-    )
-    return " ".join(re.sub(r"[^a-z0-9]+", " ", plain.casefold()).split())
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", fold_text(value)).split())
 
 
 def _club_key(value: str) -> str:

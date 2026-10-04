@@ -124,9 +124,7 @@ def test_installer_spec_is_one_file_windowed_and_excludes_sensitive_payloads():
     assert "COLLECT(" not in text
 
     for resource in (
-        "data/major_clubs.json",
-        "data/fotmob_teams_validated.json",
-        "data/team_aliases.json",
+        "data/fotmob_teams.json",
         "data/FL2622wc_players.txt",
         "data/players.csv",
         "data/FL262_teams.txt",
@@ -175,9 +173,7 @@ def test_installer_workflow_builds_tests_and_smoke_tests_on_windows():
     assert 'python -m pip install -e ".[installer-build]"' in build
     assert 'python -m pip install -e ".[dev]"' in build
     for path_filter in (
-        "data/major_clubs.json",
-        "data/fotmob_teams_validated.json",
-        "data/team_aliases.json",
+        "data/fotmob_teams.json",
         "data/FL262_teams.txt",
         "data/FL2622wc_players.txt",
         "data/players.csv",
@@ -212,7 +208,9 @@ def test_installer_workflow_builds_tests_and_smoke_tests_on_windows():
     assert "dist/FLDailyEditInstaller.zip" in build
     assert "dist/FLDailyEditInstaller.zip.sha256" in build
     assert "dist/FLDailyEditInstaller.exe.sha256" not in build
-    assert "uses: actions/upload-artifact@v7" in build
+    assert "uses: actions/upload-artifact@" in build
+    assert "Require installer signing key" in build
+    assert "secrets.INSTALLER_SIGNING_KEY != ''" in build
     assert "retention-days: 1" in build
 
 
@@ -225,7 +223,8 @@ def test_installer_publish_job_is_serialized_and_uploads_exact_release_assets():
     assert "contents: write" in publish
     assert "group: fldailyedit-latest-release" in publish
     assert "cancel-in-progress: false" in publish
-    assert "uses: actions/checkout@v7" in publish
+    assert "queue: max" in publish
+    assert "uses: actions/checkout@" in publish
     assert "GH_REPO: ${{ github.repository }}" in publish
     assert (
         'gh release view latest --repo "$GH_REPO" >/dev/null 2>&1 || '
@@ -238,19 +237,30 @@ def test_installer_publish_job_is_serialized_and_uploads_exact_release_assets():
         '            --repo "$GH_REPO" \\\n'
         "            --tag latest \\\n"
         "            release-payload/FLDailyEditInstaller.zip \\\n"
-        "            release-payload/FLDailyEditInstaller.zip.sha256"
+        "            release-payload/FLDailyEditInstaller.zip.sha256 \\\n"
+        "            release-payload/installer-update.json.sig \\\n"
+        "            release-payload/installer-update.json\n"
     ) in publish
     assert "Remove legacy standalone installer assets" in publish
     assert "release-payload/FLDailyEditInstaller.exe" not in publish
-    assert "Publish installer update manifest" in publish
-    assert (
-        'gh release upload latest release-payload/installer-update.json '
-        '--repo "$GH_REPO" --clobber'
-    ) in publish
+    assert "gh release upload" not in publish
+    signing = publish.split("- name: Sign installer update manifest", 1)[1].split(
+        "\n      - ", 1
+    )[0]
+    assert "INSTALLER_SIGNING_KEY: ${{ secrets.INSTALLER_SIGNING_KEY }}" in signing
+    assert "python tools/sign_installer_update_manifest.py" in signing
+    assert publish.index("Sign installer update manifest") < publish.index(
+        "Publish rolling release assets"
+    )
+    assert text.count("secrets.INSTALLER_SIGNING_KEY }}") == 1
     for line in publish.splitlines():
         if "gh release " in line:
             assert '--repo "$GH_REPO"' in line
 
-    actions = re.findall(r"(?m)^\s*uses:\s+([^@\s]+)@", text)
+    assert text.startswith("name: ") and "\npermissions:\n  contents: read\n" in text
+    actions = re.findall(r"(?m)^\s*(?:-\s+)?uses:\s+(\S+)", text)
     assert actions
-    assert all(action.startswith("actions/") for action in actions)
+    for action in actions:
+        name, _, ref = action.partition("@")
+        assert name.startswith("actions/")
+        assert re.fullmatch(r"[0-9a-f]{40}", ref), action
