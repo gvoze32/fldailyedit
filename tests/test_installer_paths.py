@@ -385,6 +385,10 @@ class _WindowsReparseStatus:
             self.st_reparse_tag = tag
 
     def __getattr__(self, name: str) -> object:
+        # Windows stat results always carry st_reparse_tag; hide it so the
+        # "tag unavailable" case is exercised on every platform.
+        if name == "st_reparse_tag":
+            raise AttributeError(name)
         return getattr(self._status, name)
 
 
