@@ -6,6 +6,24 @@
 Update SP Football Life 2026 and eFootball PES 2021 `EDIT00000000` saves with
 verified real-world transfers, squad numbers, and captain roles.
 
+## Project status
+
+FL Daily Edit is no longer actively developed, and the daily prebuilt saves
+are no longer updated. The last published releases remain available, but new
+features, bug fixes, and issue responses should not be expected. Forks can
+still enable the workflows and run them on demand.
+
+My Evoweb account was banned for "stealing other people's work and claiming
+it as your own." I dispute this. FL Daily Edit was written from scratch, and
+its full development history, from the
+[first commit](https://github.com/gvoze32/fldailyedit/commit/07dfac340f307eb881f6d680288b99eeb8ea75ba)
+on 2026-08-02 onward, is public in the
+[commit log](https://github.com/gvoze32/fldailyedit/commits). Third-party
+components under `vendor/` keep their original licenses and attribution.
+
+This may be both my first and last PES mod. Thanks to everyone who used the
+project, reported issues, and helped improve it.
+
 ## Installation
 
 **Installer (recommended)**
