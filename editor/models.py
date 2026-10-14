@@ -13,6 +13,7 @@ class PlayerInfo:
     position: str = ""  # e.g. 'GK', 'CB', 'LB', 'RB', 'DMF', 'CMF', 'AMF', 'LWF', 'RWF', 'SS', 'CF'
     nationality: str = ""  # country or nationality code
     age: int = 0  # player age
+    overall: int = 0  # native in-game overall at registered position; 0 = unknown
 
     @property
     def is_goalkeeper(self) -> bool:

@@ -223,6 +223,7 @@ def build_player_catalog(
             position=edited_player.position or existing.position,
             nationality=edited_player.nationality or existing.nationality,
             age=edited_player.age or existing.age,
+            overall=edited_player.overall or existing.overall,
         )
 
     missing = tuple(sorted(roster_ids - set(players)))

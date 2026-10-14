@@ -8,6 +8,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Final, Iterable, Mapping
 
+from editor.player_rating import PlayerAbilities, decode_playerbin_record
 from editor.wesys import decompress_wesys
 
 
@@ -54,6 +55,12 @@ class PlayerBinRecord:
     contract_until: int = 0
     loan_until: int = 0
     caps: int = 0
+    abilities: PlayerAbilities | None = None
+
+    @property
+    def overall(self) -> int:
+        """Native overall at the registered position; 0 when undecodable."""
+        return self.abilities.overall if self.abilities is not None else 0
 
     @property
     def is_on_loan(self) -> bool:
@@ -98,6 +105,11 @@ class PlayerBinDatabase:
                 if position_index < len(POSITION_NAMES)
                 else f"UNKNOWN({position_index})"
             )
+            abilities = (
+                decode_playerbin_record(data, offset)
+                if position_index < len(POSITION_NAMES)
+                else None
+            )
             index[player_id] = PlayerBinRecord(
                 player_id=player_id,
                 name=name,
@@ -128,6 +140,7 @@ class PlayerBinDatabase:
                 )[0]
                 & 0x7FFFFFF,
                 caps=data[offset + CAPS_OFFSET],
+                abilities=abilities,
             )
         return cls(index)
 

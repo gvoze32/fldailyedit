@@ -5,6 +5,7 @@ import struct
 from collections.abc import Mapping, Sequence
 
 from editor.models import PlayerInfo, TeamData
+from editor.player_rating import POSITION_COUNT, position_rating
 from editor.playerbin import POSITION_NAMES
 
 logger = logging.getLogger(__name__)
@@ -26,9 +27,19 @@ MATCHDAY_SQUAD_SLOT_COUNT = 18
 MIN_GOALKEEPERS = 2
 # Keep high/reserved IDs out of the overflow pool when a native reserve exists.
 RESERVED_PLAYER_ID_MIN = 0x100000
+# When every squad member has native abilities, starter scoring adds this
+# multiple of the player's rating at the role's position: a candidate about
+# 7 rating points better beats the incumbent (+20). Tuned on the FL26 base
+# save with data_extra.cpk abilities: all 747 XIs rated, summed role rating
+# +3.2 on average, one team -2 (fit bonus trade-off).
+_ROLE_RATING_WEIGHT = 3
+# With native ratings the exact-position (100) / same-line (55) fit bonus is
+# divided by this, since the rating already includes position fit.
+_RATED_FIT_DIVISOR = 5
 # Scoring bonus that lets any position-compatible live-XI player beat the
-# incumbent (+20) and exact-position (+45 over line match) advantages.
-_LIVE_STARTER_BONUS = 200
+# incumbent (+20), exact-position (+45), CB strong-foot (+40) and the full
+# role-rating spread ((99 - 40) * _ROLE_RATING_WEIGHT) advantages.
+_LIVE_STARTER_BONUS = 400
 
 # Game plan entry
 GP_TEAM_ID = 0x000         # 4 bytes uint32 LE
@@ -344,12 +355,108 @@ def assign_smart_shirt_number(
     return 99
 
 
+def _max_weight_assignment(weights: Sequence[Sequence[int | None]]) -> list[int] | None:
+    """Assign each row a distinct column maximising the total weight.
+
+    ``None`` marks a forbidden pair. Returns the column per row, or ``None``
+    when no assignment avoids every forbidden pair. Hungarian algorithm,
+    O(rows² · columns).
+    """
+    rows = len(weights)
+    if rows == 0:
+        return []
+    columns = len(weights[0])
+    if columns < rows:
+        return None
+    finite = [w for row in weights for w in row if w is not None]
+    if not finite:
+        return None
+    # Shift costs to [0, spread]; a forbidden pair then costs more than any
+    # whole assignment of allowed pairs.
+    highest = max(finite)
+    forbidden = rows * (highest - min(finite)) + 1
+    cost = [[forbidden if w is None else highest - w for w in row] for row in weights]
+
+    inf = float("inf")
+    u = [0.0] * (rows + 1)
+    v = [0.0] * (columns + 1)
+    owner = [0] * (columns + 1)  # owner[j]: 1-based row matched to column j
+    way = [0] * (columns + 1)
+    for row in range(1, rows + 1):
+        owner[0] = row
+        current = 0
+        min_reduced = [inf] * (columns + 1)
+        used = [False] * (columns + 1)
+        while True:
+            used[current] = True
+            row0 = owner[current]
+            delta = inf
+            nxt = 0
+            for column in range(1, columns + 1):
+                if used[column]:
+                    continue
+                reduced = cost[row0 - 1][column - 1] - u[row0] - v[column]
+                if reduced < min_reduced[column]:
+                    min_reduced[column] = reduced
+                    way[column] = current
+                if min_reduced[column] < delta:
+                    delta = min_reduced[column]
+                    nxt = column
+            for column in range(columns + 1):
+                if used[column]:
+                    u[owner[column]] += delta
+                    v[column] -= delta
+                else:
+                    min_reduced[column] -= delta
+            current = nxt
+            if owner[current] == 0:
+                break
+        while current:
+            previous = way[current]
+            owner[current] = owner[previous]
+            current = previous
+
+    assignment = [-1] * rows
+    for column in range(1, columns + 1):
+        if owner[column]:
+            assignment[owner[column] - 1] = column - 1
+    if any(weights[row][column] is None for row, column in enumerate(assignment)):
+        return None
+    return assignment
+
+
+
 class RosterGamePlanMixin:
     """Roster mutations and tactical repair over an EditFile byte buffer."""
     def _set_mutation_failure(self, code: str, detail: str) -> None:
         """Record a non-throwing mutation refusal for the caller."""
         self.last_mutation_error_code = code
         self.last_mutation_error = detail
+
+    def _player_role_rating(self, player_id: int, position_code: int | None) -> int | None:
+        """Return the native rating at a game-plan position, or ``None``."""
+        if not player_id or position_code is None or not 0 <= position_code < POSITION_COUNT:
+            return None
+        getter = getattr(self, "get_player_abilities", None)
+        abilities = getter(player_id) if callable(getter) else None
+        return position_rating(abilities, position_code) if abilities is not None else None
+
+    def _player_overall(self, player_id: int) -> int | None:
+        """Return the native overall at the registered position, or ``None``."""
+        getter = getattr(self, "get_player_abilities", None)
+        abilities = getter(player_id) if callable(getter) else None
+        return abilities.overall if abilities is not None else None
+
+    def _all_players_rated(self, player_ids: Sequence[int]) -> bool:
+        """Whether every listed player has native abilities.
+
+        Ratings only rank a group when every member has one; a missing
+        rating would otherwise read as the worst player in the group.
+        """
+        getter = getattr(self, "get_player_abilities", None)
+        if not callable(getter):
+            return False
+        return all(getter(player_id) is not None for player_id in player_ids if player_id)
 
 
     # ──────────────────────────────────────────────────────────
@@ -581,20 +688,19 @@ class RosterGamePlanMixin:
         """
         Find the safest player to release when a roster is full.
 
-        Release ranking is roster-role based, not ability based:
+        Release ranking combines game-plan role with native overall:
 
         1. Keep the incoming player, players transferred in this run, and
            explicitly protected players out of the candidate pool.
         2. Protect the first-team game-plan roles and then the matchday bench.
-        3. Prefer the deepest native reserve role, which is the least likely to
-           play.
-        4. Keep at least two goalkeepers when position metadata identifies them.
-        5. Prefer a native reserve over a high/reserved-ID player when both
-           are otherwise equivalent.
+        3. Keep at least two goalkeepers when position metadata identifies them.
+        4. Prefer a native reserve over a high/reserved-ID player.
+        5. Within the same role tier, release the lowest native overall first;
+           players with an unknown overall rank after every known one.
+        6. Known low usage, then the deepest role, break overall ties.
 
         The game-plan order is used when it is a valid permutation of the
         roster slots; otherwise the persisted roster order is the fallback.
-        Player ability values are deliberately never read or compared here.
 
         Returns:
             (roster_slot_index, player_id)
@@ -652,6 +758,7 @@ class RosterGamePlanMixin:
             roster_slot, pid = item
             role = role_slots.get(roster_slot, roster_slot)
             player = metadata[pid]
+            overall = self._player_overall(pid)
             goalkeeper = is_goalkeeper(roster_slot, player)
             is_reserved_player = pid >= RESERVED_PLAYER_ID_MIN
             usage = getattr(self, "release_usage", {}).get(pid)
@@ -680,8 +787,9 @@ class RosterGamePlanMixin:
                     usage.news_mentions,
                 )
 
-            # Known low usage wins before depth; depth remains the fallback.
-            return (tier, *usage_key, -role, -roster_slot)
+            overall_key = (0, overall) if overall is not None else (1, 0)
+            # Role tier first, then lowest overall; usage and depth break ties.
+            return (tier, *overall_key, *usage_key, -role, -roster_slot)
 
         best_slot, best_pid = min(active_slots, key=candidate_sort_key)
         return best_slot, best_pid
@@ -711,6 +819,7 @@ class RosterGamePlanMixin:
         role = self._overflow_role_slots(team_id, player_ids).get(slot, slot)
         player = self._player_metadata(player_id)
         usage = getattr(self, "release_usage", {}).get(player_id)
+        overall = self._player_overall(player_id)
         if role < FIRST_TEAM_SLOT_COUNT:
             role_group = "first_team"
         elif role < MATCHDAY_SQUAD_SLOT_COUNT:
@@ -727,10 +836,15 @@ class RosterGamePlanMixin:
             "is_reserved": player_id >= RESERVED_PLAYER_ID_MIN,
             "is_goalkeeper": bool(player and player.is_goalkeeper) or slot == 0,
             "usage": None if usage is None else usage.to_dict(),
-            "selection_basis": (
-                "lowest_known_usage_then_deepest_role"
-                if usage is not None
-                else "deepest_role"
+            "overall": overall,
+            "selection_basis": "_then_".join(
+                basis
+                for basis in (
+                    "lowest_overall" if overall is not None else "",
+                    "lowest_known_usage" if usage is not None else "",
+                    "deepest_role",
+                )
+                if basis
             ),
         }
 
@@ -1281,9 +1395,10 @@ class RosterGamePlanMixin:
         Exact formation-role players win, then same-line players, then any
         other outfield player, so the vacated role is always backfilled in
         place instead of shifting later roles. Within one tier, live-XI
-        players (``game_plan_preferred_starters``) win, then offline usage,
-        then the existing bench order. Returns ``None`` only when no
-        candidate can legally take the role.
+        players (``game_plan_preferred_starters``) win, then the highest
+        native rating at the vacated role, then offline usage, then the
+        existing bench order. Returns ``None`` only when no candidate can
+        legally take the role.
         """
         roster = self.get_team_roster(team_id)
         if roster is None:
@@ -1313,6 +1428,10 @@ class RosterGamePlanMixin:
             )
         }
         usage = getattr(self, "release_usage", {})
+        rated = self._all_players_rated(
+            [roster.player_ids[slot] for slot in candidate_slots if 0 <= slot < TP_MAX_PLAYERS]
+        )
+        rating_code = (0 if target_is_goalkeeper else role_position_code) if rated else None
 
         # Slot zero is the historical keeper only when it still holds its
         # original player, not the copied last-slot player after compaction.
@@ -1349,11 +1468,13 @@ class RosterGamePlanMixin:
                 else:
                     tier = 2
             player_usage = usage.get(player_id)
+            rating = self._player_role_rating(player_id, rating_code)
             ranked.append(
                 (
                     (
                         tier,
                         preferred.get(player_id, len(preferred)),
+                        -(rating or 0),
                         -(player_usage.starts if player_usage else 0),
                         -(player_usage.minutes if player_usage else 0),
                         order,
@@ -1580,6 +1701,11 @@ class RosterGamePlanMixin:
         renders on the Game Plan screen. They are not player metadata and
         must never be rewritten from a player's registered position. Promote
         only players compatible with the role's line and, for LWF/RWF, side.
+        Roles are filled by one optimal assignment over role fit (exact
+        position vs same line), incumbency and live-XI rank. When every squad
+        member has native abilities, the rating at the role's position joins
+        the score, a native B/A playable grade counts as a line match, and
+        every active player competes; live-XI players still win.
         """
         active_slots = [
             slot for slot, player_id in enumerate(roster.player_ids) if player_id
@@ -1643,29 +1769,44 @@ class RosterGamePlanMixin:
             preferred_rank[slot] = len(preferred_slots)
             preferred_slots.append(slot)
 
-        # Exact formation-role players are eligible even when the live XI
-        # scraper returns no starter list. This prevents a winger, defender,
-        # or reserve goalkeeper from occupying an unrelated current slot.
+        use_ratings = self._all_players_rated(
+            [roster.player_ids[slot] for slot in active_slots]
+        )
         candidate_slots: list[int] = []
         for slot in [*preferred_slots, *current_slots]:
             if slot not in candidate_slots:
                 candidate_slots.append(slot)
-        for slot in active_slots:
-            if slot in candidate_slots:
-                continue
-            if player_code(slot) in target_codes:
-                candidate_slots.append(slot)
-        for slot in active_slots:
-            if len(candidate_slots) >= starter_count and slot not in candidate_slots:
-                continue
-            if slot not in candidate_slots:
-                candidate_slots.append(slot)
+        if use_ratings:
+            # With native ratings every active player competes; the score
+            # ranks role fit plus rating.
+            candidate_slots.extend(
+                slot for slot in active_slots if slot not in candidate_slots
+            )
+        else:
+            # Exact formation-role players are eligible even when the live
+            # XI scraper returns no starter list. This prevents a winger,
+            # defender, or reserve goalkeeper from occupying an unrelated
+            # current slot.
+            for slot in active_slots:
+                if slot not in candidate_slots and player_code(slot) in target_codes:
+                    candidate_slots.append(slot)
+            for slot in active_slots:
+                if len(candidate_slots) >= starter_count:
+                    break
+                if slot not in candidate_slots:
+                    candidate_slots.append(slot)
+        rating_cache: dict[tuple[int, int], int] = {}
 
-        def compatibility(role: int, slot: int) -> int | None:
-            player_position = player_code(slot)
-            target = target_codes[role]
-            if player_position is None:
-                return None
+        def role_rating(role: int, slot: int) -> int:
+            key = (role, slot)
+            if key not in rating_cache:
+                rating = self._player_role_rating(
+                    roster.player_ids[slot], target_codes[role]
+                )
+                rating_cache[key] = (rating or 0) if use_ratings else 0
+            return rating_cache[key]
+
+        def line_compatibility(player_position: int, target: int) -> int | None:
             if target == player_position:
                 return 100
             if target in (9, 10):
@@ -1680,10 +1821,32 @@ class RosterGamePlanMixin:
                 return 55 if player_position in (9, 10, 11, 12) else None
             return None
 
-        def score(role: int, slot: int) -> int:
+        def compatibility(role: int, slot: int) -> int | None:
+            player_position = player_code(slot)
+            target = target_codes[role]
+            if player_position is None:
+                return None
+            value = line_compatibility(player_position, target)
+            if value is not None or not use_ratings or player_position == 0:
+                return value
+            abilities = self.get_player_abilities(roster.player_ids[slot])
+            if 0 < target < POSITION_COUNT and abilities.position_grades[target] > 0:
+                # A native B/A playable position counts as a line match.
+                return 55
+            if current_role.get(slot) == role:
+                # The save's own choice stays valid for its incumbent; it
+                # loses to any line match of similar rating.
+                return 30
+            return None
+
+        def score(role: int, slot: int, *, foot: bool = True) -> int:
             value = compatibility(role, slot)
             if value is None:
                 return -10_000
+            if use_ratings:
+                # The native rating already includes position fit, so the
+                # line-fit bonus only nudges between similar ratings.
+                value //= _RATED_FIT_DIVISOR
             preferred_index = preferred_rank.get(slot)
             if preferred_index is not None:
                 # A compatible live-XI player always beats a non-live
@@ -1693,9 +1856,11 @@ class RosterGamePlanMixin:
                 value += 8
             if current_role.get(slot) == role:
                 value += 12
+            value += _ROLE_RATING_WEIGHT * role_rating(role, slot)
             side = cb_side_by_role.get(role)
             if (
-                side is not None
+                foot
+                and side is not None
                 and player_code(slot) == 1
                 and player_preferred_foot(slot) == side
             ):
@@ -1713,6 +1878,22 @@ class RosterGamePlanMixin:
             # The live XI names the first-choice keeper; it replaces the
             # incumbent role-zero player instead of waiting on the bench.
             primary_slot = live_goalkeeper
+        elif starter_count and player_code(current_slots[0]) is not None:
+            # Otherwise the best-rated registered keeper takes role zero; the
+            # incumbent keeps the same stickiness bonus as outfield roles.
+            goalkeeper_slots = [slot for slot in active_slots if player_code(slot) == 0]
+
+            def goalkeeper_score(slot: int) -> tuple[int, int, int]:
+                rating = (
+                    (self._player_role_rating(roster.player_ids[slot], 0) or 0)
+                    if use_ratings
+                    else 0
+                )
+                incumbent = slot == current_slots[0]
+                return (_ROLE_RATING_WEIGHT * rating + (20 if incumbent else 0), incumbent, -slot)
+
+            if goalkeeper_slots:
+                primary_slot = max(goalkeeper_slots, key=goalkeeper_score)
         assigned: dict[int, int] = (
             {0: primary_slot} if primary_slot is not None else {}
         )
@@ -1733,46 +1914,41 @@ class RosterGamePlanMixin:
             used_slots.add(current_slots[role])
 
         roles = [role for role in roles if role not in assigned]
-        roles.sort(
-            key=lambda role: (
-                sum(
-                    compatibility(role, slot) is not None
-                    for slot in candidate_slots
-                ),
-                role,
-            )
-        )
+        available = [slot for slot in candidate_slots if slot not in used_slots]
+        if roles:
+            # Maximise the total score over every role at once; a per-role
+            # greedy pick can spend the best player on the wrong role.
+            no_rank = len(preferred_slots) + 1
 
-        def assign_remaining(index: int) -> bool:
-            if index == len(roles):
-                return True
-            role = roles[index]
-            available = sorted(
-                (
-                    slot
-                    for slot in candidate_slots
-                    if slot not in used_slots
-                    and compatibility(role, slot) is not None
-                ),
-                key=lambda slot: (
-                    -score(role, slot),
-                    preferred_rank.get(slot, len(preferred_slots) + 1),
-                    current_role.get(slot, starter_count + 1),
-                    slot,
-                ),
-            )
-            for slot in available:
+            def weight(role: int, slot: int, *, foot: bool = True) -> int | None:
+                if compatibility(role, slot) is None:
+                    return None
+                # Ties prefer live rank, then the incumbent role, then slot.
+                tie_break = (
+                    preferred_rank.get(slot, no_rank) * 41 * 41
+                    + current_role.get(slot, 40) * 41
+                    + slot
+                )
+                return score(role, slot, foot=foot) * 100_000 - tie_break
+
+            def match(slots: list[int], *, foot: bool) -> list[int] | None:
+                columns = _max_weight_assignment(
+                    [[weight(role, slot, foot=foot) for slot in slots] for role in roles]
+                )
+                return None if columns is None else [slots[column] for column in columns]
+
+            if use_ratings:
+                # Ratings pick who starts; CB strong-foot sides then only
+                # permute the chosen starters and never pull in a worse CB.
+                chosen = match(available, foot=False)
+                matched = match(chosen, foot=True) if chosen is not None else None
+            else:
+                matched = match(available, foot=True)
+            if matched is None:
+                return False, 0
+            for role, slot in zip(roles, matched):
                 assigned[role] = slot
                 used_slots.add(slot)
-                if assign_remaining(index + 1):
-                    return True
-                used_slots.remove(slot)
-                del assigned[role]
-
-            return False
-
-        if not assign_remaining(0):
-            return False, 0
 
         if len(assigned) != starter_count:
             return False, 0
@@ -2056,7 +2232,8 @@ class RosterGamePlanMixin:
 
         Teams with ``preferred_bench`` entries or signings from this session
         get their matchday bench (roles 11-17) ordered live substitutes
-        first, then signings, with a second goalkeeper guaranteed. Empty
+        first, then signings, then highest native overall, with a second
+        goalkeeper guaranteed. Empty
         captain, set-piece, and attack-player roles are filled from save
         data for every team.
         """
@@ -2186,7 +2363,7 @@ class RosterGamePlanMixin:
         live_bench: Sequence[int] = (),
         signings: Sequence[int] = (),
     ) -> bool:
-        """Order roles 11+ as live subs, then signings, then the old order.
+        """Order roles 11+ as live subs, signings, then highest overall.
 
         A second goalkeeper is guaranteed inside the matchday 18 when one is
         registered. Starter roles are never touched.
@@ -2206,7 +2383,12 @@ class RosterGamePlanMixin:
             slot = slot_by_player.get(player_id)
             if slot in bench_set and slot not in ordered:
                 ordered.append(slot)
-        ordered.extend(slot for slot in bench if slot not in ordered)
+        # Remaining reserves: highest native overall first when every one is
+        # rated; otherwise the old order. sort() is stable for ties.
+        remaining = [slot for slot in bench if slot not in ordered]
+        if self._all_players_rated([roster.player_ids[slot] for slot in remaining]):
+            remaining.sort(key=lambda slot: -(self._player_overall(roster.player_ids[slot]) or 0))
+        ordered.extend(remaining)
 
         matchday_bench = MATCHDAY_SQUAD_SLOT_COUNT - FIRST_TEAM_SLOT_COUNT
 

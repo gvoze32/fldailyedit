@@ -19,6 +19,7 @@ from pathlib import Path
 
 import config
 from editor.models import PlayerInfo, TeamData, TeamInfo
+from editor.player_rating import PlayerAbilities, decode_edit_player
 from editor.player_assignment import PlayerAssignmentDatabase
 from editor.player_catalog import PlayerCatalogReport, build_player_catalog
 from editor.playerbin import POSITION_NAMES, PlayerBinDatabase
@@ -279,6 +280,22 @@ class EditFile(RosterGamePlanMixin):
         """Return strong-foot metadata from the save player record."""
         return self._save_player_preferred_foot(player_id)
 
+    def get_player_abilities(self, player_id: int) -> PlayerAbilities | None:
+        """Return in-game abilities: the save's EDIT entry, else Player.bin.
+
+        EDIT player entries replace the database record in-game, so a player
+        edited in the save is rated from the save.
+        """
+        entry_offset = self._player_record_offsets_by_id().get(player_id)
+        if entry_offset is not None:
+            try:
+                return decode_edit_player(self._data, entry_offset)
+            except ValueError:
+                pass
+        database = getattr(self, "playerbin_db", None)
+        record = database.get(player_id) if database is not None else None
+        return record.abilities if record is not None else None
+
     def get_player_position(self, player_id: int) -> str | None:
         """Return native position first, then selected-save fallback metadata."""
         native_position = self._native_player_position(player_id)
@@ -317,6 +334,7 @@ class EditFile(RosterGamePlanMixin):
                 position=record.registered_position or player_info.position,
                 nationality=player_info.nationality,
                 age=record.age or player_info.age,
+                overall=player_info.overall or record.overall,
             )
         if record is None:
             return None
@@ -326,6 +344,7 @@ class EditFile(RosterGamePlanMixin):
             print_name=record.print_name or record.name,
             position=record.registered_position,
             age=record.age,
+            overall=record.overall,
         )
 
 
@@ -481,12 +500,18 @@ class EditFile(RosterGamePlanMixin):
                 if position_id < len(POSITION_NAMES)
                 else ""
             )
+            overall = (
+                decode_edit_player(raw_entry, 0).overall
+                if position_id < len(POSITION_NAMES)
+                else 0
+            )
             edited_players[player_id] = PlayerInfo(
                 player_id=player_id,
                 name=name,
                 print_name=print_name,
                 position=position,
                 age=age,
+                overall=overall,
             )
             edited_count += 1
 
@@ -541,6 +566,7 @@ class EditFile(RosterGamePlanMixin):
                         print_name=record.print_name or record.name,
                         position=record.registered_position,
                         age=record.age,
+                        overall=record.overall,
                     )
                 else:
                     players[player_id] = PlayerInfo(
@@ -550,6 +576,8 @@ class EditFile(RosterGamePlanMixin):
                         position=record.registered_position or existing.position,
                         nationality=existing.nationality,
                         age=record.age or existing.age,
+                        # EDIT entries override Player.bin abilities in-game.
+                        overall=existing.overall or record.overall,
                     )
             report = replace(
                 report,

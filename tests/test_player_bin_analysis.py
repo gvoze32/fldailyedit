@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import struct
+from dataclasses import replace
 from pathlib import Path
 
 import config
@@ -33,6 +34,7 @@ from editor.playerbin import (
     PlayerBinDatabase,
     PlayerBinRecord,
 )
+from editor.player_rating import PlayerAbilities
 from editor.teambin import TeamBinDatabase, TeamBinRecord
 from tools.cpk_extract import extract_file, extract_game_databases, list_files
 
@@ -54,7 +56,10 @@ def test_cpk_extracts_and_indexes_player_bin(tmp_path: Path):
 
     database = PlayerBinDatabase.load(output)
     assert len(database) > 25_000
-    assert database.get(162196) == PlayerBinRecord(
+    record = database.get(162196)
+    assert record is not None
+    assert record.overall == 69
+    assert replace(record, abilities=None) == PlayerBinRecord(
         player_id=162196,
         name="Marco Palestra",
         age=20,
@@ -199,8 +204,8 @@ def test_extract_game_databases_reads_all_supported_cpk_members(tmp_path: Path):
         "Team.bin",
     }
     assert len(PlayerBinDatabase.load(extracted["Player.bin"])) > 25_000
-    assert len(TeamBinDatabase.load(extracted["Team.bin"])) == 743
-    assert len(PlayerAssignmentDatabase.load(extracted["PlayerAssignment.bin"])) == 21_245
+    assert len(TeamBinDatabase.load(extracted["Team.bin"])) == 749
+    assert len(PlayerAssignmentDatabase.load(extracted["PlayerAssignment.bin"])) == 21_364
 
 
 
@@ -1884,6 +1889,7 @@ def _game_plan_team(
     caps: dict[int, int] | None = None,
     ages: dict[int, int] | None = None,
     values: dict[int, int] | None = None,
+    abilities: dict[int, int] | None = None,
     first_id: int = 5000,
 ):
     from tests.test_editor import _build_mock_data
@@ -1911,12 +1917,33 @@ def _game_plan_team(
                     position,
                     (values or {}).get(player_id, 0),
                     caps=(caps or {}).get(player_id, 0),
+                    abilities=(
+                        _uniform_abilities(position, abilities[player_id])
+                        if abilities and player_id in abilities
+                        else None
+                    ),
                 )
                 for player_id, position in zip(player_ids, positions)
             }
         )
     )
     return edit_file, player_ids
+
+
+def _uniform_abilities(
+    position: str, value: int, grades: dict[str, int] | None = None
+) -> PlayerAbilities:
+    """Every ability (incl. GK) at ``value``; playable grades from ``grades``."""
+    position_grades = [0] * 13
+    for name, grade in (grades or {}).items():
+        position_grades[POSITION_NAMES.index(name)] = grade
+    return PlayerAbilities(
+        registered_position=POSITION_NAMES.index(position),
+        position_grades=tuple(position_grades),
+        abilities=(value,) * 20,
+        goalkeeping=(value,) * 5,
+        weak_foot_accuracy=2,
+    )
 
 
 def _lineup(edit_file: EditFile) -> list[int]:
@@ -2072,3 +2099,170 @@ def test_live_starter_beats_exact_position_incumbent():
     assert live_cb_for_rb in starters
     assert ids[0] == starters[0]
     assert ids[12] not in starters
+
+
+def _rated(count: int, value: int = 75) -> dict[int, int]:
+    return {player_id: value for player_id in range(5000, 5000 + count)}
+
+
+def test_better_rated_reserve_replaces_weak_same_role_incumbent():
+    # Slots 6/7 are the CMF starters; slot 11 is a reserve CMF.
+    positions = _FOUR_THREE_THREE + ["CMF"]
+    edit_file, ids = _game_plan_team(
+        positions, abilities={**_rated(12), 5006: 60, 5007: 70, 5011: 85}
+    )
+    edit_file.set_team_formation(101, "4-3-3")
+
+    edit_file.repair_game_plans(
+        preserve_existing_primary=True,
+        preferred_starters={101: ()},
+        align_positions=True,
+    )
+
+    roster = edit_file.get_team_roster(101)
+    starters = [roster.player_ids[slot] for slot in _lineup(edit_file)[:11]]
+    assert ids[11] in starters
+    assert ids[6] not in starters
+    assert ids[7] in starters
+
+
+def test_lineup_ignores_ratings_when_a_player_is_unrated():
+    positions = _FOUR_THREE_THREE + ["CMF"]
+    abilities = {**_rated(12), 5006: 60, 5011: 85}
+    del abilities[5005]  # one unrated starter disables rating-based ranking
+    edit_file, ids = _game_plan_team(positions, abilities=abilities)
+    edit_file.set_team_formation(101, "4-3-3")
+
+    edit_file.repair_game_plans(
+        preserve_existing_primary=True,
+        preferred_starters={101: ()},
+        align_positions=True,
+    )
+
+    roster = edit_file.get_team_roster(101)
+    starters = [roster.player_ids[slot] for slot in _lineup(edit_file)[:11]]
+    assert ids[5] in starters
+    assert ids[6] in starters
+    assert ids[11] not in starters
+
+
+def test_small_rating_edge_keeps_incumbent_starter():
+    positions = _FOUR_THREE_THREE + ["CMF"]
+    # 70 vs 72 abilities is a 4-point rating gap: below the incumbent bonus.
+    edit_file, ids = _game_plan_team(
+        positions, abilities={**_rated(12), 5006: 70, 5007: 85, 5011: 72}
+    )
+    edit_file.set_team_formation(101, "4-3-3")
+
+    edit_file.repair_game_plans(
+        preserve_existing_primary=True,
+        preferred_starters={101: ()},
+        align_positions=True,
+    )
+
+    roster = edit_file.get_team_roster(101)
+    starters = [roster.player_ids[slot] for slot in _lineup(edit_file)[:11]]
+    assert ids[6] in starters
+    assert ids[11] not in starters
+
+
+def test_live_starter_still_beats_much_better_rated_reserve():
+    positions = _FOUR_THREE_THREE + ["CMF"]
+    edit_file, ids = _game_plan_team(
+        positions, abilities={**_rated(12), 5006: 85, 5007: 85, 5011: 45}
+    )
+    edit_file.set_team_formation(101, "4-3-3")
+
+    edit_file.repair_game_plans(
+        preserve_existing_primary=True,
+        preferred_starters={101: (ids[11],)},
+        align_positions=True,
+    )
+
+    roster = edit_file.get_team_roster(101)
+    starters = [roster.player_ids[slot] for slot in _lineup(edit_file)[:11]]
+    assert ids[11] in starters
+
+
+def test_best_rated_goalkeeper_takes_role_zero():
+    positions = _FOUR_THREE_THREE + ["GK"]
+    edit_file, ids = _game_plan_team(
+        positions, abilities={**_rated(12), 5000: 60, 5011: 85}
+    )
+    edit_file.set_team_formation(101, "4-3-3")
+
+    edit_file.repair_game_plans(
+        preserve_existing_primary=True,
+        preferred_starters={101: ()},
+        align_positions=True,
+    )
+
+    roster = edit_file.get_team_roster(101)
+    lineup = _lineup(edit_file)
+    assert roster.player_ids[lineup[0]] == ids[11]
+    assert ids[0] not in [roster.player_ids[slot] for slot in lineup[:11]]
+
+
+@pytest.mark.parametrize(("lmf_grade", "starts"), [(2, True), (0, False)])
+def test_rated_winger_needs_playable_grade_for_wide_midfield_role(lmf_grade, starts):
+    four_four_two = ["GK", "CB", "CB", "RB", "LB", "CMF", "CMF", "RMF", "LMF", "CF", "CF"]
+    edit_file, ids = _game_plan_team(
+        four_four_two + ["LWF"], abilities={**_rated(11), 5008: 60}
+    )
+    winger = ids[11]
+    records = dict(edit_file.playerbin_db.items())
+    records[winger] = replace(
+        records[winger], abilities=_uniform_abilities("LWF", 85, {"LMF": lmf_grade})
+    )
+    edit_file.attach_playerbin(PlayerBinDatabase(records))
+    edit_file.set_team_formation(101, "4-4-2")
+
+    edit_file.repair_game_plans(
+        preserve_existing_primary=True,
+        preferred_starters={101: ()},
+        align_positions=True,
+    )
+
+    roster = edit_file.get_team_roster(101)
+    starters = [roster.player_ids[slot] for slot in _lineup(edit_file)[:11]]
+    # LWF -> LMF crosses lines; only a native B/A grade at LMF allows it.
+    assert (winger in starters) is starts
+    assert (starters[8] == winger) is starts
+
+
+def test_overflow_releases_lowest_overall_reserve_but_protects_first_team():
+    # 11 starters, 7 matchday bench, 4 reserves (slots 18-21).
+    positions = _FOUR_THREE_THREE + ["CB"] * 7 + ["CMF", "CMF", "CMF", "CMF"]
+    abilities = {player_id: 75 for player_id in range(5000, 5022)}
+    abilities[5005] = 45  # lowest overall, but a first-team starter
+    abilities[5019] = 50  # lowest overall among reserves
+    edit_file, ids = _game_plan_team(positions, abilities=abilities)
+
+    slot, player_id = edit_file.find_overflow_release_candidate(101)
+
+    assert (slot, player_id) == (19, ids[19])
+    detail = edit_file.describe_overflow_release_candidate(101, ids[19])
+    assert detail["role_group"] == "reserve"
+    assert detail["selection_basis"] == "lowest_overall_then_deepest_role"
+
+
+def test_overflow_ranks_unknown_overall_after_known_reserves():
+    positions = _FOUR_THREE_THREE + ["CB"] * 7 + ["CMF", "CMF"]
+    abilities = {player_id: 75 for player_id in range(5000, 5019)}
+    # Slot 19 (deepest) has no abilities; slot 18 is known and releasable.
+    edit_file, ids = _game_plan_team(positions, abilities=abilities)
+
+    assert edit_file.find_overflow_release_candidate(101) == (18, ids[18])
+
+
+def test_bench_orders_remaining_reserves_by_overall():
+    positions = _FOUR_THREE_THREE + ["GK", "CB", "CMF", "CF"]
+    abilities = {5011: 60, 5012: 55, 5013: 80, 5014: 70}
+    edit_file, ids = _game_plan_team(positions, abilities=abilities)
+
+    edit_file.repair_game_plans(preferred_bench={101: (ids[12],)})
+
+    roster = edit_file.get_team_roster(101)
+    bench = [roster.player_ids[slot] for slot in _lineup(edit_file)[11:15]]
+    # Live sub first, then highest overall; the GK is already in the 18.
+    assert bench == [ids[12], ids[13], ids[14], ids[11]]

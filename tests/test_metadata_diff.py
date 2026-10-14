@@ -198,7 +198,7 @@ def test_reference_cpk_diff_matches_documented_semantic_contract():
         player.changed_entries,
         player.only_left_entries,
         player.only_right_entries,
-    ) == (27_840, 29_492, 10_054, 17_786, 0, 1_652)
+    ) == (27_840, 29_492, 9_855, 17_985, 0, 1_652)  # abilities count as changes
     assert (
         team.left_entries,
         team.right_entries,
