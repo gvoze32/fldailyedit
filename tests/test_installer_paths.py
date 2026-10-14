@@ -11,6 +11,7 @@ from installer.paths import (
     GameTarget,
     SaveLocation,
     discover_game_cpk,
+    discover_game_cpks,
     discover_save_locations,
     reject_game_root_save,
     validate_destination,
@@ -127,6 +128,19 @@ def test_discovers_database_cpk_from_explicit_game_root(tmp_path: Path) -> None:
     assert discover_game_cpk(
         environment={"FL_GAME_ROOT": str(game_root)}
     ) == archive
+
+
+def test_data_extra_overrides_base_database_cpk(tmp_path: Path) -> None:
+    download = tmp_path / "Football Life 2026" / "download"
+    download.mkdir(parents=True)
+    for name in ("data_s2526.cpk", "data_extra.cpk"):
+        (download / name).write_bytes(b"cpk")
+
+    # data_extra.cpk is the in-game Player.bin/Team.bin source when both exist.
+    assert [path.name for path in discover_game_cpks(download.parent)] == [
+        "data_extra.cpk",
+        "data_s2526.cpk",
+    ]
 
 
 def test_rejects_save_inside_game_root(tmp_path: Path) -> None:

@@ -24,7 +24,10 @@ _GAME_ROOT_ENVIRONMENT = (
 )
 _GAME_ROOT_PARENT_ENVIRONMENT = ("PROGRAMFILES(X86)", "PROGRAMFILES", "LOCALAPPDATA")
 _GAME_ROOT_NAMES = ("SP Football Life 2026", "Football Life 2026", "PES 2021")
-_DATABASE_ARCHIVE_NAMES = ("data_s2526.cpk", "data_extra.cpk")
+# FL's data_extra.cpk overrides data_s2526.cpk in-game: its Player.bin is a
+# superset (players referenced by FL26 national-squad saves exist only there)
+# and carries the in-game abilities.
+_DATABASE_ARCHIVE_NAMES = ("data_extra.cpk", "data_s2526.cpk")
 _DATABASE_ARCHIVE_PATTERNS = ("*liveupd*.cpk", "*datapack*.cpk", "*.cpk")
 _ENVIRONMENT_ROOTS = ("USERPROFILE", "OneDrive", "OneDriveConsumer")
 _GAME_NAMES = {
