@@ -339,15 +339,15 @@ fn game_card(ui: &mut Ui, state: &mut SetupState, actions: &mut Vec<Action>) {
         }
         let badge = match (&state.save, needed) {
             (SaveStatus::Ready { .. }, true) => Some(("Required for this save", Tone::Warn)),
-            (SaveStatus::Ready { .. }, false) => Some(("Optional", Tone::Muted)),
+            (SaveStatus::Ready { .. }, false) => Some(("Recommended", Tone::Info)),
             _ => None,
         };
         theme::step_title(ui, 2, "Game folder", badge);
         ui.add_space(4.0);
         let help = if needed {
-            "PES 2021 saves are matched against the game's own player database. Choose the folder that contains the download folder."
+            "Required for this save: it is matched against the game's own player database. Choose the folder that contains the download folder."
         } else {
-            "Football Life 2026 saves don't need this. Choose it only if you want the game's own database used."
+            "Choose the folder that contains the download folder. The app then reads player details such as age and rating from your game, which makes matching more accurate."
         };
         ui.label(RichText::new(help).color(theme::muted(ui)));
         ui.add_space(2.0);
@@ -377,9 +377,11 @@ fn game_card(ui: &mut Ui, state: &mut SetupState, actions: &mut Vec<Action>) {
         ui.add_space(2.0);
         match &state.game {
             GameStatus::Empty => {
-                if needed {
-                    theme::chip(ui, Tone::Warn, "Not chosen yet");
-                }
+                theme::chip(
+                    ui,
+                    if needed { Tone::Warn } else { Tone::Muted },
+                    "Not chosen yet",
+                );
             }
             GameStatus::Checking => theme::spinner_chip(ui, "Looking for the game files…"),
             GameStatus::Unusable => theme::chip(

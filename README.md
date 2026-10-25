@@ -48,8 +48,9 @@ Windows may show "Windows protected your PC" the first time. Click
 2. Open `FLDailyEdit.exe`. It finds your save by itself. Saves are in
    `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\<folder>\save\` and are
    named `EDIT00000000`. If the app can't find yours, click **Browse…**.
-3. **PES 2021 or T99 patch only:** choose your game folder (the one that
-   contains the `download` folder). Football Life doesn't need this.
+3. Choose your **game folder**: the folder where the game is installed, the
+   one that contains the `download` folder. The app often finds it by itself.
+   It reads player details from your game, so matching is more accurate.
 4. Click **Update save** and wait a few minutes. A copy of your old save is
    made first, just in case.
 5. The app shows what changed and which transfers could not be applied.
