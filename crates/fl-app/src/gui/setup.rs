@@ -1,5 +1,5 @@
-//! Setup screen: choose the save (and, when the save needs it, the game
-//! folder), then preview or update.
+//! Setup screen: choose the save and the game folder (both required), then
+//! preview or update.
 
 use std::path::{Path, PathBuf};
 
@@ -45,7 +45,8 @@ impl Blocker {
             Self::Checking => "Checking your choices…".into(),
             Self::SaveInvalid(reason) => reason.clone(),
             Self::ChooseGameFolder => {
-                "Choose the game folder: this save needs the game's player database.".into()
+                "Choose the game folder: the app reads the player and club lists from your game."
+                    .into()
             }
             Self::GameFolderInvalid => {
                 "The game folder has no data_extra.cpk or data_s2526.cpk in its download folder."
@@ -107,12 +108,6 @@ impl SetupState {
         self.game_path = path;
     }
 
-    /// The save is a vanilla PES 2021 save, which cannot be updated without
-    /// the game's own database files.
-    pub fn needs_game_folder(&self) -> bool {
-        matches!(&self.save, SaveStatus::Ready { info, .. } if info.kind.needs_game_folder())
-    }
-
     pub fn blockers(&self) -> Vec<Blocker> {
         let mut blockers = Vec::new();
         match &self.save {
@@ -121,13 +116,11 @@ impl SetupState {
             SaveStatus::Invalid(reason) => blockers.push(Blocker::SaveInvalid(reason.clone())),
             SaveStatus::Ready { .. } => {}
         }
-        if self.needs_game_folder() {
-            match &self.game {
-                GameStatus::Empty => blockers.push(Blocker::ChooseGameFolder),
-                GameStatus::Checking => blockers.push(Blocker::Checking),
-                GameStatus::Unusable => blockers.push(Blocker::GameFolderInvalid),
-                GameStatus::Usable { .. } => {}
-            }
+        match &self.game {
+            GameStatus::Empty => blockers.push(Blocker::ChooseGameFolder),
+            GameStatus::Checking => blockers.push(Blocker::Checking),
+            GameStatus::Unusable => blockers.push(Blocker::GameFolderInvalid),
+            GameStatus::Usable { .. } => {}
         }
         blockers.dedup();
         blockers
@@ -332,31 +325,25 @@ fn save_status(ui: &mut Ui, state: &SetupState) {
 }
 
 fn game_card(ui: &mut Ui, state: &mut SetupState, actions: &mut Vec<Action>) {
-    let needed = state.needs_game_folder();
     theme::card(ui, |ui| {
         if std::mem::take(&mut state.focus_game_folder) {
             ui.scroll_to_cursor(Some(egui::Align::Center));
         }
-        let badge = match (&state.save, needed) {
-            (SaveStatus::Ready { .. }, true) => Some(("Required for this save", Tone::Warn)),
-            (SaveStatus::Ready { .. }, false) => Some(("Recommended", Tone::Info)),
-            _ => None,
-        };
-        theme::step_title(ui, 2, "Game folder", badge);
+        theme::step_title(ui, 2, "Game folder", Some(("Required", Tone::Warn)));
         ui.add_space(4.0);
-        let help = if needed {
-            "Required for this save: it is matched against the game's own player database. Choose the folder that contains the download folder."
-        } else {
-            "Choose the folder that contains the download folder. The app then reads player details such as age and rating from your game, which makes matching more accurate."
-        };
-        ui.label(RichText::new(help).color(theme::muted(ui)));
+        ui.label(
+            RichText::new(
+                "Choose the folder where the game is installed (the one that contains the download folder). The app reads the player and club lists from your game.",
+            )
+            .color(theme::muted(ui)),
+        );
         ui.add_space(2.0);
         ui.horizontal(|ui| {
             let width = (ui.available_width() - 110.0).max(120.0);
             let edit = ui.add(
                 TextEdit::singleline(&mut state.game_text)
                     .desired_width(width)
-                    .hint_text("e.g. D:\\Games\\PES 2021")
+                    .hint_text("e.g. D:\\Games\\Football Life 2026")
                     .margin(vec2(8.0, 6.0)),
             );
             if edit.lost_focus() && edit.changed() {
@@ -377,11 +364,7 @@ fn game_card(ui: &mut Ui, state: &mut SetupState, actions: &mut Vec<Action>) {
         ui.add_space(2.0);
         match &state.game {
             GameStatus::Empty => {
-                theme::chip(
-                    ui,
-                    if needed { Tone::Warn } else { Tone::Muted },
-                    "Not chosen yet",
-                );
+                theme::chip(ui, Tone::Warn, "Not chosen yet");
             }
             GameStatus::Checking => theme::spinner_chip(ui, "Looking for the game files…"),
             GameStatus::Unusable => theme::chip(
@@ -421,41 +404,39 @@ mod tests {
     }
 
     #[test]
-    fn fl26_save_runs_without_a_game_folder_pes21_does_not() {
+    fn every_save_needs_a_usable_game_folder() {
         let mut state = SetupState::new(None, None);
-        assert_eq!(state.blockers(), [Blocker::ChooseSave]);
+        assert_eq!(
+            state.blockers(),
+            [Blocker::ChooseSave, Blocker::ChooseGameFolder]
+        );
         assert!(state.request(false).is_none());
 
+        for kind in [SaveKind::FootballLife26, SaveKind::Pes2021] {
+            state.save = ready(kind);
+            state.game = GameStatus::Empty;
+            assert_eq!(state.blockers(), [Blocker::ChooseGameFolder]);
+            assert!(state.request(false).is_none());
+            state.game = GameStatus::Unusable;
+            assert_eq!(state.blockers(), [Blocker::GameFolderInvalid]);
+            assert!(!state.ready());
+            state.game = GameStatus::Checking;
+            assert_eq!(state.blockers(), [Blocker::Checking]);
+        }
+
         state.save = ready(SaveKind::FootballLife26);
+        state.game_path = Some("D:/Games/FL".into());
+        state.game = GameStatus::Usable {
+            archives: vec!["D:/Games/FL/download/data_extra.cpk".into()],
+        };
         assert!(state.ready());
         let request = state.request(true).unwrap();
-        assert!(request.dry_run && request.game_root.is_none());
+        assert!(request.dry_run);
+        assert_eq!(request.game_root.as_deref(), Some(Path::new("D:/Games/FL")));
         assert!(
             request.output_path.is_none(),
             "the app always updates in place"
         );
-
-        state.save = ready(SaveKind::Pes2021);
-        assert_eq!(state.blockers(), [Blocker::ChooseGameFolder]);
-        state.game = GameStatus::Unusable;
-        assert_eq!(state.blockers(), [Blocker::GameFolderInvalid]);
-        state.game_path = Some("D:/Games/PES".into());
-        state.game = GameStatus::Usable {
-            archives: vec!["D:/Games/PES/download/data_extra.cpk".into()],
-        };
-        assert_eq!(
-            state.request(false).unwrap().game_root.as_deref(),
-            Some(Path::new("D:/Games/PES"))
-        );
-    }
-
-    #[test]
-    fn unusable_optional_game_folder_is_ignored_for_fl26() {
-        let mut state = SetupState::new(None, Some("D:/nowhere".into()));
-        state.save = ready(SaveKind::FootballLife26);
-        state.game = GameStatus::Unusable;
-        assert!(state.ready());
-        assert!(state.request(false).unwrap().game_root.is_none());
     }
 
     #[test]

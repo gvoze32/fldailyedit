@@ -50,7 +50,8 @@ Windows may show "Windows protected your PC" the first time. Click
    named `EDIT00000000`. If the app can't find yours, click **Browse…**.
 3. Choose your **game folder**: the folder where the game is installed, the
    one that contains the `download` folder. The app often finds it by itself.
-   It reads player details from your game, so matching is more accurate.
+   It is required for every save: the app reads the player and club lists from
+   your game.
 4. Click **Update save** and wait a few minutes. A copy of your old save is
    made first, just in case.
 5. The app shows what changed and which transfers could not be applied.
@@ -63,9 +64,11 @@ where the last one stopped.
 
 ## Good to know
 
-- **Supported:** Football Life, PES 2021 and the
-  T99 patch. Saves from patches that change the database a lot (such as UML)
-  may not work.
+- **Supported:** Football Life and PES 2021. Saves from patches that change
+  the database a lot (such as UML) may not work.
+- **The game folder is required for every save.** The app reads the player and
+  club lists from your own game installation; it does not ship any. Choose the
+  game that matches your save, or the update stops before anything is written.
 - **New players are never created.** If a player isn't in your save, his
   transfer is skipped and listed under **Not applied**.
 - **Your save is checked before and after every update.** If anything looks
@@ -73,7 +76,9 @@ where the last one stopped.
 - **Backups** of your old saves, reports and logs are kept in
   `%LOCALAPPDATA%\FLDailyEdit`.
 - Transfer data comes from FotMob, checked against Transfermarkt, Wikipedia
-  and other football sites.
+  and other football sites. The first update also downloads FotMob's club list
+  (a few seconds) and keeps it for 30 days, so it needs an
+  internet connection.
 
 ## For developers
 

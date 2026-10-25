@@ -13,6 +13,7 @@ pub mod planning;
 pub mod report;
 pub mod scrape;
 pub mod services;
+mod team_catalog;
 
 pub use pipeline::{run_update, run_update_with};
 pub use services::{Clock, FixedClock, Services, SystemClock};

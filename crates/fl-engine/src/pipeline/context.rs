@@ -2,23 +2,24 @@
 //! club identity and the integrity baseline. Loaded once, before fetching.
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::Arc;
 
-use fl_save::catalog::CatalogSources;
 use fl_save::model::NativePlayers;
 use fl_save::release_policy::load_release_policy;
-use fl_sources::team_index::embedded_catalog;
 
 use super::Reporter;
 use super::prepare::{Prepared, fail};
 use super::verify::baseline_keys;
-use crate::api::{ErrorCode, Stage, UpdateError, UpdateRequest};
+use crate::api::{CancelToken, ErrorCode, Stage, UpdateError, UpdateRequest};
 use crate::club_identity::{ClubIdentityIndex, IdentityCache};
 use crate::match_db::build_match_database;
 use crate::matcher::{MATCH_THRESHOLD_PLAYER, NameMatcher};
-use crate::native::{NativeData, NativeFiles, load_native};
+use crate::native::{NativeData, load_native};
 use crate::paths::StatePaths;
 use crate::planning::RosterMap;
+use crate::services::Services;
+use crate::team_catalog;
 
 /// Everything about the selected save that fetching and planning read.
 pub(crate) struct Context {
@@ -43,42 +44,32 @@ fn matching_failed(message: String) -> UpdateError {
     )
 }
 
-/// The three-line hint appended to the missing-Player.bin failure.
-fn missing_native_message(
-    missing: &[u32],
-    source: Option<String>,
-    game_root: Option<&std::path::Path>,
-) -> String {
-    let sample: Vec<String> = missing.iter().take(8).map(u32::to_string).collect();
+/// The failure for game data that is absent or does not belong to the save.
+/// Every save reads its players and clubs from the game's own database files.
+fn native_missing(problem: String, game_root: Option<&Path>, warnings: &[String]) -> UpdateError {
     let root_hint = match game_root {
-        Some(root) => format!(" Selected game root: {}.", root.display()),
-        None => " Choose the PES 2021/T99 game folder containing download/*.cpk.".to_owned(),
+        Some(root) => format!(" Selected game folder: {}.", root.display()),
+        None => String::new(),
     };
-    format!(
-        "PES 2021/T99 save requires matching native Player.bin metadata; {} roster IDs are missing (source: {}; first IDs: {}).{root_hint}",
-        missing.len(),
-        source.unwrap_or_else(|| "unavailable".to_owned()),
-        sample.join(", ")
+    let details = if warnings.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", warnings.join("; "))
+    };
+    fail(
+        ErrorCode::NativeDatabaseMissing,
+        Stage::Validating,
+        format!(
+            "{problem}{details} Choose the game folder that contains the download folder \
+             (the one with data_extra.cpk).{root_hint}"
+        ),
     )
 }
 
-/// (Re)load the save's player catalog: names plus the native metadata of the
-/// players currently rostered.
-fn load_catalog(
-    prepared: &mut Prepared,
-) -> Result<fl_save::catalog::PlayerCatalogReport, UpdateError> {
-    let sources = if prepared.edit.is_pes21() {
-        // PES 2021/T99 ids come from the matching native Player.bin; the
-        // bundled FL26 catalog uses a different id universe.
-        CatalogSources::default()
-    } else {
-        CatalogSources::embedded()
-    };
-    prepared
-        .edit
-        .load_player_catalog(sources)
-        .map(|catalog| catalog.report.clone())
-        .map_err(|error| matching_failed(error.to_string()))
+/// (Re)load the save's player catalog: the players edited in the save plus
+/// the native metadata of the players currently rostered.
+fn load_catalog(prepared: &mut Prepared) -> fl_save::catalog::PlayerCatalogReport {
+    prepared.edit.load_player_catalog().report.clone()
 }
 
 /// Rebuild everything that depends on who sits in which roster, after a round
@@ -86,45 +77,57 @@ fn load_catalog(
 /// follows the rosters), the player matcher and the roster tables. This is
 /// what a fresh run on the changed save would load; club identities, the
 /// integrity baseline and the configuration stay.
-pub(crate) fn refresh(context: &mut Context, prepared: &mut Prepared) -> Result<(), UpdateError> {
-    load_catalog(prepared)?;
+pub(crate) fn refresh(context: &mut Context, prepared: &mut Prepared) {
+    load_catalog(prepared);
     let native_players: Option<Arc<dyn NativePlayers>> = context
         .native
         .player_bin
         .as_ref()
         .map(|loaded| Arc::clone(&loaded.database) as Arc<dyn NativePlayers>);
-    let database = build_match_database(&prepared.edit, native_players.as_deref())
-        .map_err(|error| matching_failed(error.to_string()))?;
+    let teams = context.native.team_bin.as_ref().map(|t| &*t.database);
+    let database = build_match_database(&prepared.edit, native_players.as_deref(), teams);
     let mut matcher = database.matcher;
     matcher.set_team_aliases(context.identity.aliases());
     context.matcher = matcher;
     context.rosters = database.rosters;
     context.player_names = database.player_names;
-    Ok(())
 }
 
 pub(crate) fn load(
     prepared: &mut Prepared,
     request: &UpdateRequest,
-    native_files: &NativeFiles,
+    services: &Services,
     paths: &StatePaths,
     reporter: &mut Reporter<'_>,
+    cancel: &CancelToken,
 ) -> Result<Context, UpdateError> {
     let stage = Stage::Validating;
     reporter.say(stage, "Reading the selected save database");
-    let native = load_native(request.game_root.as_deref(), native_files);
+    let native = load_native(request.game_root.as_deref(), &services.native_files);
     let mut warnings = native.warnings.clone();
-    if let Some(player_bin) = &native.player_bin {
-        reporter.say(
-            stage,
-            format!("Loaded Player.bin metadata from {}", player_bin.source),
-        );
+    let Some(player_bin) = &native.player_bin else {
+        return Err(native_missing(
+            "The game's Player.bin was not found.".to_owned(),
+            request.game_root.as_deref(),
+            &native.warnings,
+        ));
+    };
+    reporter.say(
+        stage,
+        format!("Loaded Player.bin metadata from {}", player_bin.source),
+    );
+    if !prepared.edit.is_pes21() && native.team_bin.is_none() {
+        return Err(native_missing(
+            "The game's Team.bin was not found.".to_owned(),
+            request.game_root.as_deref(),
+            &native.warnings,
+        ));
     }
-    let native_players: Option<Arc<dyn NativePlayers>> = native
-        .player_bin
-        .as_ref()
-        .map(|loaded| Arc::clone(&loaded.database) as Arc<dyn NativePlayers>);
-    prepared.edit.attach_native(native_players.clone());
+    let native_players: Arc<dyn NativePlayers> =
+        Arc::clone(&player_bin.database) as Arc<dyn NativePlayers>;
+    prepared
+        .edit
+        .attach_native(Some(Arc::clone(&native_players)));
 
     let policy = match &request.release_policy {
         Some(path) => {
@@ -134,34 +137,40 @@ pub(crate) fn load(
     };
     prepared.edit.attach_release_policy(policy.as_ref());
 
-    let report = load_catalog(prepared)?;
-    if prepared.edit.is_pes21() && !report.missing_roster_ids.is_empty() {
-        return Err(fail(
-            ErrorCode::NativeDatabaseMissing,
-            Stage::Matching,
-            missing_native_message(
-                &report.missing_roster_ids,
-                native
-                    .player_bin
-                    .as_ref()
-                    .map(|loaded| loaded.source.to_string()),
-                request.game_root.as_deref(),
+    let report = load_catalog(prepared);
+    if !report.missing_roster_ids.is_empty() {
+        let sample: Vec<String> = report
+            .missing_roster_ids
+            .iter()
+            .take(8)
+            .map(u32::to_string)
+            .collect();
+        return Err(native_missing(
+            format!(
+                "The game files do not match this save: {} players on its rosters are missing from \
+                 Player.bin (from {}; first IDs: {}).",
+                report.missing_roster_ids.len(),
+                player_bin.source,
+                sample.join(", ")
             ),
+            request.game_root.as_deref(),
+            &[],
         ));
     }
 
-    let database = build_match_database(&prepared.edit, native_players.as_deref())
-        .map_err(|error| matching_failed(error.to_string()))?;
-    if report.current_entries == 0 && !prepared.edit.is_pes21() {
-        warnings
-            .push("External player catalog unavailable; using names from the selected save".into());
-    }
+    let teams = native.team_bin.as_ref().map(|t| &*t.database);
+    let database = build_match_database(&prepared.edit, Some(&*native_players), teams);
     let club_ids: HashSet<u32> = prepared.edit.club_team_ids().iter().copied().collect();
 
+    // Club identity binds save clubs to FotMob ids through FotMob's team list,
+    // which is downloaded (or read from the state directory) here, before any
+    // squad is fetched.
+    let catalog = team_catalog::load(paths, request.dry_run, services, reporter, cancel)?;
+    warnings.extend(catalog.warnings);
     let mut matcher = database.matcher;
     let identity = ClubIdentityIndex::build(
         &database.club_names,
-        embedded_catalog(),
+        &catalog.teams,
         IdentityCache::new(paths.club_identity_cache(), prepared.scope.clone()),
     );
     matcher.set_team_aliases(identity.aliases());

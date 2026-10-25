@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use fl_engine::club_identity::{ClubIdentityIndex, IdentityCache, IdentityEntry, NameResolution};
 use fl_engine::matcher::{NameMatcher, PlayerAttrs, PlayerQuery};
 use fl_sources::model::{SquadMember, SquadSnapshot};
-use fl_sources::team_index::embedded_catalog;
+use fl_sources::team_index::{TeamEntry, parse_catalog};
 use serde_json::Value;
 
 /// Replay everything (`FL_PARITY_FULL=1`) instead of a sample.
@@ -280,13 +280,22 @@ fn snapshot(squad: &Value) -> SquadSnapshot {
     }
 }
 
+/// The recorded FotMob team catalog (test fixture; the app downloads it at run time).
+fn fixture_catalog() -> Vec<TeamEntry> {
+    let text = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/fotmob_teams.json"),
+    )
+    .unwrap();
+    parse_catalog(&text).unwrap()
+}
+
 fn check_identity(variant: &str, db: &Db, identity: &Value) {
     let dir = tempfile::tempdir().unwrap();
-    let catalog = embedded_catalog();
+    let catalog = fixture_catalog();
     let build = |file: &str, scope: &str| {
         ClubIdentityIndex::build(
             &db.pes_clubs,
-            catalog,
+            &catalog,
             IdentityCache::new(dir.path().join(file), scope.to_owned()),
         )
     };

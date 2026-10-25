@@ -13,7 +13,6 @@
 use std::collections::HashMap;
 
 use super::support::*;
-use crate::catalog::CatalogSources;
 use crate::edit_file::EditFile;
 use crate::layout::*;
 use crate::model::Position;
@@ -711,9 +710,7 @@ fn native_playerbin_position_overrides_stale_save_position() {
         .copy_from_slice(&(u16::from(Position::Gk.code()) << 5).to_le_bytes());
     attach_positions(&mut file, &[(138156, "AMF")]);
 
-    let catalog = file
-        .build_catalog(CatalogSources::default())
-        .expect("catalog");
+    let catalog = file.build_catalog();
 
     assert_eq!(catalog.players[&138156].position, Some(Position::Amf));
     assert_eq!(file.player_position(138156), Some(Position::Amf));

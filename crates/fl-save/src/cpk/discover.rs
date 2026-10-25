@@ -177,7 +177,7 @@ mod tests {
             "z_other.cpk",
             "data_s2526.cpk",
             "a_datapack2.cpk",
-            "t99_liveupd.cpk",
+            "patch_liveupd.cpk",
             "data_extra.cpk",
             "A_datapack1.cpk",
             "notes.txt",
@@ -190,7 +190,7 @@ mod tests {
             [
                 "data_extra.cpk",
                 "data_s2526.cpk",
-                "t99_liveupd.cpk",
+                "patch_liveupd.cpk",
                 "A_datapack1.cpk",
                 "a_datapack2.cpk",
                 "z_other.cpk"

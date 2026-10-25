@@ -8,8 +8,10 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, NaiveDate, Utc};
-use fl_sources::http::Transport;
+use fl_sources::http::{HttpClient, LiveTransport, Transport};
+use fl_sources::team_index::TeamEntry;
 
+use crate::api::{CancelToken, ErrorCode, Stage, UpdateError};
 use crate::native::NativeFiles;
 
 /// Source of the current UTC time.
@@ -51,6 +53,9 @@ pub struct Services {
     pub native_files: NativeFiles,
     /// Make provider back-off and pacing waits instant (offline replays).
     pub skip_sleeps: bool,
+    /// FotMob team list to use as-is; `None` reads the state-directory copy or
+    /// downloads it from FotMob (see [`crate::team_catalog`]).
+    pub team_index: Option<Arc<[TeamEntry]>>,
 }
 
 impl Services {
@@ -61,7 +66,32 @@ impl Services {
             transport: None,
             native_files: NativeFiles::default(),
             skip_sleeps: false,
+            team_index: None,
         }
+    }
+
+    /// The shared HTTP client of a run: the injected or live transport, with
+    /// `cancel` aborting in-flight requests and back-off waits.
+    pub(crate) fn http_client(
+        &self,
+        cancel: &CancelToken,
+        stage: Stage,
+    ) -> Result<HttpClient, UpdateError> {
+        let failure = |error: &dyn std::fmt::Display| UpdateError {
+            code: ErrorCode::Internal,
+            stage: Some(stage),
+            message: format!("Could not start the HTTP client: {error}"),
+        };
+        let transport: Arc<dyn Transport> = match &self.transport {
+            Some(transport) => Arc::clone(transport),
+            None => Arc::new(LiveTransport::new().map_err(|error| failure(&error))?),
+        };
+        HttpClient::builder()
+            .transport(transport)
+            .cancel_token(cancel.transport().clone())
+            .skip_sleeps(self.skip_sleeps)
+            .build()
+            .map_err(|error| failure(&error))
     }
 }
 

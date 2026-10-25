@@ -100,12 +100,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
   for SP Football Life 2026 (Update 2.2, SmokePatch National Teams Selection
   Update). Football Life 2026, SmokePatch, and the game databases belong to
   their respective authors; the updater is a tool for your own save and does
-  not include game files. Vanilla PES 2021 / T99 `Player.bin`, `Team.bin`, and
+  not include game files. Vanilla PES 2021 `Player.bin`, `Team.bin`, and
   `PlayerAssignment.bin` are read from your own installation at run time.
-- `data/FL2622wc_players.txt`, `data/FL262_teams.txt`, and `data/players.csv`
-  are name/ID reference lists for the Football Life 2026 database embedded in
-  the app. `data/fotmob_teams.json` is a generated index of FotMob team ids and
-  names used for club matching.
+- Football Life player and team names are read from your game folder's
+  `Player.bin` and `Team.bin` at run time; the app ships no game or player
+  data. FotMob's team list (ids and club names) is downloaded from FotMob's
+  public sitemaps on the first update and cached in the app's state folder for
+  30 days.
 
 ## Live data sources
 

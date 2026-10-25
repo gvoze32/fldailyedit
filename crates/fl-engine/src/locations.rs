@@ -277,19 +277,13 @@ fn starts_with_fold(path: &Path, prefix: &Path) -> bool {
 /// Which game wrote the save, from the container header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveKind {
-    /// Football Life 2026 (and other non-vanilla patches): player data is
-    /// embedded in the app.
+    /// Football Life 2026 (and other non-vanilla patches).
     FootballLife26,
-    /// Vanilla PES 2021 / T99: player data comes from the game's CPK files,
-    /// so the game folder is required.
+    /// Vanilla PES 2021.
     Pes2021,
 }
 
 impl SaveKind {
-    pub fn needs_game_folder(self) -> bool {
-        self == Self::Pes2021
-    }
-
     pub fn game_name(self) -> &'static str {
         match self {
             Self::FootballLife26 => "Football Life 2026",
@@ -486,7 +480,7 @@ mod tests {
     #[test]
     fn resolve_accepts_file_or_folder_with_any_name_and_location() {
         let dir = tempfile::tempdir().unwrap();
-        let save = dir.path().join("T99").join(SAVE_FILE_NAME);
+        let save = dir.path().join("Profile").join(SAVE_FILE_NAME);
         touch(&save);
         let copy = dir.path().join("EDIT00000000 (copy)");
         touch(&copy);

@@ -37,12 +37,9 @@ fn reference_save_is_recognized_and_remembered() {
     let SaveStatus::Ready { info, .. } = &fx.app.setup().save else {
         panic!("not ready")
     };
-    assert_eq!(
-        info.kind,
-        SaveKind::FootballLife26,
-        "FL26 saves need no game folder"
-    );
-    assert!(fx.app.setup().request(false).is_some());
+    assert_eq!(info.kind, SaveKind::FootballLife26);
+    let request = fx.app.setup().request(false).unwrap();
+    assert_eq!(request.game_root, Some(fake_game_folder()));
 
     // The choice is persisted for the next launch.
     let settings = std::fs::read_to_string(fx.state_dir.path().join("settings.json")).unwrap();
@@ -59,6 +56,22 @@ fn garbage_and_missing_saves_block_the_buttons_with_a_reason() {
         matches!(app.setup().save, SaveStatus::Invalid(_))
     });
     assert!(!fx.app.setup().ready());
+    fx.app.dispatch(Action::Start { dry_run: false });
+    assert!(
+        matches!(fx.app.screen(), Screen::Setup),
+        "a blocked start must do nothing"
+    );
+}
+
+#[test]
+fn a_valid_save_alone_cannot_start_without_a_game_folder() {
+    let mut fx = fixture(ScriptedEngine::new(Vec::new(), Ok(UpdateResult::default())));
+    fx.app.dispatch(Action::SaveChosen(reference_save()));
+    wait_until(&mut fx.app, "save check", |app| {
+        matches!(app.setup().save, SaveStatus::Ready { .. })
+    });
+    assert!(!fx.app.setup().ready());
+    assert!(fx.app.setup().request(false).is_none());
     fx.app.dispatch(Action::Start { dry_run: false });
     assert!(
         matches!(fx.app.screen(), Screen::Setup),

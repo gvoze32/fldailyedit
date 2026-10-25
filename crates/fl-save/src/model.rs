@@ -241,6 +241,12 @@ pub struct NativeCareer {
 pub trait NativePlayers: Send + Sync {
     fn native_player(&self, player_id: u32) -> Option<NativePlayer<'_>>;
 
+    /// Ids of every player the database lists (every game player, rostered
+    /// or free). Lookup-only sources answer with none.
+    fn native_ids(&self) -> Vec<u32> {
+        Vec::new()
+    }
+
     /// Career fields of a player; `None` without a record (or a source that
     /// carries none).
     fn native_career(&self, _player_id: u32) -> Option<NativeCareer> {

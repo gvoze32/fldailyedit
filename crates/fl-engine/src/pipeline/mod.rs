@@ -16,11 +16,9 @@ pub(crate) mod verify;
 pub mod window;
 
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use chrono::NaiveDate;
 use fl_sources::dates::parse_iso_datetime;
-use fl_sources::http::{HttpClient, LiveTransport, Transport};
 use fl_sources::model::ScrapeResult;
 
 use self::apply::{Applied, ApplyInput};
@@ -119,13 +117,7 @@ impl Run {
         reporter.say(Stage::Validating, "Validating the selected save");
         let mut prepared = prepare::prepare(request, reporter, cancel)?;
         cancel.check(Stage::Validating)?;
-        let context = context::load(
-            &mut prepared,
-            request,
-            &services.native_files,
-            paths,
-            reporter,
-        )?;
+        let context = context::load(&mut prepared, request, services, paths, reporter, cancel)?;
         cancel.check(Stage::Validating)?;
         Ok(Self { prepared, context })
     }
@@ -164,8 +156,7 @@ impl Run {
                 // A fresh run starts without a session, and so does this round:
                 // what it finds must be what the next run would find.
                 self.prepared.edit.reset_session();
-                context::refresh(&mut self.context, &mut self.prepared)
-                    .inspect_err(|_| self.rollback())?;
+                context::refresh(&mut self.context, &mut self.prepared);
             }
             reporter.say(
                 Stage::Matching,
@@ -663,19 +654,7 @@ fn run_scrape(
 ) -> Result<Scraped, UpdateError> {
     let stage = Stage::Fetching;
     let internal = |message: String| failure(ErrorCode::Internal, stage, message);
-    let transport: Arc<dyn Transport> = match &services.transport {
-        Some(transport) => Arc::clone(transport),
-        None => Arc::new(
-            LiveTransport::new()
-                .map_err(|error| internal(format!("Could not start the HTTP client: {error}")))?,
-        ),
-    };
-    let http = HttpClient::builder()
-        .transport(transport)
-        .cancel_token(cancel.transport().clone())
-        .skip_sleeps(services.skip_sleeps)
-        .build()
-        .map_err(|error| internal(format!("Could not start the HTTP client: {error}")))?;
+    let http = services.http_client(cancel, stage)?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

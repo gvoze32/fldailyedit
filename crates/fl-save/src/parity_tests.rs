@@ -15,7 +15,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::catalog::{self, CatalogSources, PlayerCatalog};
+use crate::catalog::PlayerCatalog;
 use crate::cpk::Cpk;
 use crate::edit_file::{EditFile, testing::Mock};
 use crate::layout::*;
@@ -108,17 +108,59 @@ fn sorted_player_rows(players: &HashMap<u32, PlayerInfo>) -> Value {
     Value::Array(ids.iter().map(|id| player_row(&players[id])).collect())
 }
 
+/// Rows (names blanked) of the players both the engine's catalog and the
+/// Python catalog hold, by ascending id. The Python run took names and the
+/// set of non-rostered players from the bundled FL catalog (removed); the
+/// engine takes them from the save and Player.bin.
+fn shared_unnamed_rows(players: &HashMap<u32, PlayerInfo>, python: &Value) -> (Value, Value) {
+    let blank = |mut row: Value| {
+        row[1] = json!("");
+        row[2] = json!("");
+        row
+    };
+    let python_rows: Vec<&Value> = python.as_array().unwrap().iter().collect();
+    let python_ids: std::collections::HashSet<u32> = python_rows
+        .iter()
+        .map(|row| row[0].as_u64().unwrap() as u32)
+        .collect();
+    let mut ids: Vec<u32> = players
+        .keys()
+        .copied()
+        .filter(|id| python_ids.contains(id))
+        .collect();
+    ids.sort_unstable();
+    let rust: Vec<Value> = ids
+        .iter()
+        .map(|id| blank(player_row(&players[id])))
+        .collect();
+    let expected: Vec<Value> = python_rows
+        .into_iter()
+        .filter(|row| players.contains_key(&(row[0].as_u64().unwrap() as u32)))
+        .map(|row| blank(row.clone()))
+        .collect();
+    (Value::Array(rust), Value::Array(expected))
+}
+
+/// The coverage counters both implementations report. `missing_roster_ids`
+/// is not one of them: the Python run filled ids the old Player.bin variants
+/// lack from the bundled FL catalog.
 fn report_value(catalog: &PlayerCatalog) -> Value {
     let r = &catalog.report;
     json!({
-        "current_entries": r.current_entries,
-        "legacy_roster_fallbacks": r.legacy_roster_fallbacks,
         "edited_entries": r.edited_entries,
         "roster_entries": r.roster_entries,
-        "missing_roster_ids": r.missing_roster_ids,
         "positions": r.positions,
-        "nationalities": 0,
         "ages": r.ages,
+    })
+}
+
+/// The same counters of a Python `catalog_report`.
+fn python_report_value(report: &Value) -> Value {
+    json!({
+        "edited_entries": report["edited_entries"],
+        "roster_entries": report["roster_entries"],
+        "positions": report["positions"],
+        "ages": report["ages"],
     })
 }
 
@@ -296,21 +338,11 @@ fn core_checks(label: &str, loaded: &Loaded, py: &Value) {
         &py["integrity"],
     );
 
-    // Catalog (embedded FL catalog + legacy CSV; skipped for PES 2021).
+    // Catalog without native data: the players edited inside the save. The
+    // Python catalog also held the bundled FL names (removed), which never
+    // carried positions or ages, so the integrity verdict is unchanged.
     let mut file = open(loaded);
-    let catalog = file
-        .build_catalog(CatalogSources::embedded())
-        .expect("catalog");
-    assert_same(
-        &format!("{label} catalog_players"),
-        &sorted_player_rows(&catalog.players),
-        &py["catalog_players"],
-    );
-    assert_same(
-        &format!("{label} catalog_report"),
-        &report_value(&catalog),
-        &py["catalog_report"],
-    );
+    let catalog = file.build_catalog();
     file.set_player_catalog(Some(catalog));
     assert_same(
         &format!("{label} catalog_integrity"),
@@ -347,19 +379,14 @@ fn playerbin_checks(label: &str, loaded: &Loaded, py: &Value) -> usize {
         let database = PlayerBinDatabase::from_bytes(&raw).expect("Player.bin");
         let mut file = open(loaded);
         file.attach_native(Some(Arc::new(database)));
-        let catalog = file
-            .build_catalog(CatalogSources::embedded())
-            .expect("catalog");
+        let catalog = file.build_catalog();
         let what = format!("{label}+{source}");
-        assert_same(
-            &format!("{what} players"),
-            &sorted_player_rows(&catalog.players),
-            &expected["players"],
-        );
+        let (rust_rows, python_rows) = shared_unnamed_rows(&catalog.players, &expected["players"]);
+        assert_same(&format!("{what} players"), &rust_rows, &python_rows);
         assert_same(
             &format!("{what} report"),
             &report_value(&catalog),
-            &expected["report"],
+            &python_report_value(&expected["report"]),
         );
         file.set_player_catalog(Some(catalog));
         assert_same(
@@ -750,25 +777,4 @@ fn synthetic_ratings_match_python_and_never_panic() {
         compared > 100 && out_of_curve > 0,
         "{compared} compared, {out_of_curve} out of curve"
     );
-}
-
-#[test]
-fn embedded_catalogs_match_python_digests() {
-    let fixture = synthetic();
-    let digest = |entries: &HashMap<u32, String>| {
-        let mut keys: Vec<u32> = entries.keys().copied().collect();
-        keys.sort_unstable();
-        let mut hasher = Sha256::new();
-        for key in keys {
-            hasher.update(format!("{key}\t{}\n", entries[&key]).as_bytes());
-        }
-        hex(&hasher.finalize())
-    };
-    let players = catalog::embedded_player_names().unwrap();
-    let teams = catalog::embedded_team_names().unwrap();
-    let expected = &fixture["catalog"];
-    assert_eq!(json!(players.len()), expected["players"]);
-    assert_eq!(json!(digest(&players)), expected["players_digest"]);
-    assert_eq!(json!(teams.len()), expected["teams"]);
-    assert_eq!(json!(digest(&teams)), expected["teams_digest"]);
 }

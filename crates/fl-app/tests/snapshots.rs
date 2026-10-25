@@ -130,6 +130,12 @@ fn ready_setup(engine: ScriptedEngine) -> Fixture {
             problems: vec![],
         },
     };
+    let game = PathBuf::from(r"D:\Games\Football Life 2026");
+    let setup = fx.app.setup_mut();
+    setup.set_game(Some(game.clone()));
+    setup.game = GameStatus::Usable {
+        archives: vec![game.join("download").join("data_extra.cpk")],
+    };
     fx.app.setup_mut().generation += 1; // drop answers of probes that started before the staging
     fx
 }
@@ -152,6 +158,18 @@ fn setup_dark() {
     let mut harness = harness(fx.app, Theme::Dark);
     settle(&mut harness);
     harness.snapshot_options("setup_dark", &options());
+}
+
+#[test]
+fn setup_game_folder_not_chosen() {
+    let mut fx = ready_setup(ScriptedEngine::new(Vec::new(), Ok(UpdateResult::default())));
+    let setup = fx.app.setup_mut();
+    setup.set_game(None);
+    setup.game = GameStatus::Empty;
+    setup.generation += 1;
+    let mut harness = harness(fx.app, Theme::Light);
+    settle(&mut harness);
+    harness.snapshot_options("setup_game_folder_not_chosen", &options());
 }
 
 #[test]

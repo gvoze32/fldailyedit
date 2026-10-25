@@ -28,9 +28,12 @@ FL_E2E_REBASELINE=1 cargo test --release -p fl-engine --test e2e_replay --test p
 Paths inside `expected/` text files are normalised: the run's work directory is written as `<WORKDIR>`
 (`<WORKDIR>/input/EDIT00000000`, `<WORKDIR>/output/EDIT00000000`, `<WORKDIR>/state/...`).
 
-The save output depends on `Player.bin`, which is game data and is NOT committed: it is a gitignored scenario input at
-`testdata/local/e2e/<name>/inputs/Player.bin.gz` (gzip; sha256 of the raw file in `meta.json` → `player_bin.sha256`;
-decompress to `<WORKDIR>/inputs/Player.bin` and load it as the run's Player.bin). Rust e2e tests must SKIP (not fail) when that file is absent.
+The save output depends on the game's `Player.bin` and `Team.bin` (every save reads its player and club lists from the game), which are
+game data and are NOT committed: they are gitignored scenario inputs at
+`testdata/local/e2e/<name>/inputs/Player.bin.gz` and `Team.bin.gz` (gzip; sha256 of the raw files in `meta.json` → `player_bin.sha256`,
+`team_bin.sha256`; both taken from `reference/data_extra.cpk`, the archive the game overrides `data_s2526.cpk` with;
+decompress to `<WORKDIR>/inputs/Player.bin` / `Team.bin` and load them as the run's databases). Rust e2e tests must SKIP (not fail) when
+either file is absent.
 
 `small/` is committed (6 clubs via `--club`). The full coverage run (`--deep`) lives in gitignored `testdata/local/e2e/full/`.
 

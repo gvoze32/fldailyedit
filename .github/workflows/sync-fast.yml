@@ -7,6 +7,13 @@ name: Sync Live Transfers (Fast)
 # its deep twin run exactly the same command. Both files are kept only so
 # existing forks keep their workflow names. The updated save is uploaded as a
 # workflow artifact; nothing is published to a release.
+#
+# NEEDS THE GAME FILES: every save reads its player and club lists from the
+# game's own Player.bin / Team.bin (data_extra.cpk), which this repository does
+# not contain. Before re-enabling a schedule, make `GAME_ROOT` (a repository
+# variable) point at a folder on the runner that holds the game's CPK files
+# (for example a self-hosted runner with the game installed). Without it the
+# "Require the game files" step fails the run with an explanation.
 on:
   # schedule:
   #   # Run daily at 00:00 UTC
@@ -18,6 +25,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Folder with the game's CPK files (see the note at the top).
+  GAME_ROOT: ${{ vars.GAME_ROOT }}
   # The app keeps its state (transfer log, reports, caches, backups) under
   # $XDG_DATA_HOME/FLDailyEdit on Linux; point it into the workspace so the
   # cache and artifact steps can reach it.
@@ -61,10 +70,18 @@ jobs:
           path: |
             state/FLDailyEdit/storage/fotmob_team_cache/
             state/FLDailyEdit/storage/fotmob_tactics_cache.json
+            state/FLDailyEdit/storage/fotmob_teams.json
             state/FLDailyEdit/club_identity_cache.json
-          key: fotmob-fast-payload-${{ hashFiles('data/fotmob_teams.json') }}-${{ github.run_id }}
+          key: fotmob-fast-payload-${{ github.run_id }}
           restore-keys: |
-            fotmob-fast-payload-${{ hashFiles('data/fotmob_teams.json') }}-
+            fotmob-fast-payload-
+
+      - name: Require the game files
+        run: |
+          if [ -z "${GAME_ROOT:-}" ] || [ ! -d "$GAME_ROOT" ]; then
+            echo "::error::GAME_ROOT is not set to an existing folder. Every save reads its player and club lists from the game (data_extra.cpk), which is not part of this repository. Set the GAME_ROOT repository variable to a folder with the game's CPK files."
+            exit 1
+          fi
 
       - name: Validate Base and Apply Transfers
         run: |
@@ -73,6 +90,7 @@ jobs:
           cp base/EDIT00000000 output/EDIT00000000
           cargo run --release --locked -p fl-app -- run \
             --window auto \
+            --game-root "$GAME_ROOT" \
             --edit-file output/EDIT00000000
 
       - name: Validate final save

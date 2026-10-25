@@ -30,7 +30,6 @@ tempfile = "3"
 regex = "1"
 html-escape = "0.2"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
-csv = "1"
 unicode-normalization = "0.1"
 
 [profile.release]

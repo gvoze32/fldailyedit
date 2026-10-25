@@ -42,6 +42,11 @@ impl StatePaths {
         self.root.join("storage").join("fotmob_team_cache")
     }
 
+    /// FotMob team list (club catalog) downloaded from FotMob's sitemaps.
+    pub fn team_index(&self) -> PathBuf {
+        self.root.join("storage").join("fotmob_teams.json")
+    }
+
     /// FotMob league-tactics cache file.
     pub fn tactics_cache(&self) -> PathBuf {
         self.root.join("storage").join("fotmob_tactics_cache.json")

@@ -94,7 +94,7 @@ pub struct RunArgs {
     /// Write the updated save here instead of updating the input save in place
     #[arg(short, long, value_name = "PATH")]
     pub output: Option<PathBuf>,
-    /// Game folder (PES 2021 / T99 install containing download/*.cpk); required for PES 2021 saves
+    /// Game folder (the one that contains the download folder with data_extra.cpk); required, the player and club lists are read from the game
     #[arg(long, value_name = "DIR")]
     pub game_root: Option<PathBuf>,
     /// Transfer window

@@ -24,16 +24,21 @@ use fl_engine::planning::{
     dedupe_shirt_number_matches, match_transfers_statefully, plan_captain_updates,
     plan_gameplan_preferences, plan_roster_actions, plan_shirt_batch, plan_transfers,
 };
-use fl_save::catalog::CatalogSources;
 use fl_save::crypto;
 use fl_save::edit_file::EditFile;
 use fl_save::model::{NativePlayers, Position, TeamData};
 use fl_sources::model::{CaptainUpdate, ScrapeResult, SquadSnapshot, TacticalUpdate, Transfer};
-use fl_sources::team_index::embedded_catalog;
+use fl_sources::team_index::{TeamEntry, parse_catalog};
 use serde_json::{Value, json};
 
 fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+/// The recorded FotMob team catalog (test fixture; the app downloads it at run time).
+fn fixture_catalog() -> Vec<TeamEntry> {
+    let text = std::fs::read_to_string(repo().join("testdata/fotmob_teams.json")).unwrap();
+    parse_catalog(&text).unwrap()
 }
 
 fn gunzip(path: &Path) -> Vec<u8> {
@@ -402,8 +407,12 @@ struct World {
 
 fn world(scenario_dir: &Path, local_dir: &Path, snapshots: &[SquadSnapshot]) -> Option<World> {
     let player_bin_gz = local_dir.join("inputs/Player.bin.gz");
-    if !player_bin_gz.is_file() {
-        eprintln!("skipping: {} missing", player_bin_gz.display());
+    let team_bin_gz = local_dir.join("inputs/Team.bin.gz");
+    if !player_bin_gz.is_file() || !team_bin_gz.is_file() {
+        eprintln!(
+            "skipping: Player.bin.gz / Team.bin.gz missing in {}",
+            local_dir.display()
+        );
         return None;
     }
     let meta: Value =
@@ -411,10 +420,13 @@ fn world(scenario_dir: &Path, local_dir: &Path, snapshots: &[SquadSnapshot]) -> 
     let dir = tempfile::tempdir().unwrap();
     let player_bin = dir.path().join("Player.bin");
     std::fs::write(&player_bin, gunzip(&player_bin_gz)).unwrap();
+    let team_bin = dir.path().join("Team.bin");
+    std::fs::write(&team_bin, gunzip(&team_bin_gz)).unwrap();
     let native = load_native(
         None,
         &NativeFiles {
             player_bin: Some(player_bin),
+            team_bin: Some(team_bin),
             ..NativeFiles::default()
         },
     );
@@ -429,19 +441,15 @@ fn world(scenario_dir: &Path, local_dir: &Path, snapshots: &[SquadSnapshot]) -> 
     let mut edit = EditFile::from_bytes(std::mem::take(&mut blocks.data)).unwrap();
     edit.set_pes21(header.is_pes21());
     edit.attach_native(native_players.clone());
-    let sources = if edit.is_pes21() {
-        CatalogSources::default()
-    } else {
-        CatalogSources::embedded()
-    };
-    edit.load_player_catalog(sources).unwrap();
+    edit.load_player_catalog();
 
-    let database = build_match_database(&edit, native_players.as_deref()).unwrap();
+    let teams = native.team_bin.as_ref().map(|loaded| &*loaded.database);
+    let database = build_match_database(&edit, native_players.as_deref(), teams);
     let club_ids: HashSet<u32> = edit.club_team_ids().iter().copied().collect();
     let mut matcher = database.matcher;
     let mut identity = ClubIdentityIndex::build(
         &database.club_names,
-        embedded_catalog(),
+        &fixture_catalog(),
         IdentityCache::new(
             dir.path().join("club_identity_cache.json"),
             "golden".to_owned(),
@@ -549,17 +557,9 @@ fn run_scenario(scenario: &str, scenario_dir: &Path, local_dir: &Path, plan_path
         .chain(&scrape.roster_updates)
         .cloned()
         .collect();
-    let dump_names: HashMap<u32, String> = plan["player_names"]
-        .as_object()
-        .unwrap()
-        .iter()
-        .map(|(k, v)| (k.parse().unwrap(), v.as_str().unwrap().to_owned()))
-        .collect();
-    assert_eq!(
-        world.player_names.len(),
-        dump_names.len(),
-        "{scenario}: player names"
-    );
+    // The names come from the game's Player.bin like in a real run; the dump
+    // used to carry the removed bundled catalog.
+    let dump_names = &world.player_names;
 
     lap("world built and inputs parsed");
     // Stage 1: matching.
@@ -572,7 +572,7 @@ fn run_scenario(scenario: &str, scenario_dir: &Path, local_dir: &Path, plan_path
         history: &history,
         club_identity: Some(&world.identity),
         squad_snapshots: &scrape.squad_snapshots,
-        player_names: &dump_names,
+        player_names: dump_names,
         team_shirt_numbers: Some(&shirt_numbers),
     });
     let mut baseline = Baseline::new();
@@ -678,7 +678,7 @@ fn run_scenario(scenario: &str, scenario_dir: &Path, local_dir: &Path, plan_path
         rosters: &rosters,
         club_ids: &world.club_ids,
         history: &history,
-        player_names: &dump_names,
+        player_names: dump_names,
         overflow: &world.edit,
         allow_overflow_release: allow_overflow,
         today: plan["today"].as_str().unwrap().parse().unwrap(),
@@ -869,6 +869,10 @@ fn run_scenario(scenario: &str, scenario_dir: &Path, local_dir: &Path, plan_path
     if baseline.rewrite {
         let mut rewritten = doc.clone();
         rewritten["plan"]["expected"] = Value::Object(baseline.rows);
+        rewritten["plan"]
+            .as_object_mut()
+            .unwrap()
+            .remove("player_names");
         for (call, rows) in rewritten["captains"]
             .as_array_mut()
             .unwrap()

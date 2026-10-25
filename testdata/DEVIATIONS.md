@@ -203,3 +203,56 @@ the settled state or re-resolved namesakes). Skip-reason deltas: `current_club_m
 `snapshot_coverage_low` 237 → 177, `player_not_matched` 2734 → 2661, `provider_identity_metadata_conflict` 135 → 206
 (reclassified from `player_not_matched`, see Idempotency), `last_goalkeeper` 0 → 1, `shirt_number_ambiguous/outvoted`
 now also reported. Per-team detail for `full`: `testdata/local/e2e/full/REBASELINE.md` (local, gitignored).
+
+## Game-folder-only names (no bundled FL catalog)
+
+`data/FL2622wc_players.txt` and `data/FL262_teams.txt` are no longer embedded: every save reads its player and club lists from the
+game's own `Player.bin` / `Team.bin` (CPKs below the game folder), and a missing or mismatched database fails the run early with
+`NativeDatabaseMissing`. (`data/players.csv`, kept at that time for T99 alias names, was removed later: see "T99 support dropped".)
+
+Evidence before the removal (reference/data_extra.cpk against the bundled lists):
+
+* Player.bin covers every rostered id of `base/EDIT00000000` and of the five FL saves in `reference/` (18 912 – 19 389 ids each).
+  Three ids of `EDIT00000000epltactic` are not in Player.bin; all three are edited inside that save, so the save's own record covers them.
+* Names: 18 911 of 18 911 Player.bin-covered rostered ids identical to the bundled list on the base save (0 different; 1 rostered id
+  is missing from the list); 0 different on every other FL save.
+* Team.bin: all 583 club ids of every FL save are present with the identical name (583 / 583).
+* `reference/Player.bin` (= `data_s2526.cpk`, 27 840 players) is **not** enough: it misses 1 534 rostered ids of the base save. The game's
+  `data_extra.cpk` Player.bin (29 492 players) is the one discovery prefers, so the e2e scenarios now use it (plus its `Team.bin`,
+  `inputs/Team.bin.gz`); the old inputs only worked because the bundled names covered the gap.
+
+What changes in the engine:
+
+* The catalog is the players edited inside the save plus, from Player.bin, metadata for every rostered player and a name-only entry for
+  every other player of the game (free agents stay matchable, their position stays unknown as before). Where the save and Player.bin
+  both name a player, the save's name wins (it is what the game displays); the bundled list used to win. Five players of the base save
+  differ (Joseph Opoku/Okopu, Manu/Kouadio Koné, Víctor Valdepeñas/Valde, Chupe/Chupete, Jeff/Julian Chabot).
+* FL club names come from Team.bin (identical to the removed list); PES 2021 / T99 keep the save's own names.
+* 11 ids the bundled list named but the game's Player.bin does not contain are gone (Alexandre Pato 35266, Manuel Hidalgo 131217,
+  Rinsei Ohata, Renji Hidano, Mostafa Shobeir, Kanta Sekitomi, Yusei Yamanouchi, Ginjiro Ikegaya, Ryuki Osa, Paul Mendy, Steeve Kango;
+  none is edited in the base save): the old engine could register them although the game has no such player. One Player.bin id the
+  list lacked now has a name. T99 saves also gain name-only entries of the non-rostered players of their Player.bin (Japanese names,
+  no effect on matching).
+
+Baseline change (both scenarios, same cassettes): the `Player.bin` swap (s2526 → data_extra) explains nearly all of it. Measured by
+running the pre-change engine on the data_extra inputs: only the rows below differ between that run and the new engine.
+
+| scenario | skipped rows | log rows | changed by the catalog removal itself |
+|---|---|---|---|
+| small | 74 → 72 | 91 → 92 | 1 registration (Manuel Hidalgo, 131217, a bundled-list-only id) not made; Johor Darul Ta'zim therefore releases Eddy Silvestre instead |
+| full | 6 508 → 6 490 | 7 259 → 7 306 | 18 log rows only before, 3 only after: 9 registrations of bundled-list-only ids not made (Hidalgo, Ohata, Hidano, Sekitomi, Yamanouchi, Ikegaya, Osa, Mendy, Kango); the other rows are shirt/release rows of players on those clubs and of the five save-vs-Player.bin name differences (Valdepeñas/Valde, Opoku/Okopu, Koné); 1 `player_not_matched` skip fewer |
+
+Skip reasons before → after (`full`): `player_not_matched` 2661 → 2648, `current_club_mismatch` 478 → 481, `destination_team_not_matched` 1257 → 1258,
+`source_team_not_matched` 1117 → 1120, `snapshot_coverage_low` 177 → 168, `provider_identity_metadata_conflict` 206 → 204,
+`already_registered_elsewhere` 35 → 39, `outside_save` 545 → 535, `shirt_number_ambiguous` 4 → 6, `shirt_number_outvoted` 1 → 2,
+`last_goalkeeper` 1 → 2, new `source_player_missing` 1. `small`: `destination_team_not_matched` 26 → 25, `player_not_matched` 17 → 15,
+`source_team_not_matched` 17 → 18.
+
+## T99 support dropped
+
+Support for the T99 patch is dropped. `data/players.csv` (English alias names that T99 saves used for their localized players) and
+everything that existed only for it are removed: `fl-save::catalog::{EMBEDDED_LEGACY_PLAYERS_CSV, load_legacy_player_names,
+legacy_name_matches_native, PlayerCatalogError}`, the alias block and `MatchDatabase::native_aliases` in `match_db.rs`, and the `csv`
+dependency of `fl-save`. `build_match_database` is infallible now. Football Life and vanilla PES 2021 read player and club data from the
+game folder's `Player.bin` / `Team.bin` and never used the aliases, so their goldens are unchanged. Local-only parity tests against
+`reference/` T99 files (save tables, roster sequences, protected-TOC CPK) stay: they exercise generic save/CPK code.

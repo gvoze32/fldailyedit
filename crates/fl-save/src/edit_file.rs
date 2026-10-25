@@ -19,9 +19,7 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
-use crate::catalog::{
-    CatalogSources, PlayerCatalog, PlayerCatalogError, build_player_catalog, coverage,
-};
+use crate::catalog::{PlayerCatalog, build_player_catalog, coverage};
 use crate::layout::*;
 use crate::model::{NativePlayers, PlayerInfo, Position, TeamData, TeamInfo};
 use crate::rating::{PlayerAbilities, decode_edit_player};
@@ -309,8 +307,8 @@ impl EditFile {
 
     // ── attached metadata ────────────────────────────────────────────────
 
-    /// Mark this save as vanilla PES 2021 (disables the FL26 name catalog and
-    /// the FL26 position-code invariant). Derived from the container header.
+    /// Mark this save as vanilla PES 2021 (disables the FL26
+    /// position-code invariant). Derived from the container header.
     pub fn set_pes21(&mut self, pes21: bool) {
         self.pes21 = pes21;
     }
@@ -412,33 +410,25 @@ impl EditFile {
         players
     }
 
-    /// Build the full player catalog: name catalog (unless PES 2021), edited
-    /// players, then native Player.bin metadata for rostered players.
+    /// Build the full player catalog: the players edited inside the save, then
+    /// native Player.bin metadata for rostered players.
     ///
     /// Player.bin is authoritative for position/age; EDIT entries override its
-    /// overall (they replace the database record in-game).
-    pub fn build_catalog(
-        &self,
-        sources: CatalogSources<'_>,
-    ) -> Result<PlayerCatalog, PlayerCatalogError> {
+    /// name and overall (they replace the database record in-game). Rostered
+    /// ids that neither the save nor Player.bin knows show up in the report's
+    /// `missing_roster_ids`.
+    pub fn build_catalog(&self) -> PlayerCatalog {
         let edited = self.edited_players();
         let roster_ids: HashSet<u32> = self.rosters().iter().flat_map(TeamData::roster).collect();
-        let sources = if self.pes21 {
-            // PES 2021/T99 ids come from the matching native Player.bin; the
-            // bundled FL26 catalog uses a different id universe.
-            CatalogSources::default()
-        } else {
-            sources
-        };
         let Some(native) = &self.native else {
-            let (players, report) = build_player_catalog(sources, &edited, &roster_ids)?;
-            return Ok(PlayerCatalog { players, report });
+            let (players, report) = build_player_catalog(&edited, &roster_ids);
+            return PlayerCatalog { players, report };
         };
 
         let (native_ids, catalog_ids): (HashSet<u32>, HashSet<u32>) = roster_ids
             .iter()
             .partition(|&&id| native.native_player(id).is_some());
-        let (mut players, mut report) = build_player_catalog(sources, &edited, &catalog_ids)?;
+        let (mut players, mut report) = build_player_catalog(&edited, &catalog_ids);
 
         let mut native_ids: Vec<u32> = native_ids.into_iter().collect();
         native_ids.sort_unstable();
@@ -488,20 +478,36 @@ impl EditFile {
             };
             players.insert(player_id, merged);
         }
+        // Every other player of the game database is a name-only catalog
+        // entry: free agents and players of other leagues stay matchable,
+        // but their position stays unknown (see the match database).
+        for player_id in native.native_ids() {
+            if players.contains_key(&player_id) {
+                continue;
+            }
+            if let Some(record) = native.native_player(player_id) {
+                players.insert(
+                    player_id,
+                    PlayerInfo {
+                        player_id,
+                        name: record.name.to_owned(),
+                        print_name: record.name.to_owned(),
+                        ..PlayerInfo::default()
+                    },
+                );
+            }
+        }
         report.roster_entries = roster_ids.len();
         report.positions = coverage(&players, &roster_ids, |p| p.position.is_some());
         report.ages = coverage(&players, &roster_ids, |p| p.age != 0);
-        Ok(PlayerCatalog { players, report })
+        PlayerCatalog { players, report }
     }
 
     /// [`build_catalog`](Self::build_catalog) and keep the result as this
     /// file's player catalog.
-    pub fn load_player_catalog(
-        &mut self,
-        sources: CatalogSources<'_>,
-    ) -> Result<&PlayerCatalog, PlayerCatalogError> {
-        let catalog = self.build_catalog(sources)?;
-        Ok(self.player_catalog.insert(catalog))
+    pub fn load_player_catalog(&mut self) -> &PlayerCatalog {
+        let catalog = self.build_catalog();
+        self.player_catalog.insert(catalog)
     }
 
     #[cfg(test)]
@@ -1084,16 +1090,16 @@ mod tests {
     }
 
     #[test]
-    fn catalog_without_external_sources_uses_only_save_names() {
+    fn catalog_without_native_data_uses_only_save_names() {
         let mut mock = Mock::club(101, vec![1001, 1002], vec![1, 2]);
         mock.players = 2;
         mock.player_entries = vec![(1001, "Vanilla One".into()), (1002, "Vanilla Two".into())];
         let mut file = EditFile::from_bytes(mock.build()).unwrap();
-        let catalog = file.load_player_catalog(CatalogSources::default()).unwrap();
+        let catalog = file.load_player_catalog();
         let mut ids: Vec<u32> = catalog.players.keys().copied().collect();
         ids.sort_unstable();
         assert_eq!(ids, [1001, 1002]);
-        assert_eq!(catalog.report.current_entries, 0);
+        assert_eq!(catalog.report.edited_entries, 2);
         assert!(file.player_catalog().is_some());
     }
 

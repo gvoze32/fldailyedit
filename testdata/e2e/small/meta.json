@@ -16,7 +16,8 @@
     "club_identity_cache": "<WORKDIR>/state/club_identity_cache.json",
     "fotmob_team_cache_dir": "<WORKDIR>/state/storage/fotmob_team_cache (starts empty)",
     "fotmob_tactics_cache": "<WORKDIR>/state/storage/fotmob_tactics_cache.json (starts empty)",
-    "player_bin": "<WORKDIR>/inputs/Player.bin"
+    "player_bin": "<WORKDIR>/inputs/Player.bin",
+    "team_bin": "<WORKDIR>/inputs/Team.bin"
   },
   "cli": "run --edit-file <input_save> -o <output_save> --club 10200,10083,9780,8528,213591,165228",
   "timezone": "UTC",
@@ -28,8 +29,13 @@
   "input_sha256": "f827a8d5dab8b8e3ca06584f36dedfcbdfcc8944c6f6f68e50d6147ca118b836",
   "player_bin": {
     "file": "testdata/local/e2e/small/inputs/Player.bin.gz",
-    "sha256": "1c8d85ba891c46af740ec0347662892c29fa567904c129f34a39ed0d1cc781a6",
-    "origin": "reference/Player.bin"
+    "sha256": "a03beb7e77011674f861d9e9f219eb3039ded7abf68e84831adcfa39570462f6",
+    "origin": "reference/data_extra.cpk::Player.bin"
+  },
+  "team_bin": {
+    "file": "testdata/local/e2e/small/inputs/Team.bin.gz",
+    "sha256": "844e29f87fbf2d540860defa8581783710722200018dbda8377f789e6aff21ef",
+    "origin": "reference/data_extra.cpk::Team.bin"
   },
   "python": "3.14.9",
   "expected_save": "expected/ is the engine's own reviewed output (testdata/DEVIATIONS.md, Baseline); EDIT00000000.delta.json.gz is a sparse patch over `input`",
@@ -61,11 +67,11 @@
     }
   },
   "expected_sha256": {
-    "EDIT00000000": "bec4dafb63c259675fd77d608eef73bb7806ca1769b43566eea12faaa30fbd80",
-    "transfer_summary.md": "727505d4c38801d901c6fda11f8b549502e2f60b42a75c389a3972ca558d4889",
-    "transfer_summary.html": "a81ad5c9791febd39598c5f895e1e1c284028c363d004fd7ae7d55c2ea6e8fdb",
-    "skipped_transfers.jsonl": "f84712847348b5a3f92c8ccbd9c87b10dc61d39098c4e3c6d73e9edc1eae3f24",
-    "transfer_log.jsonl": "1cf5914a6af7080da8a10f620b8c190da18c4ad605805ad33a0b91cb813c41b8",
+    "EDIT00000000": "3fcae932c87141f4151c19f139cc1e0527f52988274e61146ba89e0bf6ba6f14",
+    "transfer_summary.md": "34cc69bed283aaee75784b815682c81d8c476672add2dcbe2a41914cd6d2f0d1",
+    "transfer_summary.html": "bd1a60b82b2223372d87a846d538c26a87c405b30347dcc9b9e6612698632f5a",
+    "skipped_transfers.jsonl": "3816aa37bccf5da824814c32df7a06fc7d40f474ff44805de20b27da391bedc5",
+    "transfer_log.jsonl": "331cf7e25a9c1056e346b8f23929a23f19581f33505cae207b761b7b5758c2c4",
     "club_identity_cache.json": "8214e71f8cb4ea6cee25802702183e80efd4a2de6bef056d99a719acb4cec478"
   },
   "record_vs_replay_identical": true,

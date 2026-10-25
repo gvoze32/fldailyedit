@@ -153,6 +153,10 @@ impl NativePlayers for PlayerBinDatabase {
         })
     }
 
+    fn native_ids(&self) -> Vec<u32> {
+        self.iter().map(|record| record.player_id).collect()
+    }
+
     fn native_career(&self, id: u32) -> Option<NativeCareer> {
         self.get(id).map(|record| NativeCareer {
             caps: u32::from(record.caps),

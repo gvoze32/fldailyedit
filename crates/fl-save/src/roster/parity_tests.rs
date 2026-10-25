@@ -23,7 +23,6 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::catalog::CatalogSources;
 use crate::cpk::Cpk;
 use crate::crypto;
 use crate::edit_file::EditFile;
@@ -479,11 +478,32 @@ fn open(
         file.attach_native(Some(database));
     }
     if context["catalog"].as_bool().unwrap_or(false) {
-        file.load_player_catalog(CatalogSources::embedded())
-            .expect("catalog");
+        file.load_player_catalog();
     }
     apply_policy(&mut file, &context["policy"]);
     Some(file)
+}
+
+/// `value` with every string `name` field blanked. The Python run named
+/// catalog players from the bundled FL catalog (removed); without Player.bin
+/// the engine only knows the names edited inside the save.
+fn without_names(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, inner)| {
+                    let inner = if key == "name" && inner.is_string() {
+                        json!("")
+                    } else {
+                        without_names(inner)
+                    };
+                    (key.clone(), inner)
+                })
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.iter().map(without_names).collect()),
+        other => other.clone(),
+    }
 }
 
 fn replay_sequence(
@@ -493,6 +513,7 @@ fn replay_sequence(
     databases: &mut HashMap<String, Arc<PlayerBinDatabase>>,
 ) -> usize {
     let name = sequence["name"].as_str().expect("name");
+    let mask_names = sequence["context"]["catalog"].as_bool().unwrap_or(false);
     let Some(mut file) = open(save, &sequence["context"], databases) else {
         eprintln!("skip {label}/{name}: Player.bin source unavailable");
         return 0;
@@ -548,7 +569,12 @@ fn replay_sequence(
             }
         }
         let check_result = !(diverged && role_sensitive(kind)) && !zero_player;
-        if fallback && (result != step["result"] || file_hash_differs(&file, step, diverged)) {
+        let (result, expected_result) = if mask_names {
+            (without_names(&result), without_names(&step["result"]))
+        } else {
+            (result, step["result"].clone())
+        };
+        if fallback && (result != expected_result || file_hash_differs(&file, step, diverged)) {
             if is_mutation(kind) {
                 eprintln!(
                     "{label}/{name}: stopped at step {index} (documented overflow-fallback deviation)"
@@ -558,7 +584,7 @@ fn replay_sequence(
             continue;
         }
         if check_result {
-            assert_eq!(result, step["result"], "result of {context}");
+            assert_eq!(result, expected_result, "result of {context}");
         }
         if !diverged && step["changed"].as_array().is_some_and(Vec::is_empty) {
             assert!(file.bytes() == &shadow[..], "data.dat changed in {context}");

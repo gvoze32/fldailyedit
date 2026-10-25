@@ -116,10 +116,21 @@ pub fn on_result_screen(app: &App) -> bool {
     matches!(app.screen(), Screen::Result)
 }
 
-/// Point the app at the reference save and wait for the check to finish.
+/// A stand-in game folder: `download/data_extra.cpk` exists, which is all the
+/// setup screen checks before the engine runs.
+pub fn fake_game_folder() -> PathBuf {
+    let download = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fake_game/download");
+    std::fs::create_dir_all(&download).unwrap();
+    std::fs::write(download.join("data_extra.cpk"), b"x").unwrap();
+    download.parent().unwrap().to_owned()
+}
+
+/// Point the app at the reference save and the stand-in game folder, and wait
+/// for both checks to finish.
 pub fn choose_reference_save(app: &mut App) {
+    app.dispatch(fl_app::gui::Action::GameChosen(fake_game_folder()));
     app.dispatch(fl_app::gui::Action::SaveChosen(reference_save()));
-    wait_until(app, "the save check", |app| app.setup().ready());
+    wait_until(app, "the save and game checks", |app| app.setup().ready());
 }
 
 pub fn result_ok(result: UpdateResult) -> Result<UpdateResult, UpdateError> {

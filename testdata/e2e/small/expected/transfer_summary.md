@@ -5,13 +5,13 @@
 
 | Save changes | Club transfers | Permanent | Loans / returns | Shirt numbers | Captains | Dry-run |
 |---:|---:|---:|---:|---:|---:|---:|
-| **91** | **44** | 35 | 9 | **33** | **1** | 0 |
+| **92** | **43** | 34 | 9 | **34** | **1** | 0 |
 > Captain updates use the latest verified captain marker from the club's most recent lineup.
 
 > Shirt-number updates only change kit numbers. They never move a player between clubs.
-> Roster actions: 25 direct moves · 19 signings · 13 releases.
+> Roster actions: 26 direct moves · 17 signings · 14 releases.
 
-### Club transfers (44)
+### Club transfers (43)
 
 | Status | Player | Pos | From | To | Deal | Native metadata | Match |
 |:---:|---|:---:|---|---|---|---|---:|
@@ -52,15 +52,14 @@
 | ✅ Applied | **Carlos Akapo** | `RB` | Free Agent | Johor Darul Ta'zim | squad_registration | Player.bin: Carlos Akapo (RB) | 100% |
 | ✅ Applied | **Najmuddin Akmal** | `Defender` | Free Agent | Johor Darul Ta'zim | squad_registration | Player.bin: Najmuddin Akmal (RMF) | 100% |
 | ✅ Applied | **Dejan Petrovič** | `CDM` | Free Agent | Johor Darul Ta'zim | squad_registration | Player.bin: Dejan Petrovič (CMF) | 100% |
-| ✅ Applied | **Manuel Hidalgo** | `CAM` | Free Agent | Johor Darul Ta'zim | squad_registration | Player.bin: not found | 100% |
-| ✅ Applied | **Matías Reali** | `AM` | San Lorenzo | Independiente Rivadavia | on loan | Player.bin: Matías Reali (RWF) | 100% |
 | ✅ Applied | **Gonzalo González** | `RW` | Gimnasia La Plata | Estudiantes de Río Cuarto | squad_registration | Player.bin: Gonzalo González (CB) | 100% |
 | ✅ Applied | **Fernando** | `LW` | Red Bull Bragantino | Estudiantes de Río Cuarto | squad_registration | Player.bin: Fernando (CF) | 100% |
 | ✅ Applied | **Dani Bolt** | `RWB` | FK Qarabağ | Johor Darul Ta'zim | squad_registration | Player.bin: Dani Bolt (RB) | 100% |
 | ✅ Applied | **Kevin Medina** | `CB` | FK Qarabağ | Johor Darul Ta'zim | squad_registration | Player.bin: Kevin Medina (CB) | 100% |
 | ✅ Applied | **Shahab Zahedi** | `ST` | Avispa Fukuoka | Johor Darul Ta'zim | squad_registration | Player.bin: Shahab Zahedi (CF) | 100% |
+| ✅ Applied | **Matías Reali** | `AM` | San Lorenzo | Independiente Rivadavia | on loan | Player.bin: Matías Reali (RWF) | 100% |
 
-### Player releases (13)
+### Player releases (14)
 
 | Status | Player | Pos | Released from | Native metadata | Match |
 |:---:|---|:---:|---|---|---:|
@@ -70,15 +69,16 @@
 | Released | **Stéphane Diarra** | `RW` | Alverca | Player.bin: Stéphane Diarra (LWF) | 100% |
 | Released | **Francisco Flores** | `-` | San Lorenzo | Player.bin: Francisco Flores (CB) | 100% |
 | Released | **Jhohan Romaña** | `-` | San Lorenzo | Player.bin: Jhohan Romaña (CB) | 100% |
-| Released | **Mauro Pérez** | `-` | San Lorenzo | Player.bin: not found | 100% |
+| Released | **Matías Reali** | `-` | San Lorenzo | Player.bin: Matías Reali (RWF) | 100% |
 | Released | **Fabricio López** | `-` | San Lorenzo | Player.bin: Fabricio López (RB) | 100% |
 | Released | **Heberty** | `-` | Johor Darul Ta'zim | Player.bin: Heberty (SS) | 100% |
+| Released | **Eddy Silvestre** | `-` | Johor Darul Ta'zim | Player.bin: Eddy Silvestre (CMF) | 100% |
 | Released | **Samu Castillejo** | `-` | Johor Darul Ta'zim | Player.bin: Samu Castillejo (RWF) | 100% |
 | Released | **Romel Morales** | `-` | Johor Darul Ta'zim | Player.bin: Romel Morales (CF) | 100% |
 | Released | **Park Jun-Heong** | `-` | Johor Darul Ta'zim | Player.bin: Park Jun-Heong (CB) | 100% |
 | Released | **Cristian Glauder** | `-` | Johor Darul Ta'zim | Player.bin: Cristian Glauder (CB) | 100% |
 
-### Shirt-number changes (33)
+### Shirt-number changes (34)
 
 | Status | Player | Club | Previous | New | Match |
 |:---:|---|---|---:|---:|---:|
@@ -91,9 +91,9 @@
 | 🔢 Updated | **Kings Kangwa** | Panathinaikos | #6 | #42 | 100% |
 | 🔢 Updated | **Levi García** | Panathinaikos | #32 | #99 | 100% |
 | 🔢 Updated | **Ramiro Pedroza** | San Lorenzo | #82 | #53 | 100% |
-| 🔢 Updated | **Facundo Farías** | San Lorenzo | #21 | #38 | 100% |
+| 🔢 Updated | **Facundo Farías** | San Lorenzo | #14 | #38 | 100% |
 | 🔢 Updated | **Gonzalo Alassia** | San Lorenzo | #59 | #62 | 100% |
-| 🔢 Updated | **Gustavo del Prete** | San Lorenzo | #11 | #21 | 100% |
+| 🔢 Updated | **Agustín Ladstatter** | San Lorenzo | #50 | #14 | 100% |
 | 🔢 Updated | **Sergi Gómez** | Alverca | #5 | #21 | 100% |
 | 🔢 Updated | **Sabit Abdulai** | Alverca | #21 | #5 | 100% |
 | 🔢 Updated | **Zé Rafael** | Alverca | #34 | #93 | 100% |
@@ -113,27 +113,27 @@
 | 🔢 Updated | **Marcos Guilherme** | Johor Darul Ta'zim | #20 | #95 | 100% |
 | 🔢 Updated | **Arif Aiman Hanapi** | Johor Darul Ta'zim | #42 | #10 | 100% |
 | 🔢 Updated | **Yago César** | Johor Darul Ta'zim | #17 | #97 | 100% |
-| 🔢 Updated | **Agustín Ladstatter** | San Lorenzo | #50 | #14 | 100% |
 | 🔢 Updated | **Hector Hevel** | Johor Darul Ta'zim | #87 | #8 | 100% |
+| 🔢 Updated | **Dejan Petrovič** | Johor Darul Ta'zim | #7 | #21 | 100% |
+| 🔢 Updated | **Shahab Zahedi** | Johor Darul Ta'zim | #11 | #7 | 100% |
 
 ### Captain changes (1)
 
 | Status | Club | New captain | Previous player ID | Match |
 |:---:|---|---|---:|---:|
-| Updated | Estudiantes de Río Cuarto | **Gonzalo Maffini** | 136220 | 100% |
+| Updated | Estudiantes de Río Cuarto | **Gonzalo Maffini** | 101952 | 100% |
 
-### Not applied (74)
+### Not applied (72)
 
-> 74 touch a club in this save. Players missing from the save are never created; they are listed here instead.
+> 72 touch a club in this save. Players missing from the save are never created; they are listed here instead.
 
-#### `destination_team_not_matched` (26)
+#### `destination_team_not_matched` (25)
 
 | Save club | Player | FotMob ID | From | To | Date | Source | Detail |
 |:---:|---|---:|---|---|---|---|---|
 | yes | **Brian Olivera** | 570763 | Estudiantes de Río Cuarto | Racing de Córdoba | 2025-12-30T00:56:32Z | fotmob | club 'Racing de Córdoba' (FotMob 213592) is not confidently resolved in the save |
 | yes | **Pavlos Pantelidis** | 1526934 | Panathinaikos | Kifisia FC | 2026-01-03T09:45:02Z | fotmob | club 'Kifisia FC' (FotMob 488099) is not confidently resolved in the save |
 | yes | **Gian Cabezas** | 1356527 | Alverca | Athletic Club MG | 2026-01-05T13:57:26Z | fotmob | club 'Athletic Club MG' (FotMob 1221604) is not confidently resolved in the save |
-| yes | **Lautaro López** | 1073683 | San Lorenzo | Atlanta | 2026-01-13T13:47:14Z | fotmob | club 'Atlanta' (FotMob 213525) is not confidently resolved in the save |
 | yes | **Miguel Tavares** | 1422661 | Panathinaikos | Kifisia FC | 2026-01-13T14:12:12Z | fotmob | club 'Kifisia FC' (FotMob 488099) is not confidently resolved in the save |
 | yes | **Federico Álvarez** | 1459243 | Estudiantes de Río Cuarto | Atlanta | 2026-01-14T09:56:41Z | fotmob | club 'Atlanta' (FotMob 213525) is not confidently resolved in the save |
 | yes | **Diogo Martins** | 908834 | Alverca | União de Leiria | 2026-01-17T06:13:12Z | fotmob | club 'União de Leiria' (FotMob 9771) is not confidently resolved in the save |
@@ -157,33 +157,12 @@
 | yes | **Filip Mladenović** | 259439 | Panathinaikos | FK Mladost Novi Sad | 2026-09-14T07:58:38Z | fotmob | club 'FK Mladost Novi Sad' (FotMob 1266892) is not confidently resolved in the save |
 | yes | **Georgios Kyriopoulos** | 1418919 | Panathinaikos | Kifisia FC | 2026-09-18T06:05:54Z | fotmob | club 'Kifisia FC' (FotMob 488099) is not confidently resolved in the save |
 
-#### `player_not_matched` (17)
-
-| Save club | Player | FotMob ID | From | To | Date | Source | Detail |
-|:---:|---|---:|---|---|---|---|---|
-| yes | **Tomás Silva** | 1336637 | San Lorenzo | Club Atlético Platense | 2025-12-31T23:00:00Z | fotmob | no unique save player matches 'Tomás Silva' (FotMob 1336637) |
-| yes | **Andrews Tetteh** | 1318701 | Kifisia FC | Panathinaikos | 2026-01-02T07:20:41Z | fotmob | no unique save player matches 'Andrews Tetteh' (FotMob 1318701) |
-| yes | **Lucas Abraham Chávez** | 736344 | Argentinos Juniors | Panathinaikos | 2026-01-06T17:43:43Z | fotmob | no unique save player matches 'Lucas Abraham Chávez' (FotMob 736344) |
-| yes | **Álvaro Cuello** | 903678 | Estudiantes de Río Cuarto | Chacarita Juniors | 2026-01-09T11:49:19Z | fotmob | no unique save player matches 'Álvaro Cuello' (FotMob 903678) |
-| yes | **Renzo Sordi** | 1690813 | Estudiantes de Río Cuarto | 9 de Julio Rafaela | 2026-01-21T23:00:00Z | fotmob | no unique save player matches 'Renzo Sordi' (FotMob 1690813) |
-| yes | **Lautaro Herrera** | 1751991 | Quilmes | Estudiantes de Río Cuarto | 2026-01-27T21:08:13Z | fotmob | no unique save player matches 'Lautaro Herrera' (FotMob 1751991) |
-| yes | **Adriano Jagušić** | 1515990 | Slaven | Panathinaikos | 2026-02-07T09:17:15Z | fotmob | no unique save player matches 'Adriano Jagušić' (FotMob 1515990) |
-| yes | **Maleace Asamoah** | 1426548 | Wigan Athletic | Shamrock Rovers | 2026-02-24T08:05:36Z | fotmob | no unique save player matches 'Maleace Asamoah' (FotMob 1426548) |
-| yes | **Lucas Abraham Chávez** | 736344 | Argentinos Juniors | Panathinaikos | 2026-06-20T13:37:40Z | fotmob | no unique save player matches 'Lucas Abraham Chávez' (FotMob 736344) |
-| yes | **Sam Tickle** | 1184473 | Wigan Athletic | Bristol City | 2026-06-25T12:04:45Z | fotmob | no unique save player matches 'Sam Tickle' (FotMob 1184473) |
-| yes | **Elmin Rastoder** | 1347804 | Thun | Panathinaikos | 2026-06-28T22:00:00Z | fotmob | no unique save player matches 'Elmin Rastoder' (FotMob 1347804) |
-| yes | **Nektarios Kaloskamis** | 1899316 | Panathinaikos | Kifisia FC | 2026-07-04T07:01:24Z | fotmob | no unique save player matches 'Nektarios Kaloskamis' (FotMob 1899316) |
-| yes | **Loukas Stamellos** | 1782739 | Panathinaikos | Kifisia FC | 2026-07-04T07:04:17Z | fotmob | no unique save player matches 'Loukas Stamellos' (FotMob 1782739) |
-| yes | **Nahuel Leiva** | 517941 | Maccabi Haifa | Johor Darul Ta'zim | 2026-08-08T00:00:00Z | fotmob | no unique save player matches 'Nahuel Leiva' (FotMob 517941) |
-| yes | **Lautaro Montenegro** | 1751917 | San Lorenzo | Al-Wahda | 2026-08-24T08:30:34Z | fotmob | no unique save player matches 'Lautaro Montenegro' (FotMob 1751917) |
-| yes | **Gabriel Carioca** | 1936631 | Athletic Club MG | Alverca | 2026-08-26T08:15:48Z | fotmob | no unique save player matches 'Gabriel Carioca' (FotMob 1936631) |
-| yes | **Maleace Asamoah** | 1426548 | Wigan Athletic | Port Vale | 2026-09-02T01:11:17Z | fotmob | no unique save player matches 'Maleace Asamoah' (FotMob 1426548) |
-
-#### `source_team_not_matched` (17)
+#### `source_team_not_matched` (18)
 
 | Save club | Player | FotMob ID | From | To | Date | Source | Detail |
 |:---:|---|---:|---|---|---|---|---|
 | yes | **Nicolás Morro** | 1340805 | San Telmo | Estudiantes de Río Cuarto | 2026-01-02T05:10:46Z | fotmob | club 'San Telmo' (FotMob 213522) is not confidently resolved in the save |
+| yes | **Andrews Tetteh** | 1318701 | Kifisia FC | Panathinaikos | 2026-01-02T07:20:41Z | fotmob | club 'Kifisia FC' (FotMob 488099) is not confidently resolved in the save |
 | yes | **Pavlos Pantelidis** | 1526934 | Kifisia FC | Panathinaikos | 2026-01-03T09:43:43Z | fotmob | club 'Kifisia FC' (FotMob 488099) is not confidently resolved in the save |
 | yes | **Renzo Bacchia** | 965577 | Racing | Estudiantes de Río Cuarto | 2026-01-07T10:43:06Z | fotmob | club 'Racing' (FotMob 6043) is not confidently resolved in the save |
 | yes | **Zakaria Kassary** | 1813121 | Union Touarga Sport | Alverca | 2026-01-20T17:31:51Z | fotmob | club 'Union Touarga Sport' (FotMob 320835) is not confidently resolved in the save |
@@ -201,6 +180,26 @@
 | yes | **Jhonatan** | 500475 | Athletic Club MG | Alverca | 2026-07-24T06:30:41Z | fotmob | club 'Athletic Club MG' (FotMob 1221604) is not confidently resolved in the save |
 | yes | **Gustavo Del Prete** | 848182 | Atlas | San Lorenzo | 2026-07-29T07:59:13Z | fotmob | club 'Atlas' (FotMob 6577) is not confidently resolved in the save |
 
+#### `player_not_matched` (15)
+
+| Save club | Player | FotMob ID | From | To | Date | Source | Detail |
+|:---:|---|---:|---|---|---|---|---|
+| yes | **Tomás Silva** | 1336637 | San Lorenzo | Club Atlético Platense | 2025-12-31T23:00:00Z | fotmob | no unique save player matches 'Tomás Silva' (FotMob 1336637) |
+| yes | **Lucas Abraham Chávez** | 736344 | Argentinos Juniors | Panathinaikos | 2026-01-06T17:43:43Z | fotmob | no unique save player matches 'Lucas Abraham Chávez' (FotMob 736344) |
+| yes | **Álvaro Cuello** | 903678 | Estudiantes de Río Cuarto | Chacarita Juniors | 2026-01-09T11:49:19Z | fotmob | no unique save player matches 'Álvaro Cuello' (FotMob 903678) |
+| yes | **Lautaro López** | 1073683 | San Lorenzo | Atlanta | 2026-01-13T13:47:14Z | fotmob | no unique save player matches 'Lautaro López' (FotMob 1073683) |
+| yes | **Renzo Sordi** | 1690813 | Estudiantes de Río Cuarto | 9 de Julio Rafaela | 2026-01-21T23:00:00Z | fotmob | no unique save player matches 'Renzo Sordi' (FotMob 1690813) |
+| yes | **Lautaro Herrera** | 1751991 | Quilmes | Estudiantes de Río Cuarto | 2026-01-27T21:08:13Z | fotmob | no unique save player matches 'Lautaro Herrera' (FotMob 1751991) |
+| yes | **Maleace Asamoah** | 1426548 | Wigan Athletic | Shamrock Rovers | 2026-02-24T08:05:36Z | fotmob | no unique save player matches 'Maleace Asamoah' (FotMob 1426548) |
+| yes | **Lucas Abraham Chávez** | 736344 | Argentinos Juniors | Panathinaikos | 2026-06-20T13:37:40Z | fotmob | no unique save player matches 'Lucas Abraham Chávez' (FotMob 736344) |
+| yes | **Sam Tickle** | 1184473 | Wigan Athletic | Bristol City | 2026-06-25T12:04:45Z | fotmob | no unique save player matches 'Sam Tickle' (FotMob 1184473) |
+| yes | **Elmin Rastoder** | 1347804 | Thun | Panathinaikos | 2026-06-28T22:00:00Z | fotmob | no unique save player matches 'Elmin Rastoder' (FotMob 1347804) |
+| yes | **Nektarios Kaloskamis** | 1899316 | Panathinaikos | Kifisia FC | 2026-07-04T07:01:24Z | fotmob | no unique save player matches 'Nektarios Kaloskamis' (FotMob 1899316) |
+| yes | **Loukas Stamellos** | 1782739 | Panathinaikos | Kifisia FC | 2026-07-04T07:04:17Z | fotmob | no unique save player matches 'Loukas Stamellos' (FotMob 1782739) |
+| yes | **Nahuel Leiva** | 517941 | Maccabi Haifa | Johor Darul Ta'zim | 2026-08-08T00:00:00Z | fotmob | no unique save player matches 'Nahuel Leiva' (FotMob 517941) |
+| yes | **Gabriel Carioca** | 1936631 | Athletic Club MG | Alverca | 2026-08-26T08:15:48Z | fotmob | no unique save player matches 'Gabriel Carioca' (FotMob 1936631) |
+| yes | **Maleace Asamoah** | 1426548 | Wigan Athletic | Port Vale | 2026-09-02T01:11:17Z | fotmob | no unique save player matches 'Maleace Asamoah' (FotMob 1426548) |
+
 #### `current_club_mismatch` (7)
 
 | Save club | Player | FotMob ID | From | To | Date | Source | Detail |
@@ -217,7 +216,7 @@
 
 | Save club | Player | FotMob ID | From | To | Date | Source | Detail |
 |:---:|---|---:|---|---|---|---|---|
-| yes | **Étienne Camara** | 1222191 | RSC Charleroi | Panathinaikos FC | - | fotmob_squad | 23/35 destination roster players confirmed by live squad |
+| yes | **Étienne Camara** | 1222191 | RSC Charleroi | Panathinaikos FC | - | fotmob_squad | 25/35 destination roster players confirmed by live squad |
 | yes | **Yaya Bojang** | 1604179 | Odense Boldklub | FC Alverca | - | fotmob_squad | 26/39 destination roster players confirmed by live squad |
 | yes | **Toni Tamarit** | 1801070 | CD Mirandés | FC Alverca | - | fotmob_squad | 26/39 destination roster players confirmed by live squad |
 | yes | **Ian Luccas** | 1459547 | Athletic Club | FC Alverca | - | fotmob_squad | 26/39 destination roster players confirmed by live squad |
@@ -233,5 +232,5 @@
 
 | Save club | Player | FotMob ID | From | To | Date | Source | Detail |
 |:---:|---|---:|---|---|---|---|---|
-| yes | **Sotiris Kontouris** | 1526975 | Panetolikos | Panathinaikos | 2026-01-02T07:26:38Z | fotmob | FotMob identity maps to PES player 91209 whose position/age contradicts this event |
+| yes | **Matías Reali** | 1271801 | San Lorenzo | Independiente Rivadavia | 2026-10-10T18:04:14Z | fotmob | FotMob identity maps to PES player 166637 whose position/age contradicts this event |
 

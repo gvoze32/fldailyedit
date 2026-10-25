@@ -13,6 +13,7 @@ use fl_engine::api::{CancelToken, Environment, Progress, UpdateRequest, UpdateRe
 use fl_engine::native::NativeFiles;
 use fl_engine::{FixedClock, Services};
 use fl_sources::http::ReplayTransport;
+use fl_sources::team_index::{TeamEntry, parse_catalog};
 use flate2::read::GzDecoder;
 
 pub fn repo_root() -> PathBuf {
@@ -26,15 +27,24 @@ pub fn gunzip(path: &Path) -> Vec<u8> {
     out
 }
 
+/// The recorded FotMob team list (`testdata/fotmob_teams.json`): the replays'
+/// cassettes carry no sitemap requests, so the list is injected.
+pub fn fixture_team_index() -> Arc<[TeamEntry]> {
+    let text = fs::read_to_string(repo_root().join("testdata/fotmob_teams.json")).unwrap();
+    parse_catalog(&text).unwrap().into()
+}
+
 /// One recorded scenario (`testdata/e2e/<name>` or `testdata/local/e2e/<name>`).
 pub struct Scenario {
     pub dir: PathBuf,
     pub meta: serde_json::Value,
     pub player_bin_gz: PathBuf,
+    pub team_bin_gz: PathBuf,
 }
 
 impl Scenario {
-    /// `None` when the scenario or its Player.bin input is not on this machine.
+    /// `None` when the scenario or its Player.bin / Team.bin inputs are not on
+    /// this machine.
     pub fn open(committed: bool, name: &str) -> Option<Self> {
         let root = repo_root().join("testdata");
         let dir = if committed {
@@ -42,13 +52,10 @@ impl Scenario {
         } else {
             root.join("local").join("e2e").join(name)
         };
-        let player_bin_gz = root
-            .join("local")
-            .join("e2e")
-            .join(name)
-            .join("inputs")
-            .join("Player.bin.gz");
-        if !dir.join("meta.json").is_file() || !player_bin_gz.is_file() {
+        let inputs = root.join("local").join("e2e").join(name).join("inputs");
+        let player_bin_gz = inputs.join("Player.bin.gz");
+        let team_bin_gz = inputs.join("Team.bin.gz");
+        if !dir.join("meta.json").is_file() || !player_bin_gz.is_file() || !team_bin_gz.is_file() {
             eprintln!("skipping scenario {name}: recorded inputs not present");
             return None;
         }
@@ -57,6 +64,7 @@ impl Scenario {
             dir,
             meta,
             player_bin_gz,
+            team_bin_gz,
         })
     }
 
@@ -95,6 +103,7 @@ pub struct Workdir {
     pub output: PathBuf,
     pub state: PathBuf,
     pub player_bin: PathBuf,
+    pub team_bin: PathBuf,
 }
 
 impl Workdir {
@@ -111,6 +120,8 @@ impl Workdir {
         let player_bin = root.join("inputs").join("Player.bin");
         fs::create_dir_all(player_bin.parent().unwrap()).unwrap();
         fs::write(&player_bin, gunzip(&scenario.player_bin_gz)).unwrap();
+        let team_bin = root.join("inputs").join("Team.bin");
+        fs::write(&team_bin, gunzip(&scenario.team_bin_gz)).unwrap();
         let state = root.join("state");
         fs::create_dir_all(&state).unwrap();
         Self {
@@ -118,6 +129,7 @@ impl Workdir {
             input,
             state,
             player_bin,
+            team_bin,
             tmp,
         }
     }
@@ -154,9 +166,11 @@ impl Workdir {
             transport: Some(Arc::new(transport)),
             native_files: NativeFiles {
                 player_bin: Some(self.player_bin.clone()),
+                team_bin: Some(self.team_bin.clone()),
                 ..NativeFiles::default()
             },
             skip_sleeps: true,
+            team_index: Some(fixture_team_index()),
         }
     }
 

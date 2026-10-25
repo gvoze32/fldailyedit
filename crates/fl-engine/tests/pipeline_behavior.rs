@@ -7,6 +7,7 @@ use std::fs;
 
 use common::{Scenario, Workdir, run, tree};
 use fl_engine::api::{CancelToken, ErrorCode, Outcome, Progress, Stage, UpdateRequest};
+use fl_engine::native::NativeFiles;
 
 fn small() -> Option<(Scenario, Workdir)> {
     let scenario = Scenario::open(true, "small")?;
@@ -232,4 +233,80 @@ fn in_place_rerun_backs_up_the_previous_save_and_extends_the_log() {
     let edit = fl_save::edit_file::EditFile::from_bytes(blocks.data).unwrap();
     assert!(edit.validate_integrity().is_valid());
     assert!(!workdir.output.with_file_name(".EDIT00000000.lock").exists());
+}
+
+/// Run the small scenario with the native database files `native` instead of
+/// the recorded ones and return the failure; nothing may be written.
+fn native_failure(native: impl FnOnce(&Workdir) -> NativeFiles) -> fl_engine::api::UpdateError {
+    let Some((scenario, workdir)) = small() else {
+        panic!("skip");
+    };
+    let mut services = workdir.services(&scenario);
+    services.native_files = native(&workdir);
+    let input_before = fs::read(&workdir.input).unwrap();
+    let error = fl_engine::run_update_with(
+        &workdir.request(&scenario),
+        &workdir.environment(),
+        &services,
+        &mut |_| {},
+        &CancelToken::new(),
+    )
+    .expect_err("a run without matching game data must fail");
+    assert_nothing_durable_written(&workdir);
+    assert_eq!(fs::read(&workdir.input).unwrap(), input_before);
+    error
+}
+
+/// A machine with the game installed finds it through the game-root
+/// variables and install folders, which these tests must not see.
+fn game_is_discoverable() -> bool {
+    !fl_save::cpk::discover::discover_game_cpks(None).is_empty()
+}
+
+#[test]
+fn a_run_without_game_data_fails_early_and_says_where_to_find_it() {
+    if small().is_none() || game_is_discoverable() {
+        return;
+    }
+    let error = native_failure(|_| NativeFiles::default());
+    assert_eq!(error.code, ErrorCode::NativeDatabaseMissing, "{error}");
+    assert_eq!(error.stage, Some(Stage::Validating));
+    assert!(
+        error
+            .message
+            .contains("game folder that contains the download folder"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_football_life_run_needs_the_team_database_too() {
+    if small().is_none() || game_is_discoverable() {
+        return;
+    }
+    let error = native_failure(|workdir| NativeFiles {
+        player_bin: Some(workdir.player_bin.clone()),
+        ..NativeFiles::default()
+    });
+    assert_eq!(error.code, ErrorCode::NativeDatabaseMissing, "{error}");
+    assert!(error.message.contains("Team.bin"), "{error}");
+}
+
+#[test]
+fn a_player_database_of_another_game_is_rejected() {
+    if small().is_none() {
+        return;
+    }
+    // A valid but empty Player.bin knows none of the save's rostered players.
+    let error = native_failure(|workdir| {
+        let empty = workdir.root().join("inputs").join("Empty-Player.bin");
+        fs::write(&empty, vec![0u8; 312 * 4]).unwrap();
+        NativeFiles {
+            player_bin: Some(empty),
+            team_bin: Some(workdir.team_bin.clone()),
+            ..NativeFiles::default()
+        }
+    });
+    assert_eq!(error.code, ErrorCode::NativeDatabaseMissing, "{error}");
+    assert!(error.message.contains("do not match this save"), "{error}");
 }

@@ -15,8 +15,11 @@ pub struct UpdateRequest {
     pub edit_path: PathBuf,
     /// Where to write the result; `None` updates `edit_path` in place.
     pub output_path: Option<PathBuf>,
-    /// PES 2021 / T99 installation (folder with `download/*.cpk`) or a folder
-    /// holding the patch CPKs. Required for non-FL26 saves.
+    /// Game installation (folder with `download/*.cpk`) or a folder holding the
+    /// game's CPKs: every save reads its player and club lists from the game's
+    /// own `Player.bin` / `Team.bin`. Without it only the game-root environment
+    /// variables and the usual install folders are searched; a run that finds
+    /// no database fails with `NativeDatabaseMissing`.
     pub game_root: Option<PathBuf>,
     /// Transfer window selection.
     pub window: Window,
