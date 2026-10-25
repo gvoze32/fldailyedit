@@ -15,6 +15,11 @@ name: Build Windows Installer
 #   because the updater only installs a strictly newer version.
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to the latest release (existing installs self-update to it)"
+        type: boolean
+        default: false
   # push:
   #   branches: [main]
   #   paths:
@@ -114,6 +119,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Publish rolling release assets
+        if: github.event_name == 'push' || inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -126,6 +132,7 @@ jobs:
           gh release upload latest --repo "$GH_REPO" --clobber dist/installer-update.json.sig
           gh release upload latest --repo "$GH_REPO" --clobber dist/installer-update.json
       - name: Remove legacy standalone installer assets
+        if: github.event_name == 'push' || inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
