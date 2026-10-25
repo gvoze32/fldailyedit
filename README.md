@@ -1,16 +1,20 @@
 # FL Daily Edit
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+A simple Windows app that brings your **Football Life** or **PES 2021**
+save up to date with real-world football.
 
-Update SP Football Life 2026 and eFootball PES 2021 `EDIT00000000` saves with
-verified real-world transfers, squad numbers, captain roles, tactics, and
-formations.
+What it updates:
+
+- **Transfers:** signings, releases, loans and loan returns.
+- **Squads:** shirt numbers and captains.
+- **Tactics and formations** based on how each club really plays.
+
+The app updates itself when a new version is available.
 
 ## Project status
 
 FL Daily Edit is actively maintained. It is a local app: it updates your own
-save on your own PC, and app updates arrive through the built-in signed
-self-update. Bug reports and suggestions are welcome in
+save on your own PC. Bug reports and suggestions are welcome in
 [Issues](https://github.com/gvoze32/fldailyedit/issues). Daily prebuilt saves
 are no longer published.
 
@@ -23,326 +27,71 @@ on 2026-08-02 onward, is public in the
 components keep their original licenses and attribution, see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-## Quick start (Windows)
+A note for anyone quick to cry "copy": two tools that edit the same
+`EDIT00000000` format will look alike, the same way every car has four wheels.
+Similar goals are not stolen code. Before calling something a copy, open it and
+point to the lines, it takes less time than writing the report.
 
-1. Download
-   [FLDailyEdit.exe](https://github.com/gvoze32/fldailyedit/releases/latest/download/FLDailyEdit.exe)
-   from the [latest release](https://github.com/gvoze32/fldailyedit/releases/latest).
-   It is the app itself: a single executable with nothing to install and no
-   runtime to download. Put it anywhere you like and keep it there; the app
-   updates itself in place.
-2. Close the game and open the app. It looks for your save in your Documents
-   folder (`KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\EDIT00000000`
-   for Football Life 2026, and the numbered folders next to it for PES 2021)
-   and remembers your last choices. If it finds none, or several, pick the
-   `EDIT00000000` with **Browse**.
-3. Press **Update save**. The app validates the save, fetches the current
-   transfer data, shows its progress, backs up your save, writes the update,
-   and then lists what changed and what could not be applied.
+## Download
 
-There is one update mode with full coverage: the live transfer feed plus
-current squad membership, shirt numbers, captain roles, tactics, and
-formations for every save club that can be matched to a FotMob club. There is
-no Fast or Deep choice.
+Download
+[FLDailyEdit.exe](https://github.com/gvoze32/fldailyedit/releases/latest/download/FLDailyEdit.exe)
+from the [Releases](https://github.com/gvoze32/fldailyedit/releases/latest)
+page. Nothing to install: just open it.
 
-**Preview changes** runs the same plan and shows the result without writing
-anything (no backup, no log entry, no report files). Use **Update now** from
-the preview to apply it.
+Windows may show "Windows protected your PC" the first time. Click
+**More info**, then **Run anyway**.
 
-**Game folder:** a vanilla PES 2021 or T99 patch save carries no player
-database of its own, so the app needs the game folder (the install that holds
-`download\*.cpk`, or a directory with the patch CPKs) and asks for it. Football
-Life 2026 saves do not need it.
+## How to use
 
-**SmartScreen:** the executable is unsigned, so Windows SmartScreen may warn
-before the first run (**More info**, then **Run anyway**). To check your
-download, compare the SHA-256 of `FLDailyEdit.exe` with the published
-`FLDailyEdit.exe.sha256` on the same release.
+1. **Close the game.**
+2. Open `FLDailyEdit.exe`. It finds your save by itself. Saves are in
+   `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\<folder>\save\` and are
+   named `EDIT00000000`. If the app can't find yours, click **Browse…**.
+3. **PES 2021 or T99 patch only:** choose your game folder (the one that
+   contains the `download` folder). Football Life doesn't need this.
+4. Click **Update save** and wait a few minutes. A copy of your old save is
+   made first, just in case.
+5. The app shows what changed and which transfers could not be applied.
+6. Start a **new** Master League or Become a Legend career to use the update.
 
-### App updates
+Want to see the changes first? Click **Preview changes**. Nothing is saved.
 
-Every version is its own GitHub release (`v1.0.0`, `v1.0.1`, ...) with four
-assets: `FLDailyEdit.exe`, `FLDailyEdit.exe.sha256`, `update.json` and
-`update.json.sig`. The app checks the newest release when it starts, and the
-**Check for updates** button checks on demand. **Update and restart**
-downloads `FLDailyEdit.exe` from that release, verifies its size and SHA-256,
-replaces the running executable, and restarts. An update is accepted only when
-`update.json` carries a valid Ed25519 signature (`update.json.sig`) from the
-project release key embedded in the app, and its download address is exactly
-the `FLDailyEdit.exe` of the release with the same version.
+Run it again whenever you like, for example once a week. Each run picks up
+where the last one stopped.
 
-Installs of the old Python app, and of any build that predates versioned
-releases, cannot update themselves to this version: download the new
-`FLDailyEdit.exe` manually once. From then on the app updates itself.
+## Good to know
 
-## Compatibility
+- **Supported:** Football Life, PES 2021 and the
+  T99 patch. Saves from patches that change the database a lot (such as UML)
+  may not work.
+- **New players are never created.** If a player isn't in your save, his
+  transfer is skipped and listed under **Not applied**.
+- **Your save is checked before and after every update.** If anything looks
+  wrong, nothing is written.
+- **Backups** of your old saves, reports and logs are kept in
+  `%LOCALAPPDATA%\FLDailyEdit`.
+- Transfer data comes from FotMob, checked against Transfermarkt, Wikipedia
+  and other football sites.
 
-The bundled [base save](base/EDIT00000000) requires:
+## For developers
 
-- **SP Football Life 2026 Update 2.2**
-- **SmokePatch's National Teams Selection Update**
-
-The base EDIT file is from Gondowan's [Road to FL27 MiniPatch](https://www.reddit.com/r/SPFootballLife/comments/1wssmur/release_minipatch_road_to_fl27_for_football_life/).
-It updates transfers, overalls, selected lineups, and national-team call-ups.
-The base is incompatible with UML, other patches that modify the database,
-older FL26 versions, and installations without the National Teams update.
-
-Start a new Master League or Become a Legend career after using it.
-
-### PES 2021 / T99 patch saves
-
-Vanilla PES 2021 and T99 patch `EDIT00000000` files are supported when the
-matching native database CPKs are available. Point the game folder (GUI) or
-`--game-root` (CLI) at the PES installation (with `download`) or at a directory
-containing the patch CPKs:
+The app is written in Rust. The same executable also works from the command
+line (`FLDailyEdit run --help`).
 
 ```bash
-FLDailyEdit run \
-  --edit-file "/path/to/T99/EDIT00000000" \
-  --game-root "/path/to/T99 Patch V10" \
-  --dry-run
-```
-
-Use the save and CPKs from the same patch generation. The updater reads the
-native `Player.bin`, `Team.bin`, and `PlayerAssignment.bin` from the CPKs and
-never uses the bundled FL26 player catalog. A missing or mismatched native
-`Player.bin` is rejected before any save mutation.
-
-## Command line
-
-The same executable is the command line: with no arguments it opens the app,
-with arguments it runs a command. `FLDailyEdit --edit-file PATH` is shorthand
-for `FLDailyEdit run --edit-file PATH`.
-
-```text
-FLDailyEdit run       Apply verified transfers, squad numbers, captains and tactics (default)
-FLDailyEdit validate  Check that a save matches the supported edit-file layout (exit 2 on FAIL)
-FLDailyEdit inspect   Show what a save contains
-FLDailyEdit log       Show the most recent save changes from the transfer log
-```
-
-`run` options:
-
-| Option                 | Meaning                                                                                      |
-| ---------------------- | -------------------------------------------------------------------------------------------- |
-| `--edit-file <PATH>`   | Save to update (default: the only save found in your Documents folder)                       |
-| `-o, --output <PATH>`  | Write the updated save here instead of updating the input save in place                      |
-| `--game-root <DIR>`    | Game folder (PES 2021 / T99 install containing `download/*.cpk`); required for PES 2021 saves |
-| `--window <WINDOW>`    | `auto` (continue from the save's last applied update), `all`, `summer`, `winter`              |
-| `--since <DATE>`       | Only transfers on or after this date (`YYYY-MM-DD`); conflicts with `--window`               |
-| `--club <CLUB>`        | Focus on one club (name or FotMob id)                                                        |
-| `--threshold <PERCENT>`| Minimum player-name match confidence, 0-100 (default 80; 0 accepts any match)                |
-| `--no-overflow-release`| Keep full rosters unchanged instead of releasing a squad player                              |
-| `--release-policy <FILE>` | JSON protected-player / usage policy for overflow releases                                |
-| `--dry-run`            | Plan and report without writing anything                                                     |
-
-`validate` and `inspect` take `--edit-file <PATH>` (`validate -v, --verbose`
-lists every team of a repeated warning instead of the first ten); `log` takes `-n, --last <N>`
-(default 20). Exit codes: `0` success, `1` missing or unusable input save,
-`2` failed validation or failed update, `130` cancelled. `--help` on any
-command lists the details.
-
-```bash
-# Preview current-cycle transfers for the save the app found
-FLDailyEdit run --dry-run
-
-# Apply them (default window: continue from this save's last applied update)
-FLDailyEdit run
-
-# Replay all available transfer history into a copy
-FLDailyEdit run --edit-file base/EDIT00000000 --window all --output /tmp/EDIT00000000
-
-# Validate / inspect a save, show the last 50 applied changes
-FLDailyEdit validate --edit-file /path/to/EDIT00000000
-FLDailyEdit inspect --edit-file /path/to/EDIT00000000
-FLDailyEdit log -n 50
-```
-
-Each run loads and validates the save before scraping. With `--window auto`,
-when a run continues a save it applied before (per its entries in the transfer
-log), the transfer window starts 7 days before that save's last applied entry,
-extended back to the oldest still-retryable transfer that was not applied.
-Saves without a log use the previous window start (Jan 1 / Jun 1), and the
-automatic window never starts earlier than that.
-
-## What it updates
-
-- Verified transfers, releases, loans, and loan returns
-- Evidence-driven roster reconciliation for indexed clubs: shirt numbers,
-  affected lineups, and game-plan repairs
-- Current captain roles
-- Evidence-gated tactical choices in the main game-plan preset
-- FotMob-derived formations and role/coordinate layouts in the main game-plan preset
-- Transfer reports and an audit log of every applied change
-
-Roster changes come from verified transfer events or complete FotMob squad
-snapshots matched to existing local identities. Short provider aliases require
-matching shirt, age, and compatible-role evidence; ambiguous or low-coverage
-evidence does not force player-specific corrections.
-
-Club identity is learned per selected save, not from curated club lists: save
-club names are matched against the FotMob team index embedded in the app and
-confirmed by FotMob squad overlap. Learned bindings are cached in the state
-folder.
-
-### Tactics
-
-Tactical settings are generated from FotMob current-season league aggregates:
-possession share, accurate long-ball/pass rate, accurate-cross/pass rate, and
-possessions won in the attacking third. These are league-relative proxies, not
-tracking or PPDA measurements. For a team with at least three matches and
-evidence from at least eight league teams, categorical choices change only at
-the top or bottom quartile. Containment area uses cross/pass rate as a width
-proxy (low = Middle, high = Wide); pressuring uses attacking-third recoveries
-(low = Conservative, high = Aggressive). Defensive Line scales those recoveries
-across the league to the game's 1-10 range; it is not an independent spatial
-measurement. Missing or uniform evidence preserves the existing value. The
-updater can change seven controls in the main preset: attacking style,
-build-up, attacking area, defensive style, containment area, pressuring, and
-defensive line. Compactness is left as saved, because no parsed FotMob metric
-measures it independently.
-
-### Formations and game plans
-
-Formations, starting XI, bench, and detailed positions come from FotMob's last
-lineup (starters and substitutes), otherwise the latest finished match page
-with an unambiguous team-name match. The game plan is resolved after the run's
-roster changes. Valid 10-player shapes are converted into PES role and
-coordinate layouts for all three phases of the main preset; the two alternate
-presets are untouched. Empty captain and set-piece roles are filled from save
-data. Formations are applied to every matched club with a complete squad
-snapshot. Missing or unsupported formation evidence preserves the existing
-bytes.
-
-The updater checks each player's current club and never overwrites an occupied
-shirt number. Clean PES21 saves may retain numbers in empty roster slots; these
-are reported as non-blocking warnings.
-
-### Transfer sources
-
-FotMob is the primary source for current transfer events. Transfermarkt and
-Wikipedia provide dated routes and details, Sortitoutsi, BeSoccer, Sofascore,
-and Soccerway corroborate them. For same-day route conflicts, precedence is
-FotMob > Transfermarkt > Wikipedia. Corroboration sources never override a
-primary route or create transfer events.
-
-Sofascore and Soccerway scan only relevant primary-source clubs. Soccerway reads
-the first transfer page per club and has a 60-second source budget.
-Transfermarkt scans continue back to the run's since-date, so events on later
-pages are not dropped by a time budget. Every save club bound to a FotMob club
-is refreshed.
-
-A failed primary-source (FotMob) fetch aborts the run before anything is
-written. Failures of the other sources are reported as warnings and do not
-block a run; incomplete or ambiguous events are skipped.
-
-## Reports, logs and backups
-
-Everything the app keeps lives in one per-user state folder:
-
-| OS      | State folder                                                        |
-| ------- | ------------------------------------------------------------------- |
-| Windows | `%LOCALAPPDATA%\FLDailyEdit`                                        |
-| macOS   | `~/Library/Application Support/FLDailyEdit`                         |
-| Linux   | `$XDG_DATA_HOME/FLDailyEdit` (default `~/.local/share/FLDailyEdit`) |
-
-| Path (inside the state folder)                    | Content                                                                          |
-| ------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `transfer_log.jsonl`                              | Append-only audit log of applied transfer, roster, and captain changes (all saves) |
-| `reports/<save-id>/transfer_summary.md` and `.html` | Report of the latest run for that save                                          |
-| `reports/<save-id>/skipped_transfers.jsonl`       | Transfers that were not applied, with a reason code                              |
-| `backups/<save-id>/EDIT00000000.bak.<timestamp>`  | Backup taken right before a save is overwritten; the newest 10 per save are kept |
-| `club_identity_cache.json`, `storage/`            | Learned club bindings and cached FotMob payloads                                 |
-| `settings.json`                                   | Your last save and game-folder choices                                           |
-
-`<save-id>` is a short hash of the save's resolved path, so different saves
-never share reports or evict each other's backups. The `log` command reads
-`transfer_log.jsonl`.
-
-Transfers that could not be applied are never forced into the save: players
-missing from the save are reported, never created. Each run lists them, with a
-reason code, in a **Not applied** report section and in
-`skipped_transfers.jsonl`, with transfers touching save clubs listed first. The
-CLI prints the full list grouped by reason, and the app shows the same list
-after an update. `--dry-run` (and **Preview changes**) also lists the per-team
-XI, bench, and captain changes a run would make.
-
-## Safety
-
-- Saves are validated before and after changes; a failed check restores the
-  validated input.
-- Updates create a rolling backup, and the save is replaced atomically after
-  the encrypted result is verified by decrypting it again.
-- A per-save process lock prevents concurrent writes to the same save.
-- Preview and `--dry-run` write nothing: no backup, log, report, or lock.
-- The app refuses to read or write a save that sits inside the game installation.
-- Incomplete or ambiguous data is skipped rather than forced into the save.
-- Roster compaction preserves tactical game-plan positions, updates lineup slots
-  and goalkeeper placement, and repairs role zero from known goalkeeper metadata.
-  Validation rejects non-empty plans without exactly one goalkeeper marker per
-  tactical phase.
-
-## Build from source
-
-Rust (stable, edition 2024) is required.
-
-```bash
-git clone https://github.com/gvoze32/fldailyedit.git
-cd fldailyedit
-cargo build --release -p fl-app
-# target/release/FLDailyEdit (the app and the command line in one executable)
-```
-
-Windows executable from Linux or macOS with mingw-w64 (it provides the linker
-and `windres`, which `crates/fl-app/build.rs` uses to embed the icon, version
-information, and manifest):
-
-```bash
-rustup target add x86_64-pc-windows-gnu
-# macOS: brew install mingw-w64    Debian/Ubuntu: apt install gcc-mingw-w64-x86-64
-cargo build --release -p fl-app --target x86_64-pc-windows-gnu
-# target/x86_64-pc-windows-gnu/release/FLDailyEdit.exe
-```
-
-The graphical app targets Windows; the engine and command line also build and
-test on macOS and Linux. Release builds on Windows use the GUI subsystem and
-attach to the parent console when started with arguments.
-
-### Releasing
-
-The `Build & Release` workflow (`.github/workflows/build-installer.yml`) runs
-on every push to `main`, pull request and manual dispatch on one Ubuntu
-runner: tests, then the Windows executable cross-compiled with mingw-w64. To
-release, bump `version` in the workspace `Cargo.toml` and push to `main`: when
-no `vX.Y.Z` release exists for that version yet, the workflow publishes it
-with `FLDailyEdit.exe`, `FLDailyEdit.exe.sha256`, `update.json` and
-`update.json.sig`. Pull requests build and test only. Signing needs an
-`INSTALLER_SIGNING_KEY` secret (PEM PKCS#8 Ed25519 private key matching the
-public key embedded in `crates/fl-update`). The signing tool is
-`cargo run -p fl-update --bin sign-manifest -- build|sign`.
-
-## Development
-
-Workspace crates: `fl-save` (save file, crypto, tables), `fl-text` (name and
-club matching text), `fl-sources` (data providers), `fl-engine` (matching,
-planning, update pipeline), `fl-update` (signed self-update), `fl-app` (app and
-command line).
-
-```bash
+cargo build --release -p fl-app                                   # this OS
+cargo build --release -p fl-app --target x86_64-pc-windows-gnu    # Windows exe (needs mingw-w64)
 cargo test --workspace
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-Parity and end-to-end golden fixtures live under `testdata/` (see
-[testdata/e2e/README.md](testdata/e2e/README.md) and
-[testdata/DEVIATIONS.md](testdata/DEVIATIONS.md)). Tests that need large local
-game data (`testdata/local/`, `reference/`) skip when it is absent. The
-`fl-app` screen snapshot test renders through a GPU adapter and compares PNGs
-in `crates/fl-app/tests/snapshots`.
+To release, bump `version` in `Cargo.toml` and push to `main`. GitHub Actions
+tests, builds the Windows exe and publishes `vX.Y.Z`.
 
-## License
+## Credits
 
-FL Daily Edit is available under the [MIT License](LICENSE). Bundled and
-ported third-party components are listed in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+The [base save](base/EDIT00000000) used for testing is from Gondowan's
+[Road to FL27 MiniPatch](https://www.reddit.com/r/SPFootballLife/comments/1wssmur/release_minipatch_road_to_fl27_for_football_life/).
+Credits and third-party licences:
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). FL Daily Edit is MIT
+licensed ([LICENSE](LICENSE)).
