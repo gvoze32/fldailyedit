@@ -11,7 +11,7 @@ use crate::error::{Error, Result};
 
 /// Timeout for the manifest and signature requests (connect and each body read).
 pub const MANIFEST_TIMEOUT: Duration = Duration::from_secs(15);
-/// Timeout for the installer download (connect and each body read).
+/// Timeout for the executable download (connect and each body read).
 pub const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
 
 const MAX_REDIRECTS: usize = 10;
@@ -154,7 +154,7 @@ mod tests {
     #[test]
     fn initial_requests_must_target_github_com_over_https() {
         assert!(is_trusted_url(
-            "https://github.com/gvoze32/fldailyedit/releases/download/latest/x",
+            "https://github.com/gvoze32/fldailyedit/releases/latest/download/update.json",
             true
         ));
         for rejected in [

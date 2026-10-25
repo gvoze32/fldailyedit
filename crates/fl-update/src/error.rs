@@ -12,22 +12,20 @@ pub enum ErrorKind {
     Timeout,
     /// The server answered with a non-success HTTP status.
     Http,
-    /// `installer-update.json.sig` does not exist (HTTP 404).
+    /// `update.json.sig` does not exist (HTTP 404).
     MissingSignature,
     /// The signature is malformed, oversized, or does not verify.
     InvalidSignature,
     /// The manifest is not valid or violates the strict schema.
     InvalidManifest,
-    /// A URL, redirect target or asset name is outside the allow-list.
+    /// A URL or redirect target is outside the allow-list.
     UntrustedUrl,
-    /// A document, archive or executable exceeds its size limit.
+    /// A document or executable exceeds its size limit.
     TooLarge,
     /// The downloaded byte count differs from the declared size.
     SizeMismatch,
-    /// The SHA-256 of the archive differs from the signed manifest.
+    /// The SHA-256 of the executable differs from the signed manifest.
     ChecksumMismatch,
-    /// The zip archive does not have the exact expected layout.
-    InvalidArchive,
     /// A local filesystem or process operation failed.
     Io,
     /// The manifest schema or the operation is not supported here.
@@ -50,7 +48,6 @@ impl ErrorKind {
             Self::TooLarge => "too_large",
             Self::SizeMismatch => "size_mismatch",
             Self::ChecksumMismatch => "checksum_mismatch",
-            Self::InvalidArchive => "invalid_archive",
             Self::Io => "io",
             Self::Unsupported => "unsupported",
             Self::Cancelled => "cancelled",
@@ -79,10 +76,8 @@ pub enum Error {
     TooLarge(String),
     #[error("{0}")]
     SizeMismatch(String),
-    #[error("installer archive checksum does not match the signed manifest")]
+    #[error("downloaded update checksum does not match the signed manifest")]
     ChecksumMismatch,
-    #[error("{0}")]
-    InvalidArchive(String),
     #[error("{context}: {source}")]
     Io {
         context: String,
@@ -109,7 +104,6 @@ impl Error {
             Self::TooLarge(_) => ErrorKind::TooLarge,
             Self::SizeMismatch(_) => ErrorKind::SizeMismatch,
             Self::ChecksumMismatch => ErrorKind::ChecksumMismatch,
-            Self::InvalidArchive(_) => ErrorKind::InvalidArchive,
             Self::Io { .. } => ErrorKind::Io,
             Self::Unsupported(_) => ErrorKind::Unsupported,
             Self::Cancelled => ErrorKind::Cancelled,

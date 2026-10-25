@@ -1,147 +1,157 @@
-name: Build Windows Installer
+name: Build & Release
 
-# Disabled: the Windows app is no longer built or published automatically.
-# Restore the push trigger below to re-enable builds on main.
+# One Ubuntu runner (cheapest minutes): tests, then the Windows .exe
+# cross-compiled with mingw (x86_64-pc-windows-gnu). When the workspace version
+# in Cargo.toml has no matching vX.Y.Z release yet, the .exe is published as that
+# release together with a signed update manifest. The in-app update checker
+# reads the newest release, so bumping `version` in Cargo.toml and pushing to
+# main is all it takes to release.
 #
-# Runs on Ubuntu and cross-compiles only the Windows executable
-# (x86_64-pc-windows-gnu with mingw-w64).
+# Release assets (vX.Y.Z):
+#   FLDailyEdit.exe         the raw Windows executable users download
+#   FLDailyEdit.exe.sha256  its SHA-256
+#   update.json             signed manifest (version, download_url, size, sha256)
+#   update.json.sig         Ed25519 signature of update.json (secret INSTALLER_SIGNING_KEY)
 #
-# The release assets keep the names the app's self-updater (and the older
-# builds already installed on user PCs) expect:
-#   FLDailyEditInstaller.zip (exactly one entry: FLDailyEditInstaller.exe),
-#   FLDailyEditInstaller.zip.sha256, installer-update.json and
-#   installer-update.json.sig. The entry holds the Rust app (`fldailyedit.exe`
-#   renamed); bump `version` in the workspace Cargo.toml for every release,
-#   because the updater only installs a strictly newer version.
+# The file keeps its name so the GitHub workflow id stays the same.
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
-    inputs:
-      publish:
-        description: "Publish to the latest release (existing installs self-update to it)"
-        type: boolean
-        default: false
-  # push:
-  #   branches: [main]
-  #   paths:
-  #     - "Cargo.toml"
-  #     - "Cargo.lock"
-  #     - "crates/**"
-  #     - "data/**"
-  #     - ".github/workflows/build-installer.yml"
 
 permissions:
-  contents: read
+  contents: write
+
+# Never cancel a run on main: it may be half-way through publishing a release.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
   WINDOWS_TARGET: x86_64-pc-windows-gnu
+  APP: FLDailyEdit
 
 jobs:
   build:
-    name: Build, sign and publish Windows app
+    name: Test, build and release
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    concurrency:
-      group: fldailyedit-latest-release
-      cancel-in-progress: false
     steps:
-      - name: Require installer signing key
-        env:
-          SIGNING_KEY_CONFIGURED: ${{ secrets.INSTALLER_SIGNING_KEY != '' }}
-        run: |
-          if [ "$SIGNING_KEY_CONFIGURED" != "true" ]; then
-            echo "::error::INSTALLER_SIGNING_KEY secret is required to sign installer-update.json"
-            exit 1
-          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install mingw-w64 and Rust Windows target
+
+      - name: Version
+        id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" != "pull_request" ] && [ "${{ github.ref }}" = "refs/heads/main" ] \
+             && ! gh release view "v$version" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "Will publish v$version"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: System dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 zip
+          sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 \
+            libwayland-dev libxkbcommon-dev libx11-dev libxcb1-dev
+
+      - name: Rust toolchain
+        run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
           rustup target add "$WINDOWS_TARGET"
           rustc --version
           cargo --version
+
       - name: Restore Cargo cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: cargo-installer-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: cargo-release-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            cargo-installer-${{ runner.os }}-
-      - name: Build Windows executable
-        run: cargo build --release --locked -p fl-app --target "$WINDOWS_TARGET"
+            cargo-release-${{ runner.os }}-
+
+      # The fl-app `snapshots` test renders every screen through wgpu and
+      # compares PNGs, which needs a GPU adapter; it runs locally
+      # (`cargo test --workspace`) and is skipped on the GPU-less runner.
+      - name: Test
+        run: |
+          cargo test --locked --workspace --exclude fl-app
+          cargo test --locked -p fl-app --lib --test cli --test flows
+
+      - name: Build Windows
+        run: cargo build --locked --release -p fl-app --target "$WINDOWS_TARGET"
+
       - name: Check executable format
         run: |
-          exe="target/$WINDOWS_TARGET/release/fldailyedit.exe"
+          exe="target/$WINDOWS_TARGET/release/$APP.exe"
           info="$(file -b "$exe")"
           echo "$info"
           case "$info" in
             PE32+*GUI*x86-64*) ;;
             *) echo "::error::expected a 64-bit Windows GUI executable"; exit 1 ;;
           esac
-      - name: Package installer ZIP
+
+      - name: Package
         run: |
           mkdir -p dist
-          cp "target/$WINDOWS_TARGET/release/fldailyedit.exe" dist/FLDailyEditInstaller.exe
-          (cd dist && zip -9 -X FLDailyEditInstaller.zip FLDailyEditInstaller.exe)
-          entries="$(zipinfo -1 dist/FLDailyEditInstaller.zip)"
-          if [ "$entries" != "FLDailyEditInstaller.exe" ]; then
-            echo "::error::Installer ZIP must contain exactly FLDailyEditInstaller.exe"
-            exit 1
-          fi
-          (cd dist && sha256sum FLDailyEditInstaller.zip > FLDailyEditInstaller.zip.sha256)
-      - name: Generate installer update manifest
+          cp "target/$WINDOWS_TARGET/release/$APP.exe" "dist/$APP.exe"
+          cp LICENSE THIRD_PARTY_NOTICES.md dist/
+          (cd dist && sha256sum "$APP.exe" > "$APP.exe.sha256")
+          ls -l dist
+
+      # The signing secret is not available to pull requests, so only release
+      # builds produce (and verify) the signed manifest.
+      - name: Build update manifest
+        if: steps.meta.outputs.release == 'true'
         run: >-
           cargo run --release --locked -p fl-update --bin sign-manifest --
           build
-          --asset dist/FLDailyEditInstaller.zip
-          --output dist/installer-update.json
-      - name: Sign installer update manifest
+          --asset "dist/$APP.exe"
+          --version "${{ steps.meta.outputs.version }}"
+          --output dist/update.json
+
+      - name: Sign update manifest
+        if: steps.meta.outputs.release == 'true'
         env:
           INSTALLER_SIGNING_KEY: ${{ secrets.INSTALLER_SIGNING_KEY }}
-        run: >-
-          cargo run --release --locked -p fl-update --bin sign-manifest --
-          sign
-          --manifest dist/installer-update.json
-          --output dist/installer-update.json.sig
+        run: |
+          if [ -z "$INSTALLER_SIGNING_KEY" ]; then
+            echo "::error::INSTALLER_SIGNING_KEY secret is required to sign update.json"
+            exit 1
+          fi
+          cargo run --release --locked -p fl-update --bin sign-manifest -- \
+            sign --manifest dist/update.json --output dist/update.json.sig
+
       - name: Upload build artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: installer-${{ github.run_id }}
+          name: FLDailyEdit-v${{ steps.meta.outputs.version }}
           path: dist/
           if-no-files-found: error
-          retention-days: 7
-      - name: Publish rolling release assets
-        if: github.event_name == 'push' || inputs.publish
+
+      - name: Release
+        if: steps.meta.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
         run: |
-          gh release view latest --repo "$GH_REPO" >/dev/null 2>&1 || gh release create latest --repo "$GH_REPO" --title "Latest FL Daily Edit" --notes "Validated FL Daily Edit release assets."
-          # The manifest goes last so it never points at a missing archive.
-          gh release upload latest --repo "$GH_REPO" --clobber \
-            dist/FLDailyEditInstaller.zip \
-            dist/FLDailyEditInstaller.zip.sha256
-          gh release upload latest --repo "$GH_REPO" --clobber dist/installer-update.json.sig
-          gh release upload latest --repo "$GH_REPO" --clobber dist/installer-update.json
-      - name: Remove legacy standalone installer assets
-        if: github.event_name == 'push' || inputs.publish
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          assets="$(gh release view latest --repo "$GH_REPO" --json assets --jq '.assets[].name')"
-          for legacy in FLDailyEditInstaller.exe FLDailyEditInstaller.exe.sha256; do
-            case $'\n'"$assets"$'\n' in
-              *$'\n'"$legacy"$'\n'*)
-                gh release delete-asset latest "$legacy" --repo "$GH_REPO" --yes
-                ;;
-            esac
-          done
+          version="${{ steps.meta.outputs.version }}"
+          gh release create "v$version" \
+            --repo "${{ github.repository }}" \
+            --target "$GITHUB_SHA" \
+            --title "FL Daily Edit v$version" \
+            --generate-notes \
+            dist/FLDailyEdit.exe \
+            dist/FLDailyEdit.exe.sha256 \
+            dist/update.json \
+            dist/update.json.sig

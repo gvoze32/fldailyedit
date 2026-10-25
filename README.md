@@ -27,11 +27,11 @@ project, reported issues, and helped improve it.
 ## Quick start (Windows)
 
 1. Download
-   [FLDailyEditInstaller.zip](https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.zip)
-   from the [latest release](https://github.com/gvoze32/fldailyedit/releases/tag/latest)
-   and extract it. It holds one file, the app itself: a single executable with
-   nothing to install and no runtime to download. You can rename it to
-   `FLDailyEdit.exe`.
+   [FLDailyEdit.exe](https://github.com/gvoze32/fldailyedit/releases/latest/download/FLDailyEdit.exe)
+   from the [latest release](https://github.com/gvoze32/fldailyedit/releases/latest).
+   It is the app itself: a single executable with nothing to install and no
+   runtime to download. Put it anywhere you like and keep it there; the app
+   updates itself in place.
 2. Close the game and open the app. It looks for your save in your Documents
    folder (`KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\EDIT00000000`
    for Football Life 2026, and the numbered folders next to it for PES 2021)
@@ -57,18 +57,24 @@ Life 2026 saves do not need it.
 
 **SmartScreen:** the executable is unsigned, so Windows SmartScreen may warn
 before the first run (**More info**, then **Run anyway**). To check your
-download, compare the SHA-256 of `FLDailyEditInstaller.zip` with the published
-`FLDailyEditInstaller.zip.sha256` on the latest release.
+download, compare the SHA-256 of `FLDailyEdit.exe` with the published
+`FLDailyEdit.exe.sha256` on the same release.
 
 ### App updates
 
-The app checks for a newer version when it starts, and the **Check for
-updates** button checks on demand. **Update and restart** downloads
-`FLDailyEditInstaller.zip`, verifies its size and SHA-256, checks that the
-archive holds exactly the one expected executable, replaces the running
-executable, and restarts. An update is accepted only when
-`installer-update.json` carries a valid Ed25519 signature
-(`installer-update.json.sig`) from the project release key embedded in the app.
+Every version is its own GitHub release (`v1.0.0`, `v1.0.1`, ...) with four
+assets: `FLDailyEdit.exe`, `FLDailyEdit.exe.sha256`, `update.json` and
+`update.json.sig`. The app checks the newest release when it starts, and the
+**Check for updates** button checks on demand. **Update and restart**
+downloads `FLDailyEdit.exe` from that release, verifies its size and SHA-256,
+replaces the running executable, and restarts. An update is accepted only when
+`update.json` carries a valid Ed25519 signature (`update.json.sig`) from the
+project release key embedded in the app, and its download address is exactly
+the `FLDailyEdit.exe` of the release with the same version.
+
+Installs of the old Python app, and of any build that predates versioned
+releases, cannot update themselves to this version: download the new
+`FLDailyEdit.exe` manually once. From then on the app updates itself.
 
 ## Compatibility
 
@@ -107,8 +113,7 @@ never uses the bundled FL26 player catalog. A missing or mismatched native
 
 The same executable is the command line: with no arguments it opens the app,
 with arguments it runs a command. `FLDailyEdit --edit-file PATH` is shorthand
-for `FLDailyEdit run --edit-file PATH`. (Built from source the binary is named
-`fldailyedit`; the examples use the release name.)
+for `FLDailyEdit run --edit-file PATH`.
 
 ```text
 FLDailyEdit run       Apply verified transfers, squad numbers, captains and tactics (default)
@@ -286,7 +291,7 @@ Rust (stable, edition 2024) is required.
 git clone https://github.com/gvoze32/fldailyedit.git
 cd fldailyedit
 cargo build --release -p fl-app
-# target/release/fldailyedit (the app and the command line in one executable)
+# target/release/FLDailyEdit (the app and the command line in one executable)
 ```
 
 Windows executable from Linux or macOS with mingw-w64 (it provides the linker
@@ -297,17 +302,24 @@ information, and manifest):
 rustup target add x86_64-pc-windows-gnu
 # macOS: brew install mingw-w64    Debian/Ubuntu: apt install gcc-mingw-w64-x86-64
 cargo build --release -p fl-app --target x86_64-pc-windows-gnu
-# target/x86_64-pc-windows-gnu/release/fldailyedit.exe
+# target/x86_64-pc-windows-gnu/release/FLDailyEdit.exe
 ```
 
 The graphical app targets Windows; the engine and command line also build and
 test on macOS and Linux. Release builds on Windows use the GUI subsystem and
 attach to the parent console when started with arguments.
 
-Release publishing (signed update manifest, `FLDailyEditInstaller.zip`) is the
-manual `Build Windows Installer` workflow and needs an `INSTALLER_SIGNING_KEY`
-secret (PEM PKCS#8 Ed25519 private key matching the public key embedded in
-`crates/fl-update`). The signing tool is
+### Releasing
+
+The `Build & Release` workflow (`.github/workflows/build-installer.yml`) runs
+on every push to `main`, pull request and manual dispatch on one Ubuntu
+runner: tests, then the Windows executable cross-compiled with mingw-w64. To
+release, bump `version` in the workspace `Cargo.toml` and push to `main`: when
+no `vX.Y.Z` release exists for that version yet, the workflow publishes it
+with `FLDailyEdit.exe`, `FLDailyEdit.exe.sha256`, `update.json` and
+`update.json.sig`. Pull requests build and test only. Signing needs an
+`INSTALLER_SIGNING_KEY` secret (PEM PKCS#8 Ed25519 private key matching the
+public key embedded in `crates/fl-update`). The signing tool is
 `cargo run -p fl-update --bin sign-manifest -- build|sign`.
 
 ## Development

@@ -3,7 +3,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::io::{Cursor, Write};
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -12,8 +12,8 @@ use ed25519_dalek::SigningKey;
 use ed25519_dalek::pkcs8::EncodePrivateKey;
 use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
 use fl_update::manifest::{
-    APP_EXECUTABLE_ENTRY, APP_INSTALLER_ASSET_NAME, APP_INSTALLER_URL, APP_UPDATE_MANIFEST_URL,
-    APP_UPDATE_PUBLIC_KEY, APP_UPDATE_SIGNATURE_URL, MAX_APP_ARCHIVE_BYTES,
+    APP_EXECUTABLE_NAME, APP_UPDATE_MANIFEST_URL, APP_UPDATE_PUBLIC_KEY, APP_UPDATE_SIGNATURE_URL,
+    MAX_APP_EXECUTABLE_BYTES, release_download_url,
 };
 use fl_update::release::{
     build_manifest, sign_manifest_file, sign_manifest_file_with_public_key, sign_with,
@@ -38,30 +38,21 @@ fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+/// URL the `0.3.0` release serves its executable from.
+fn download_url() -> String {
+    release_download_url(&"0.3.0".parse().unwrap())
+}
+
 /// Single-line JSON with `, ` and `: ` separators (the default compact-with-spaces shape).
-fn manifest_payload(archive: &[u8], version: &str) -> Vec<u8> {
+fn manifest_payload(executable: &[u8], version: &str) -> Vec<u8> {
     format!(
-        "{{\"schema_version\": 1, \"version\": \"{version}\", \"asset_name\": \"{APP_INSTALLER_ASSET_NAME}\", \
-         \"download_url\": \"{APP_INSTALLER_URL}\", \"archive_size\": {}, \"archive_sha256\": \"{}\"}}",
-        archive.len(),
-        sha256_hex(archive)
+        "{{\"schema_version\": 1, \"version\": \"{version}\", \
+         \"download_url\": \"https://github.com/gvoze32/fldailyedit/releases/download/v{version}/{APP_EXECUTABLE_NAME}\", \
+         \"size\": {}, \"sha256\": \"{}\"}}",
+        executable.len(),
+        sha256_hex(executable)
     )
     .into_bytes()
-}
-
-fn zip_payload(entries: &[(&str, &[u8])]) -> Vec<u8> {
-    let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
-    for (name, content) in entries {
-        writer
-            .start_file(*name, zip::write::SimpleFileOptions::default())
-            .unwrap();
-        writer.write_all(content).unwrap();
-    }
-    writer.finish().unwrap().into_inner()
-}
-
-fn installer_zip(executable: &[u8]) -> Vec<u8> {
-    zip_payload(&[(APP_EXECUTABLE_ENTRY, executable)])
 }
 
 enum Route {
@@ -133,19 +124,19 @@ fn signed_fetch(payload: &[u8]) -> FakeFetch {
         )
 }
 
-fn available_for(archive: &[u8]) -> Available {
-    let manifest = Manifest::parse(&manifest_payload(archive, "0.3.0")).unwrap();
+fn available_for(executable: &[u8]) -> Available {
+    let manifest = Manifest::parse(&manifest_payload(executable, "0.3.0")).unwrap();
     Available::new(manifest).unwrap()
 }
 
-fn stage(archive: &[u8], fetch: &FakeFetch) -> Result<Staged, Error> {
-    let available = available_for(archive);
+fn stage(executable: &[u8], fetch: &FakeFetch) -> Result<Staged, Error> {
+    let available = available_for(executable);
     download_and_stage(&available, fetch, &mut |_, _| {}, &AtomicBool::new(false))
 }
 
 fn json_with(mutate: impl FnOnce(&mut serde_json::Value)) -> Vec<u8> {
     let mut document: serde_json::Value =
-        serde_json::from_slice(&manifest_payload(b"installer archive", "0.3.0")).unwrap();
+        serde_json::from_slice(&manifest_payload(b"release executable", "0.3.0")).unwrap();
     mutate(&mut document);
     serde_json::to_vec(&document).unwrap()
 }
@@ -158,7 +149,7 @@ fn kind_of(result: Result<impl std::fmt::Debug, Error>) -> ErrorKind {
 
 #[test]
 fn accepts_a_wellformed_manifest() {
-    let manifest = Manifest::parse(&manifest_payload(b"installer archive", "0.3.0")).unwrap();
+    let manifest = Manifest::parse(&manifest_payload(b"release executable", "0.3.0")).unwrap();
     assert_eq!(
         manifest.version,
         Version {
@@ -167,10 +158,13 @@ fn accepts_a_wellformed_manifest() {
             patch: 0
         }
     );
-    assert_eq!(manifest.asset_name, APP_INSTALLER_ASSET_NAME);
-    assert_eq!(manifest.download_url, APP_INSTALLER_URL);
-    assert_eq!(manifest.archive_size, 17);
-    assert_eq!(manifest.archive_sha256, sha256_hex(b"installer archive"));
+    assert_eq!(manifest.download_url, download_url());
+    assert_eq!(
+        manifest.download_url,
+        "https://github.com/gvoze32/fldailyedit/releases/download/v0.3.0/FLDailyEdit.exe"
+    );
+    assert_eq!(manifest.size, 18);
+    assert_eq!(manifest.sha256, sha256_hex(b"release executable"));
 }
 
 #[test]
@@ -205,7 +199,7 @@ fn rejects_malformed_documents() {
         (
             "missing key",
             json_with(|d| {
-                d.as_object_mut().unwrap().remove("archive_size");
+                d.as_object_mut().unwrap().remove("size");
             }),
             ErrorKind::InvalidManifest,
         ),
@@ -247,80 +241,157 @@ fn rejects_malformed_documents() {
             ErrorKind::InvalidManifest,
         ),
         (
-            "asset renamed",
-            json_with(|d| d["asset_name"] = "other.zip".into()),
-            ErrorKind::UntrustedUrl,
-        ),
-        (
-            "asset empty",
-            json_with(|d| d["asset_name"] = "".into()),
-            ErrorKind::InvalidManifest,
-        ),
-        (
             "url other host",
-            json_with(|d| d["download_url"] = "https://example.com/installer.zip".into()),
+            json_with(|d| d["download_url"] = "https://example.com/FLDailyEdit.exe".into()),
             ErrorKind::UntrustedUrl,
         ),
         (
             "url http",
-            json_with(|d| {
-                d["download_url"] = APP_INSTALLER_URL.replacen("https", "http", 1).into()
-            }),
+            json_with(|d| d["download_url"] = download_url().replacen("https", "http", 1).into()),
             ErrorKind::UntrustedUrl,
         ),
         (
             "url query",
-            json_with(|d| d["download_url"] = format!("{APP_INSTALLER_URL}?x=1").into()),
+            json_with(|d| d["download_url"] = format!("{}?x=1", download_url()).into()),
             ErrorKind::UntrustedUrl,
         ),
         (
+            "url fragment",
+            json_with(|d| d["download_url"] = format!("{}#x", download_url()).into()),
+            ErrorKind::UntrustedUrl,
+        ),
+        (
+            "url other port",
+            json_with(|d| {
+                d["download_url"] = download_url().replacen(".com", ".com:8443", 1).into()
+            }),
+            ErrorKind::UntrustedUrl,
+        ),
+        (
+            "url credentials",
+            json_with(|d| d["download_url"] = download_url().replacen("//", "//user@", 1).into()),
+            ErrorKind::UntrustedUrl,
+        ),
+        (
+            "url lookalike host",
+            json_with(|d| {
+                d["download_url"] = download_url()
+                    .replacen("github.com", "github.com.evil.example", 1)
+                    .into()
+            }),
+            ErrorKind::UntrustedUrl,
+        ),
+        (
+            "url other repository",
+            json_with(|d| {
+                d["download_url"] = download_url()
+                    .replacen("gvoze32/fldailyedit", "evil/fldailyedit", 1)
+                    .into()
+            }),
+            ErrorKind::UntrustedUrl,
+        ),
+        (
+            "url other tag",
+            json_with(|d| {
+                d["download_url"] = download_url().replacen("v0.3.0", "v0.2.0", 1).into()
+            }),
+            ErrorKind::UntrustedUrl,
+        ),
+        (
+            "url rolling latest tag",
+            json_with(|d| {
+                d["download_url"] = download_url().replacen("v0.3.0", "latest", 1).into()
+            }),
+            ErrorKind::UntrustedUrl,
+        ),
+        (
+            "url untagged version",
+            json_with(|d| d["download_url"] = download_url().replacen("v0.3.0", "0.3.0", 1).into()),
+            ErrorKind::UntrustedUrl,
+        ),
+        (
+            "url other asset",
+            json_with(|d| {
+                d["download_url"] = download_url()
+                    .replacen("FLDailyEdit.exe", "other.exe", 1)
+                    .into()
+            }),
+            ErrorKind::UntrustedUrl,
+        ),
+        (
+            "url trailing slash",
+            json_with(|d| d["download_url"] = format!("{}/", download_url()).into()),
+            ErrorKind::UntrustedUrl,
+        ),
+        (
+            "url empty",
+            json_with(|d| d["download_url"] = "".into()),
+            ErrorKind::InvalidManifest,
+        ),
+        (
+            "legacy asset_name key",
+            json_with(|d| d["asset_name"] = "FLDailyEditInstaller.zip".into()),
+            ErrorKind::InvalidManifest,
+        ),
+        (
+            "legacy archive keys",
+            json_with(|d| {
+                let object = d.as_object_mut().unwrap();
+                let size = object.remove("size").unwrap();
+                let sha = object.remove("sha256").unwrap();
+                object.insert("archive_size".into(), size);
+                object.insert("archive_sha256".into(), sha);
+            }),
+            ErrorKind::InvalidManifest,
+        ),
+        (
             "size zero",
-            json_with(|d| d["archive_size"] = 0.into()),
+            json_with(|d| d["size"] = 0.into()),
             ErrorKind::InvalidManifest,
         ),
         (
             "size negative",
-            json_with(|d| d["archive_size"] = (-1).into()),
+            json_with(|d| d["size"] = (-1).into()),
             ErrorKind::InvalidManifest,
         ),
         (
             "size string",
-            json_with(|d| d["archive_size"] = "5".into()),
+            json_with(|d| d["size"] = "5".into()),
             ErrorKind::InvalidManifest,
         ),
         (
             "size float",
-            json_with(|d| d["archive_size"] = serde_json::json!(5.5)),
+            json_with(|d| d["size"] = serde_json::json!(5.5)),
             ErrorKind::InvalidManifest,
         ),
         (
             "size bool",
-            json_with(|d| d["archive_size"] = true.into()),
+            json_with(|d| d["size"] = true.into()),
             ErrorKind::InvalidManifest,
         ),
         (
             "size too large",
-            json_with(|d| d["archive_size"] = (MAX_APP_ARCHIVE_BYTES + 1).into()),
+            json_with(|d| d["size"] = (MAX_APP_EXECUTABLE_BYTES + 1).into()),
             ErrorKind::TooLarge,
         ),
         (
             "sha uppercase",
-            json_with(|d| d["archive_sha256"] = sha256_hex(b"x").to_uppercase().into()),
+            json_with(|d| d["sha256"] = sha256_hex(b"x").to_uppercase().into()),
             ErrorKind::InvalidManifest,
         ),
         (
             "sha short",
-            json_with(|d| d["archive_sha256"] = "abc".into()),
+            json_with(|d| d["sha256"] = "abc".into()),
             ErrorKind::InvalidManifest,
         ),
         (
             "sha not hex",
-            json_with(|d| d["archive_sha256"] = "g".repeat(64).into()),
+            json_with(|d| d["sha256"] = "g".repeat(64).into()),
             ErrorKind::InvalidManifest,
         ),
         (
             "sha trailing newline",
-            json_with(|d| d["archive_sha256"] = format!("{}\n", sha256_hex(b"x")).into()),
+            json_with(|d| d["sha256"] = format!("{}\n", sha256_hex(b"x")).into()),
             ErrorKind::InvalidManifest,
         ),
     ];
@@ -335,11 +406,11 @@ fn rejects_malformed_documents() {
 }
 
 #[test]
-fn accepts_the_maximum_archive_size() {
-    let payload = json_with(|d| d["archive_size"] = MAX_APP_ARCHIVE_BYTES.into());
+fn accepts_the_maximum_executable_size() {
+    let payload = json_with(|d| d["size"] = MAX_APP_EXECUTABLE_BYTES.into());
     assert_eq!(
-        Manifest::parse(&payload).unwrap().archive_size,
-        MAX_APP_ARCHIVE_BYTES
+        Manifest::parse(&payload).unwrap().size,
+        MAX_APP_EXECUTABLE_BYTES
     );
 }
 
@@ -396,12 +467,11 @@ fn versions_compare_numerically_per_component() {
 }
 
 #[test]
-fn canonical_bytes_match_the_0_2_generator() {
+fn canonical_bytes_are_sorted_indented_and_newline_terminated() {
     let manifest = Manifest::parse(&manifest_payload(b"abc", "1.2.3")).unwrap();
     let expected = format!(
-        "{{\n  \"archive_sha256\": \"{}\",\n  \"archive_size\": 3,\n  \"asset_name\": \"FLDailyEditInstaller.zip\",\n  \
-         \"download_url\": \"https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.zip\",\n  \
-         \"schema_version\": 1,\n  \"version\": \"1.2.3\"\n}}\n",
+        "{{\n  \"download_url\": \"https://github.com/gvoze32/fldailyedit/releases/download/v1.2.3/FLDailyEdit.exe\",\n  \
+         \"schema_version\": 1,\n  \"sha256\": \"{}\",\n  \"size\": 3,\n  \"version\": \"1.2.3\"\n}}\n",
         sha256_hex(b"abc")
     );
     assert_eq!(String::from_utf8(manifest.to_bytes()).unwrap(), expected);
@@ -476,8 +546,8 @@ fn malformed_signatures_are_rejected() {
 
 #[test]
 fn check_returns_a_newer_verified_release() {
-    let archive = installer_zip(b"exe");
-    let payload = manifest_payload(&archive, "0.3.0");
+    let executable = b"exe".to_vec();
+    let payload = manifest_payload(&executable, "0.3.0");
     let fetch = signed_fetch(&payload);
 
     let available = check_for_update_with_key("0.2.0", &fetch, &public_key())
@@ -485,7 +555,7 @@ fn check_returns_a_newer_verified_release() {
         .unwrap();
 
     assert_eq!(available.version.to_string(), "0.3.0");
-    assert_eq!(available.size, archive.len() as u64);
+    assert_eq!(available.size, executable.len() as u64);
     assert_eq!(
         *fetch.calls.borrow(),
         [APP_UPDATE_MANIFEST_URL, APP_UPDATE_SIGNATURE_URL]
@@ -617,11 +687,10 @@ fn check_enforces_size_limits_on_header_and_stream() {
 // --------------------------------------------------------------- staging
 
 #[test]
-fn downloads_verifies_and_extracts_only_the_executable() {
+fn downloads_and_verifies_the_executable() {
     let executable = b"new executable bytes".repeat(1000);
-    let archive = installer_zip(&executable);
-    let fetch = FakeFetch::default().with(APP_INSTALLER_URL, &archive);
-    let available = available_for(&archive);
+    let fetch = FakeFetch::default().with(&download_url(), &executable);
+    let available = available_for(&executable);
     let mut seen = Vec::new();
 
     let staged = download_and_stage(
@@ -634,7 +703,7 @@ fn downloads_verifies_and_extracts_only_the_executable() {
 
     assert_eq!(staged.version.to_string(), "0.3.0");
     assert_eq!(std::fs::read(&staged.executable).unwrap(), executable);
-    assert_eq!(staged.executable.file_name().unwrap(), APP_EXECUTABLE_ENTRY);
+    assert_eq!(staged.executable.file_name().unwrap(), APP_EXECUTABLE_NAME);
     let directory = staged.executable.parent().unwrap().to_path_buf();
     assert!(
         directory
@@ -647,15 +716,15 @@ fn downloads_verifies_and_extracts_only_the_executable() {
     assert_eq!(
         std::fs::read_dir(&directory).unwrap().count(),
         1,
-        "archive is deleted"
+        "only the executable is staged"
     );
-    assert_eq!(seen.first(), Some(&(0, archive.len() as u64)));
+    assert_eq!(seen.first(), Some(&(0, executable.len() as u64)));
     assert_eq!(
         seen.last(),
-        Some(&(archive.len() as u64, archive.len() as u64))
+        Some(&(executable.len() as u64, executable.len() as u64))
     );
     assert!(seen.windows(2).all(|pair| pair[0].0 <= pair[1].0));
-    assert_eq!(*fetch.calls.borrow(), [APP_INSTALLER_URL]);
+    assert_eq!(*fetch.calls.borrow(), [download_url()]);
 
     staged.discard();
     assert!(!directory.exists());
@@ -663,118 +732,74 @@ fn downloads_verifies_and_extracts_only_the_executable() {
 
 #[test]
 fn checksum_mismatch_is_rejected() {
-    let archive = installer_zip(b"genuine");
-    let mut forged = archive.clone();
+    let executable = b"genuine".to_vec();
+    let mut forged = executable.clone();
     let last = forged.len() - 1;
     forged[last] ^= 0xff;
-    let fetch = FakeFetch::default().with(APP_INSTALLER_URL, &forged);
+    let fetch = FakeFetch::default().with(&download_url(), &forged);
     assert_eq!(
-        kind_of(stage(&archive, &fetch)),
+        kind_of(stage(&executable, &fetch)),
         ErrorKind::ChecksumMismatch
     );
 }
 
 #[test]
 fn truncated_and_overlong_downloads_are_rejected() {
-    let archive = installer_zip(b"genuine executable");
+    let executable = b"genuine executable".to_vec();
 
-    let short = FakeFetch::default().with(APP_INSTALLER_URL, &archive[..archive.len() - 1]);
-    assert_eq!(kind_of(stage(&archive, &short)), ErrorKind::SizeMismatch);
+    let short = FakeFetch::default().with(&download_url(), &executable[..executable.len() - 1]);
+    assert_eq!(kind_of(stage(&executable, &short)), ErrorKind::SizeMismatch);
 
-    let mut longer = archive.clone();
+    let mut longer = executable.clone();
     longer.push(0);
-    let long_with_header = FakeFetch::default().with(APP_INSTALLER_URL, &longer);
+    let long_with_header = FakeFetch::default().with(&download_url(), &longer);
     assert_eq!(
-        kind_of(stage(&archive, &long_with_header)),
+        kind_of(stage(&executable, &long_with_header)),
         ErrorKind::SizeMismatch
     );
 
     // Header claims the right size but the stream keeps going.
     let lying = FakeFetch::default().with_lying_length(
-        APP_INSTALLER_URL,
-        Some(archive.len() as u64),
+        &download_url(),
+        Some(executable.len() as u64),
         &longer,
     );
-    assert_eq!(kind_of(stage(&archive, &lying)), ErrorKind::SizeMismatch);
+    assert_eq!(kind_of(stage(&executable, &lying)), ErrorKind::SizeMismatch);
 
     // No header at all.
-    let headerless = FakeFetch::default().with_lying_length(APP_INSTALLER_URL, None, &longer);
+    let headerless = FakeFetch::default().with_lying_length(&download_url(), None, &longer);
     assert_eq!(
-        kind_of(stage(&archive, &headerless)),
+        kind_of(stage(&executable, &headerless)),
         ErrorKind::SizeMismatch
     );
 }
 
 #[test]
 fn content_length_beyond_the_hard_cap_is_too_large() {
-    let archive = installer_zip(b"genuine");
+    let executable = b"genuine".to_vec();
     let fetch = FakeFetch::default().with_lying_length(
-        APP_INSTALLER_URL,
-        Some(MAX_APP_ARCHIVE_BYTES + 1),
-        &archive,
+        &download_url(),
+        Some(MAX_APP_EXECUTABLE_BYTES + 1),
+        &executable,
     );
-    assert_eq!(kind_of(stage(&archive, &fetch)), ErrorKind::TooLarge);
+    assert_eq!(kind_of(stage(&executable, &fetch)), ErrorKind::TooLarge);
 }
 
 #[test]
 fn download_http_errors_are_reported() {
-    let archive = installer_zip(b"x");
-    let fetch = FakeFetch::default().with_status(APP_INSTALLER_URL, 502);
+    let executable = b"x".to_vec();
+    let fetch = FakeFetch::default().with_status(&download_url(), 502);
     assert!(matches!(
-        stage(&archive, &fetch).unwrap_err(),
+        stage(&executable, &fetch).unwrap_err(),
         Error::Http(502)
     ));
 }
 
 #[test]
-fn bad_zip_layouts_are_rejected() {
-    let layouts: Vec<(&str, Vec<u8>)> = vec![
-        ("not a zip", b"definitely not a zip file".to_vec()),
-        ("no entries", zip_payload(&[])),
-        ("wrong name", zip_payload(&[("other.exe", b"x")])),
-        (
-            "nested path",
-            zip_payload(&[("dir/FLDailyEditInstaller.exe", b"x")]),
-        ),
-        (
-            "wrong case",
-            zip_payload(&[("fldailyeditinstaller.exe", b"x")]),
-        ),
-        (
-            "two entries",
-            zip_payload(&[(APP_EXECUTABLE_ENTRY, b"x"), ("readme.txt", b"y")]),
-        ),
-        (
-            "empty executable",
-            zip_payload(&[(APP_EXECUTABLE_ENTRY, b"")]),
-        ),
-        (
-            "directory entry",
-            zip_payload(&[("FLDailyEditInstaller.exe/", b"")]),
-        ),
-    ];
-    for (name, archive) in layouts {
-        let fetch = FakeFetch::default().with(APP_INSTALLER_URL, &archive);
-        let kind = kind_of(stage(&archive, &fetch));
-        assert_eq!(kind, ErrorKind::InvalidArchive, "{name}");
-    }
-}
-
-#[test]
-fn corrupted_zip_payload_is_rejected() {
-    let executable = vec![0x5a_u8; 4096];
-    let mut archive = installer_zip(&executable);
-    // Flip a byte inside the stored data: the CRC check must catch it.
-    archive[64] ^= 0xff;
-    let fetch = FakeFetch::default().with(APP_INSTALLER_URL, &archive);
-    assert_eq!(kind_of(stage(&archive, &fetch)), ErrorKind::InvalidArchive);
-}
-
-#[test]
 fn cancellation_stops_the_download() {
-    let archive = installer_zip(&vec![1_u8; 300_000]);
-    let fetch = FakeFetch::default().with(APP_INSTALLER_URL, &archive);
-    let available = available_for(&archive);
+    let executable = vec![1_u8; 300_000];
+    let fetch = FakeFetch::default().with(&download_url(), &executable);
+    let available = available_for(&executable);
 
     let cancelled = AtomicBool::new(true);
     let error = download_and_stage(&available, &fetch, &mut |_, _| {}, &cancelled).unwrap_err();
@@ -805,15 +830,15 @@ fn cancellation_stops_the_download() {
 #[test]
 fn available_cannot_be_built_from_an_invalid_manifest() {
     let mut manifest = Manifest::parse(&manifest_payload(b"x", "0.3.0")).unwrap();
-    manifest.download_url = "https://example.com/x.zip".into();
+    manifest.download_url = "https://example.com/FLDailyEdit.exe".into();
     assert_eq!(kind_of(Available::new(manifest)), ErrorKind::UntrustedUrl);
 }
 
 // ------------------------------------------------------ release tooling
 
-fn write_asset(directory: &Path, archive: &[u8]) -> PathBuf {
-    let asset = directory.join(APP_INSTALLER_ASSET_NAME);
-    std::fs::write(&asset, archive).unwrap();
+fn write_asset(directory: &Path, executable: &[u8]) -> PathBuf {
+    let asset = directory.join(APP_EXECUTABLE_NAME);
+    std::fs::write(&asset, executable).unwrap();
     asset
 }
 
@@ -824,10 +849,10 @@ fn pem(key: &SigningKey) -> String {
 #[test]
 fn build_sign_verify_parse_round_trip() {
     let directory = tempfile::tempdir().unwrap();
-    let archive = installer_zip(b"rust gui exe");
-    let asset = write_asset(directory.path(), &archive);
-    let manifest_path = directory.path().join("out/installer-update.json");
-    let signature_path = directory.path().join("out/installer-update.json.sig");
+    let executable = b"rust gui exe".to_vec();
+    let asset = write_asset(directory.path(), &executable);
+    let manifest_path = directory.path().join("out/update.json");
+    let signature_path = directory.path().join("out/update.json.sig");
 
     let built = build_manifest(&asset, &manifest_path, "1.0.0").unwrap();
     sign_manifest_file_with_public_key(
@@ -840,7 +865,6 @@ fn build_sign_verify_parse_round_trip() {
 
     let payload = std::fs::read(&manifest_path).unwrap();
     let signature = std::fs::read(&signature_path).unwrap();
-    // Rules the 0.2.x parser enforces.
     assert!(payload.ends_with(b"}\n"));
     assert!(payload.len() <= 64 * 1024);
     assert_eq!(signature.len(), 89, "88 base64 chars + newline");
@@ -848,17 +872,20 @@ fn build_sign_verify_parse_round_trip() {
     verify_with_key(&public_key(), &payload, &signature).unwrap();
     let parsed = Manifest::parse(&payload).unwrap();
     assert_eq!(parsed, built);
-    assert_eq!(parsed.archive_size, archive.len() as u64);
-    assert_eq!(parsed.archive_sha256, sha256_hex(&archive));
-    assert_eq!(parsed.download_url, APP_INSTALLER_URL);
+    assert_eq!(parsed.size, executable.len() as u64);
+    assert_eq!(parsed.sha256, sha256_hex(&executable));
+    assert_eq!(
+        parsed.download_url,
+        "https://github.com/gvoze32/fldailyedit/releases/download/v1.0.0/FLDailyEdit.exe"
+    );
     let document: serde_json::Value = serde_json::from_slice(&payload).unwrap();
-    assert_eq!(document.as_object().unwrap().len(), 6);
+    assert_eq!(document.as_object().unwrap().len(), 5);
 
     // And the whole client path accepts it.
     let fetch = FakeFetch::default()
         .with(APP_UPDATE_MANIFEST_URL, &payload)
         .with(APP_UPDATE_SIGNATURE_URL, &signature)
-        .with(APP_INSTALLER_URL, &archive);
+        .with(&parsed.download_url, &executable);
     let available = check_for_update_with_key("0.2.0", &fetch, &public_key())
         .unwrap()
         .unwrap();
@@ -872,41 +899,27 @@ fn build_sign_verify_parse_round_trip() {
 fn build_rejects_bad_assets_and_versions() {
     let directory = tempfile::tempdir().unwrap();
     let output = directory.path().join("m.json");
-    let good = installer_zip(b"exe");
 
-    let wrong_name = directory.path().join("other.zip");
-    std::fs::write(&wrong_name, &good).unwrap();
+    let wrong_name = directory.path().join("other.exe");
+    std::fs::write(&wrong_name, b"exe").unwrap();
     assert_eq!(
         kind_of(build_manifest(&wrong_name, &output, "1.0.0")),
         ErrorKind::InvalidManifest
     );
 
-    let asset = write_asset(directory.path(), &good);
-    assert_eq!(
-        kind_of(build_manifest(&asset, &output, "1.0")),
-        ErrorKind::InvalidManifest
-    );
+    let asset = write_asset(directory.path(), b"exe");
+    for bad_version in ["1.0", "v1.0.0", "1.0.0-beta", ""] {
+        assert_eq!(
+            kind_of(build_manifest(&asset, &output, bad_version)),
+            ErrorKind::InvalidManifest,
+            "{bad_version:?}"
+        );
+    }
 
     std::fs::write(&asset, b"").unwrap();
     assert_eq!(
         kind_of(build_manifest(&asset, &output, "1.0.0")),
         ErrorKind::InvalidManifest
-    );
-
-    std::fs::write(
-        &asset,
-        zip_payload(&[(APP_EXECUTABLE_ENTRY, b"x"), ("extra.txt", b"y")]),
-    )
-    .unwrap();
-    assert_eq!(
-        kind_of(build_manifest(&asset, &output, "1.0.0")),
-        ErrorKind::InvalidArchive
-    );
-
-    std::fs::write(&asset, zip_payload(&[("FLDailyEdit.exe", b"x")])).unwrap();
-    assert_eq!(
-        kind_of(build_manifest(&asset, &output, "1.0.0")),
-        ErrorKind::InvalidArchive
     );
 
     std::fs::remove_file(&asset).unwrap();
@@ -920,8 +933,8 @@ fn build_rejects_bad_assets_and_versions() {
 #[test]
 fn signing_refuses_missing_malformed_or_mismatched_keys() {
     let directory = tempfile::tempdir().unwrap();
-    let manifest_path = directory.path().join("installer-update.json");
-    let signature_path = directory.path().join("installer-update.json.sig");
+    let manifest_path = directory.path().join("update.json");
+    let signature_path = directory.path().join("update.json.sig");
     std::fs::write(&manifest_path, b"{}\n").unwrap();
 
     assert_eq!(

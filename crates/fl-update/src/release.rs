@@ -1,4 +1,4 @@
-//! Release-side tooling: build and sign `installer-update.json`.
+//! Release-side tooling: build and sign `update.json`.
 
 use std::fs::{self, File};
 use std::io::Read;
@@ -10,10 +10,9 @@ use ed25519_dalek::pkcs8::DecodePrivateKey;
 use ed25519_dalek::{Signer, SigningKey};
 use sha2::{Digest, Sha256};
 
-use crate::archive::validate_installer_archive;
 use crate::error::{Error, Result};
 use crate::manifest::{
-    APP_INSTALLER_ASSET_NAME, APP_INSTALLER_URL, APP_UPDATE_PUBLIC_KEY, Manifest, Version,
+    APP_EXECUTABLE_NAME, APP_UPDATE_PUBLIC_KEY, Manifest, Version, release_download_url,
     verify_with_key,
 };
 
@@ -48,45 +47,37 @@ fn sha256_of_file(path: &Path) -> Result<String> {
     }
 }
 
-/// Describe `asset` (which must be named `FLDailyEditInstaller.zip`, be non-empty and
-/// contain exactly `FLDailyEditInstaller.exe`) as a manifest for `version`.
+/// Describe `asset` (which must be named `FLDailyEdit.exe`, be non-empty and not
+/// exceed the size limit) as the manifest for the release of `version`.
 pub fn manifest_for_asset(asset: &Path, version: &str) -> Result<Manifest> {
     if asset
         .file_name()
-        .is_none_or(|name| name != APP_INSTALLER_ASSET_NAME)
+        .is_none_or(|name| name != APP_EXECUTABLE_NAME)
     {
         return Err(Error::InvalidManifest(format!(
-            "installer asset must be named {APP_INSTALLER_ASSET_NAME}"
+            "release asset must be named {APP_EXECUTABLE_NAME}"
         )));
     }
     let size = fs::metadata(asset)
         .map_err(|error| Error::io(format!("cannot inspect {}", asset.display()), error))?
         .len();
-    if size == 0 {
-        return Err(Error::InvalidManifest(
-            "installer asset must not be empty".into(),
-        ));
-    }
-    validate_installer_archive(asset)?;
+    let version = version.parse::<Version>()?;
     Manifest::new(
-        version.parse::<Version>()?,
-        APP_INSTALLER_ASSET_NAME.to_owned(),
-        APP_INSTALLER_URL.to_owned(),
+        version,
+        release_download_url(&version),
         size,
         sha256_of_file(asset)?,
     )
 }
 
 /// Write the manifest for `asset` to `output` (parents are created) and return it.
-/// The file is byte-compatible with manifests written by 0.2.x release tooling.
 pub fn build_manifest(asset: &Path, output: &Path, version: &str) -> Result<Manifest> {
     let manifest = manifest_for_asset(asset, version)?;
     write_creating_parents(output, &manifest.to_bytes())?;
     Ok(manifest)
 }
 
-/// Sign raw `payload`; the result is base64 plus a trailing newline, as 0.2.x
-/// release tooling wrote it.
+/// Sign raw `payload`; the result is base64 plus a trailing newline.
 pub fn sign_with(key: &SigningKey, payload: &[u8]) -> Vec<u8> {
     let mut signature = STANDARD.encode(key.sign(payload).to_bytes()).into_bytes();
     signature.push(b'\n');

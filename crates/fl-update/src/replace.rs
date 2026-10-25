@@ -201,7 +201,7 @@ mod tests {
     fn staged_in(dir: &Path, content: &[u8]) -> Staged {
         let staging = dir.join(format!("{STAGING_PREFIX}test"));
         fs::create_dir_all(&staging).unwrap();
-        let executable = staging.join("FLDailyEditInstaller.exe");
+        let executable = staging.join("FLDailyEdit.exe");
         fs::write(&executable, content).unwrap();
         Staged {
             executable,
@@ -242,15 +242,15 @@ mod tests {
     #[test]
     fn a_stale_old_file_is_cleared_first() {
         let dir = tempfile::tempdir().unwrap();
-        let current = dir.path().join("FLDailyEditInstaller.exe");
+        let current = dir.path().join("FLDailyEdit.exe");
         fs::write(&current, b"old").unwrap();
-        fs::write(dir.path().join("FLDailyEditInstaller.exe.old"), b"ancient").unwrap();
+        fs::write(dir.path().join("FLDailyEdit.exe.old"), b"ancient").unwrap();
         let staged = staged_in(dir.path(), b"new");
 
         replace_current_exe(&staged, &current).unwrap();
 
         assert_eq!(
-            fs::read(dir.path().join("FLDailyEditInstaller.exe.old")).unwrap(),
+            fs::read(dir.path().join("FLDailyEdit.exe.old")).unwrap(),
             b"old"
         );
     }

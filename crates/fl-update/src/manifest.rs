@@ -1,4 +1,4 @@
-//! The signed update manifest (`installer-update.json`): strict parsing, canonical
+//! The signed update manifest (`update.json`): strict parsing, canonical
 //! serialization, Ed25519 signature verification and version ordering.
 
 use std::fmt;
@@ -14,24 +14,16 @@ use serde_json::Value;
 
 use crate::error::{Error, Result};
 
-/// Name of the release asset: a zip holding exactly [`APP_EXECUTABLE_ENTRY`].
-pub const APP_INSTALLER_ASSET_NAME: &str = "FLDailyEditInstaller.zip";
-/// The only entry the asset zip may contain. Installed 0.2.x builds also expect this
-/// exact name.
-pub const APP_EXECUTABLE_ENTRY: &str = "FLDailyEditInstaller.exe";
-/// Exact URL of the installer zip.
-pub const APP_INSTALLER_URL: &str =
-    "https://github.com/gvoze32/fldailyedit/releases/download/latest/FLDailyEditInstaller.zip";
-/// Exact URL of the manifest.
+/// Name of the release executable asset, and of the staged copy of it.
+pub const APP_EXECUTABLE_NAME: &str = "FLDailyEdit.exe";
+/// Manifest of the newest release (GitHub redirects `latest` to the newest `vX.Y.Z`).
 pub const APP_UPDATE_MANIFEST_URL: &str =
-    "https://github.com/gvoze32/fldailyedit/releases/download/latest/installer-update.json";
-/// Exact URL of the detached signature.
+    "https://github.com/gvoze32/fldailyedit/releases/latest/download/update.json";
+/// Detached signature of the manifest of the newest release.
 pub const APP_UPDATE_SIGNATURE_URL: &str =
-    "https://github.com/gvoze32/fldailyedit/releases/download/latest/installer-update.json.sig";
+    "https://github.com/gvoze32/fldailyedit/releases/latest/download/update.json.sig";
 
-/// Largest accepted installer zip (128 MiB).
-pub const MAX_APP_ARCHIVE_BYTES: u64 = 128 * 1024 * 1024;
-/// Largest accepted extracted executable (128 MiB).
+/// Largest accepted executable (128 MiB).
 pub const MAX_APP_EXECUTABLE_BYTES: u64 = 128 * 1024 * 1024;
 /// Largest accepted manifest (64 KiB).
 pub const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
@@ -39,7 +31,7 @@ pub const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
 pub const MAX_SIGNATURE_BYTES: u64 = 1024;
 
 /// Raw Ed25519 public key (base64 `sYH8IUcmk160DJcjyu6TMRm4WEMtTYza4KL/kwKyYsI=`);
-/// the release workflow signs `installer-update.json` with the private half.
+/// the release workflow signs `update.json` with the private half.
 pub const APP_UPDATE_PUBLIC_KEY: [u8; 32] = [
     0xb1, 0x81, 0xfc, 0x21, 0x47, 0x26, 0x93, 0x5e, 0xb4, 0x0c, 0x97, 0x23, 0xca, 0xee, 0x93, 0x31,
     0x19, 0xb8, 0x58, 0x43, 0x2d, 0x4d, 0x8c, 0xda, 0xe0, 0xa2, 0xff, 0x93, 0x02, 0xb2, 0x62, 0xc2,
@@ -47,14 +39,21 @@ pub const APP_UPDATE_PUBLIC_KEY: [u8; 32] = [
 
 const ED25519_SIGNATURE_BYTES: usize = 64;
 
-const MANIFEST_KEYS: [&str; 6] = [
-    "archive_sha256",
-    "archive_size",
-    "asset_name",
+const MANIFEST_KEYS: [&str; 5] = [
     "download_url",
     "schema_version",
+    "sha256",
+    "size",
     "version",
 ];
+
+/// The one URL a manifest for `version` may point at: the executable attached to the
+/// `v{version}` release, so the signed manifest and the executable always match.
+pub fn release_download_url(version: &Version) -> String {
+    format!(
+        "https://github.com/gvoze32/fldailyedit/releases/download/v{version}/{APP_EXECUTABLE_NAME}"
+    )
+}
 
 /// Standard-alphabet base64 with required padding; non-zero trailing bits are
 /// tolerated.
@@ -118,25 +117,26 @@ impl fmt::Display for Version {
     }
 }
 
-/// A validated update manifest. Every field satisfies the rules the shipped 0.2.x
-/// updater enforces; construct it with [`Manifest::parse`] or [`Manifest::new`].
+/// A validated update manifest; construct it with [`Manifest::parse`] or
+/// [`Manifest::new`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Manifest {
     pub version: Version,
-    pub asset_name: String,
+    /// Always [`release_download_url`] of `version`.
     pub download_url: String,
-    pub archive_size: u64,
-    pub archive_sha256: String,
+    /// Size of the executable in bytes.
+    pub size: u64,
+    /// Lowercase hex SHA-256 of the executable.
+    pub sha256: String,
 }
 
 /// Field order is alphabetical on purpose: keys are written sorted.
 #[derive(Serialize)]
 struct Document<'a> {
-    archive_sha256: &'a str,
-    archive_size: u64,
-    asset_name: &'a str,
     download_url: &'a str,
     schema_version: u8,
+    sha256: &'a str,
+    size: u64,
     version: String,
 }
 
@@ -190,43 +190,30 @@ fn is_lowercase_sha256(text: &str) -> bool {
 }
 
 impl Manifest {
-    /// Validate field values (asset name, URL, size bounds, digest format).
-    pub fn new(
-        version: Version,
-        asset_name: String,
-        download_url: String,
-        archive_size: u64,
-        archive_sha256: String,
-    ) -> Result<Self> {
-        if asset_name != APP_INSTALLER_ASSET_NAME {
-            return Err(Error::UntrustedUrl(
-                "installer asset name is not trusted".into(),
-            ));
-        }
-        if download_url != APP_INSTALLER_URL {
+    /// Validate field values (URL pinned to the release of `version`, size bounds,
+    /// digest format).
+    pub fn new(version: Version, download_url: String, size: u64, sha256: String) -> Result<Self> {
+        if download_url != release_download_url(&version) {
             return Err(Error::UntrustedUrl("update URL is not trusted".into()));
         }
-        if archive_size == 0 {
-            return Err(Error::InvalidManifest(
-                "archive_size must be positive".into(),
-            ));
+        if size == 0 {
+            return Err(Error::InvalidManifest("size must be positive".into()));
         }
-        if archive_size > MAX_APP_ARCHIVE_BYTES {
+        if size > MAX_APP_EXECUTABLE_BYTES {
             return Err(Error::TooLarge(format!(
-                "installer archive exceeds {MAX_APP_ARCHIVE_BYTES} byte limit"
+                "update executable exceeds {MAX_APP_EXECUTABLE_BYTES} byte limit"
             )));
         }
-        if !is_lowercase_sha256(&archive_sha256) {
+        if !is_lowercase_sha256(&sha256) {
             return Err(Error::InvalidManifest(
-                "archive_sha256 must be a lowercase SHA-256 digest".into(),
+                "sha256 must be a lowercase SHA-256 digest".into(),
             ));
         }
         Ok(Self {
             version,
-            asset_name,
             download_url,
-            archive_size,
-            archive_sha256,
+            size,
+            sha256,
         })
     }
 
@@ -234,15 +221,14 @@ impl Manifest {
     pub fn validate(&self) -> Result<()> {
         Self::new(
             self.version,
-            self.asset_name.clone(),
             self.download_url.clone(),
-            self.archive_size,
-            self.archive_sha256.clone(),
+            self.size,
+            self.sha256.clone(),
         )
         .map(drop)
     }
 
-    /// Strictly parse manifest bytes: UTF-8 JSON object with exactly the six expected
+    /// Strictly parse manifest bytes: UTF-8 JSON object with exactly the five expected
     /// keys, no duplicates, `schema_version == 1`, and valid field values.
     pub fn parse(payload: &[u8]) -> Result<Self> {
         let text = std::str::from_utf8(payload).map_err(|_| {
@@ -271,43 +257,25 @@ impl Manifest {
             ));
         }
         let version: Version = required_string(&entries, "version")?.parse()?;
-        let asset_name = required_string(&entries, "asset_name")?;
-        if asset_name != APP_INSTALLER_ASSET_NAME {
-            return Err(Error::UntrustedUrl(
-                "installer asset name is not trusted".into(),
-            ));
-        }
         let download_url = required_string(&entries, "download_url")?;
-        if download_url != APP_INSTALLER_URL {
-            return Err(Error::UntrustedUrl("update URL is not trusted".into()));
-        }
-        let archive_size = match value_of("archive_size") {
+        let size = match value_of("size") {
             Some(Value::Number(number)) if number.is_u64() => number.as_u64().unwrap_or_default(),
             _ => {
-                return Err(Error::InvalidManifest(
-                    "archive_size must be positive".into(),
-                ));
+                return Err(Error::InvalidManifest("size must be positive".into()));
             }
         };
-        let archive_sha256 = required_string(&entries, "archive_sha256")?;
-        Self::new(
-            version,
-            asset_name,
-            download_url,
-            archive_size,
-            archive_sha256,
-        )
+        let sha256 = required_string(&entries, "sha256")?;
+        Self::new(version, download_url, size, sha256)
     }
 
-    /// Canonical bytes, byte-compatible with 0.2.x release tooling: keys sorted, two-space
-    /// indent, non-ASCII unescaped, trailing newline. These are the bytes that get signed.
+    /// Canonical bytes: keys sorted, two-space indent, non-ASCII unescaped, trailing
+    /// newline. These are the bytes that get signed.
     pub fn to_bytes(&self) -> Vec<u8> {
         let document = Document {
-            archive_sha256: &self.archive_sha256,
-            archive_size: self.archive_size,
-            asset_name: &self.asset_name,
             download_url: &self.download_url,
             schema_version: 1,
+            sha256: &self.sha256,
+            size: self.size,
             version: self.version.to_string(),
         };
         let mut bytes = serde_json::to_vec_pretty(&document)

@@ -2,33 +2,30 @@
 //!
 //! Flow (all APIs are blocking; call them from a background thread, they never print):
 //!
-//! 1. [`check_for_update`] fetches `installer-update.json` + `.sig`, verifies the
-//!    Ed25519 signature, parses the manifest strictly and compares versions.
-//! 2. [`download_and_stage`] streams `FLDailyEditInstaller.zip` into a private temp
-//!    directory, verifies size and SHA-256, validates the zip layout and extracts the
-//!    executable.
+//! 1. [`check_for_update`] fetches `update.json` + `update.json.sig` from the newest
+//!    GitHub release (`releases/latest/download/…` redirects to the newest `vX.Y.Z`),
+//!    verifies the Ed25519 signature, parses the manifest strictly and compares
+//!    versions.
+//! 2. [`download_and_stage`] streams `FLDailyEdit.exe` from the manifest's
+//!    `download_url` into a private temp directory and verifies size and SHA-256.
 //! 3. [`replace_current_exe`] swaps the running exe (rename-self), [`restart`] launches
 //!    the new one; the caller then exits. [`cleanup_after_update`] runs at next launch.
 //!
-//! # Compatibility with 0.2.x installs
+//! # Releases
 //!
-//! Release assets are unchanged so already-installed 0.2.x builds can upgrade:
-//! `FLDailyEditInstaller.zip` holds exactly one entry named
-//! `FLDailyEditInstaller.exe` (for the current app, the GUI exe),
-//! `installer-update.json` has exactly the keys `schema_version` (1), `version`,
-//! `asset_name`, `download_url`, `archive_size`, `archive_sha256`, and
-//! `installer-update.json.sig` is the base64 Ed25519 signature of the raw manifest
-//! bytes. The 0.2.x swap script moves the staged exe over the *current* exe path and
-//! refuses unless the current file name is `FLDailyEditInstaller.exe`; 0.2.x installs
-//! therefore keep that file name, while fresh installs may be named
-//! `FLDailyEdit.exe`. [`replace_current_exe`] replaces the running exe whatever it is
-//! called. The 0.2.x limits apply: archive ≤ 128 MiB, manifest ≤ 64 KiB,
-//! signature ≤ 1 KiB.
+//! Every release `vX.Y.Z` carries four assets: `FLDailyEdit.exe` (what users download),
+//! `FLDailyEdit.exe.sha256`, `update.json` and `update.json.sig`. `update.json` has
+//! exactly the keys `schema_version` (1), `version`, `download_url`, `size` and
+//! `sha256`; `download_url` must be exactly
+//! `https://github.com/gvoze32/fldailyedit/releases/download/v<version>/FLDailyEdit.exe`
+//! (pinned to the release tag, so the signed manifest and the executable always
+//! match) and `update.json.sig` is the base64 Ed25519 signature of the raw manifest
+//! bytes. Limits: executable ≤ 128 MiB, manifest ≤ 64 KiB, signature ≤ 1 KiB.
+//! [`replace_current_exe`] replaces the running exe whatever it is called.
 //!
 //! The [`release`] module and the `sign-manifest` binary build and sign the release
 //! manifest.
 
-mod archive;
 mod error;
 mod fetch;
 pub mod manifest;

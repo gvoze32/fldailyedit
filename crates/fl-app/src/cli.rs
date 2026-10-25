@@ -635,7 +635,7 @@ mod tests {
     use fl_engine::api::{ChangeCounts, SkippedTransfer};
 
     fn args(list: &[&str]) -> Vec<OsString> {
-        std::iter::once("fldailyedit")
+        std::iter::once("FLDailyEdit")
             .chain(list.iter().copied())
             .map(OsString::from)
             .collect()

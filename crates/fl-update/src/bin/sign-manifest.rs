@@ -1,4 +1,4 @@
-//! Release tool: builds `installer-update.json` from the installer zip and signs it.
+//! Release tool: builds `update.json` for the release executable and signs it.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -19,9 +19,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Write installer-update.json for FLDailyEditInstaller.zip.
+    /// Write update.json for FLDailyEdit.exe.
     Build {
-        /// Path to FLDailyEditInstaller.zip (must hold exactly FLDailyEditInstaller.exe).
+        /// Path to the release executable (must be named FLDailyEdit.exe).
         #[arg(long)]
         asset: PathBuf,
         /// Where to write the manifest.

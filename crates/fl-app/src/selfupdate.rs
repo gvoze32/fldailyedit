@@ -261,10 +261,7 @@ fn describe(error: &fl_update::Error) -> String {
         | ErrorKind::UntrustedUrl => {
             "The update could not be verified, so it was not installed.".into()
         }
-        ErrorKind::TooLarge
-        | ErrorKind::SizeMismatch
-        | ErrorKind::ChecksumMismatch
-        | ErrorKind::InvalidArchive => {
+        ErrorKind::TooLarge | ErrorKind::SizeMismatch | ErrorKind::ChecksumMismatch => {
             "The downloaded update was damaged, so it was not installed. Try again later.".into()
         }
         ErrorKind::Io | ErrorKind::Unsupported => format!(
@@ -328,11 +325,11 @@ mod tests {
     }
 
     fn available() -> Available {
+        let version: fl_update::Version = "9.9.9".parse().unwrap();
         Available::new(
             Manifest::new(
-                "9.9.9".parse().unwrap(),
-                fl_update::manifest::APP_INSTALLER_ASSET_NAME.into(),
-                fl_update::manifest::APP_INSTALLER_URL.into(),
+                version,
+                fl_update::manifest::release_download_url(&version),
                 10,
                 "0".repeat(64),
             )

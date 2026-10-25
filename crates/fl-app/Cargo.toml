@@ -12,7 +12,7 @@ name = "fl_app"
 path = "src/lib.rs"
 
 [[bin]]
-name = "fldailyedit"
+name = "FLDailyEdit"
 path = "src/main.rs"
 
 [dependencies]

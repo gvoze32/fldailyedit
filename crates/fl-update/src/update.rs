@@ -7,12 +7,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use sha2::{Digest, Sha256};
 
-use crate::archive::extract_executable;
 use crate::error::{Error, Result};
 use crate::fetch::{DOWNLOAD_TIMEOUT, Fetch, MANIFEST_TIMEOUT, fetch_document};
 use crate::manifest::{
-    APP_EXECUTABLE_ENTRY, APP_UPDATE_MANIFEST_URL, APP_UPDATE_PUBLIC_KEY, APP_UPDATE_SIGNATURE_URL,
-    MAX_APP_ARCHIVE_BYTES, MAX_MANIFEST_BYTES, MAX_SIGNATURE_BYTES, Manifest, Version,
+    APP_EXECUTABLE_NAME, APP_UPDATE_MANIFEST_URL, APP_UPDATE_PUBLIC_KEY, APP_UPDATE_SIGNATURE_URL,
+    MAX_APP_EXECUTABLE_BYTES, MAX_MANIFEST_BYTES, MAX_SIGNATURE_BYTES, Manifest, Version,
     verify_with_key,
 };
 
@@ -26,7 +25,7 @@ const DOWNLOAD_CHUNK_BYTES: usize = 64 * 1024;
 pub struct Available {
     /// Version offered by the manifest.
     pub version: Version,
-    /// Size of the installer zip in bytes.
+    /// Size of the new executable in bytes.
     pub size: u64,
     manifest: Manifest,
 }
@@ -37,7 +36,7 @@ impl Available {
         manifest.validate()?;
         Ok(Self {
             version: manifest.version,
-            size: manifest.archive_size,
+            size: manifest.size,
             manifest,
         })
     }
@@ -48,10 +47,10 @@ impl Available {
     }
 }
 
-/// A fully verified executable extracted to a private staging directory.
+/// A fully verified executable downloaded to a private staging directory.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Staged {
-    /// Path of the staged `FLDailyEditInstaller.exe` (whatever the running exe is named).
+    /// Path of the staged `FLDailyEdit.exe` (whatever the running exe is named).
     pub executable: PathBuf,
     /// Version that was staged.
     pub version: Version,
@@ -64,7 +63,7 @@ impl Staged {
     }
 }
 
-/// Fetch `installer-update.json` and its signature, verify, parse, and compare with
+/// Fetch `update.json` and its signature, verify, parse, and compare with
 /// `current` (`MAJOR.MINOR.PATCH`). Returns `None` when the release is not newer.
 pub fn check_for_update(current: &str, fetch: &dyn Fetch) -> Result<Option<Available>> {
     check_for_update_with_key(current, fetch, &APP_UPDATE_PUBLIC_KEY)
@@ -105,9 +104,9 @@ pub fn check_for_update_with_key(
     Available::new(manifest).map(Some)
 }
 
-/// Download the installer zip into a fresh `fldailyedit-app-update-*` temp directory
-/// (streaming, size-capped, SHA-256 verified), validate that it contains exactly one
-/// `FLDailyEditInstaller.exe`, extract it with fsync and delete the archive.
+/// Download the release executable into a fresh `fldailyedit-app-update-*` temp
+/// directory (streaming, size-capped, size and SHA-256 verified against the signed
+/// manifest, fsynced).
 ///
 /// `progress(done, total)` is called with `(0, total)` first and after every chunk;
 /// `cancel` is polled before the request and before every chunk. On any failure the
@@ -124,13 +123,9 @@ pub fn download_and_stage(
         .prefix(STAGING_PREFIX)
         .tempdir()
         .map_err(|error| Error::io("cannot create the update staging directory", error))?;
-    let archive_path = staging.path().join(&manifest.asset_name);
-    let executable = staging.path().join(APP_EXECUTABLE_ENTRY);
+    let executable = staging.path().join(APP_EXECUTABLE_NAME);
 
-    download_archive(manifest, fetch, &archive_path, progress, cancel)?;
-    extract_executable(&archive_path, &executable)?;
-    fs::remove_file(&archive_path)
-        .map_err(|error| Error::io("cannot remove the downloaded archive", error))?;
+    download_executable(manifest, fetch, &executable, progress, cancel)?;
 
     // Success: the caller now owns the directory (see `Staged::discard`).
     let _ = staging.keep();
@@ -140,7 +135,7 @@ pub fn download_and_stage(
     })
 }
 
-fn download_archive(
+fn download_executable(
     manifest: &Manifest,
     fetch: &dyn Fetch,
     destination: &Path,
@@ -150,24 +145,24 @@ fn download_archive(
     if cancel.load(Ordering::Relaxed) {
         return Err(Error::Cancelled);
     }
-    let total = manifest.archive_size;
+    let total = manifest.size;
     let response = fetch.get(&manifest.download_url, DOWNLOAD_TIMEOUT)?;
     if let Some(length) = response.content_length {
-        if length > MAX_APP_ARCHIVE_BYTES {
+        if length > MAX_APP_EXECUTABLE_BYTES {
             return Err(Error::TooLarge(
-                "installer archive exceeds the download limit".into(),
+                "update executable exceeds the download limit".into(),
             ));
         }
         if length > total {
             return Err(Error::SizeMismatch(
-                "installer archive exceeds its declared size".into(),
+                "update executable exceeds its declared size".into(),
             ));
         }
     }
 
     let mut body = response.body;
     let mut output = File::create(destination)
-        .map_err(|error| Error::io("cannot create the archive download file", error))?;
+        .map_err(|error| Error::io("cannot create the executable download file", error))?;
     let mut digest = Sha256::new();
     let mut buffer = vec![0_u8; DOWNLOAD_CHUNK_BYTES];
     let mut downloaded = 0_u64;
@@ -185,19 +180,19 @@ fn download_archive(
             Err(error) => return Err(Error::from_body_read(error)),
         };
         let next = downloaded + read as u64;
-        if next > MAX_APP_ARCHIVE_BYTES {
+        if next > MAX_APP_EXECUTABLE_BYTES {
             return Err(Error::TooLarge(
-                "installer archive exceeds the download limit".into(),
+                "update executable exceeds the download limit".into(),
             ));
         }
         if next > total {
             return Err(Error::SizeMismatch(
-                "installer archive exceeds its declared size".into(),
+                "update executable exceeds its declared size".into(),
             ));
         }
         output
             .write_all(&buffer[..read])
-            .map_err(|error| Error::io("cannot write the archive download file", error))?;
+            .map_err(|error| Error::io("cannot write the executable download file", error))?;
         digest.update(&buffer[..read]);
         downloaded = next;
         progress(downloaded, total);
@@ -207,21 +202,21 @@ fn download_archive(
             "received {downloaded} of {total} bytes"
         )));
     }
-    if format!("{:x}", digest.finalize()) != manifest.archive_sha256 {
+    if format!("{:x}", digest.finalize()) != manifest.sha256 {
         return Err(Error::ChecksumMismatch);
     }
     output
         .sync_all()
-        .map_err(|error| Error::io("cannot flush the archive download file", error))
+        .map_err(|error| Error::io("cannot flush the executable download file", error))
 }
 
 /// Delete the staging directory that holds `staged_executable`. Does nothing unless
-/// the file is named `FLDailyEditInstaller.exe` inside a `fldailyedit-app-update-*`
+/// the file is named `FLDailyEdit.exe` inside a `fldailyedit-app-update-*`
 /// directory; errors are ignored.
 pub fn cleanup_staged(staged_executable: &Path) {
-    let is_installer_exe = staged_executable
+    let is_app_exe = staged_executable
         .file_name()
-        .is_some_and(|name| name == APP_EXECUTABLE_ENTRY);
+        .is_some_and(|name| name == APP_EXECUTABLE_NAME);
     let Some(directory) = staged_executable.parent() else {
         return;
     };
@@ -229,7 +224,7 @@ pub fn cleanup_staged(staged_executable: &Path) {
         .file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| name.starts_with(STAGING_PREFIX));
-    if is_installer_exe && named_like_staging {
+    if is_app_exe && named_like_staging {
         let _ = fs::remove_dir_all(directory);
     }
 }
