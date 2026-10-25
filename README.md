@@ -8,21 +8,20 @@ formations.
 
 ## Project status
 
-FL Daily Edit is back as a local app: it updates your own save on your own
-PC. Daily prebuilt saves are no longer published, and the GitHub workflows that
-built them are disabled.
+FL Daily Edit is actively maintained. It is a local app: it updates your own
+save on your own PC, and app updates arrive through the built-in signed
+self-update. Bug reports and suggestions are welcome in
+[Issues](https://github.com/gvoze32/fldailyedit/issues). Daily prebuilt saves
+are no longer published.
 
-My Evoweb account was banned for "stealing other people's work and claiming
-it as your own." I dispute this. FL Daily Edit was written from scratch, and
-its full development history, from the
+My Evoweb account was banned for "stealing other people's work and claiming it
+as your own." I dispute this. FL Daily Edit was written from scratch, and its
+full development history, from the
 [first commit](https://github.com/gvoze32/fldailyedit/commit/07dfac340f307eb881f6d680288b99eeb8ea75ba)
 on 2026-08-02 onward, is public in the
 [commit log](https://github.com/gvoze32/fldailyedit/commits). Third-party
 components keep their original licenses and attribution, see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-This may be both my first and last PES mod. Thanks to everyone who used the
-project, reported issues, and helped improve it.
 
 ## Quick start (Windows)
 
