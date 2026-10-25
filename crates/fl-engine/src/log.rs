@@ -160,9 +160,14 @@ impl TransferLog {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
+        // Read/write, not append: on Windows `File::lock` is `LockFileEx`,
+        // which needs GENERIC_READ or GENERIC_WRITE access; an append-only
+        // handle lacks FILE_WRITE_DATA and fails with ERROR_ACCESS_DENIED.
         let lock = OpenOptions::new()
             .create(true)
-            .append(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
             .open(self.lock_path())?;
         lock.lock()?;
         let mut file = OpenOptions::new()
