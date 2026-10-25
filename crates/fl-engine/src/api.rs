@@ -111,8 +111,6 @@ pub struct UpdateResult {
     /// SHA-256 (hex) of the written save.
     pub written_sha256: Option<String>,
     pub counts: ChangeCounts,
-    /// Markdown transfer report for this run.
-    pub report_markdown: String,
     /// Report files written for this run (markdown/html), if any.
     pub report_paths: Vec<PathBuf>,
     /// Events that were not applied, save-relevant rows first.

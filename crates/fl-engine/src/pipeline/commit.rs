@@ -103,21 +103,16 @@ pub(crate) fn log_records(
         .collect()
 }
 
-/// Reports written for one run.
-pub(crate) struct Reports {
-    pub(crate) markdown: String,
-    pub(crate) paths: Vec<PathBuf>,
-}
-
 /// Append the audit log and write the reports. Failures are returned as
-/// warnings: the save itself is already safely written.
+/// warnings: the save itself is already safely written. Returns the report
+/// files written (empty when writing them failed).
 pub(crate) fn publish_records(
     paths: &StatePaths,
     scope: &str,
     entries: &[LogRecord],
     skipped: &[SkippedRow],
     now: DateTime<Utc>,
-) -> (Option<Reports>, Vec<String>) {
+) -> (Vec<PathBuf>, Vec<String>) {
     let mut warnings = Vec::new();
     let log = TransferLog::new(paths.transfer_log());
     if let Err(error) = log.append(&log_records(entries, scope, now)) {
@@ -125,15 +120,12 @@ pub(crate) fn publish_records(
             "Save published, but the transfer log could not be updated: {error}"
         ));
     }
-    let reports = match write_reports(paths, scope, entries, skipped, now) {
-        Ok(reports) => Some(reports),
-        Err(error) => {
-            warnings.push(format!(
-                "Save published, but report generation failed: {error}"
-            ));
-            None
-        }
-    };
+    let reports = write_reports(paths, scope, entries, skipped, now).unwrap_or_else(|error| {
+        warnings.push(format!(
+            "Save published, but report generation failed: {error}"
+        ));
+        Vec::new()
+    });
     (reports, warnings)
 }
 
@@ -145,13 +137,9 @@ pub(crate) fn write_reports(
     entries: &[LogRecord],
     skipped: &[SkippedRow],
     now: DateTime<Utc>,
-) -> Result<Reports, report::ReportError> {
-    let (markdown, written) =
-        report::write_reports(&paths.reports_dir(scope), entries, skipped, now)?;
-    Ok(Reports {
-        markdown,
-        paths: vec![written.markdown, written.html, written.skipped],
-    })
+) -> Result<Vec<PathBuf>, report::ReportError> {
+    let written = report::write_reports(&paths.reports_dir(scope), entries, skipped, now)?;
+    Ok(vec![written.markdown, written.html, written.skipped])
 }
 
 #[cfg(test)]

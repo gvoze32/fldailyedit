@@ -187,14 +187,6 @@ impl App {
         self.run.is_some()
     }
 
-    /// Test and demo hook: switch the result screen to `tab`.
-    #[doc(hidden)]
-    pub fn show_result_tab(&mut self, tab: result::Tab) {
-        if let Some(view) = &mut self.result {
-            view.tab = tab;
-        }
-    }
-
     /// Test and demo hook: edit the setup state directly.
     #[doc(hidden)]
     pub fn setup_mut(&mut self) -> &mut SetupState {

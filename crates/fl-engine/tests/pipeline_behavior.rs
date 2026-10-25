@@ -108,10 +108,6 @@ fn dry_run_writes_nothing_anywhere() {
         result.counts
     );
     assert!(
-        result.report_markdown.contains("Dry-run"),
-        "preview report marks rows as dry-run"
-    );
-    assert!(
         result.report_paths.is_empty()
             && result.backup_path.is_none()
             && result.written_sha256.is_none()

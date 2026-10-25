@@ -26,7 +26,6 @@ serde_json.workspace = true
 chrono.workspace = true
 clap = { version = "4", features = ["derive", "wrap_help"] }
 eframe = { version = "0.37", default-features = false, features = ["wgpu", "default_fonts"] }
-egui_commonmark = { version = "0.26", default-features = false, features = ["pulldown_cmark"] }
 rfd = "0.17"
 opener = { version = "0.9", features = ["reveal"] }
 

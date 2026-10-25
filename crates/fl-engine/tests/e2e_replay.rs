@@ -194,10 +194,6 @@ fn replay_matches_golden(scenario: Scenario) {
         differences.join("\n")
     );
 
-    assert_eq!(
-        result.report_markdown,
-        fs::read_to_string(&paths[0]).unwrap()
-    );
     assert!(result.backup_path.as_ref().is_some_and(|p| p.is_file()));
     assert!(
         !workdir.output.with_file_name(".EDIT00000000.lock").exists(),

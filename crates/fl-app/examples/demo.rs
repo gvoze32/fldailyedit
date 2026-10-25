@@ -59,7 +59,6 @@ fn main() -> eframe::Result {
                 shirt_numbers: 2,
                 ..ChangeCounts::default()
             },
-            report_markdown: "# Demo report\n\n- one\n- two\n".into(),
             ..UpdateResult::default()
         }),
     };

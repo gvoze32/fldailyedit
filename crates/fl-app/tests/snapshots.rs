@@ -70,26 +70,6 @@ fn skipped(
     }
 }
 
-const REPORT: &str = "\
-# Transfer summary
-
-**Window:** since 2026-01-01 · **Source:** FotMob, Transfermarkt
-
-## Applied (4)
-
-| Player | From | To | Date |
-|---|---|---|---|
-| Marc Guéhi | Crystal Palace | Manchester City | 2026-01-14 |
-| Antoine Semenyo | Bournemouth | Manchester City | 2026-01-09 |
-| Conor Gallagher | Atlético Madrid | Tottenham Hotspur | 2026-01-05 |
-| Jan Bednarek | Southampton | Aston Villa | 2026-01-03 |
-
-## Shirt numbers
-
-- Manchester City: Guéhi **#15**, Semenyo **#42**
-- Tottenham Hotspur: Gallagher **#22**
-";
-
 fn updated_result() -> UpdateResult {
     UpdateResult {
         target_path: r"C:\Users\Player\Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\2026\save\EDIT00000000".into(),
@@ -97,7 +77,6 @@ fn updated_result() -> UpdateResult {
         backup_path: Some(r"C:\Users\Player\AppData\Local\FLDailyEdit\backups\EDIT00000000-2026-10-25.bak".into()),
         written_sha256: Some("9f2c1a7d0b6e44f1a3c58e90d2b7a6c4f1e83d5a0b9c7e2f4d6a8b1c3e5f7092".into()),
         counts: ChangeCounts { transfers: 4, shirt_numbers: 3, captains: 1, formations: 2, tactics: 0, unchanged: 311, safety_skipped: 0 },
-        report_markdown: REPORT.into(),
         report_paths: vec![r"C:\Users\Player\AppData\Local\FLDailyEdit\reports\transfer_summary.md".into()],
         skipped: vec![
             skipped("Kamaldeen Sulemana", "Southampton", "Atalanta", "player_not_in_save", "no player with this name in the save", false),
@@ -316,21 +295,6 @@ fn result_updated_dark() {
         Theme::Dark,
         "result_updated_dark",
         |_| {},
-    );
-}
-
-#[test]
-fn result_updated_not_applied_tab() {
-    if skip_without_baselines() {
-        return;
-    }
-    finished(
-        Ok(updated_result()),
-        Theme::Light,
-        "result_not_applied",
-        |app| {
-            app.show_result_tab(fl_app::gui::result::Tab::NotApplied);
-        },
     );
 }
 

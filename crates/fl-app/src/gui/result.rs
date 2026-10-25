@@ -1,16 +1,20 @@
-//! Result screen: headline, counts, and the Report / Not applied / Details tabs.
+//! Result screen: headline, counts and a one-screen summary. The full report
+//! lives in the report files; nothing here scrolls.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use eframe::egui::{self, RichText, ScrollArea, Ui, vec2};
-use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
+use eframe::egui::{self, RichText, Ui, vec2};
 use fl_engine::api::{ErrorCode, Outcome, Stage, UpdateError, UpdateRequest, UpdateResult};
 
 use super::Action;
 use super::copy::{ErrorCopy, error_copy, stage_label};
 use super::theme::{self, Tone};
-use crate::report::{format_elapsed, group_skipped, reason_label, skipped_line};
+use crate::report::{format_elapsed, group_skipped, reason_label};
+
+/// Not-applied reasons listed by name; the rest fold into one line so the
+/// summary always fits the window.
+const MAX_REASONS: usize = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -21,20 +25,6 @@ pub enum Kind {
     Failed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Tab {
-    Report,
-    NotApplied,
-    Details,
-}
-
-/// One line of the "Not applied" list.
-#[derive(Debug, Clone, Copy)]
-enum Row {
-    Header { group: usize },
-    Item { index: usize },
-}
-
 struct Group {
     reason: String,
     total: usize,
@@ -43,7 +33,6 @@ struct Group {
 
 pub struct ResultView {
     pub kind: Kind,
-    pub tab: Tab,
     pub request: UpdateRequest,
     pub outcome: Result<UpdateResult, UpdateError>,
     /// The last stage the engine reported before finishing.
@@ -51,8 +40,6 @@ pub struct ResultView {
     pub elapsed: Duration,
     copy: Option<ErrorCopy>,
     groups: Vec<Group>,
-    rows: Vec<Row>,
-    cache: CommonMarkCache,
 }
 
 impl ResultView {
@@ -76,50 +63,27 @@ impl ResultView {
             .err()
             .map(|error| error_copy(error.code, error.stage.or(last_stage)));
 
-        let (mut groups, mut rows) = (Vec::new(), Vec::new());
-        if let Ok(result) = &outcome {
-            let position = |item: &fl_engine::api::SkippedTransfer| {
-                result
-                    .skipped
-                    .iter()
-                    .position(|other| std::ptr::eq(other, item))
-            };
-            for (index, group) in group_skipped(&result.skipped).into_iter().enumerate() {
-                rows.push(Row::Header { group: index });
-                rows.extend(
-                    group
-                        .items
-                        .iter()
-                        .filter_map(|item| position(item))
-                        .map(|index| Row::Item { index }),
-                );
-                groups.push(Group {
-                    reason: group.reason.to_owned(),
-                    total: group.items.len(),
-                    relevant: group.relevant,
-                });
-            }
-        }
-        let has_report = outcome
-            .as_ref()
-            .is_ok_and(|result| !result.report_markdown.trim().is_empty());
-        let tab = match kind {
-            Kind::Updated | Kind::Preview => Tab::Report,
-            Kind::NoChanges if !groups.is_empty() => Tab::NotApplied,
-            Kind::NoChanges if has_report => Tab::Report,
-            _ => Tab::Details,
-        };
+        let groups = outcome.as_ref().map_or_else(
+            |_| Vec::new(),
+            |result| {
+                group_skipped(&result.skipped)
+                    .into_iter()
+                    .map(|group| Group {
+                        reason: group.reason.to_owned(),
+                        total: group.items.len(),
+                        relevant: group.relevant,
+                    })
+                    .collect()
+            },
+        );
         Self {
             kind,
-            tab,
             request,
             outcome,
             last_stage,
             elapsed,
             copy,
             groups,
-            rows,
-            cache: CommonMarkCache::default(),
         }
     }
 
@@ -261,7 +225,7 @@ impl ResultView {
     }
 }
 
-pub fn ui(ui: &mut Ui, view: &mut ResultView, actions: &mut Vec<Action>) {
+pub fn ui(ui: &mut Ui, view: &ResultView, actions: &mut Vec<Action>) {
     ui.add_space(6.0);
     headline(ui, view);
 
@@ -275,7 +239,10 @@ pub fn ui(ui: &mut Ui, view: &mut ResultView, actions: &mut Vec<Action>) {
         ui.add_space(10.0);
         counts(ui, view);
         ui.add_space(12.0);
-        tabs(ui, view);
+        ui.columns(2, |columns| {
+            not_applied(&mut columns[0], view);
+            summary(&mut columns[1], view, result);
+        });
     } else {
         ui.add_space(10.0);
         failure(ui, view, actions);
@@ -323,113 +290,95 @@ fn counts(ui: &mut Ui, view: &ResultView) {
     });
 }
 
-fn tabs(ui: &mut Ui, view: &mut ResultView) {
-    ui.horizontal(|ui| {
-        for (tab, label) in [
-            (Tab::Report, "Report".to_owned()),
-            (
-                Tab::NotApplied,
-                format!("Not applied ({})", view.not_applied()),
-            ),
-            (Tab::Details, "Details".to_owned()),
-        ] {
-            if ui
-                .selectable_label(view.tab == tab, RichText::new(label).strong())
-                .clicked()
-            {
-                view.tab = tab;
-            }
+/// Text-height rows: the summary cards must fit the window without scrolling.
+fn compact(ui: &mut Ui) {
+    let spacing = ui.spacing_mut();
+    spacing.item_spacing.y = 6.0;
+    spacing.interact_size.y = 0.0;
+}
+
+/// Not-applied transfers by reason; the transfers themselves are in the report.
+fn not_applied(ui: &mut Ui, view: &ResultView) {
+    theme::card(ui, |ui| {
+        ui.set_width(ui.available_width());
+        compact(ui);
+        ui.label(RichText::new(format!("Not applied ({})", view.not_applied())).strong());
+        if view.groups.is_empty() {
+            ui.label(RichText::new("Every transfer found was applied.").color(theme::muted(ui)));
+            return;
+        }
+        let shown = view.groups.len().min(MAX_REASONS);
+        for group in &view.groups[..shown] {
+            ui.horizontal(|ui| {
+                ui.label(format!("{} ({})", reason_label(&group.reason), group.total));
+                if group.relevant > 0 {
+                    ui.label(
+                        RichText::new(format!("{} touch your save", group.relevant))
+                            .color(theme::tone_color(ui, Tone::Warn)),
+                    );
+                }
+            });
+        }
+        let rest = &view.groups[shown..];
+        if !rest.is_empty() {
+            let transfers: usize = rest.iter().map(|group| group.total).sum();
+            ui.label(
+                RichText::new(format!(
+                    "+{} more reason{} ({transfers} transfer{})",
+                    rest.len(),
+                    if rest.len() == 1 { "" } else { "s" },
+                    if transfers == 1 { "" } else { "s" },
+                ))
+                .color(theme::muted(ui)),
+            );
         }
     });
-    ui.separator();
-    let height = ui.available_height().max(120.0);
-    match view.tab {
-        Tab::Report => ScrollArea::vertical()
-            .id_salt("report")
-            .max_height(height)
-            .auto_shrink([false, false])
-            .show(ui, |ui| report_tab(ui, view)),
-        Tab::NotApplied => not_applied_tab(ui, view, height),
-        Tab::Details => ScrollArea::vertical()
-            .id_salt("details")
-            .max_height(height)
-            .auto_shrink([false, false])
-            .show(ui, |ui| details_tab(ui, view)),
-    };
 }
 
-fn report_tab(ui: &mut Ui, view: &mut ResultView) {
-    let markdown = view
-        .result()
-        .map(|result| result.report_markdown.clone())
-        .unwrap_or_default();
-    if markdown.trim().is_empty() {
-        ui.label(RichText::new("No report was produced for this run.").color(theme::muted(ui)));
-    } else {
-        CommonMarkViewer::new().show(ui, &mut view.cache, &markdown);
-    }
-}
-
-fn not_applied_tab(
-    ui: &mut Ui,
-    view: &ResultView,
-    height: f32,
-) -> egui::scroll_area::ScrollAreaOutput<()> {
-    let Some(result) = view.result() else {
-        unreachable!("tabs only exist for successful runs")
-    };
-    if view.rows.is_empty() {
-        ui.label(RichText::new("Every transfer found was applied.").color(theme::muted(ui)));
-        return ScrollArea::vertical().show(ui, |_| {});
-    }
-    let row_height = ui.text_style_height(&egui::TextStyle::Body) + 8.0;
-    ScrollArea::vertical()
-        .id_salt("not_applied")
-        .max_height(height)
-        .auto_shrink([false, false])
-        .show_rows(ui, row_height, view.rows.len(), |ui, range| {
-            for row in &view.rows[range] {
-                match *row {
-                    Row::Header { group } => {
-                        let group = &view.groups[group];
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new(format!(
-                                    "{} ({})",
-                                    reason_label(&group.reason),
-                                    group.total
-                                ))
-                                .strong()
-                                .size(16.0),
-                            );
-                            if group.relevant > 0 {
-                                ui.label(
-                                    RichText::new(format!("{} touch your save", group.relevant))
-                                        .color(theme::tone_color(ui, Tone::Warn)),
-                                );
-                            }
-                        });
-                    }
-                    Row::Item { index } => {
-                        let item = &result.skipped[index];
-                        ui.horizontal(|ui| {
-                            ui.add_space(12.0);
-                            if item.relevant {
-                                theme::icon(
-                                    ui,
-                                    theme::Icon::Dot,
-                                    theme::tone_color(ui, Tone::Warn),
-                                    12.0,
-                                );
-                            } else {
-                                ui.add_space(16.0);
-                            }
-                            ui.add(egui::Label::new(skipped_line(item)).truncate());
-                        });
-                    }
+/// One-line facts about the run and where the full report is.
+fn summary(ui: &mut Ui, view: &ResultView, result: &UpdateResult) {
+    theme::card(ui, |ui| {
+        ui.set_width(ui.available_width());
+        compact(ui);
+        egui::Grid::new("summary")
+            .num_columns(2)
+            .spacing(vec2(12.0, 6.0))
+            .show(ui, |ui| {
+                let row = |ui: &mut Ui, key: &str, value: String| {
+                    ui.label(RichText::new(key).color(theme::muted(ui)));
+                    ui.add(egui::Label::new(value).truncate());
+                    ui.end_row();
+                };
+                row(ui, "Time taken", format_elapsed(view.elapsed));
+                row(
+                    ui,
+                    "Already up to date",
+                    result.counts.unchanged.to_string(),
+                );
+                row(
+                    ui,
+                    "Skipped for safety",
+                    result.counts.safety_skipped.to_string(),
+                );
+                // File names only; the buttons below open them and
+                // "Copy diagnostics" carries the full paths.
+                let file_name = |path: &Path| {
+                    path.file_name().map_or_else(
+                        || path.display().to_string(),
+                        |name| name.to_string_lossy().into_owned(),
+                    )
+                };
+                if let Some(backup) = view.backup() {
+                    row(ui, "Backup", file_name(backup));
                 }
-            }
-        })
+                let report = match (view.report_file(), view.kind) {
+                    (Some(path), _) => file_name(path),
+                    (None, Kind::Preview) => "Not written for a preview".to_owned(),
+                    (None, _) => "Not written".to_owned(),
+                };
+                row(ui, "Full report", report);
+            });
+    });
 }
 
 fn details_tab(ui: &mut Ui, view: &ResultView) {
@@ -605,7 +554,7 @@ mod tests {
     }
 
     #[test]
-    fn classifies_outcomes_and_picks_the_useful_tab() {
+    fn classifies_outcomes() {
         let ok = |outcome| {
             ResultView::new(
                 request(),
@@ -617,8 +566,7 @@ mod tests {
                 Duration::ZERO,
             )
         };
-        let updated = ok(Outcome::Updated);
-        assert_eq!((updated.kind, updated.tab), (Kind::Updated, Tab::Report));
+        assert_eq!(ok(Outcome::Updated).kind, Kind::Updated);
         assert_eq!(ok(Outcome::NoChanges).headline(), "No changes needed");
         assert_eq!(ok(Outcome::Preview).headline(), "Preview ready");
 
@@ -642,7 +590,7 @@ mod tests {
     }
 
     #[test]
-    fn not_applied_rows_put_relevant_groups_first_and_cover_every_item() {
+    fn not_applied_groups_put_relevant_reasons_first() {
         let result = UpdateResult {
             outcome: Outcome::Updated,
             counts: ChangeCounts::default(),
@@ -655,15 +603,12 @@ mod tests {
         };
         let view = ResultView::new(request(), Ok(result), None, Duration::ZERO);
         assert_eq!(view.not_applied(), 3);
-        let order: Vec<_> = view
-            .rows
+        let groups: Vec<_> = view
+            .groups
             .iter()
-            .map(|row| match row {
-                Row::Header { group } => view.groups[*group].reason.clone(),
-                Row::Item { index } => view.result().unwrap().skipped[*index].player.clone(),
-            })
+            .map(|group| (group.reason.as_str(), group.total, group.relevant))
             .collect();
-        assert_eq!(order, ["roster_full", "b", "not_in_save", "a", "c"]);
+        assert_eq!(groups, [("roster_full", 1, 1), ("not_in_save", 2, 0)]);
     }
 
     #[test]

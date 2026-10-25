@@ -70,7 +70,9 @@ where the last one stopped.
   club lists from your own game installation; it does not ship any. Choose the
   game that matches your save, or the update stops before anything is written.
 - **New players are never created.** If a player isn't in your save, his
-  transfer is skipped and listed under **Not applied**.
+  transfer is skipped and counted under **Not applied**.
+- **The result screen shows a summary.** Every change and every skipped
+  transfer is listed in the full report: click **Open report**.
 - **Your save is checked before and after every update.** If anything looks
   wrong, nothing is written.
 - **Backups** of your old saves, reports and logs are kept in

@@ -22,7 +22,7 @@ use fl_sources::dates::parse_iso_datetime;
 use fl_sources::model::ScrapeResult;
 
 use self::apply::{Applied, ApplyInput};
-use self::commit::{Committed, Reports};
+use self::commit::Committed;
 use self::context::Context;
 use self::prepare::{Prepared, fail};
 use crate::api::{
@@ -253,14 +253,11 @@ impl Run {
         self.verify(request, cancel)?;
         cancel.check(Stage::Verifying)?;
 
-        let now = services.clock.now();
         if request.dry_run {
-            let markdown = report::render_markdown(&applied.entries, &skipped, now);
             return Ok(UpdateResult {
                 target_path: request.target_path().to_path_buf(),
                 outcome: Outcome::Preview,
                 counts,
-                report_markdown: markdown,
                 skipped: public_skipped(&skipped),
                 warnings,
                 ..UpdateResult::default()
@@ -274,7 +271,7 @@ impl Run {
             written_sha256,
         } = commit::write_save(&mut self.prepared, paths, services.clock.now(), cancel)
             .inspect_err(|_| self.rollback())?;
-        let (reports, publish_warnings) = commit::publish_records(
+        let (report_paths, publish_warnings) = commit::publish_records(
             paths,
             &self.prepared.scope,
             &applied.entries,
@@ -282,16 +279,12 @@ impl Run {
             services.clock.now(),
         );
         warnings.extend(publish_warnings);
-        let (report_markdown, report_paths) = reports
-            .map(|Reports { markdown, paths }| (markdown, paths))
-            .unwrap_or_default();
         Ok(UpdateResult {
             target_path: request.target_path().to_path_buf(),
             outcome: Outcome::Updated,
             backup_path,
             written_sha256,
             counts,
-            report_markdown,
             report_paths,
             skipped: public_skipped(&skipped),
             warnings,
@@ -337,25 +330,23 @@ impl Run {
         mut warnings: Vec<String>,
         reporter: &mut Reporter<'_>,
     ) -> Result<UpdateResult, UpdateError> {
-        let now = services.clock.now();
-        let (report_markdown, report_paths) = if request.dry_run {
-            (report::render_markdown(&[], &skipped, now), Vec::new())
+        let report_paths = if request.dry_run {
+            Vec::new()
         } else {
-            match commit::write_reports(paths, &self.prepared.scope, &[], &skipped, now) {
-                Ok(Reports { markdown, paths }) => (markdown, paths),
-                Err(error) => {
+            let now = services.clock.now();
+            commit::write_reports(paths, &self.prepared.scope, &[], &skipped, now).unwrap_or_else(
+                |error| {
                     let warning = format!("Could not write the not-applied report: {error}");
                     reporter.say(Stage::Complete, format!("⚠ {warning}"));
                     warnings.push(warning);
-                    (report::render_markdown(&[], &skipped, now), Vec::new())
-                }
-            }
+                    Vec::new()
+                },
+            )
         };
         Ok(UpdateResult {
             target_path: request.target_path().to_path_buf(),
             outcome: Outcome::NoChanges,
             counts,
-            report_markdown,
             report_paths,
             skipped: public_skipped(&skipped),
             warnings,

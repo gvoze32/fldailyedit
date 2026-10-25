@@ -96,13 +96,13 @@ pub fn read_skipped(path: &Path) -> Vec<SkippedRow> {
 
 /// Writes the markdown report, the HTML report and the skipped-transfer JSONL
 /// (rewritten every run, empty when nothing was skipped) into `dir`.
-/// Returns the markdown text and the written paths.
+/// Returns the written paths.
 pub fn write_reports(
     dir: &Path,
     entries: &[LogRecord],
     skipped: &[SkippedRow],
     generated: DateTime<Utc>,
-) -> Result<(String, ReportPaths), ReportError> {
+) -> Result<ReportPaths, ReportError> {
     fs::create_dir_all(dir)?;
     let markdown = render_markdown(entries, skipped, generated);
     let html = render_html(entries, skipped, generated);
@@ -119,7 +119,7 @@ pub fn write_reports(
     write_atomic(&paths.markdown, markdown.as_bytes())?;
     write_atomic(&paths.html, html.as_bytes())?;
     write_atomic(&paths.skipped, jsonl.as_bytes())?;
-    Ok((markdown, paths))
+    Ok(paths)
 }
 
 // ---------------------------------------------------------------------------
@@ -1056,9 +1056,11 @@ mod tests {
         fs::create_dir_all(&out).unwrap();
         fs::write(out.join(SKIPPED_TRANSFERS_FILENAME), "{\"stale\": true}\n").unwrap();
 
-        let (markdown, paths) = write_reports(&out, &[], &[], generated).unwrap();
-        assert_eq!(markdown, render_markdown(&[], &[], generated));
-        assert_eq!(fs::read_to_string(&paths.markdown).unwrap(), markdown);
+        let paths = write_reports(&out, &[], &[], generated).unwrap();
+        assert_eq!(
+            fs::read_to_string(&paths.markdown).unwrap(),
+            render_markdown(&[], &[], generated)
+        );
         assert_eq!(
             fs::read_to_string(&paths.html).unwrap(),
             render_html(&[], &[], generated)
