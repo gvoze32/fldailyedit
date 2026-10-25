@@ -1,44 +1,62 @@
 name: CI Tests
 
+# Disabled: tests run locally with `cargo test --workspace`. Restore the
+# triggers below to re-enable CI on push and pull requests.
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  # push:
+  #   branches: [main]
+  # pull_request:
+  #   branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   test:
-    name: Test on Ubuntu / Python 3.12
+    name: Format, lint and test on Ubuntu / Rust stable
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: Install window-system headers for the app crate
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwayland-dev libxkbcommon-dev libx11-dev libxcb1-dev
+
+      - name: Restore Cargo cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          python-version: "3.12"
-          cache: "pip"
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cargo-ci-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-ci-${{ runner.os }}-
 
-      - name: Compile pesXdecrypter binaries on Ubuntu
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # The fl-app `snapshots` test renders every screen through wgpu and
+      # compares PNGs, which needs a GPU adapter; it runs locally
+      # (`cargo test --workspace`) and is skipped on the GPU-less runner.
+      - name: Test workspace
         run: |
-          make -C vendor/pesXdecrypter clean
-          make -C vendor/pesXdecrypter
-          chmod +x vendor/pesXdecrypter/decrypter21 vendor/pesXdecrypter/encrypter21
-
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .
-          pip install pytest
-
-
-      - name: Run Test Suite
-        run: |
-          pytest -v
-
+          cargo test --workspace --exclude fl-app
+          cargo test -p fl-app --lib --test cli --test flows

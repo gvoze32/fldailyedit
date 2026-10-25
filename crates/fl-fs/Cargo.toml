@@ -1,0 +1,10 @@
+[package]
+name = "fl-fs"
+description = "Crash-safe file replacement shared by the save, cache and report writers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

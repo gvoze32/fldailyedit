@@ -1,14 +1,5 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-dist/
-build/
-*.egg
-
-# Virtual environment
-.venv/
-venv/
+# Rust
+/target/
 
 # IDE
 .vscode/
@@ -19,13 +10,11 @@ venv/
 # Project
 backups/
 output/
+state/
 storage/
-*.dat
 *.log
 data/transfer_log.jsonl
-data/cron.log
-*.bak.*
-.pytest_cache/
+.*.lock
 
 # OS
 .DS_Store
@@ -41,6 +30,5 @@ MEMORY.md
 .codegraph
 docs/
 
-# Native build products
-vendor/pesXdecrypter/decrypter21
-vendor/pesXdecrypter/encrypter21
+# Large local-only parity artifacts
+testdata/local/

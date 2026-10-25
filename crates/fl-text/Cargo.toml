@@ -1,0 +1,14 @@
+[package]
+name = "fl-text"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+unicode-normalization.workspace = true
+
+[dev-dependencies]
+flate2.workspace = true
+serde.workspace = true
+serde_json.workspace = true

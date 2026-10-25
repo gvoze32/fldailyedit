@@ -1,0 +1,64 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+fl-fs = { path = "crates/fl-fs" }
+fl-save = { path = "crates/fl-save" }
+fl-text = { path = "crates/fl-text" }
+fl-sources = { path = "crates/fl-sources" }
+fl-engine = { path = "crates/fl-engine" }
+thiserror = "2"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
+tracing = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "brotli", "json", "cookies"] }
+scraper = "0.24"
+flate2 = "1"
+base64 = "0.22"
+sha2 = "0.10"
+tempfile = "3"
+regex = "1"
+html-escape = "0.2"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+csv = "1"
+unicode-normalization = "0.1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+# Full debuginfo makes each agent/target dir several GB; line tables keep
+# usable backtraces.
+[profile.dev]
+debug = "line-tables-only"
+
+# Planning/matching replays score tens of thousands of fuzzy matches; the
+# golden e2e tests take minutes in plain debug.
+[profile.dev.package.fl-text]
+opt-level = 3
+
+[profile.dev.package.fl-engine]
+opt-level = 2
+
+[profile.dev.package.fl-sources]
+opt-level = 2
+
+# The EDIT-file stream cipher and parity tests walk ~11 MB per save; unoptimized
+# builds make `cargo test -p fl-save` take minutes.
+[profile.dev.package.fl-save]
+opt-level = 2
+
+# fl-save parity tests hash those saves.
+[profile.dev.package.sha2]
+opt-level = 3

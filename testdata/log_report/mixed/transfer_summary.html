@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Football Life Live Sync Report</title>
+<style>
+  :root { --ink:#f5f7f2; --muted:#a9b3aa; --pitch:#07130e; --surface:#101d17; --surface-2:#16261e; --line:#2a3c31; --lime:#b8f34a; --cyan:#62d9ff; --amber:#ffd166; --green:#70e19a; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:clamp(1rem,3vw,3rem); background:radial-gradient(circle at 85% -10%,#1a3928 0,transparent 34rem),var(--pitch); color:var(--ink); font:15px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }
+  .shell { width:min(1180px,100%); margin:auto; }
+  .masthead { position:relative; overflow:hidden; padding:clamp(1.5rem,4vw,3rem); background:#0d1b14; border:1px solid var(--line); border-radius:16px; box-shadow:0 22px 60px rgba(0,0,0,.28); }
+  .masthead::after { content:""; position:absolute; inset:auto -8% -70% auto; width:24rem; aspect-ratio:1; border:1px solid rgba(184,243,74,.24); border-radius:50%; box-shadow:0 16px 48px rgba(0,0,0,.22); }
+  .kicker { margin:0 0 .55rem; color:var(--lime); font-size:.78rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+  h1 { max-width:18ch; margin:0; font-size:clamp(2rem,5vw,4.5rem); line-height:.98; letter-spacing:-.035em; text-wrap:balance; }
+  .generated { margin:1rem 0 0; color:var(--muted); }
+  .summary { display:grid; grid-template-columns:repeat(7,1fr); margin:1.25rem 0 2.5rem; border:1px solid var(--line); border-radius:14px; overflow:hidden; background:var(--surface); }
+  .metric strong { display:block; color:var(--lime); font-size:clamp(1.7rem,3vw,2.45rem); line-height:1; letter-spacing:-.03em; }
+  .metric span { display:block; margin-top:.45rem; color:var(--muted); font-size:.82rem; }
+  .action-line { margin:-1.3rem 0 2.5rem; color:var(--muted); text-align:right; font-size:.86rem; } .action-line strong { color:var(--ink); }
+  .report-section { margin-top:1.5rem; background:var(--surface); border:1px solid var(--line); border-radius:16px; overflow:hidden; box-shadow:0 16px 44px rgba(0,0,0,.18); }
+  .section-heading { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:1.25rem 1.4rem; background:var(--surface-2); }
+  .section-heading h2 { margin:0; font-size:1.18rem; letter-spacing:-.015em; } .section-heading p { margin:.2rem 0 0; color:var(--muted); font-size:.86rem; }
+  .count { min-width:2.3rem; padding:.28rem .65rem; border-radius:999px; background:var(--lime); color:#132008; text-align:center; font-weight:850; }
+  .table-wrap { overflow-x:auto; } table { width:100%; min-width:780px; border-collapse:collapse; }
+  .table-wrap:focus-visible { outline:2px solid var(--cyan); outline-offset:-2px; }
+  th,td { padding:.88rem 1rem; text-align:left; border-bottom:1px solid var(--line); } th { color:var(--muted); font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; } tbody tr:last-child td { border-bottom:0; } tbody tr:hover { background:#18291f; }
+  .badge { display:inline-flex; align-items:center; white-space:nowrap; padding:.24rem .58rem; border-radius:999px; font-size:.72rem; font-weight:750; }
+  .badge-applied { color:#baf8ce; background:#174b2c; } .badge-number { color:#c9f3ff; background:#124354; } .badge-captain { color:#e2d3ff; background:#3c2860; } .badge-release { color:#ffd2c8; background:#5b2118; } .badge-dry { color:#ffe5a3; background:#55400e; }
+  .reason { margin:0; padding:1rem 1.4rem .4rem; font-size:.9rem; color:var(--amber); } .reason span { color:var(--muted); font-weight:500; }
+</style>
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead"><p class="kicker">FL26 · verified sync</p><h1>Football Life Live Sync Report</h1><p class="generated">Generated 2026-10-24 22:25 UTC · 14 save changes</p></header>
+    <section class="summary" aria-label="Run summary">
+      <div class="metric"><strong>5</strong><span>Club transfers</span></div>
+      <div class="metric"><strong>3</strong><span>Releases</span></div>
+      <div class="metric"><strong>4</strong><span>Permanent moves</span></div>
+      <div class="metric"><strong>1</strong><span>Loans / returns</span></div>
+      <div class="metric"><strong>2</strong><span>Shirt numbers changed</span></div>
+      <div class="metric"><strong>4</strong><span>Captains changed</span></div>
+      <div class="metric"><strong>4</strong><span>Dry-run</span></div>
+    </section>
+    <p class="action-line">Roster actions · <strong>3</strong> direct moves · <strong>1</strong> signings · <strong>3</strong> releases</p>
+    <section class="report-section">
+        <div class="section-heading"><div><h2>Club transfers</h2><p>Players moved or signed.</p></div><span class="count">5</span></div>
+        <div class="table-wrap" role="region" aria-label="Club transfer details" tabindex="0"><table><thead><tr><th>Status</th><th>Player</th><th>Pos</th><th>From</th><th>To</th><th>Deal</th><th>Native metadata</th><th>Match</th></tr></thead><tbody><tr><td><span class="badge badge-applied">Transfer applied</span></td><td><strong>Zoë | Ünï &lt;i&gt;&amp;&quot;&#x27;</strong></td><td><span class='position'>ST</span></td><td>Alpha</td><td>Beta</td><td>€3,000,000</td><td>Player.bin: Zoë (CF); Assignment: ALP, Beta FC, k, None</td><td class='numeric'>86%</td></tr><tr><td><span class="badge badge-dry">Dry-run</span></td><td><strong>Loan Guy</strong></td><td><span class='position'>ST</span></td><td>Alpha</td><td>Beta</td><td>Loan return</td><td>Player.bin: 77</td><td class='numeric'>88%</td></tr><tr><td><span class="badge badge-applied">Transfer applied</span></td><td><strong>Nameless Found</strong></td><td><span class='position'>-</span></td><td>Alpha</td><td>Beta</td><td>free transfer</td><td>Player.bin: matched</td><td class='numeric'>0%</td></tr><tr><td><span class="badge badge-applied">Transfer applied</span></td><td><strong>Not Found</strong></td><td><span class='position'>ST</span></td><td>Alpha</td><td>Beta</td><td>Transfer</td><td>Player.bin: not found</td><td class='numeric'>100%</td></tr><tr><td><span class="badge badge-applied">Transfer applied</span></td><td><strong>Unknown</strong></td><td><span class='position'>ST</span></td><td>-</td><td>-</td><td>transfer</td><td>Assignment: Only &lt;T&gt;</td><td class='numeric'>100%</td></tr></tbody></table></div>
+      </section><section class="report-section release-section">
+        <div class="section-heading"><div><h2>Player releases</h2><p>Players removed from a club roster and returned to free agency.</p></div><span class="count">3</span></div>
+        <div class="table-wrap" role="region" aria-label="Player release details" tabindex="0"><table><thead><tr><th>Status</th><th>Player</th><th>Pos</th><th>Released from</th><th>Native metadata</th><th>Match</th></tr></thead><tbody><tr><td><span class="badge badge-release">Released</span></td><td><strong>Released One</strong></td><td><span class='position'>ST</span></td><td>Alpha</td><td>-</td><td class='numeric'>100%</td></tr><tr><td><span class="badge badge-dry">Dry-run</span></td><td><strong>Released Two</strong></td><td><span class='position'>ST</span></td><td>Alpha</td><td>-</td><td class='numeric'>100%</td></tr><tr><td><span class="badge badge-release">Released</span></td><td><strong>Released Three</strong></td><td><span class='position'>ST</span></td><td>Alpha</td><td>-</td><td class='numeric'>100%</td></tr></tbody></table></div>
+      </section><section class="report-section number-section">
+        <div class="section-heading"><div><h2>Shirt-number changes</h2><p>Kit numbers only. No club movement.</p></div><span class="count">2</span></div>
+        <div class="table-wrap" role="region" aria-label="Shirt-number change details" tabindex="0"><table><thead><tr><th>Status</th><th>Player</th><th>Club</th><th>Previous</th><th>New</th><th>Match</th></tr></thead><tbody><tr><td><span class="badge badge-number">Number changed</span></td><td><strong>Shirt A</strong></td><td>Beta</td><td class='shirt old'>#9</td><td class='shirt new'>#10</td><td class='numeric'>88%</td></tr><tr><td><span class="badge badge-dry">Dry-run</span></td><td><strong>Shirt B</strong></td><td>Beta</td><td class='shirt old'>#-</td><td class='shirt new'>#0</td><td class='numeric'>100%</td></tr></tbody></table></div>
+      </section><section class="report-section captain-section">
+        <div class="section-heading"><div><h2>Captain changes</h2><p>Captain role updates from the latest verified lineup marker.</p></div><span class="count">4</span></div>
+        <div class="table-wrap" role="region" aria-label="Captain change details" tabindex="0"><table><thead><tr><th>Status</th><th>Club</th><th>New captain</th><th>Previous player ID</th><th>Match</th></tr></thead><tbody><tr><td><span class="badge badge-captain">Captain updated</span></td><td>Beta</td><td><strong>Cap A</strong></td><td>42</td><td class='numeric'>100%</td></tr><tr><td><span class="badge badge-dry">Dry-run</span></td><td>Beta</td><td><strong>Cap B</strong></td><td>-</td><td class='numeric'>100%</td></tr><tr><td><span class="badge badge-captain">Captain updated</span></td><td>Beta</td><td><strong>Cap C</strong></td><td>-</td><td class='numeric'>100%</td></tr><tr><td><span class="badge badge-captain">Captain updated</span></td><td>Beta</td><td><strong>Cap D</strong></td><td>x|y</td><td class='numeric'>100%</td></tr></tbody></table></div>
+      </section>
+  </main>
+</body>
+</html>

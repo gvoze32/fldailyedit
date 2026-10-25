@@ -1,0 +1,97 @@
+{
+  "today": "2026-10-24",
+  "now_utc": "2026-10-24T22:25:55Z",
+  "input": "base/EDIT00000000",
+  "args": [
+    "--club",
+    "10200,10083,9780,8528,213591,165228"
+  ],
+  "workdir_placeholder": "<WORKDIR>",
+  "layout": {
+    "input_save": "<WORKDIR>/input/EDIT00000000",
+    "output_save": "<WORKDIR>/output/EDIT00000000",
+    "output_dir": "<WORKDIR>/output",
+    "state_dir": "<WORKDIR>/state",
+    "transfer_log": "<WORKDIR>/state/transfer_log.jsonl",
+    "club_identity_cache": "<WORKDIR>/state/club_identity_cache.json",
+    "fotmob_team_cache_dir": "<WORKDIR>/state/storage/fotmob_team_cache (starts empty)",
+    "fotmob_tactics_cache": "<WORKDIR>/state/storage/fotmob_tactics_cache.json (starts empty)",
+    "player_bin": "<WORKDIR>/inputs/Player.bin"
+  },
+  "cli": "run --edit-file <input_save> -o <output_save> --club 10200,10083,9780,8528,213591,165228",
+  "timezone": "UTC",
+  "clock": "frozen at now_utc (no ticking); time.time_ns() therefore constant",
+  "cassette_ignored_query_params": [
+    "fldailyedit_refresh"
+  ],
+  "cassette_notes": "bodies are decoded; a request that raised is stored with status 0 and an `error` object",
+  "input_sha256": "f827a8d5dab8b8e3ca06584f36dedfcbdfcc8944c6f6f68e50d6147ca118b836",
+  "player_bin": {
+    "file": "testdata/local/e2e/small/inputs/Player.bin.gz",
+    "sha256": "1c8d85ba891c46af740ec0347662892c29fa567904c129f34a39ed0d1cc781a6",
+    "origin": "reference/Player.bin"
+  },
+  "python": "3.14.9",
+  "expected_save": "expected/ is the engine's own reviewed output (testdata/DEVIATIONS.md, Baseline); EDIT00000000.delta.json.gz is a sparse patch over `input`",
+  "recorded": {
+    "wall_seconds": 16.85,
+    "http": {
+      "total_requests": 27,
+      "unique_urls": 27,
+      "total_bytes": 7683544,
+      "statuses": {
+        "200": 27
+      },
+      "hosts": {
+        "data.fotmob.com": {
+          "requests": 15,
+          "errors": 0,
+          "non_200": 0,
+          "bytes": 116198,
+          "seconds": 1.706
+        },
+        "www.fotmob.com": {
+          "requests": 12,
+          "errors": 0,
+          "non_200": 0,
+          "bytes": 7567346,
+          "seconds": 15.853
+        }
+      }
+    }
+  },
+  "expected_sha256": {
+    "EDIT00000000": "bec4dafb63c259675fd77d608eef73bb7806ca1769b43566eea12faaa30fbd80",
+    "transfer_summary.md": "727505d4c38801d901c6fda11f8b549502e2f60b42a75c389a3972ca558d4889",
+    "transfer_summary.html": "a81ad5c9791febd39598c5f895e1e1c284028c363d004fd7ae7d55c2ea6e8fdb",
+    "skipped_transfers.jsonl": "f84712847348b5a3f92c8ccbd9c87b10dc61d39098c4e3c6d73e9edc1eae3f24",
+    "transfer_log.jsonl": "1cf5914a6af7080da8a10f620b8c190da18c4ad605805ad33a0b91cb813c41b8",
+    "club_identity_cache.json": "8214e71f8cb4ea6cee25802702183e80efd4a2de6bef056d99a719acb4cec478"
+  },
+  "record_vs_replay_identical": true,
+  "replay_wall_seconds": 9.9,
+  "replay_http": {
+    "total_requests": 27,
+    "unique_urls": 27,
+    "total_bytes": 7683544,
+    "statuses": {
+      "200": 27
+    },
+    "hosts": {
+      "data.fotmob.com": {
+        "requests": 15,
+        "errors": 0,
+        "non_200": 0,
+        "bytes": 116198,
+        "seconds": 0.0
+      },
+      "www.fotmob.com": {
+        "requests": 12,
+        "errors": 0,
+        "non_200": 0,
+        "bytes": 7567346,
+        "seconds": 0.0
+      }
+    }
+  }
+}

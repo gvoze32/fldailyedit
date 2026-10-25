@@ -1,13 +1,27 @@
 name: Sync Live Transfers (Fast)
 
+# Manual only: FL Daily Edit runs locally and prebuilt saves are no longer
+# published. Restore the schedule below to re-enable daily runs.
+#
+# The app has ONE update mode with full coverage, so this "fast" workflow and
+# its deep twin run exactly the same command. Both files are kept only so
+# existing forks keep their workflow names. The updated save is uploaded as a
+# workflow artifact; nothing is published to a release.
 on:
-  schedule:
-    # Run daily at 00:00 UTC
-    - cron: "0 0 * * *"
+  # schedule:
+  #   # Run daily at 00:00 UTC
+  #   - cron: "0 0 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # The app keeps its state (transfer log, reports, caches, backups) under
+  # $XDG_DATA_HOME/FLDailyEdit on Linux; point it into the workspace so the
+  # cache and artifact steps can reach it.
+  XDG_DATA_HOME: ${{ github.workspace }}/state
 
 jobs:
   sync:
@@ -18,107 +32,59 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.11"
-          cache: "pip"
-      - name: Restore FotMob team payload cache
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+
+      - name: Install window-system headers for the app crate
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwayland-dev libxkbcommon-dev libx11-dev libxcb1-dev
+
+      - name: Restore Cargo cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
-            storage/fotmob_team_cache/
-            storage/fotmob_tactics_cache.json
-            storage/club_identity*.json
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cargo-sync-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-sync-${{ runner.os }}-
+
+      - name: Restore FotMob payload cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            state/FLDailyEdit/storage/fotmob_team_cache/
+            state/FLDailyEdit/storage/fotmob_tactics_cache.json
+            state/FLDailyEdit/club_identity_cache.json
           key: fotmob-fast-payload-${{ hashFiles('data/fotmob_teams.json') }}-${{ github.run_id }}
           restore-keys: |
             fotmob-fast-payload-${{ hashFiles('data/fotmob_teams.json') }}-
 
-      - name: Compile pesXdecrypter
-        run: |
-          make -C vendor/pesXdecrypter clean
-          make -C vendor/pesXdecrypter
-          chmod +x vendor/pesXdecrypter/decrypter21 vendor/pesXdecrypter/encrypter21
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .
-
       - name: Validate Base and Apply Transfers
-        id: run_sync
         run: |
-          python run.py validate --edit-file base/EDIT00000000
+          cargo run --release --locked -p fl-app -- validate --edit-file base/EDIT00000000
           mkdir -p output
           cp base/EDIT00000000 output/EDIT00000000
-          rm -f output/transfer_summary.md output/transfer_summary.html
-          python run.py run \
+          cargo run --release --locked -p fl-app -- run \
             --window auto \
-            --edit-file output/EDIT00000000 \
-            --in-place
+            --edit-file output/EDIT00000000
 
       - name: Validate final save
-        run: python run.py validate --edit-file output/EDIT00000000
+        run: cargo run --release --locked -p fl-app -- validate --edit-file output/EDIT00000000
 
-      - name: Package public Fast save
-        run: |
-          GENERATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          python tools/build_release_asset.py package \
-            --save output/EDIT00000000 \
-            --transfer-report output/transfer_summary.md \
-            --output-dir release-payload \
-            --target-id fl26-u2.2-national-squads \
-            --target-name "Football Life 2026 Update 2.2 + National Squads" \
-            --channel fast \
-            --generated-at "$GENERATED_AT"
-
-      - name: Upload release payload
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: release-${{ github.run_id }}-fast
-          path: release-payload/
-          retention-days: 1
-
-      - name: Upload Updated Save File & Visual Reports
+      - name: Upload Updated Save File & Reports
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: updated-fl-save-and-reports-${{ github.run_id }}-fast
           path: |
-            output/transfer_summary.md
-            output/transfer_summary.html
-            data/transfer_log.jsonl
-          if-no-files-found: ignore
+            output/EDIT00000000
+            state/FLDailyEdit/reports/
+            state/FLDailyEdit/transfer_log.jsonl
+          if-no-files-found: error
           retention-days: 14
-
-  publish:
-    name: Publish Fast save
-    needs: sync
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    concurrency:
-      group: fldailyedit-latest-release
-      cancel-in-progress: false
-      queue: max
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.11"
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: release-${{ github.run_id }}-fast
-          path: release-payload
-      - name: Merge release catalog
-        run: python tools/build_release_asset.py merge --existing-url "https://github.com/gvoze32/fldailyedit/releases/download/latest/catalog.json" --record release-payload/record.json --output release-payload/catalog.json
-      - name: Publish rolling release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          gh release view latest --repo "$GH_REPO" >/dev/null 2>&1 || gh release create latest --repo "$GH_REPO" --title "Latest FL Daily Edit" --notes "Validated Fast and Deep option files for FL Daily Edit."
-          python tools/publish_release_assets.py \
-            --repo "$GH_REPO" \
-            --tag latest \
-            release-payload/fldailyedit-fl2026-fast.zip \
-            release-payload/catalog.json

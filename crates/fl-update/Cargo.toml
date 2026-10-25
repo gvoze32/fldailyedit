@@ -1,0 +1,28 @@
+[package]
+name = "fl-update"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Signed self-update for FL Daily Edit: manifest verification, download/staging, exe replacement, and release tooling"
+
+[lib]
+name = "fl_update"
+
+[[bin]]
+name = "sign-manifest"
+path = "src/bin/sign-manifest.rs"
+
+[dependencies]
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# zip pulls flate2 without a backend; pick the pure-Rust one (no C toolchain needed).
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+sha2 = "0.10"
+base64 = "0.22"
+tempfile = "3"
+ed25519-dalek = { version = "2", features = ["pem"] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"] }
+clap = { version = "4", features = ["derive"] }

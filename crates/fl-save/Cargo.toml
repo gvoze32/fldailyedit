@@ -1,0 +1,20 @@
+[package]
+name = "fl-save"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+fl-fs.workspace = true
+fl-text.workspace = true
+thiserror.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
+flate2.workspace = true
+csv.workspace = true
+unicode-normalization.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+sha2.workspace = true
+base64.workspace = true
