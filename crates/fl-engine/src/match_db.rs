@@ -128,7 +128,7 @@ pub fn build_match_database(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fl_save::crypto;
+    use crate::test_support::base_save;
     use fl_save::model::{NativePlayer, Position};
     use std::collections::HashSet;
     use std::sync::Arc;
@@ -154,13 +154,6 @@ mod tests {
         fn native_ids(&self) -> Vec<u32> {
             vec![self.player_id]
         }
-    }
-
-    fn base_save() -> Option<EditFile> {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../base/EDIT00000000");
-        let raw = std::fs::read(path).ok()?;
-        let blocks = crypto::decrypt(&raw).expect("base save decrypts");
-        Some(EditFile::from_bytes(blocks.data).expect("base save loads"))
     }
 
     /// Native Player.bin ages apply to every catalog player, not only the

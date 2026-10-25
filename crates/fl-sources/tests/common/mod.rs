@@ -7,8 +7,23 @@ use chrono::NaiveDate;
 use fl_sources::model::Transfer;
 use serde_json::Value;
 
+/// Local recorded fixtures (`testdata/sources_other`, not in the repository).
 pub fn testdata() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/sources_other")
+}
+
+/// True, after printing a skip note, when the local fixtures are absent; the
+/// calling test then returns early. A present-but-broken fixture still fails loudly.
+pub fn fixtures_absent() -> bool {
+    if testdata().exists() {
+        return false;
+    }
+    let thread = std::thread::current();
+    eprintln!(
+        "skipping {}: testdata/sources_other not present",
+        thread.name().unwrap_or("test")
+    );
+    true
 }
 
 pub fn read(path: &str) -> String {

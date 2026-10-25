@@ -93,14 +93,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
   rounding were recovered from Ejogc327's PES 2020 Editor V0.12.10 and verified
   against pesdb.net PES 2021 overall ratings. No editor code is included.
 
-## Base save and game data
+## Game data
 
-- `base/EDIT00000000` is derived from Gondowan's
-  [Road to FL27 MiniPatch](https://www.reddit.com/r/SPFootballLife/comments/1wssmur/release_minipatch_road_to_fl27_for_football_life/)
-  for SP Football Life 2026 (Update 2.2, SmokePatch National Teams Selection
-  Update). Football Life 2026, SmokePatch, and the game databases belong to
-  their respective authors; the updater is a tool for your own save and does
-  not include game files. Vanilla PES 2021 `Player.bin`, `Team.bin`, and
+- The updater works on your own save and game files and includes none of them.
+  Football Life 2026, SmokePatch, and the game databases belong to their
+  respective authors. Vanilla PES 2021 `Player.bin`, `Team.bin`, and
   `PlayerAssignment.bin` are read from your own installation at run time.
 - Football Life player and team names are read from your game folder's
   `Player.bin` and `Team.bin` at run time; the app ships no game or player

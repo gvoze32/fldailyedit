@@ -15,6 +15,8 @@ mod unicode_str;
 #[cfg(test)]
 mod corpus_tests;
 #[cfg(test)]
+mod test_support;
+#[cfg(test)]
 mod unit_tests;
 
 pub use club::{

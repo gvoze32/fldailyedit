@@ -30,5 +30,7 @@ MEMORY.md
 .codegraph
 docs/
 
-# Large local-only parity artifacts
-testdata/local/
+# Local-only test data (fixtures, goldens, cassettes, corpora, the owner's own
+# save, snapshot baselines): never committed; tests skip when absent
+/testdata/
+crates/fl-app/tests/snapshots/

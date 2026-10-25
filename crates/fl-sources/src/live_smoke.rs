@@ -30,7 +30,8 @@ async fn live_feed_page() {
 }
 
 /// Live crawl of the FotMob team sitemaps, compared with the recorded
-/// catalog (`testdata/fotmob_teams.json`). Prints request count, duration and
+/// catalog (local `testdata/fotmob_teams.json`, not in the repository; skipped
+/// when absent). Prints request count, duration and
 /// the id/name differences (`--nocapture`).
 ///
 ///     cargo test -p fl-sources live_team_index -- --ignored --nocapture
@@ -43,6 +44,7 @@ async fn live_team_index() {
 
     use crate::http::{BoxFuture, LiveTransport, Response, Transport, TransportError};
     use crate::team_index::{crawl, parse_catalog};
+    use crate::test_support::read_fixture_text;
 
     struct Counting {
         inner: LiveTransport,
@@ -57,7 +59,9 @@ async fn live_team_index() {
             self.inner.execute(request)
         }
     }
-
+    let Some(recorded_text) = read_fixture_text("fotmob_teams.json") else {
+        return;
+    };
     let transport = Arc::new(Counting {
         inner: LiveTransport::new().expect("rustls client"),
         requests: AtomicUsize::new(0),
@@ -79,10 +83,6 @@ async fn live_team_index() {
         started.elapsed().as_secs_f64()
     );
 
-    let recorded_text = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/fotmob_teams.json"),
-    )
-    .expect("recorded catalog");
     let recorded: BTreeMap<i64, _> = parse_catalog(&recorded_text)
         .expect("recorded catalog parses")
         .into_iter()

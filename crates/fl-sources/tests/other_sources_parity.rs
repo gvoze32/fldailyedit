@@ -1,7 +1,8 @@
 //! Parser parity of the supplemental sources against the frozen Python
-//! implementation. Fixtures are real recorded responses
-//! (`testdata/sources_other/<source>/`); expected outputs are dumped by
-//! the former Python implementation (removed).
+//! implementation. Fixtures are real recorded responses, kept local
+//! (`testdata/sources_other/<source>/`, not in the repository; the tests skip
+//! when absent); expected outputs are dumped by the former Python
+//! implementation (removed).
 
 use std::collections::HashMap;
 
@@ -49,6 +50,9 @@ fn check_case(
 
 #[test]
 fn transfermarkt_pages_match_expected() {
+    if common::fixtures_absent() {
+        return;
+    }
     for page in 1..=3 {
         let body = read(&format!("transfermarkt/page{page}.md"));
         let url = read(&format!("transfermarkt/page{page}.url"));
@@ -67,6 +71,9 @@ fn transfermarkt_pages_match_expected() {
 
 #[test]
 fn besoccer_feed_matches_expected() {
+    if common::fixtures_absent() {
+        return;
+    }
     let case = json("expected/besoccer_page.json.gz");
     let legacy = read("besoccer/page_legacy_hosts.md");
     assert!(!case["full"].as_array().unwrap().is_empty());
@@ -77,6 +84,9 @@ fn besoccer_feed_matches_expected() {
 
 #[test]
 fn besoccer_accepts_current_player_link_host() {
+    if common::fixtures_absent() {
+        return;
+    }
     // The legacy pattern rejected `es.besoccer.com` links and returned nothing on
     // today's page; only the proof URL host differs from the legacy fixture.
     let live = read("besoccer/page.md");
@@ -104,6 +114,9 @@ fn besoccer_accepts_current_player_link_host() {
 
 #[test]
 fn sortitoutsi_feed_matches_expected() {
+    if common::fixtures_absent() {
+        return;
+    }
     let body = read("sortitoutsi/page.md");
     let case = json("expected/sortitoutsi_page.json.gz");
     assert!(!case["full"].as_array().unwrap().is_empty());
@@ -114,6 +127,9 @@ fn sortitoutsi_feed_matches_expected() {
 
 #[test]
 fn sofascore_page_matches_expected() {
+    if common::fixtures_absent() {
+        return;
+    }
     let html = read("sofascore/page.html");
     let case = json("expected/sofascore_page.json.gz");
     let payload = global_transfer_payload(&html).expect("embedded transfers");
@@ -142,6 +158,9 @@ fn sofascore_page_matches_expected() {
 
 #[test]
 fn soccerway_feeds_match_expected() {
+    if common::fixtures_absent() {
+        return;
+    }
     let expected = json("expected/soccerway.json.gz");
     for (club, team) in expected["teams"].as_object().unwrap() {
         let slug: String = club
@@ -169,6 +188,9 @@ fn soccerway_feeds_match_expected() {
 
 #[test]
 fn wikipedia_pages_match_expected() {
+    if common::fixtures_absent() {
+        return;
+    }
     let expected = json("expected/wikipedia.json.gz");
     let category = json("wikipedia/category.json");
     let titles = category_titles(category.as_array().unwrap());
@@ -234,6 +256,9 @@ fn wikipedia_pages_match_expected() {
 
 #[test]
 fn wikipedia_category_discovery_matches_expected() {
+    if common::fixtures_absent() {
+        return;
+    }
     for case in json("expected/wikipedia.json.gz")["category_cases"]
         .as_array()
         .unwrap()
@@ -257,6 +282,9 @@ fn wikipedia_category_discovery_matches_expected() {
 
 #[test]
 fn source_date_ranges_match_expected() {
+    if common::fixtures_absent() {
+        return;
+    }
     for case in json("expected/source_ranges.json.gz").as_array().unwrap() {
         let today = date(&case["today"]).unwrap();
         let since = case["since"].as_str().map(SinceDate::from);
@@ -276,6 +304,9 @@ fn transfer_batch(value: &Value) -> Vec<Transfer> {
 
 #[test]
 fn reconcile_matches_expected_on_every_case() {
+    if common::fixtures_absent() {
+        return;
+    }
     let cases = json("expected/reconcile_cases.json.gz");
     let cases = cases.as_object().expect("cases");
     assert!(cases.len() > 40, "scenario and generated cases present");
@@ -305,6 +336,9 @@ fn string_map(value: &Value) -> HashMap<String, String> {
 
 #[test]
 fn synthetic_bodies_match_expected() {
+    if common::fixtures_absent() {
+        return;
+    }
     let synthetic = json("synthetic.json.gz");
     let bodies = &synthetic["bodies"];
     let text = |source: &str, name: &str| bodies[source][name].as_str().unwrap().to_owned();
@@ -388,6 +422,9 @@ fn synthetic_bodies_match_expected() {
 
 #[test]
 fn query_encoding_matches_expected() {
+    if common::fixtures_absent() {
+        return;
+    }
     for case in json("expected/url_encoding.json.gz").as_array().unwrap() {
         let params: Vec<(String, String)> = case["params"]
             .as_array()
@@ -417,6 +454,9 @@ fn truncations(body: &str) -> impl Iterator<Item = &str> {
 
 #[test]
 fn parsers_survive_truncated_and_garbled_bodies() {
+    if common::fixtures_absent() {
+        return;
+    }
     let team_names = HashMap::new();
     for page in 1..=2 {
         for cut in truncations(&read(&format!("transfermarkt/page{page}.md"))) {

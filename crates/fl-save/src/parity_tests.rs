@@ -1,8 +1,11 @@
 //! Parity of the save-table modules against the frozen Python implementation.
 //!
 //! Fixtures were recorded from the former Python implementation (removed; they are now frozen):
-//! * `testdata/save_tables/{base,synthetic}.json.gz` (committed),
+//! * `testdata/save_tables/{base,synthetic}.json.gz` (local only; tests skip when absent),
 //! * `testdata/local/save_tables/*` (local only; tests skip when absent).
+//!
+//! The base save is the owner's own, kept at `testdata/local/base/EDIT00000000`
+//! (or `FL_TEST_BASE_SAVE`); tests skip when it is absent.
 //!
 //! Saves are decrypted in-process with [`crate::crypto`].
 
@@ -33,6 +36,10 @@ fn root() -> PathBuf {
 }
 
 fn read_gz_json(path: &Path) -> Option<Value> {
+    if !path.exists() {
+        eprintln!("skipping: {} not present", path.display());
+        return None;
+    }
     let file = fs::File::open(path).ok()?;
     let mut text = String::new();
     flate2::read::GzDecoder::new(file)
@@ -197,12 +204,11 @@ struct Loaded {
 }
 
 fn load_save(label: &str) -> Option<Loaded> {
-    let path = if label == "base" {
-        root().join("base/EDIT00000000")
+    let raw = if label == "base" {
+        crate::test_support::base_save_bytes()?
     } else {
-        root().join("reference").join(label)
+        fs::read(root().join("reference").join(label)).ok()?
     };
-    let raw = fs::read(path).ok()?;
     let blocks = crypto::decrypt(&raw).expect("decrypt");
     Some(Loaded {
         pes21: blocks.save_header().is_pes21(),
@@ -454,12 +460,9 @@ fn local_fixture(name: &str) -> Option<Value> {
 
 #[test]
 fn base_matches_committed_python_dump() {
-    let fixture = read_gz_json(&root().join("testdata/save_tables/base.json.gz"))
-        .expect("committed base fixture");
-    assert!(
-        load_save("base").is_some(),
-        "base/EDIT00000000 is committed"
-    );
+    let Some(fixture) = read_gz_json(&root().join("testdata/save_tables/base.json.gz")) else {
+        return;
+    };
     run_label(
         "base",
         Some(fixture),
@@ -537,9 +540,8 @@ fn playerbin_record_ratings_match_python() {
 
 // ── synthetic fixtures ───────────────────────────────────────────────────
 
-fn synthetic() -> Value {
+fn synthetic() -> Option<Value> {
     read_gz_json(&root().join("testdata/save_tables/synthetic.json.gz"))
-        .expect("committed synthetic fixture")
 }
 
 struct LabelledNative(HashMap<u32, Option<Position>>);
@@ -622,7 +624,9 @@ fn unhex(text: &str) -> Vec<u8> {
 
 #[test]
 fn synthetic_validation_cases_match_python() {
-    let fixture = synthetic();
+    let Some(fixture) = synthetic() else {
+        return;
+    };
     let cases = fixture["validate"].as_array().unwrap();
     assert!(cases.len() >= 25);
     for case in cases {
@@ -673,7 +677,9 @@ fn synthetic_validation_cases_match_python() {
 
 #[test]
 fn synthetic_release_policy_cases_match_python() {
-    let fixture = synthetic();
+    let Some(fixture) = synthetic() else {
+        return;
+    };
     let dir = tempfile::tempdir().unwrap();
     for (index, case) in fixture["policy"].as_array().unwrap().iter().enumerate() {
         let text = case["text"].as_str().unwrap();
@@ -740,7 +746,9 @@ fn policy_value(policy: &ReleasePolicy) -> Value {
 
 #[test]
 fn synthetic_ratings_match_python_and_never_panic() {
-    let fixture = synthetic();
+    let Some(fixture) = synthetic() else {
+        return;
+    };
     let mut compared = 0;
     let mut out_of_curve = 0;
     for case in fixture["rating"].as_array().unwrap() {

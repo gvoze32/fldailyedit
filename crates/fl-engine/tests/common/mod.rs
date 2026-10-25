@@ -20,6 +20,35 @@ pub fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
 }
 
+/// `path` when it exists; otherwise prints the skip note of the running test
+/// and returns `None`. `testdata/`, `reference/` and the base save are local
+/// files (not in the repository): tests that need one skip when it is absent.
+pub fn existing(path: PathBuf) -> Option<PathBuf> {
+    if path.exists() {
+        return Some(path);
+    }
+    let thread = std::thread::current();
+    let test = thread.name().unwrap_or("test");
+    eprintln!("skipping {test}: {} not present", path.display());
+    None
+}
+
+/// `<repo>/testdata/<rel>` when it exists; otherwise prints a skip note.
+pub fn testdata_path(rel: &str) -> Option<PathBuf> {
+    existing(repo_root().join("testdata").join(rel))
+}
+
+/// The base save a recording ran on: `FL_TEST_BASE_SAVE` if set, else
+/// `input` of its `meta.json` relative to the repo root. `None` (with a skip
+/// note) when absent.
+pub fn base_save_path(meta: &serde_json::Value) -> Option<PathBuf> {
+    let path = match std::env::var_os("FL_TEST_BASE_SAVE") {
+        Some(custom) => repo_root().join(custom),
+        None => repo_root().join(meta["input"].as_str().unwrap()),
+    };
+    existing(path)
+}
+
 pub fn gunzip(path: &Path) -> Vec<u8> {
     let raw = fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     let mut out = Vec::new();
@@ -38,12 +67,14 @@ pub fn fixture_team_index() -> Arc<[TeamEntry]> {
 pub struct Scenario {
     pub dir: PathBuf,
     pub meta: serde_json::Value,
+    pub input: PathBuf,
     pub player_bin_gz: PathBuf,
     pub team_bin_gz: PathBuf,
 }
 
 impl Scenario {
-    /// `None` when the scenario or its Player.bin / Team.bin inputs are not on
+    /// `None` (with a skip note) when the scenario, its recording, its
+    /// Player.bin / Team.bin inputs, the base save or the team list are not on
     /// this machine.
     pub fn open(committed: bool, name: &str) -> Option<Self> {
         let root = repo_root().join("testdata");
@@ -53,16 +84,18 @@ impl Scenario {
             root.join("local").join("e2e").join(name)
         };
         let inputs = root.join("local").join("e2e").join(name).join("inputs");
-        let player_bin_gz = inputs.join("Player.bin.gz");
-        let team_bin_gz = inputs.join("Team.bin.gz");
-        if !dir.join("meta.json").is_file() || !player_bin_gz.is_file() || !team_bin_gz.is_file() {
-            eprintln!("skipping scenario {name}: recorded inputs not present");
-            return None;
-        }
-        let meta = serde_json::from_slice(&fs::read(dir.join("meta.json")).unwrap()).unwrap();
+        let meta_path = existing(dir.join("meta.json"))?;
+        existing(dir.join("cassette.jsonl.gz"))?;
+        let player_bin_gz = existing(inputs.join("Player.bin.gz"))?;
+        let team_bin_gz = existing(inputs.join("Team.bin.gz"))?;
+        existing(root.join("fotmob_teams.json"))?;
+        let meta: serde_json::Value =
+            serde_json::from_slice(&fs::read(meta_path).unwrap()).unwrap();
+        let input = base_save_path(&meta)?;
         Some(Self {
             dir,
             meta,
+            input,
             player_bin_gz,
             team_bin_gz,
         })
@@ -112,11 +145,7 @@ impl Workdir {
         let root = fs::canonicalize(tmp.path()).unwrap();
         let input = root.join("input").join("EDIT00000000");
         fs::create_dir_all(input.parent().unwrap()).unwrap();
-        fs::copy(
-            repo_root().join(scenario.meta["input"].as_str().unwrap()),
-            &input,
-        )
-        .unwrap();
+        fs::copy(&scenario.input, &input).unwrap();
         let player_bin = root.join("inputs").join("Player.bin");
         fs::create_dir_all(player_bin.parent().unwrap()).unwrap();
         fs::write(&player_bin, gunzip(&scenario.player_bin_gz)).unwrap();

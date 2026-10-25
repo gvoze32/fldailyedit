@@ -559,14 +559,7 @@ mod tests {
     use super::*;
     use crate::matcher::NameMatcher;
     use crate::planning::{MatchedTransfer, PlannedRosterAction, Side};
-    use fl_save::crypto;
-
-    fn base_save() -> Option<EditFile> {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../base/EDIT00000000");
-        let raw = std::fs::read(path).ok()?;
-        let blocks = crypto::decrypt(&raw).expect("base save decrypts");
-        Some(EditFile::from_bytes(blocks.data).expect("base save loads"))
-    }
+    use crate::test_support::base_save;
 
     fn run_plan(
         edit: &mut EditFile,

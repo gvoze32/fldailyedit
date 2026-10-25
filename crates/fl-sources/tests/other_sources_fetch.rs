@@ -48,6 +48,9 @@ fn page_number(url: &str) -> Option<usize> {
 
 #[tokio::test]
 async fn transfermarkt_uses_detailed_pages_and_stops_below_cutoff() {
+    if common::fixtures_absent() {
+        return;
+    }
     let (page1, page2) = (
         synthetic("transfermarkt", "detailed"),
         synthetic("transfermarkt", "page2"),
@@ -89,6 +92,9 @@ fn renumbered(markdown: &str, page: usize) -> String {
 
 #[tokio::test]
 async fn transfermarkt_continues_past_four_pages_until_old_rows() {
+    if common::fixtures_absent() {
+        return;
+    }
     let detailed = synthetic("transfermarkt", "detailed");
     let old = detailed.replace("03/08/2026", "01/08/2026");
     let (client, log) = scripted(move |request| {
@@ -110,6 +116,9 @@ async fn transfermarkt_continues_past_four_pages_until_old_rows() {
 
 #[tokio::test]
 async fn transfermarkt_has_no_250_transfer_cap() {
+    if common::fixtures_absent() {
+        return;
+    }
     let detailed = synthetic("transfermarkt", "detailed");
     let (client, _log) = scripted(move |request| {
         Ok(ok(renumbered(
@@ -131,6 +140,9 @@ async fn transfermarkt_has_no_250_transfer_cap() {
 
 #[tokio::test]
 async fn transfermarkt_continues_past_future_dated_first_page() {
+    if common::fixtures_absent() {
+        return;
+    }
     let future = synthetic("transfermarkt", "detailed").replace("03/08/2026", "04/08/2026");
     let valid = synthetic("transfermarkt", "page2").replace("02/08/2026", "03/08/2026");
     let (client, log) = scripted(move |request| {
@@ -154,6 +166,9 @@ async fn transfermarkt_continues_past_future_dated_first_page() {
 
 #[tokio::test]
 async fn transfermarkt_stops_when_reader_repeats_future_dated_page() {
+    if common::fixtures_absent() {
+        return;
+    }
     let future = synthetic("transfermarkt", "detailed").replace("03/08/2026", "04/08/2026");
     let (client, log) = scripted(move |_| Ok(ok(future.clone())));
     let transfers =
@@ -166,6 +181,9 @@ async fn transfermarkt_stops_when_reader_repeats_future_dated_page() {
 
 #[tokio::test]
 async fn transfermarkt_refreshes_empty_reader_response() {
+    if common::fixtures_absent() {
+        return;
+    }
     let detailed = synthetic("transfermarkt", "detailed");
     let (client, log) = scripted(move |request| {
         Ok(ok(if request.url.contains("fldailyedit_refresh=") {
@@ -186,6 +204,9 @@ async fn transfermarkt_refreshes_empty_reader_response() {
 
 #[tokio::test]
 async fn transfermarkt_retries_unparseable_first_page() {
+    if common::fixtures_absent() {
+        return;
+    }
     let detailed = synthetic("transfermarkt", "detailed");
     let counter = std::sync::atomic::AtomicUsize::new(0);
     let (client, log) = scripted(move |_| {
@@ -206,6 +227,9 @@ async fn transfermarkt_retries_unparseable_first_page() {
 
 #[tokio::test]
 async fn transfermarkt_falls_back_to_german_reader_domain() {
+    if common::fixtures_absent() {
+        return;
+    }
     let localized = synthetic("transfermarkt", "localized");
     let (client, log) = scripted(move |request| {
         Ok(ok(if request.url.contains("transfermarkt.de") {
@@ -229,6 +253,9 @@ async fn transfermarkt_falls_back_to_german_reader_domain() {
 
 #[tokio::test]
 async fn transfermarkt_later_page_failure_keeps_collected_rows() {
+    if common::fixtures_absent() {
+        return;
+    }
     let detailed = synthetic("transfermarkt", "detailed");
     let (client, _log) = scripted(move |request| {
         if request.url.contains("page=2") {
@@ -324,6 +351,9 @@ async fn transfermarkt_honors_window_end_date() {
 
 #[tokio::test]
 async fn besoccer_uses_the_spanish_reader_route() {
+    if common::fixtures_absent() {
+        return;
+    }
     let feed = synthetic("besoccer", "feed");
     let (client, log) = scripted(move |_| Ok(ok(feed.clone())));
     let transfers = fetch_besoccer_transfers(
@@ -359,6 +389,9 @@ async fn besoccer_uses_the_spanish_reader_route() {
 
 #[tokio::test]
 async fn sortitoutsi_requests_the_reader_page_and_bounds_by_today() {
+    if common::fixtures_absent() {
+        return;
+    }
     let page = synthetic("sortitoutsi", "mixed");
     let (client, log) = scripted(move |_| Ok(ok(page.clone())));
     let signals = fetch_sortitoutsi_transfers(&client, None, ymd("2026-08-03"))
@@ -535,6 +568,9 @@ fn search_hit(id: &str, slug: &str, name: &str) -> String {
 
 #[tokio::test]
 async fn soccerway_resolves_relevant_club_and_reads_feed() {
+    if common::fixtures_absent() {
+        return;
+    }
     let feed = synthetic("soccerway", "feed");
     let (client, log) = scripted(move |request| {
         if request
@@ -568,6 +604,9 @@ async fn soccerway_resolves_relevant_club_and_reads_feed() {
 
 #[tokio::test]
 async fn soccerway_skips_unresolvable_and_failing_clubs() {
+    if common::fixtures_absent() {
+        return;
+    }
     let feed = synthetic("soccerway", "feed");
     let (client, _log) = scripted(move |request| {
         let url = &request.url;
@@ -598,6 +637,9 @@ async fn soccerway_skips_unresolvable_and_failing_clubs() {
 
 #[tokio::test]
 async fn soccerway_source_deadline_keeps_completed_routes() {
+    if common::fixtures_absent() {
+        return;
+    }
     let feed = synthetic("soccerway", "feed");
     let (client, _log) = scripted_with_delay(
         move |request| {
@@ -687,6 +729,9 @@ fn revision_page(pages: &[(String, Value)], first: bool) -> Value {
 
 #[tokio::test]
 async fn wikipedia_fetch_follows_category_and_page_flows() {
+    if common::fixtures_absent() {
+        return;
+    }
     let category = json("wikipedia/category.json")[0].clone();
     let members: Vec<Value> = category["query"]["categorymembers"]
         .as_array()
@@ -821,6 +866,9 @@ async fn wikipedia_retries_maxlag_and_rate_limits() {
 
 #[test]
 fn expected_fixture_shapes_are_loadable() {
+    if common::fixtures_absent() {
+        return;
+    }
     // Guards the fixture schema the tests above rely on.
     let flows = json("expected/wikipedia_flow.json.gz");
     assert_eq!(flows.as_array().unwrap().len(), 3);

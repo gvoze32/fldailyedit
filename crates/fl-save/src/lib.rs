@@ -12,5 +12,7 @@ mod parity_tests;
 pub mod rating;
 pub mod release_policy;
 pub mod roster;
+#[cfg(test)]
+mod test_support;
 pub mod validate;
 pub mod wesys;

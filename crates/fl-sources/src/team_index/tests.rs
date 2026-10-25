@@ -1,15 +1,12 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
 
 use super::*;
 use crate::http::{CancelToken, ReplayTransport, Response};
+use crate::test_support::read_fixture_text;
 
-fn sitemaps_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/sources_fotmob/sitemaps")
-}
-
-fn sitemap(name: &str) -> String {
-    std::fs::read_to_string(sitemaps_dir().join(name)).expect("sitemap fixture")
+/// A recorded sitemap (`testdata/sources_fotmob/sitemaps/`), `None` when absent.
+fn sitemap(name: &str) -> Option<String> {
+    read_fixture_text(&format!("sources_fotmob/sitemaps/{name}"))
 }
 
 fn xml(body: String) -> Response {
@@ -38,12 +35,12 @@ fn client(responses: Vec<(&str, Response)>, cancel: Option<CancelToken>) -> Http
 const CHILD_1: &str = "https://www.fotmob.com/sitemap/en/teams/1.xml";
 const CHILD_2: &str = "https://www.fotmob.com/sitemap/en/teams/2.xml";
 
-fn recorded() -> Vec<(&'static str, Response)> {
-    vec![
-        (SITEMAP_INDEX_URL, xml(sitemap("teams.xml"))),
-        (CHILD_1, xml(sitemap("teams_1.xml"))),
-        (CHILD_2, xml(sitemap("teams_2.xml"))),
-    ]
+fn recorded() -> Option<Vec<(&'static str, Response)>> {
+    Some(vec![
+        (SITEMAP_INDEX_URL, xml(sitemap("teams.xml")?)),
+        (CHILD_1, xml(sitemap("teams_1.xml")?)),
+        (CHILD_2, xml(sitemap("teams_2.xml")?)),
+    ])
 }
 
 type Crawled = (Result<Vec<TeamEntry>, CrawlError>, Vec<(usize, usize)>);
@@ -95,11 +92,14 @@ fn clean_name_decodes_and_title_cases_each_word() {
 
 #[test]
 fn sitemap_parsers_read_only_loc_elements() {
-    let children = parse_sitemap_index(&sitemap("teams.xml"));
+    let (Some(index), Some(first)) = (sitemap("teams.xml"), sitemap("teams_1.xml")) else {
+        return;
+    };
+    let children = parse_sitemap_index(&index);
     assert_eq!(children, [CHILD_1, CHILD_2]);
 
     // The alternate-language `xhtml:link` hrefs repeat each URL; only `<loc>` counts.
-    let teams = parse_team_sitemap(&sitemap("teams_1.xml"));
+    let teams = parse_team_sitemap(&first);
     let ids: Vec<i64> = teams.iter().map(|team| team.fotmob_id).collect();
     assert_eq!(ids, [1583, 1954, 9977]);
     assert_eq!(
@@ -116,7 +116,10 @@ fn sitemap_parsers_read_only_loc_elements() {
 
 #[test]
 fn crawl_merges_children_sorted_and_deduplicated() {
-    let (result, progress) = crawl_blocking(&client(recorded(), None));
+    let Some(responses) = recorded() else {
+        return;
+    };
+    let (result, progress) = crawl_blocking(&client(responses, None));
     let teams = result.expect("crawl");
     let listed: Vec<(i64, &str)> = teams
         .iter()
@@ -140,7 +143,9 @@ fn crawl_merges_children_sorted_and_deduplicated() {
 
 #[test]
 fn crawl_is_all_or_nothing() {
-    let mut missing_child = recorded();
+    let Some(mut missing_child) = recorded() else {
+        return;
+    };
     missing_child.pop();
     let (result, _) = crawl_blocking(&client(missing_child, None));
     let Err(CrawlError::Incomplete(message)) = result else {
@@ -148,12 +153,12 @@ fn crawl_is_all_or_nothing() {
     };
     assert!(message.contains(CHILD_2), "{message}");
 
-    let mut empty_child = recorded();
+    let mut empty_child = recorded().expect("recorded sitemaps");
     empty_child[2].1 = xml("<urlset></urlset>".into());
     let (result, _) = crawl_blocking(&client(empty_child, None));
     assert!(matches!(result, Err(CrawlError::Incomplete(m)) if m.contains("lists no teams")));
 
-    let mut bad_status = recorded();
+    let mut bad_status = recorded().expect("recorded sitemaps");
     bad_status[1].1.status = 404;
     let (result, _) = crawl_blocking(&client(bad_status, None));
     assert!(matches!(result, Err(CrawlError::Incomplete(m)) if m.contains("HTTP 404")));
@@ -169,16 +174,21 @@ fn crawl_is_all_or_nothing() {
 fn crawl_observes_cancellation() {
     let cancel = CancelToken::new();
     cancel.cancel();
-    let (result, _) = crawl_blocking(&client(recorded(), Some(cancel)));
+    let Some(responses) = recorded() else {
+        return;
+    };
+    let (result, _) = crawl_blocking(&client(responses, Some(cancel)));
     assert!(matches!(result, Err(CrawlError::Cancelled)));
 }
 
-/// The recorded full catalog (`testdata/fotmob_teams.json`, a crawl of the
-/// live sitemaps) is exactly what the crawler's naming and rendering produce.
+/// The local recorded full catalog (`testdata/fotmob_teams.json`, a crawl of the
+/// live sitemaps; not in the repository) is exactly what the crawler's naming
+/// and rendering produce.
 #[test]
 fn recorded_catalog_round_trips() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/fotmob_teams.json");
-    let text = std::fs::read_to_string(path).expect("catalog fixture");
+    let Some(text) = read_fixture_text("fotmob_teams.json") else {
+        return;
+    };
     let teams = parse_catalog(&text).expect("valid catalog");
     assert!(teams.len() > 5000);
     assert!(

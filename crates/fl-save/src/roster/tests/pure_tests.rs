@@ -2,7 +2,6 @@
 
 use std::collections::HashSet;
 use std::io::Read;
-use std::path::Path;
 
 use serde_json::Value;
 
@@ -14,7 +13,7 @@ use crate::roster::shirt::assign_smart_shirt_number;
 use super::support::game_plan_formation_layout;
 
 fn fixture() -> Option<Value> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/roster/pure.json.gz");
+    let path = crate::test_support::local_path("testdata/roster/pure.json.gz")?;
     let file = std::fs::File::open(path).ok()?;
     let mut text = String::new();
     flate2::read::GzDecoder::new(file)
@@ -26,7 +25,6 @@ fn fixture() -> Option<Value> {
 #[test]
 fn formation_normalization_and_layouts_match_fixture() {
     let Some(fixture) = fixture() else {
-        eprintln!("skip: testdata/roster/pure.json.gz absent");
         return;
     };
     let rows = fixture["formations"].as_array().expect("formations");

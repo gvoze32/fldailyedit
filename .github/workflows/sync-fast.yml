@@ -8,12 +8,14 @@ name: Sync Live Transfers (Fast)
 # existing forks keep their workflow names. The updated save is uploaded as a
 # workflow artifact; nothing is published to a release.
 #
-# NEEDS THE GAME FILES: every save reads its player and club lists from the
-# game's own Player.bin / Team.bin (data_extra.cpk), which this repository does
-# not contain. Before re-enabling a schedule, make `GAME_ROOT` (a repository
-# variable) point at a folder on the runner that holds the game's CPK files
-# (for example a self-hosted runner with the game installed). Without it the
-# "Require the game files" step fails the run with an explanation.
+# NEEDS THE OWNER'S OWN SAVE AND GAME FILES: this repository ships neither.
+# Every save reads its player and club lists from the game's own Player.bin /
+# Team.bin (data_extra.cpk), and the run edits the owner's own EDIT00000000.
+# Before re-enabling a schedule, use a runner (for example a self-hosted one)
+# that has both on disk and set two repository variables: `GAME_ROOT` (a folder
+# with the game's CPK files) and `SAVE_PATH` (the owner's EDIT00000000 file).
+# Without them the "Require the game files and the save" step fails the run
+# with an explanation.
 on:
   # schedule:
   #   # Run daily at 00:00 UTC
@@ -25,8 +27,10 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # Folder with the game's CPK files (see the note at the top).
+  # Folder with the game's CPK files and the owner's own save (see the note at
+  # the top).
   GAME_ROOT: ${{ vars.GAME_ROOT }}
+  SAVE_PATH: ${{ vars.SAVE_PATH }}
   # The app keeps its state (transfer log, reports, caches, backups) under
   # $XDG_DATA_HOME/FLDailyEdit on Linux; point it into the workspace so the
   # cache and artifact steps can reach it.
@@ -76,18 +80,22 @@ jobs:
           restore-keys: |
             fotmob-fast-payload-
 
-      - name: Require the game files
+      - name: Require the game files and the save
         run: |
           if [ -z "${GAME_ROOT:-}" ] || [ ! -d "$GAME_ROOT" ]; then
             echo "::error::GAME_ROOT is not set to an existing folder. Every save reads its player and club lists from the game (data_extra.cpk), which is not part of this repository. Set the GAME_ROOT repository variable to a folder with the game's CPK files."
             exit 1
           fi
+          if [ -z "${SAVE_PATH:-}" ] || [ ! -f "$SAVE_PATH" ]; then
+            echo "::error::SAVE_PATH is not set to an existing file. This repository ships no save. Set the SAVE_PATH repository variable to the path of your own EDIT00000000 on the runner."
+            exit 1
+          fi
 
-      - name: Validate Base and Apply Transfers
+      - name: Validate the save and Apply Transfers
         run: |
-          cargo run --release --locked -p fl-app -- validate --edit-file base/EDIT00000000
+          cargo run --release --locked -p fl-app -- validate --edit-file "$SAVE_PATH"
           mkdir -p output
-          cp base/EDIT00000000 output/EDIT00000000
+          cp "$SAVE_PATH" output/EDIT00000000
           cargo run --release --locked -p fl-app -- run \
             --window auto \
             --game-root "$GAME_ROOT" \

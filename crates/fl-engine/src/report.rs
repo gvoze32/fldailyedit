@@ -794,24 +794,21 @@ mod tests {
 
     use super::*;
     use crate::log::TransferLog;
+    use crate::test_support::{testdata_path, testdata_path_or_gz};
 
-    fn testdata() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata")
-    }
-
-    /// Reads `path`, or `path.gz` when only the compressed copy exists.
-    fn read_text(path: &Path) -> Option<String> {
-        if let Ok(text) = fs::read_to_string(path) {
-            return Some(text);
+    /// Reads `testdata/<rel>`, or `<rel>.gz` when only the compressed copy
+    /// exists; `None` (with a skip note) when neither is present.
+    fn read_text(rel: &str) -> Option<String> {
+        let path = testdata_path_or_gz(rel)?;
+        if path.extension().is_some_and(|ext| ext == "gz") {
+            let mut text = String::new();
+            flate2::read::GzDecoder::new(fs::File::open(&path).unwrap())
+                .read_to_string(&mut text)
+                .unwrap();
+            Some(text)
+        } else {
+            Some(fs::read_to_string(path).unwrap())
         }
-        let mut gz = path.as_os_str().to_owned();
-        gz.push(".gz");
-        let file = fs::File::open(gz).ok()?;
-        let mut text = String::new();
-        flate2::read::GzDecoder::new(file)
-            .read_to_string(&mut text)
-            .ok()?;
-        Some(text)
     }
 
     fn parse_lines<T: serde::de::DeserializeOwned>(text: &str) -> Vec<T> {
@@ -890,18 +887,21 @@ mod tests {
             .with_timezone(&Utc)
     }
 
-    /// Checks one e2e scenario against its goldens; absent scenarios are skipped.
-    fn check_scenario(dir: &Path) {
-        let expected = dir.join("expected");
-        let (Some(log_text), Some(skipped_text), Some(md), Some(html)) = (
-            read_text(&expected.join("transfer_log.jsonl")),
-            read_text(&expected.join("skipped_transfers.jsonl")),
-            read_text(&expected.join("transfer_summary.md")),
-            read_text(&expected.join("transfer_summary.html")),
+    /// Checks one e2e scenario (`testdata/<rel>`) against its goldens; absent
+    /// scenarios are skipped.
+    fn check_scenario(rel: &str) {
+        let expected = format!("{rel}/expected");
+        let (Some(log_text), Some(skipped_text), Some(md), Some(html), Some(meta)) = (
+            read_text(&format!("{expected}/transfer_log.jsonl")),
+            read_text(&format!("{expected}/skipped_transfers.jsonl")),
+            read_text(&format!("{expected}/transfer_summary.md")),
+            read_text(&format!("{expected}/transfer_summary.html")),
+            testdata_path(&format!("{rel}/meta.json")),
         ) else {
             return;
         };
-        let generated = frozen(&dir.join("meta.json"));
+        let dir = Path::new(rel);
+        let generated = frozen(&meta);
         let temp = tempfile::tempdir().unwrap();
         let log_path = temp.path().join("transfer_log.jsonl");
         fs::write(&log_path, &log_text).unwrap();
@@ -941,22 +941,24 @@ mod tests {
 
     #[test]
     fn small_e2e_reports_match_goldens() {
-        check_scenario(&testdata().join("e2e/small"));
+        check_scenario("e2e/small");
     }
 
     #[test]
     fn full_e2e_reports_match_goldens() {
-        check_scenario(&testdata().join("local/e2e/full"));
+        check_scenario("local/e2e/full");
     }
 
     #[test]
     fn edge_case_reports_match_goldens() {
-        let root = testdata().join("log_report");
+        let Some(root) = testdata_path("log_report") else {
+            return;
+        };
         let generated = Utc.with_ymd_and_hms(2026, 10, 24, 22, 25, 55).unwrap();
         let mut cases = 0;
         for case in ["empty", "empty_with_skipped", "mixed", "mixed_with_skipped"] {
             let dir = root.join(case);
-            let Some(entries_text) = read_text(&dir.join("entries.jsonl")) else {
+            let Some(entries_text) = read_text(&format!("log_report/{case}/entries.jsonl")) else {
                 continue;
             };
             let skipped_text = fs::read_to_string(dir.join("skipped.jsonl")).unwrap();

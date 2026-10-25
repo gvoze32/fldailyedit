@@ -15,11 +15,25 @@ use fl_app::selfupdate::Backend;
 use fl_engine::api::{Environment, UpdateError, UpdateResult};
 use fl_update::{Available, Staged};
 
-/// The committed Football Life 2026 reference save.
-pub fn reference_save() -> PathBuf {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../base/EDIT00000000");
-    assert!(path.is_file(), "reference save missing: {}", path.display());
-    path
+/// The owner's local Football Life 2026 save (`testdata/local/base/EDIT00000000`,
+/// or `FL_TEST_BASE_SAVE`). `None`, with a note on stderr, when it is absent: the
+/// repository ships no save and tests that need one skip.
+pub fn reference_save() -> Option<PathBuf> {
+    let path = match std::env::var_os("FL_TEST_BASE_SAVE") {
+        Some(path) => PathBuf::from(path),
+        None => {
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/local/base/EDIT00000000")
+        }
+    };
+    if path.is_file() {
+        Some(path)
+    } else {
+        eprintln!(
+            "skipping: local base save not present at {}",
+            path.display()
+        );
+        None
+    }
 }
 
 #[derive(Default)]
@@ -127,9 +141,9 @@ pub fn fake_game_folder() -> PathBuf {
 
 /// Point the app at the reference save and the stand-in game folder, and wait
 /// for both checks to finish.
-pub fn choose_reference_save(app: &mut App) {
+pub fn choose_reference_save(app: &mut App, save: &Path) {
     app.dispatch(fl_app::gui::Action::GameChosen(fake_game_folder()));
-    app.dispatch(fl_app::gui::Action::SaveChosen(reference_save()));
+    app.dispatch(fl_app::gui::Action::SaveChosen(save.to_owned()));
     wait_until(app, "the save and game checks", |app| app.setup().ready());
 }
 

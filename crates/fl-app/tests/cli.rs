@@ -1,4 +1,4 @@
-//! The command line against the committed reference save.
+//! The command line against the owner's local reference save (skipped when absent).
 
 mod common;
 
@@ -23,10 +23,12 @@ fn run(args: &[&str], env: &Environment) -> (i32, String) {
 
 #[test]
 fn validate_passes_on_the_reference_save() {
+    let Some(save) = reference_save() else {
+        return;
+    };
     let env = Environment {
         state_dir: std::env::temp_dir(),
     };
-    let save = reference_save();
     let (code, text) = run(&["validate", "--edit-file", save.to_str().unwrap()], &env);
     assert_eq!(code, 0, "{text}");
     assert!(text.contains("PASS: save structure matches"), "{text}");
@@ -34,10 +36,12 @@ fn validate_passes_on_the_reference_save() {
 
 #[test]
 fn inspect_summarizes_the_reference_save() {
+    let Some(save) = reference_save() else {
+        return;
+    };
     let env = Environment {
         state_dir: std::env::temp_dir(),
     };
-    let save = reference_save();
     let (code, text) = run(&["inspect", "--edit-file", save.to_str().unwrap()], &env);
     assert_eq!(code, 0, "{text}");
     for expected in [

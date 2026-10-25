@@ -17,9 +17,15 @@ struct Sitemaps {
 }
 
 impl Sitemaps {
-    fn new(offline: bool) -> Arc<Self> {
-        let dir =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/sources_fotmob/sitemaps");
+    /// A transport whose network is down: it serves nothing.
+    fn offline() -> Arc<Self> {
+        Self::with_pages(true, HashMap::new())
+    }
+
+    /// A transport serving the recorded sitemaps; `None` (with a skip note)
+    /// when they are not on this machine.
+    fn recorded() -> Option<Arc<Self>> {
+        let dir = crate::test_support::testdata_path("sources_fotmob/sitemaps")?;
         let read = |name: &str| std::fs::read_to_string(dir.join(name)).expect("fixture");
         let pages = HashMap::from([
             (SITEMAP_INDEX_URL.to_owned(), read("teams.xml")),
@@ -32,6 +38,10 @@ impl Sitemaps {
                 read("teams_2.xml"),
             ),
         ]);
+        Some(Self::with_pages(false, pages))
+    }
+
+    fn with_pages(offline: bool, pages: HashMap<String, String>) -> Arc<Self> {
         Arc::new(Self {
             pages,
             offline,
@@ -138,7 +148,9 @@ fn ids(catalog: &TeamCatalog) -> Vec<i64> {
 #[test]
 fn first_run_downloads_stores_and_reports_progress() {
     let fixture = Fixture::new();
-    let transport = Sitemaps::new(false);
+    let Some(transport) = Sitemaps::recorded() else {
+        return;
+    };
     let (result, events) = fixture.load(
         &fixture.services(&transport, Duration::zero()),
         false,
@@ -166,7 +178,7 @@ fn first_run_downloads_stores_and_reports_progress() {
 fn a_fresh_copy_is_reused_without_network() {
     let fixture = Fixture::new();
     fixture.store();
-    let transport = Sitemaps::new(false);
+    let transport = Sitemaps::offline();
     let near_limit = Duration::days(29);
     let (result, events) = fixture.load(
         &fixture.services(&transport, near_limit),
@@ -182,7 +194,9 @@ fn a_fresh_copy_is_reused_without_network() {
 fn a_stale_copy_is_refreshed() {
     let fixture = Fixture::new();
     fixture.store();
-    let transport = Sitemaps::new(false);
+    let Some(transport) = Sitemaps::recorded() else {
+        return;
+    };
     let (result, _) = fixture.load(
         &fixture.services(&transport, AFTER_MAX_AGE),
         false,
@@ -196,7 +210,7 @@ fn a_stale_copy_is_refreshed() {
 fn a_failed_refresh_falls_back_to_the_stale_copy_with_a_warning() {
     let fixture = Fixture::new();
     fixture.store();
-    let transport = Sitemaps::new(true);
+    let transport = Sitemaps::offline();
     let (result, _) = fixture.load(
         &fixture.services(&transport, AFTER_MAX_AGE),
         false,
@@ -212,7 +226,7 @@ fn a_failed_refresh_falls_back_to_the_stale_copy_with_a_warning() {
 #[test]
 fn without_any_copy_a_failed_download_is_a_fetch_failure() {
     let fixture = Fixture::new();
-    let transport = Sitemaps::new(true);
+    let transport = Sitemaps::offline();
     let (result, _) = fixture.load(
         &fixture.services(&transport, Duration::zero()),
         false,
@@ -235,7 +249,9 @@ fn without_any_copy_a_failed_download_is_a_fetch_failure() {
 fn a_corrupt_copy_counts_as_missing() {
     let fixture = Fixture::new();
     fl_fs::write_atomic(&fixture.paths.team_index(), b"[{\"fotmob_id\": 1").unwrap();
-    let transport = Sitemaps::new(false);
+    let Some(transport) = Sitemaps::recorded() else {
+        return;
+    };
     let (result, _) = fixture.load(
         &fixture.services(&transport, Duration::zero()),
         false,
@@ -248,7 +264,9 @@ fn a_corrupt_copy_counts_as_missing() {
 #[test]
 fn a_dry_run_downloads_into_memory_only() {
     let fixture = Fixture::new();
-    let transport = Sitemaps::new(false);
+    let Some(transport) = Sitemaps::recorded() else {
+        return;
+    };
     let (result, _) = fixture.load(
         &fixture.services(&transport, Duration::zero()),
         true,
@@ -277,7 +295,7 @@ fn a_dry_run_downloads_into_memory_only() {
 fn an_injected_list_wins_over_cache_and_network() {
     let fixture = Fixture::new();
     fixture.store();
-    let transport = Sitemaps::new(false);
+    let transport = Sitemaps::offline();
     let injected: Arc<[TeamEntry]> = Vec::new().into();
     let services = Services {
         team_index: Some(Arc::clone(&injected)),
@@ -294,7 +312,7 @@ fn an_injected_list_wins_over_cache_and_network() {
 fn cancellation_stops_the_download_and_keeps_the_stale_copy() {
     let fixture = Fixture::new();
     fixture.store();
-    let transport = Sitemaps::new(false);
+    let transport = Sitemaps::offline();
     let cancel = CancelToken::new();
     assert!(cancel.request());
     let (result, _) = fixture.load(&fixture.services(&transport, AFTER_MAX_AGE), false, &cancel);
@@ -307,7 +325,7 @@ fn cancellation_stops_the_download_and_keeps_the_stale_copy() {
 fn a_copy_stamped_in_the_future_counts_as_fresh() {
     let fixture = Fixture::new();
     fixture.store();
-    let transport = Sitemaps::new(true);
+    let transport = Sitemaps::offline();
     let past = Duration::days(-400);
     let (result, _) = fixture.load(
         &fixture.services(&transport, past),

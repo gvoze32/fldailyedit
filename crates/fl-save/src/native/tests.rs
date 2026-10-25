@@ -9,9 +9,10 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-fn fixtures() -> Value {
-    let raw = fs::read(repo_root().join("testdata/native/fixtures.json")).expect("native fixtures");
-    serde_json::from_slice(&raw).unwrap()
+/// The recorded native-database fixtures (local `testdata/`); `None` when absent.
+fn fixtures() -> Option<Value> {
+    let raw = crate::test_support::local_bytes("testdata/native/fixtures.json")?;
+    Some(serde_json::from_slice(&raw).unwrap())
 }
 
 fn sha(text: &str) -> String {
@@ -162,7 +163,9 @@ fn check_database(label: &str, payload: &[u8], entry: &Value, name: &str) {
 
 #[test]
 fn reference_databases_match_fixture() {
-    let fixtures = fixtures();
+    let Some(fixtures) = fixtures() else {
+        return;
+    };
     let mut compared = 0;
     for (name, entry) in fixtures["sources"].as_object().unwrap() {
         let (path, label) = match name.split_once("::") {
@@ -202,7 +205,9 @@ fn reference_databases_match_fixture() {
 
 #[test]
 fn reference_cpk_listings_match_fixture() {
-    let fixtures = fixtures();
+    let Some(fixtures) = fixtures() else {
+        return;
+    };
     for (name, entry) in fixtures["cpks"].as_object().unwrap() {
         let path = repo_root().join(name);
         if !path.is_file() {
@@ -239,7 +244,9 @@ fn reference_cpk_listings_match_fixture() {
 
 #[test]
 fn reference_game_root_discovery_and_load_order_match_fixture() {
-    let fixtures = fixtures();
+    let Some(fixtures) = fixtures() else {
+        return;
+    };
     let root = repo_root().canonicalize().unwrap();
     let rel = |path: &Path| {
         path.strip_prefix(&root)
@@ -499,10 +506,9 @@ fn member(label: &str) -> String {
 
 #[test]
 fn data_s2526_archive_indexes_known_player() {
-    let path = repo_root().join("reference/data_s2526.cpk");
-    if !path.is_file() {
+    let Some(path) = crate::test_support::local_path("reference/data_s2526.cpk") else {
         return;
-    }
+    };
     let mut cpk = Cpk::open(&path).unwrap();
     assert_eq!(cpk.list_files().len(), 20);
     assert!(
@@ -538,10 +544,9 @@ fn data_s2526_archive_indexes_known_player() {
 
 #[test]
 fn data_extra_archive_indexes_teams_and_assignments() {
-    let path = repo_root().join("reference/data_extra.cpk");
-    if !path.is_file() {
+    let Some(path) = crate::test_support::local_path("reference/data_extra.cpk") else {
         return;
-    }
+    };
     let mut cpk = Cpk::open(&path).unwrap();
     let teams = TeamBinDatabase::from_bytes(&cpk.read_file("Team.bin").unwrap()).unwrap();
     let assignments =
@@ -561,10 +566,11 @@ fn data_extra_archive_indexes_teams_and_assignments() {
 
 #[test]
 fn t99_protected_toc_archive_extracts_native_databases() {
-    let path = repo_root().join("reference/T99 Patch V10/t99p21_v10_liveupd.cpk");
-    if !path.is_file() {
+    let Some(path) =
+        crate::test_support::local_path("reference/T99 Patch V10/t99p21_v10_liveupd.cpk")
+    else {
         return;
-    }
+    };
     let mut cpk = Cpk::open(&path).unwrap();
     for label in ["Player.bin", "Team.bin", "PlayerAssignment.bin"] {
         assert!(cpk.list_files().contains(&member(label)), "{label}");

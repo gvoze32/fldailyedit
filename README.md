@@ -91,13 +91,15 @@ cargo build --release -p fl-app --target x86_64-pc-windows-gnu    # Windows exe 
 cargo test --workspace
 ```
 
+Tests that need local data (fixtures, recorded runs, a save or game files) skip
+when it is absent; the repository ships none, so a fresh clone runs only the
+self-contained tests.
+
 To release, bump `version` in `Cargo.toml` and push to `main`. GitHub Actions
 tests, builds the Windows exe and publishes `vX.Y.Z`.
 
 ## Credits
 
-The [base save](base/EDIT00000000) used for testing is from Gondowan's
-[Road to FL27 MiniPatch](https://www.reddit.com/r/SPFootballLife/comments/1wssmur/release_minipatch_road_to_fl27_for_football_life/).
 Credits and third-party licences:
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). FL Daily Edit is MIT
 licensed ([LICENSE](LICENSE)).

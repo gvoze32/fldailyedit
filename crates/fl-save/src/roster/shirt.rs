@@ -30,7 +30,7 @@ const OTHER: &[u32] = &[
 /// allocator, verbatim: save labels `LMF` / `RMF` (and the aliases `CAM`,
 /// `CDM`, `F`) are NOT in them and therefore use the generic list. This is a
 /// known label mismatch carried over for byte parity (it changes which free
-/// number an LMF/RMF signing receives); see `testdata/DEVIATIONS.md`.
+/// number an LMF/RMF signing receives).
 fn shirt_line(label: &str, is_goalkeeper: bool) -> ShirtLine {
     let upper = fl_text::strip(label).to_uppercase();
     if is_goalkeeper || matches!(upper.as_str(), "GK" | "GOALKEEPER" | "KEEPER" | "GOALIE") {

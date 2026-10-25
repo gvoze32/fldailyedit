@@ -15,10 +15,10 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-fn fixtures() -> Value {
-    let raw =
-        std::fs::read(repo_root().join("testdata/crypto/fixtures.json")).expect("crypto fixtures");
-    serde_json::from_slice(&raw).unwrap()
+/// The C-oracle fixtures (local `testdata/`); `None` when absent.
+fn fixtures() -> Option<Value> {
+    let raw = crate::test_support::local_bytes("testdata/crypto/fixtures.json")?;
+    Some(serde_json::from_slice(&raw).unwrap())
 }
 
 fn b64(value: &Value) -> Vec<u8> {
@@ -39,8 +39,7 @@ fn block_list(blocks: &Blocks) -> [(&'static str, &[u8]); 6] {
 }
 
 /// Compare one save against the C pesXdecrypter/encrypter21 fixtures.
-fn check_save(relative: &str, entry: &Value) {
-    let input = std::fs::read(repo_root().join(relative)).unwrap();
+fn check_save(relative: &str, input: Vec<u8>, entry: &Value, verified: bool) {
     assert_eq!(
         sha(&input),
         entry["input_sha256"].as_str().unwrap(),
@@ -81,7 +80,7 @@ fn check_save(relative: &str, entry: &Value) {
         };
         blocks.data[index] ^= edit[1].as_u64().unwrap() as u8;
     }
-    let edited = if relative.starts_with("base/") {
+    let edited = if verified {
         encrypt_verified(&blocks)
     } else {
         encrypt(&blocks)
@@ -100,19 +99,28 @@ fn check_save(relative: &str, entry: &Value) {
 
 #[test]
 fn base_save_matches_c_oracle() {
-    let fixtures = fixtures();
-    let entry = &fixtures["saves"]["base/EDIT00000000"];
+    let Some(input) = crate::test_support::base_save_bytes() else {
+        return;
+    };
+    let Some(fixtures) = fixtures() else {
+        return;
+    };
+    let relative = "testdata/local/base/EDIT00000000";
+    let entry = &fixtures["saves"][relative];
     assert!(entry.is_object(), "base save missing from fixtures");
-    check_save("base/EDIT00000000", entry);
+    check_save(relative, input, entry, true);
 }
 
 #[test]
 fn reference_saves_match_c_oracle() {
-    let fixtures = fixtures();
+    let Some(fixtures) = fixtures() else {
+        return;
+    };
     let mut checked = 0;
     for (relative, entry) in fixtures["saves"].as_object().unwrap() {
         if relative.starts_with("reference/") && repo_root().join(relative).is_file() {
-            check_save(relative, entry);
+            let input = std::fs::read(repo_root().join(relative)).unwrap();
+            check_save(relative, input, entry, false);
             checked += 1;
         }
     }
@@ -121,7 +129,9 @@ fn reference_saves_match_c_oracle() {
 
 #[test]
 fn synthetic_odd_sizes_match_c_oracle() {
-    let fixtures = fixtures();
+    let Some(fixtures) = fixtures() else {
+        return;
+    };
     let cases = fixtures["synthetic"].as_array().unwrap();
     assert!(!cases.is_empty());
     for case in cases {
@@ -156,22 +166,25 @@ fn synthetic_odd_sizes_match_c_oracle() {
     }
 }
 
-fn small_blocks() -> Blocks {
-    let fixtures = fixtures();
+fn small_blocks() -> Option<Blocks> {
+    let fixtures = fixtures()?;
     let case = &fixtures["synthetic"][0];
-    Blocks {
+    Some(Blocks {
         encryption_header: b64(&case["encryption_header_b64"]).try_into().unwrap(),
         header: b64(&case["header_b64"]).try_into().unwrap(),
         description: vec![1; 7],
         logo: vec![2; 13],
         data: vec![3; 1001],
         serial: vec![4; 6],
-    }
+    })
 }
 
 #[test]
 fn truncated_or_inconsistent_input_is_an_error_not_a_panic() {
-    let encrypted = encrypt(&small_blocks()).unwrap();
+    let Some(blocks) = small_blocks() else {
+        return;
+    };
+    let encrypted = encrypt(&blocks).unwrap();
     for len in [0, 100, PREFIX_SIZE - 1, PREFIX_SIZE, encrypted.len() - 1] {
         assert!(
             matches!(
@@ -192,7 +205,9 @@ fn truncated_or_inconsistent_input_is_an_error_not_a_panic() {
 
 #[test]
 fn encrypt_rejects_odd_serial_and_rewrites_header_sizes() {
-    let mut blocks = small_blocks();
+    let Some(mut blocks) = small_blocks() else {
+        return;
+    };
     blocks.serial.push(0);
     assert!(matches!(
         encrypt(&blocks),
@@ -208,7 +223,9 @@ fn encrypt_rejects_odd_serial_and_rewrites_header_sizes() {
 
 #[test]
 fn round_trip_verification_reports_the_failing_block() {
-    let blocks = small_blocks();
+    let Some(blocks) = small_blocks() else {
+        return;
+    };
     let mut encrypted = encrypt(&blocks).unwrap();
     assert!(verify_round_trip(&blocks, &encrypted).is_ok());
 
@@ -225,7 +242,9 @@ fn round_trip_verification_reports_the_failing_block() {
 fn encrypt_to_file_is_atomic_and_verified() {
     let dir = tempfile::tempdir().unwrap();
     let target = dir.path().join("out").join("EDIT00000000");
-    let blocks = small_blocks();
+    let Some(blocks) = small_blocks() else {
+        return;
+    };
     encrypt_to_file(&blocks, &target).unwrap();
     assert_eq!(std::fs::read(&target).unwrap(), encrypt(&blocks).unwrap());
 

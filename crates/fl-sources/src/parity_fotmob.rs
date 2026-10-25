@@ -1,7 +1,8 @@
 //! Parity tests against the frozen Python scraper.
 //!
 //! The former Python implementation (removed) recorded real FotMob responses into
-//! `testdata/sources_fotmob/cassette.jsonl.gz` and dumped what the unchanged
+//! the local (`testdata/`, not in the repository) `sources_fotmob/cassette.jsonl.gz`
+//! and dumped what the unchanged
 //! Python code produces from them (clock pinned to `meta.json`) into
 //! `expected/*.json`. These tests replay the same cassette through the Rust
 //! code and demand identical results.
@@ -25,9 +26,15 @@ use crate::fotmob::{ClubsRequest, FeedRequest, FotmobOptions, FotmobScraper, fee
 use crate::http::{HttpClient, ReplayTransport, Request, RetryPolicy};
 use crate::model::{ScrapeResult, SquadSnapshot, Transfer, merge_transfers};
 use crate::tactics::fetch_tactical_updates;
+use crate::test_support::testdata_path;
 
 fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/sources_fotmob")
+}
+
+/// True, after printing a skip note, when the local recorded fixtures are absent.
+fn fixtures_absent() -> bool {
+    testdata_path("sources_fotmob").is_none()
 }
 
 fn expected(name: &str) -> Value {
@@ -109,6 +116,9 @@ fn assert_same(label: &str, actual: &Value, wanted: &Value) {
 
 #[tokio::test]
 async fn feed_matches_expected() {
+    if fixtures_absent() {
+        return;
+    }
     let (now, _) = meta();
     let scraper = scraper(None);
     let auto = scraper
@@ -127,6 +137,9 @@ async fn feed_matches_expected() {
 
 #[tokio::test]
 async fn every_feed_item_parses_as_expected() {
+    if fixtures_absent() {
+        return;
+    }
     let wanted = expected("feed_items");
     let wanted = wanted.as_array().unwrap();
     let client = client();
@@ -146,6 +159,9 @@ async fn every_feed_item_parses_as_expected() {
 
 #[tokio::test]
 async fn clubs_match_expected() {
+    if fixtures_absent() {
+        return;
+    }
     let (now, clubs) = meta();
     let dir = tempfile::tempdir().unwrap();
     let scraper = scraper(Some(dir.path()));
@@ -189,6 +205,9 @@ async fn clubs_match_expected() {
 
 #[tokio::test]
 async fn formation_enrichment_matches_expected() {
+    if fixtures_absent() {
+        return;
+    }
     let (now, _) = meta();
     let scraper = scraper(None);
     let cache = TeamPayloadCache::new(None, chrono::Duration::hours(6));
@@ -241,6 +260,9 @@ async fn formation_enrichment_matches_expected() {
 
 #[tokio::test]
 async fn tactics_match_expected() {
+    if fixtures_absent() {
+        return;
+    }
     let (now, _) = meta();
     let clubs = expected("clubs_auto");
     let snapshots: Vec<SquadSnapshot> = clubs["squad_snapshots"]
@@ -304,6 +326,9 @@ async fn tactics_match_expected() {
 
 #[test]
 fn dates_match_expected() {
+    if fixtures_absent() {
+        return;
+    }
     let wanted = expected("dates");
     let text =
         |value: Option<chrono::NaiveDate>| value.map_or(Value::Null, |d| json!(d.to_string()));
@@ -378,6 +403,9 @@ fn dates_match_expected() {
 
 #[test]
 fn merge_matches_expected() {
+    if fixtures_absent() {
+        return;
+    }
     for case in expected("merge").as_array().unwrap() {
         let input: Vec<Transfer> = serde_json::from_value(case["input"].clone()).unwrap();
         let merged = merge_transfers(input);

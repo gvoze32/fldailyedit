@@ -4,7 +4,7 @@
 //! cargo run -p fl-app --example demo -- [fail|nochanges|preview]
 //! ```
 //!
-//! Choose any save (the repo's `base/EDIT00000000` works), press Update and
+//! Choose any save (your own `EDIT00000000`), press Update and
 //! watch the progress and result screens.
 
 use std::sync::Arc;

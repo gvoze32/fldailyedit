@@ -1,6 +1,7 @@
 //! Replay of the oracle sequences recorded from the former Python implementation (removed).
 //!
-//! Fixtures: `testdata/roster/base.json.gz` (committed, base save) and
+//! Fixtures: `testdata/roster/base.json.gz` (committed; base save kept at
+//! `testdata/local/base/EDIT00000000` or `FL_TEST_BASE_SAVE`) and
 //! `testdata/local/save_roster/<label>.json.gz` (reference saves, local only;
 //! tests skip when the save or fixture is absent). Every sequence starts from
 //! the pristine save; after each step the SHA-256 of `data.dat` and the
@@ -84,12 +85,11 @@ struct Save {
 }
 
 fn load_save(label: &str) -> Option<Save> {
-    let path = if label == "base" {
-        root().join("base/EDIT00000000")
+    let raw = if label == "base" {
+        crate::test_support::base_save_bytes()?
     } else {
-        root().join("reference").join(label)
+        fs::read(root().join("reference").join(label)).ok()?
     };
-    let raw = fs::read(path).ok()?;
     let blocks = crypto::decrypt(&raw).expect("decrypt");
     Some(Save {
         pes21: blocks.save_header().is_pes21(),

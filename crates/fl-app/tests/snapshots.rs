@@ -1,4 +1,5 @@
-//! Renders every screen to PNG under `tests/snapshots` (compared on later runs;
+//! Renders every screen to PNG under `tests/snapshots` (local only, not in the
+//! repository; compared on later runs, skipped when absent;
 //! refresh with `UPDATE_SNAPSHOTS=1 cargo test -p fl-app --test snapshots`).
 
 mod common;
@@ -30,6 +31,19 @@ fn harness(app: App, theme_choice: Theme) -> Harness<'static, App> {
 
 fn options() -> SnapshotOptions {
     SnapshotOptions::new().threshold(1.5).max_failed_pixels(400)
+}
+
+/// Baseline PNGs are local (`tests/snapshots/`, not in the repository). Skip
+/// when there are none to compare with (unless `UPDATE_SNAPSHOTS` is set to
+/// create them) or when the local base save the screens are staged with is absent.
+fn skip_without_baselines() -> bool {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots");
+    let has_baselines = std::fs::read_dir(&dir).is_ok_and(|mut entries| entries.next().is_some());
+    if !has_baselines && std::env::var_os("UPDATE_SNAPSHOTS").is_none() {
+        eprintln!("skipping: no baseline snapshots in {}", dir.display());
+        return true;
+    }
+    reference_save().is_none()
 }
 
 fn settle(harness: &mut Harness<'_, App>) {
@@ -120,7 +134,7 @@ fn ready_setup(engine: ScriptedEngine) -> Fixture {
     ];
     setup.set_save(Some(shown.clone()));
     setup.save = SaveStatus::Ready {
-        resolved: reference_save(),
+        resolved: reference_save().expect("checked by skip_without_baselines"),
         info: SaveInfo {
             kind: SaveKind::FootballLife26,
             game_version: "FL26".into(),
@@ -146,6 +160,9 @@ fn start_and_run(fx: &mut Fixture, dry_run: bool) {
 
 #[test]
 fn setup_light() {
+    if skip_without_baselines() {
+        return;
+    }
     let fx = ready_setup(ScriptedEngine::new(Vec::new(), Ok(UpdateResult::default())));
     let mut harness = harness(fx.app, Theme::Light);
     settle(&mut harness);
@@ -154,6 +171,9 @@ fn setup_light() {
 
 #[test]
 fn setup_dark() {
+    if skip_without_baselines() {
+        return;
+    }
     let fx = ready_setup(ScriptedEngine::new(Vec::new(), Ok(UpdateResult::default())));
     let mut harness = harness(fx.app, Theme::Dark);
     settle(&mut harness);
@@ -162,6 +182,9 @@ fn setup_dark() {
 
 #[test]
 fn setup_game_folder_not_chosen() {
+    if skip_without_baselines() {
+        return;
+    }
     let mut fx = ready_setup(ScriptedEngine::new(Vec::new(), Ok(UpdateResult::default())));
     let setup = fx.app.setup_mut();
     setup.set_game(None);
@@ -174,13 +197,16 @@ fn setup_game_folder_not_chosen() {
 
 #[test]
 fn setup_pes21_needs_game_folder() {
+    if skip_without_baselines() {
+        return;
+    }
     let mut fx = ready_setup(ScriptedEngine::new(Vec::new(), Ok(UpdateResult::default())));
     let setup = fx.app.setup_mut();
     setup.set_save(Some(PathBuf::from(
         r"C:\Users\Player\Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\0123\save\EDIT00000000",
     )));
     setup.save = SaveStatus::Ready {
-        resolved: reference_save(),
+        resolved: reference_save().expect("checked by skip_without_baselines"),
         info: SaveInfo {
             kind: SaveKind::Pes2021,
             game_version: "PES 2021".into(),
@@ -200,6 +226,9 @@ fn setup_pes21_needs_game_folder() {
 
 #[test]
 fn progress_mid_fetch() {
+    if skip_without_baselines() {
+        return;
+    }
     let gate = Gate::new();
     let engine = ScriptedEngine::new(
         vec![
@@ -229,6 +258,9 @@ fn progress_mid_fetch() {
 
 #[test]
 fn progress_while_committing_dark() {
+    if skip_without_baselines() {
+        return;
+    }
     let gate = Gate::new();
     let engine = ScriptedEngine::new(
         vec![
@@ -268,11 +300,17 @@ fn finished(
 
 #[test]
 fn result_updated() {
+    if skip_without_baselines() {
+        return;
+    }
     finished(Ok(updated_result()), Theme::Light, "result_updated", |_| {});
 }
 
 #[test]
 fn result_updated_dark() {
+    if skip_without_baselines() {
+        return;
+    }
     finished(
         Ok(updated_result()),
         Theme::Dark,
@@ -283,6 +321,9 @@ fn result_updated_dark() {
 
 #[test]
 fn result_updated_not_applied_tab() {
+    if skip_without_baselines() {
+        return;
+    }
     finished(
         Ok(updated_result()),
         Theme::Light,
@@ -295,6 +336,9 @@ fn result_updated_not_applied_tab() {
 
 #[test]
 fn result_no_changes() {
+    if skip_without_baselines() {
+        return;
+    }
     let result = UpdateResult {
         outcome: Outcome::NoChanges,
         target_path: updated_result().target_path,
@@ -309,6 +353,9 @@ fn result_no_changes() {
 
 #[test]
 fn result_preview() {
+    if skip_without_baselines() {
+        return;
+    }
     let result = UpdateResult {
         outcome: Outcome::Preview,
         backup_path: None,
@@ -320,6 +367,9 @@ fn result_preview() {
 
 #[test]
 fn result_failed_fetch() {
+    if skip_without_baselines() {
+        return;
+    }
     let error = UpdateError {
         code: ErrorCode::FetchFailed,
         stage: Some(Stage::Fetching),
@@ -330,6 +380,9 @@ fn result_failed_fetch() {
 
 #[test]
 fn result_failed_needs_game_folder_dark() {
+    if skip_without_baselines() {
+        return;
+    }
     let error = UpdateError {
         code: ErrorCode::NativeDatabaseMissing,
         stage: Some(Stage::Validating),
@@ -345,6 +398,9 @@ fn result_failed_needs_game_folder_dark() {
 
 #[test]
 fn result_cancelled() {
+    if skip_without_baselines() {
+        return;
+    }
     let error = UpdateError {
         code: ErrorCode::Cancelled,
         stage: Some(Stage::Fetching),

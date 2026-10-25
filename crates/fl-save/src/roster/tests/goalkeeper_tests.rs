@@ -9,8 +9,6 @@
 //! as the first pass saved them (extracted from the pass-1 output), with the
 //! registered position of every player.
 
-use std::path::Path;
-
 use serde_json::Value;
 
 use crate::edit_file::{EditFile, testing::Mock};
@@ -41,10 +39,10 @@ fn ids_of(value: &Value) -> Vec<u32> {
 }
 
 /// Team 67024 exactly as the first full pass saved it.
-fn al_gharafa(with_abilities: bool) -> Fixture {
-    let path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/roster/al_gharafa_pass1.json");
-    let doc: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+/// `None` (skip) when the local `testdata/roster/al_gharafa_pass1.json` is absent.
+fn al_gharafa(with_abilities: bool) -> Option<Fixture> {
+    let bytes = crate::test_support::local_bytes("testdata/roster/al_gharafa_pass1.json")?;
+    let doc: Value = serde_json::from_slice(&bytes).unwrap();
     let team = doc["team_id"].as_u64().unwrap() as u32;
     let ids = ids_of(&doc["roster_ids"]);
     let shirts: Vec<u16> = ids_of(&doc["shirt_numbers"])
@@ -66,7 +64,7 @@ fn al_gharafa(with_abilities: bool) -> Fixture {
         native.records.insert(id.parse().unwrap(), record);
     }
     native.attach(&mut file);
-    Fixture { file, doc }
+    Some(Fixture { file, doc })
 }
 
 impl Fixture {
@@ -142,7 +140,9 @@ fn assert_one_goalkeeper_code_per_phase(fixture: &Fixture) {
 #[test]
 fn the_fixture_is_valid_before_any_release() {
     for with_abilities in [false, true] {
-        let fixture = al_gharafa(with_abilities);
+        let Some(fixture) = al_gharafa(with_abilities) else {
+            return;
+        };
         assert_eq!(fixture.goalkeeper_errors(), Vec::<String>::new());
         assert_eq!(fixture.starters()[0], Position::Gk);
         assert_one_goalkeeper_code_per_phase(&fixture);
@@ -154,7 +154,9 @@ fn the_fixture_is_valid_before_any_release() {
 #[test]
 fn live_squad_releases_never_remove_the_last_goalkeeper() {
     for with_abilities in [false, true] {
-        let mut fixture = al_gharafa(with_abilities);
+        let Some(mut fixture) = al_gharafa(with_abilities) else {
+            return;
+        };
         let team = fixture.team();
         let preferred = fixture.doc["preferred_starters"].clone();
         fixture
@@ -196,7 +198,9 @@ fn live_squad_releases_never_remove_the_last_goalkeeper() {
 #[test]
 fn releasing_the_starting_goalkeeper_promotes_the_other_one() {
     for with_abilities in [false, true] {
-        let mut fixture = al_gharafa(with_abilities);
+        let Some(mut fixture) = al_gharafa(with_abilities) else {
+            return;
+        };
         let team = fixture.team();
         fixture.file.release_player(133_193, team).unwrap();
 

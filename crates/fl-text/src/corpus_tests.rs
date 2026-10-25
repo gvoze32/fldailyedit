@@ -1,13 +1,14 @@
-//! Parity against the Python oracle corpus (`testdata/text_fuzzy/corpus.json.gz`,
-//! recorded from the former Python implementation, now removed). Every float is compared with `==`.
+//! Parity against the Python oracle corpus (local `testdata/text_fuzzy/corpus.json.gz`, not
+//! in the repository; tests skip when absent), recorded from the former Python implementation,
+//! now removed. Every float is compared with `==`.
 
 use std::collections::HashMap;
-use std::io::Read;
 use std::sync::LazyLock;
 
 use serde::Deserialize;
 
 use crate::fuzz;
+use crate::test_support::{read_gz, testdata_path};
 use crate::unicode_str;
 use crate::unit_tests::full_scan;
 use crate::{
@@ -94,21 +95,17 @@ struct Corpus {
     key_index: KeyIndex,
 }
 
+const CORPUS_PATH: &str = "text_fuzzy/corpus.json.gz";
+
 static CORPUS: LazyLock<Corpus> = LazyLock::new(|| {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../testdata/text_fuzzy/corpus.json.gz"
-    );
-    let file = std::fs::File::open(path).expect("corpus fixture is committed");
-    let mut json = Vec::new();
-    flate2::read::GzDecoder::new(file)
-        .read_to_end(&mut json)
-        .expect("corpus gzip");
+    let json = read_gz(CORPUS_PATH).expect("corpus fixture present");
     serde_json::from_slice(&json).expect("corpus json")
 });
 
-fn corpus() -> &'static Corpus {
-    &CORPUS
+/// The recorded oracle corpus, or `None` (with a skip note) when `testdata/` lacks it.
+fn corpus() -> Option<&'static Corpus> {
+    testdata_path(CORPUS_PATH)?;
+    Some(&CORPUS)
 }
 
 fn f(text: &str) -> f64 {
@@ -147,7 +144,9 @@ fn pair_scores(corpus: &Corpus, score: impl Fn(&str, &str) -> f64) -> impl Itera
 
 #[test]
 fn pair_scorers_match_corpus() {
-    let corpus = corpus();
+    let Some(corpus) = corpus() else {
+        return;
+    };
     assert!(corpus.pairs.len() >= 20_000);
     let scores = &corpus.scores;
     check_all(
@@ -178,7 +177,9 @@ fn pair_scorers_match_corpus() {
 
 #[test]
 fn internal_scorers_match_corpus() {
-    let corpus = corpus();
+    let Some(corpus) = corpus() else {
+        return;
+    };
     let scores = &corpus.scores;
     check_all(
         "partial_ratio",
@@ -202,7 +203,9 @@ fn internal_scorers_match_corpus() {
 
 #[test]
 fn cutoff_scorers_match_corpus() {
-    let corpus = corpus();
+    let Some(corpus) = corpus() else {
+        return;
+    };
     let mut failures = Vec::new();
     for case in &corpus.cutoff_cases {
         let (a, b) = (&corpus.strings[case.p.0], &corpus.strings[case.p.1]);
@@ -270,7 +273,9 @@ fn norm_check<T: PartialEq + std::fmt::Debug>(
 
 #[test]
 fn normalizers_match_corpus() {
-    let corpus = corpus();
+    let Some(corpus) = corpus() else {
+        return;
+    };
     let norm = &corpus.norm;
     norm_check("fold_text", corpus, &norm.fold, fold_text);
     norm_check("casefold", corpus, &norm.casefold, casefold);
@@ -319,7 +324,9 @@ fn normalizers_match_corpus() {
 
 #[test]
 fn category_compatibility_matches_corpus() {
-    let corpus = corpus();
+    let Some(corpus) = corpus() else {
+        return;
+    };
     for &(a, b, want) in &corpus.category_pairs {
         let (a, b) = (&corpus.strings[a], &corpus.strings[b]);
         assert_eq!(categories_compatible(a, b), want, "{a:?} vs {b:?}");
@@ -332,7 +339,10 @@ fn in_ranges(ranges: &[(u32, u32)], cp: u32) -> bool {
 
 #[test]
 fn every_code_point_matches_corpus() {
-    let cps = &corpus().codepoints;
+    let Some(corpus) = corpus() else {
+        return;
+    };
+    let cps = &corpus.codepoints;
     let mut failures = Vec::new();
     for cp in (0..=0x10FFFFu32).filter_map(char::from_u32) {
         let n = cp as u32;
@@ -384,7 +394,10 @@ fn every_code_point_matches_corpus() {
 
 #[test]
 fn token_set_index_matches_corpus_and_full_scan() {
-    for suite in &corpus().index_cases {
+    let Some(corpus) = corpus() else {
+        return;
+    };
+    for suite in &corpus.index_cases {
         let index = TokenSetIndex::new(suite.names.iter().map(String::as_str));
         for case in &suite.cases {
             let got = index.extract(&case.q, case.c);
@@ -411,7 +424,10 @@ fn token_set_index_matches_corpus_and_full_scan() {
 #[test]
 fn fuzzy_key_index_semantics_match_corpus() {
     // Key index = normalize_dotless + dedup + token_set >= 92.
-    let key_index = &corpus().key_index;
+    let Some(corpus) = corpus() else {
+        return;
+    };
+    let key_index = &corpus.key_index;
     let mut keys: Vec<String> = Vec::new();
     for raw in &key_index.raw_clubs {
         let key = normalize_dotless(raw);
@@ -453,18 +469,9 @@ type StressRow = (
 /// regenerated. Skipped when absent.
 #[test]
 fn stress_corpus_matches_reference() {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../testdata/local/text_fuzzy_stress.json.gz"
-    );
-    let Ok(file) = std::fs::File::open(path) else {
-        eprintln!("skipping: {path} not generated");
+    let Some(json) = read_gz("local/text_fuzzy_stress.json.gz") else {
         return;
     };
-    let mut json = Vec::new();
-    flate2::read::GzDecoder::new(file)
-        .read_to_end(&mut json)
-        .expect("stress gzip");
     let rows: Vec<StressRow> = serde_json::from_slice(&json).expect("stress json");
     let mut failures = Vec::new();
     for (a, b, cutoff, ratio, sort, set, w, partial, token, partial_token) in &rows {
@@ -523,18 +530,9 @@ fn norm_stress_corpus_matches_reference() {
         String,
         String,
     );
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../testdata/local/text_fuzzy_norm_stress.json.gz"
-    );
-    let Ok(file) = std::fs::File::open(path) else {
-        eprintln!("skipping: {path} not generated");
+    let Some(json) = read_gz("local/text_fuzzy_norm_stress.json.gz") else {
         return;
     };
-    let mut json = Vec::new();
-    flate2::read::GzDecoder::new(file)
-        .read_to_end(&mut json)
-        .expect("norm stress gzip");
     let rows: Vec<Row> = serde_json::from_slice(&json).expect("norm stress json");
     let mut failures = Vec::new();
     for (text, fold, dotless, alnum, key, clean, narrow, markers, senior, tokens, cf, stripped) in

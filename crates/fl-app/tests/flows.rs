@@ -32,8 +32,11 @@ fn step(stage: Stage, message: &str, current: u32, total: u32) -> Step {
 
 #[test]
 fn reference_save_is_recognized_and_remembered() {
+    let Some(save) = reference_save() else {
+        return;
+    };
     let mut fx = fixture(ScriptedEngine::new(Vec::new(), Ok(UpdateResult::default())));
-    choose_reference_save(&mut fx.app);
+    choose_reference_save(&mut fx.app, &save);
     let SaveStatus::Ready { info, .. } = &fx.app.setup().save else {
         panic!("not ready")
     };
@@ -65,8 +68,11 @@ fn garbage_and_missing_saves_block_the_buttons_with_a_reason() {
 
 #[test]
 fn a_valid_save_alone_cannot_start_without_a_game_folder() {
+    let Some(save) = reference_save() else {
+        return;
+    };
     let mut fx = fixture(ScriptedEngine::new(Vec::new(), Ok(UpdateResult::default())));
-    fx.app.dispatch(Action::SaveChosen(reference_save()));
+    fx.app.dispatch(Action::SaveChosen(save));
     wait_until(&mut fx.app, "save check", |app| {
         matches!(app.setup().save, SaveStatus::Ready { .. })
     });
@@ -81,15 +87,15 @@ fn a_valid_save_alone_cannot_start_without_a_game_folder() {
 
 #[test]
 fn browse_buttons_use_the_platform_pickers() {
+    let Some(save) = reference_save() else {
+        return;
+    };
     let mut fx = fixture(ScriptedEngine::new(Vec::new(), Ok(UpdateResult::default())));
-    *fx.platform.save.lock().unwrap() = Some(reference_save());
+    *fx.platform.save.lock().unwrap() = Some(save.clone());
     *fx.platform.folder.lock().unwrap() = Some(fx.state_dir.path().into());
     fx.app.dispatch(Action::BrowseSave);
     fx.app.dispatch(Action::BrowseGame);
-    assert_eq!(
-        fx.app.setup().save_path.as_deref(),
-        Some(reference_save().as_path())
-    );
+    assert_eq!(fx.app.setup().save_path.as_deref(), Some(save.as_path()));
     // An empty folder is reported, not accepted.
     wait_until(&mut fx.app, "game check", |app| {
         app.setup().game == GameStatus::Unusable
@@ -98,11 +104,14 @@ fn browse_buttons_use_the_platform_pickers() {
 
 #[test]
 fn game_folder_inside_the_save_guard_is_rejected() {
+    let Some(save) = reference_save() else {
+        return;
+    };
     let mut fx = fixture(ScriptedEngine::new(Vec::new(), Ok(UpdateResult::default())));
     let game = fx.state_dir.path().join("PES 2021");
     std::fs::create_dir_all(game.join("download")).unwrap();
     std::fs::write(game.join("download/data_extra.cpk"), b"x").unwrap();
-    std::fs::copy(reference_save(), game.join("EDIT00000000")).unwrap();
+    std::fs::copy(&save, game.join("EDIT00000000")).unwrap();
     fx.app.dispatch(Action::GameChosen(game.clone()));
     fx.app
         .dispatch(Action::SaveChosen(game.join("EDIT00000000")));
@@ -117,13 +126,16 @@ fn game_folder_inside_the_save_guard_is_rejected() {
 
 #[test]
 fn preview_ends_on_a_result_screen_with_an_update_now_path() {
+    let Some(save) = reference_save() else {
+        return;
+    };
     let preview = UpdateResult {
         outcome: Outcome::Preview,
         ..updated()
     };
     let engine = ScriptedEngine::new(vec![step(Stage::Fetching, "Fetching", 1, 2)], Ok(preview));
     let mut fx = fixture(engine);
-    choose_reference_save(&mut fx.app);
+    choose_reference_save(&mut fx.app, &save);
     fx.app.dispatch(Action::Start { dry_run: true });
     assert!(matches!(fx.app.screen(), Screen::Running));
     wait_until(&mut fx.app, "result", on_result_screen);
@@ -140,6 +152,9 @@ fn preview_ends_on_a_result_screen_with_an_update_now_path() {
 
 #[test]
 fn cancel_before_commit_stops_the_run() {
+    let Some(save) = reference_save() else {
+        return;
+    };
     let gate = Gate::new();
     let engine = ScriptedEngine::new(
         vec![
@@ -151,7 +166,7 @@ fn cancel_before_commit_stops_the_run() {
         Ok(updated()),
     );
     let mut fx = fixture(engine);
-    choose_reference_save(&mut fx.app);
+    choose_reference_save(&mut fx.app, &save);
     fx.app.dispatch(Action::Start { dry_run: false });
     wait_until(&mut fx.app, "fetching", |app| app.running());
     std::thread::sleep(Duration::from_millis(50));
@@ -168,6 +183,9 @@ fn cancel_before_commit_stops_the_run() {
 
 #[test]
 fn cancel_is_ignored_once_the_commit_has_started() {
+    let Some(save) = reference_save() else {
+        return;
+    };
     let gate = Gate::new();
     let engine = ScriptedEngine::new(
         vec![
@@ -181,7 +199,7 @@ fn cancel_is_ignored_once_the_commit_has_started() {
         Ok(updated()),
     );
     let mut fx = fixture(engine);
-    choose_reference_save(&mut fx.app);
+    choose_reference_save(&mut fx.app, &save);
     fx.app.dispatch(Action::Start { dry_run: false });
     wait_until(&mut fx.app, "commit", |app| app.committing());
 
@@ -198,6 +216,9 @@ fn cancel_is_ignored_once_the_commit_has_started() {
 
 #[test]
 fn missing_database_failure_leads_back_to_the_game_folder_picker() {
+    let Some(save) = reference_save() else {
+        return;
+    };
     let engine = ScriptedEngine::new(
         vec![step(Stage::Validating, "Reading save", 0, 0)],
         Err(UpdateError {
@@ -207,7 +228,7 @@ fn missing_database_failure_leads_back_to_the_game_folder_picker() {
         }),
     );
     let mut fx = fixture(engine);
-    choose_reference_save(&mut fx.app);
+    choose_reference_save(&mut fx.app, &save);
     fx.app.dispatch(Action::Start { dry_run: false });
     wait_until(&mut fx.app, "result", on_result_screen);
     let view = fx.app.result().unwrap();
@@ -231,6 +252,9 @@ fn missing_database_failure_leads_back_to_the_game_folder_picker() {
 
 #[test]
 fn engine_panic_becomes_an_error_result_not_a_hang() {
+    let Some(save) = reference_save() else {
+        return;
+    };
     struct Panics;
     impl fl_app::engine::Engine for Panics {
         fn run(
@@ -257,7 +281,7 @@ fn engine_panic_becomes_an_error_result_not_a_hang() {
         silent_update_check: false,
         detect: std::sync::Arc::new(|| (Vec::new(), None)),
     });
-    choose_reference_save(&mut app);
+    choose_reference_save(&mut app, &save);
     app.dispatch(Action::Start { dry_run: false });
     wait_until(&mut app, "result", on_result_screen);
     let view = app.result().unwrap();
@@ -267,8 +291,11 @@ fn engine_panic_becomes_an_error_result_not_a_hang() {
 
 #[test]
 fn result_buttons_open_the_right_places() {
+    let Some(save) = reference_save() else {
+        return;
+    };
     let mut fx = fixture(ScriptedEngine::new(Vec::new(), Ok(updated())));
-    choose_reference_save(&mut fx.app);
+    choose_reference_save(&mut fx.app, &save);
     fx.app.dispatch(Action::Start { dry_run: false });
     wait_until(&mut fx.app, "result", on_result_screen);
     for action in [
@@ -293,14 +320,14 @@ fn result_buttons_open_the_right_places() {
 
 #[test]
 fn remembered_choices_survive_a_restart() {
+    let Some(save) = reference_save() else {
+        return;
+    };
     let mut fx = fixture(ScriptedEngine::new(Vec::new(), Ok(UpdateResult::default())));
-    choose_reference_save(&mut fx.app);
+    choose_reference_save(&mut fx.app, &save);
     let dir = fx.state_dir.path().to_path_buf();
     let settings = fl_app::settings::Settings::load(&dir);
-    assert_eq!(
-        settings.save_path.as_deref(),
-        Some(reference_save().as_path())
-    );
+    assert_eq!(settings.save_path.as_deref(), Some(save.as_path()));
     let again = fl_app::gui::App::new(fl_app::gui::Services {
         engine: std::sync::Arc::new(ScriptedEngine::new(Vec::new(), Ok(UpdateResult::default()))),
         env: fl_engine::api::Environment { state_dir: dir },
@@ -309,8 +336,5 @@ fn remembered_choices_survive_a_restart() {
         silent_update_check: false,
         detect: std::sync::Arc::new(|| (Vec::new(), None)),
     });
-    assert_eq!(
-        again.setup().save_path.as_deref(),
-        Some(reference_save().as_path())
-    );
+    assert_eq!(again.setup().save_path.as_deref(), Some(save.as_path()));
 }

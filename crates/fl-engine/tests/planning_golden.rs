@@ -6,14 +6,17 @@
 //! save and Player.bin, feeds the dumped inputs to `fl_engine::planning`, and
 //! compares every stage.
 //!
-//! `testdata/e2e/small/plan.json.gz` is committed; `testdata/local/e2e/full/`
-//! is gitignored. Scenarios whose Player.bin or plan dump is absent are skipped.
+//! `testdata/` is local (not in the repository): every test skips with a note when the plan
+//! dump, the scenario's recorded inputs, the base save or `testdata/fotmob_teams.json` is absent.
+
+mod common;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
+use common::{base_save_path, existing, repo_root, testdata_path};
 use fl_engine::club_identity::{ClubIdentityIndex, IdentityCache};
 use fl_engine::match_db::build_match_database;
 use fl_engine::matcher::NameMatcher;
@@ -31,14 +34,11 @@ use fl_sources::model::{CaptainUpdate, ScrapeResult, SquadSnapshot, TacticalUpda
 use fl_sources::team_index::{TeamEntry, parse_catalog};
 use serde_json::{Value, json};
 
-fn repo() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
-}
-
-/// The recorded FotMob team catalog (test fixture; the app downloads it at run time).
-fn fixture_catalog() -> Vec<TeamEntry> {
-    let text = std::fs::read_to_string(repo().join("testdata/fotmob_teams.json")).unwrap();
-    parse_catalog(&text).unwrap()
+/// The recorded FotMob team catalog (test fixture; the app downloads it at run time);
+/// `None` (with a skip note) when it is not on this machine.
+fn fixture_catalog() -> Option<Vec<TeamEntry>> {
+    let text = std::fs::read_to_string(testdata_path("fotmob_teams.json")?).unwrap();
+    Some(parse_catalog(&text).unwrap())
 }
 
 fn gunzip(path: &Path) -> Vec<u8> {
@@ -406,17 +406,12 @@ struct World {
 }
 
 fn world(scenario_dir: &Path, local_dir: &Path, snapshots: &[SquadSnapshot]) -> Option<World> {
-    let player_bin_gz = local_dir.join("inputs/Player.bin.gz");
-    let team_bin_gz = local_dir.join("inputs/Team.bin.gz");
-    if !player_bin_gz.is_file() || !team_bin_gz.is_file() {
-        eprintln!(
-            "skipping: Player.bin.gz / Team.bin.gz missing in {}",
-            local_dir.display()
-        );
-        return None;
-    }
-    let meta: Value =
-        serde_json::from_slice(&std::fs::read(scenario_dir.join("meta.json")).unwrap()).unwrap();
+    let player_bin_gz = existing(local_dir.join("inputs/Player.bin.gz"))?;
+    let team_bin_gz = existing(local_dir.join("inputs/Team.bin.gz"))?;
+    let meta_path = existing(scenario_dir.join("meta.json"))?;
+    let meta: Value = serde_json::from_slice(&std::fs::read(meta_path).unwrap()).unwrap();
+    let input = base_save_path(&meta)?;
+    let catalog = fixture_catalog()?;
     let dir = tempfile::tempdir().unwrap();
     let player_bin = dir.path().join("Player.bin");
     std::fs::write(&player_bin, gunzip(&player_bin_gz)).unwrap();
@@ -435,7 +430,7 @@ fn world(scenario_dir: &Path, local_dir: &Path, snapshots: &[SquadSnapshot]) -> 
         .as_ref()
         .map(|loaded| Arc::clone(&loaded.database) as Arc<dyn NativePlayers>);
 
-    let raw = std::fs::read(repo().join(meta["input"].as_str().unwrap())).unwrap();
+    let raw = std::fs::read(input).unwrap();
     let mut blocks = crypto::decrypt(&raw).unwrap();
     let header = blocks.save_header();
     let mut edit = EditFile::from_bytes(std::mem::take(&mut blocks.data)).unwrap();
@@ -449,7 +444,7 @@ fn world(scenario_dir: &Path, local_dir: &Path, snapshots: &[SquadSnapshot]) -> 
     let mut matcher = database.matcher;
     let mut identity = ClubIdentityIndex::build(
         &database.club_names,
-        &fixture_catalog(),
+        &catalog,
         IdentityCache::new(
             dir.path().join("club_identity_cache.json"),
             "golden".to_owned(),
@@ -485,8 +480,7 @@ fn position_of(label: &Value) -> Option<Position> {
 }
 
 fn run_scenario(scenario: &str, scenario_dir: &Path, local_dir: &Path, plan_path: &Path) {
-    if !plan_path.is_file() {
-        eprintln!("skipping {scenario}: {} missing", plan_path.display());
+    if existing(plan_path.to_path_buf()).is_none() {
         return;
     }
     let doc: Value = serde_json::from_slice(&gunzip(plan_path)).unwrap();
@@ -923,20 +917,24 @@ fn sorted_object_map(value: &Value) -> Value {
 
 #[test]
 fn plan_matches_golden_on_the_small_scenario() {
-    let dir = repo().join("testdata/e2e/small");
+    let Some(dir) = testdata_path("e2e/small") else {
+        return;
+    };
     run_scenario(
         "small",
         &dir,
-        &repo().join("testdata/local/e2e/small"),
+        &repo_root().join("testdata/local/e2e/small"),
         &dir.join("plan.json.gz"),
     );
 }
 
-// ~6 min with optimised deps; needs the gitignored testdata/local/e2e/full inputs.
+// ~6 min with optimised deps; needs the local testdata/local/e2e/full inputs.
 // Run: cargo test -p fl-engine --test planning_golden -- --ignored
 #[test]
 #[ignore = "slow (~6 min); run with --ignored when testdata/local/e2e/full exists"]
 fn plan_matches_golden_on_the_full_scenario() {
-    let local = repo().join("testdata/local/e2e/full");
+    let Some(local) = testdata_path("local/e2e/full") else {
+        return;
+    };
     run_scenario("full", &local, &local, &local.join("plan.json.gz"));
 }

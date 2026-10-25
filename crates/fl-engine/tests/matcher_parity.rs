@@ -3,8 +3,9 @@
 //! matcher with the documented bug fixes applied), replayed over large query
 //! corpora.
 //!
-//! `testdata/matcher/base.json.gz` is committed; Player.bin-backed variants live in the
-//! gitignored `testdata/local/matcher/` and are skipped when absent.
+//! `testdata/` is local (not in the repository): every test skips with a note when its corpus
+//! or `testdata/fotmob_teams.json` is absent. Player.bin-backed variants live in
+//! `testdata/local/matcher/`.
 //!
 //! The full corpora (10k+ player queries, 12k+ team queries, ~1000 sequential squad
 //! replays per save) take minutes, so a plain `cargo test` replays a deterministic
@@ -12,10 +13,13 @@
 //! `FL_PARITY_FULL=1` for the complete corpus:
 //! `FL_PARITY_FULL=1 cargo test -p fl-engine --test matcher_parity --release`.
 
+mod common;
+
 use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use common::testdata_path;
 use fl_engine::club_identity::{ClubIdentityIndex, IdentityCache, IdentityEntry, NameResolution};
 use fl_engine::matcher::{NameMatcher, PlayerAttrs, PlayerQuery};
 use fl_sources::model::{SquadMember, SquadSnapshot};
@@ -30,10 +34,6 @@ fn full() -> bool {
 /// Every `stride`-th query of the corpus.
 fn sampled(queries: &[Value]) -> impl Iterator<Item = &Value> {
     queries.iter().step_by(if full() { 1 } else { 10 })
-}
-
-fn testdata() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata")
 }
 
 fn load(path: &Path) -> Value {
@@ -280,22 +280,19 @@ fn snapshot(squad: &Value) -> SquadSnapshot {
     }
 }
 
-/// The recorded FotMob team catalog (test fixture; the app downloads it at run time).
-fn fixture_catalog() -> Vec<TeamEntry> {
-    let text = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/fotmob_teams.json"),
-    )
-    .unwrap();
-    parse_catalog(&text).unwrap()
+/// The recorded FotMob team catalog (test fixture; the app downloads it at run time);
+/// `None` (with a skip note) when it is not on this machine.
+fn fixture_catalog() -> Option<Vec<TeamEntry>> {
+    let text = std::fs::read_to_string(testdata_path("fotmob_teams.json")?).unwrap();
+    Some(parse_catalog(&text).unwrap())
 }
 
-fn check_identity(variant: &str, db: &Db, identity: &Value) {
+fn check_identity(variant: &str, db: &Db, catalog: &[TeamEntry], identity: &Value) {
     let dir = tempfile::tempdir().unwrap();
-    let catalog = fixture_catalog();
     let build = |file: &str, scope: &str| {
         ClubIdentityIndex::build(
             &db.pes_clubs,
-            &catalog,
+            catalog,
             IdentityCache::new(dir.path().join(file), scope.to_owned()),
         )
     };
@@ -371,6 +368,9 @@ fn check_identity(variant: &str, db: &Db, identity: &Value) {
 }
 
 fn check_fixture(path: &Path) {
+    let Some(catalog) = fixture_catalog() else {
+        return;
+    };
     let fixture = load(path);
     let variant = fixture["variant"].as_str().unwrap();
     let db = parse_db(&fixture["db"]);
@@ -397,23 +397,26 @@ fn check_fixture(path: &Path) {
     eprintln!("  players {:?}", started.elapsed());
     check_teams(variant, &db, &aliases, teams);
     eprintln!("  teams {:?}", started.elapsed());
-    check_identity(variant, &db, &fixture["identity"]);
+    check_identity(variant, &db, &catalog, &fixture["identity"]);
     eprintln!("  identity {:?}", started.elapsed());
 }
 
 #[test]
-fn committed_base_corpus_matches_reference() {
-    check_fixture(&testdata().join("matcher/base.json.gz"));
+fn base_corpus_matches_reference() {
+    if let Some(path) = testdata_path("matcher/base.json.gz") {
+        check_fixture(&path);
+    }
 }
 
 #[test]
 fn local_variant_corpora_match_reference() {
-    let dir = testdata().join("local/matcher");
-    let Ok(read) = std::fs::read_dir(&dir) else {
-        eprintln!("skipped: {} absent", dir.display());
+    let Some(dir) = testdata_path("local/matcher") else {
         return;
     };
-    let mut files: Vec<PathBuf> = read.map(|e| e.unwrap().path()).collect();
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
     files.sort();
     for file in files
         .iter()

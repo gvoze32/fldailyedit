@@ -1307,22 +1307,15 @@ mod tests {
         assert!(reconcile(vec![], vec![], vec![base, conflicting]).is_empty());
     }
 
-    fn load_fuzzy_fixture() -> serde_json::Value {
-        use std::io::Read;
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../testdata/sources_other/expected/fuzzy_key_index.json.gz"
-        );
-        let mut text = String::new();
-        flate2::read::GzDecoder::new(std::fs::File::open(path).expect("fixture"))
-            .read_to_string(&mut text)
-            .expect("gunzip");
-        serde_json::from_str(&text).expect("json")
+    fn load_fuzzy_fixture() -> Option<serde_json::Value> {
+        crate::test_support::read_gz_json("sources_other/expected/fuzzy_key_index.json.gz")
     }
 
     #[test]
     fn fuzzy_key_index_equals_recorded_matches_and_a_full_scan() {
-        let fixture = load_fuzzy_fixture();
+        let Some(fixture) = load_fuzzy_fixture() else {
+            return;
+        };
         let clubs: Vec<&str> = fixture["clubs"]
             .as_array()
             .unwrap()

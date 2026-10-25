@@ -20,4 +20,7 @@ pub mod wikipedia;
 mod parity_fotmob;
 
 #[cfg(test)]
+mod test_support;
+
+#[cfg(test)]
 mod live_smoke;
