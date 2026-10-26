@@ -794,8 +794,6 @@ mod tests {
                 .collect(),
             source_url: format!("https://www.fotmob.com/teams/{fotmob_id}/squad"),
             complete: true,
-            starter_members: Vec::new(),
-            sub_members: Vec::new(),
             primary_league_id: None,
             formation: None,
             formation_source_url: String::new(),

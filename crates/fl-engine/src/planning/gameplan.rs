@@ -1,26 +1,19 @@
-//! Formations, tactics, captains and lineup hints from live data, resolved to
-//! save clubs and players (fail-closed).
+//! Formations, tactics and captains from live data, resolved to save clubs
+//! and players (fail-closed), and the clubs whose lineup gets re-picked.
 
 use std::collections::{HashMap, HashSet};
 
-use fl_save::model::Position;
 use fl_save::roster::formation::normalize_game_plan_formation;
-use fl_sources::model::{CaptainUpdate, SquadMember, SquadSnapshot, TacticalUpdate};
+use fl_sources::model::{CaptainUpdate, SquadSnapshot, TacticalUpdate};
 
 use super::identity::positive;
 use super::ports::{PlayerMatcher, PlayerQuery};
 use super::types::RosterMap;
 
-/// A lineup member must match at least this well by name alone.
-const LINEUP_NAME_CONFIDENCE: f64 = 85.0;
 const CAPTAIN_NAME_CONFIDENCE: f64 = 90.0;
 
 fn non_empty(text: &str) -> &str {
     text
-}
-
-fn game_plan_code(label: &str) -> Option<u8> {
-    Position::from_label(label).map(Position::code)
 }
 
 /// Map verified current match shapes to represented save clubs, in the order
@@ -205,122 +198,17 @@ pub fn plan_captain_updates(
     planned
 }
 
-/// Live matchday hints resolved to one roster state of the save.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct GameplanPreferences {
-    pub starters: HashMap<u32, Vec<u32>>,
-    pub bench: HashMap<u32, Vec<u32>>,
-    /// Team → player → detailed matchday position label.
-    pub position_overrides: HashMap<u32, HashMap<u32, String>>,
-}
-
-/// Resolve one lineup member to a player of `team_id`'s roster.
-///
-/// The FotMob identity resolved during matching wins; the guarded name match
-/// (with age and nationality) is only a fallback.
-fn resolve_lineup_member(
-    member: &SquadMember,
-    matcher: &dyn PlayerMatcher,
-    team_id: u32,
-    team_player_map: &RosterMap,
-    fotmob_player_ids: &HashMap<i64, u32>,
-    threshold: f64,
-) -> Option<u32> {
-    let roster = team_player_map.get(&team_id).map_or(&[][..], Vec::as_slice);
-    if let Some(player_id) =
-        positive(member.player_id_fotmob).and_then(|id| fotmob_player_ids.get(&id))
-    {
-        return roster.contains(player_id).then_some(*player_id);
-    }
-    let minimum = threshold.max(LINEUP_NAME_CONFIDENCE);
-    let found = matcher.match_player(
-        &member.player_name,
-        &PlayerQuery {
-            threshold: minimum,
-            to_team_id: Some(team_id),
-            team_player_map: Some(team_player_map),
-            nationality: &member.nationality,
-            age: member.age,
-            ..PlayerQuery::default()
-        },
-    );
-    let player_id = found.id?;
-    (found.confidence >= minimum && roster.contains(&player_id)).then_some(player_id)
-}
-
-/// Resolve the live XI, bench and positions into local game-plan hints.
-///
-/// A starter's detailed matchday position overrides the registered position
-/// only when the two map to different game-plan codes.
-#[allow(clippy::too_many_arguments)]
-pub fn plan_gameplan_preferences(
+/// Save clubs with a complete live squad snapshot: their XI and bench are
+/// re-picked by native rating (never from a match lineup).
+pub fn plan_lineup_clubs(
     snapshots: &[SquadSnapshot],
-    matcher: &dyn PlayerMatcher,
-    team_player_map: &RosterMap,
     club_ids: &HashSet<u32>,
     fotmob_team_map: &HashMap<i64, u32>,
-    threshold: f64,
-    fotmob_player_ids: &HashMap<i64, u32>,
-    registered_position: &dyn Fn(u32) -> Option<Position>,
-) -> GameplanPreferences {
-    let mut preferences = GameplanPreferences::default();
-    for snapshot in snapshots.iter().filter(|snapshot| snapshot.complete) {
-        let Some(&team_id) = fotmob_team_map.get(&snapshot.team_id_fotmob) else {
-            continue;
-        };
-        if !club_ids.contains(&team_id) {
-            continue;
-        }
-        let resolve = |member: &SquadMember| {
-            resolve_lineup_member(
-                member,
-                matcher,
-                team_id,
-                team_player_map,
-                fotmob_player_ids,
-                threshold,
-            )
-        };
-
-        let mut starter_ids: Vec<u32> = Vec::new();
-        let mut overrides: HashMap<u32, String> = HashMap::new();
-        for member in &snapshot.starter_members {
-            let Some(player_id) = resolve(member) else {
-                continue;
-            };
-            if starter_ids.contains(&player_id) {
-                continue;
-            }
-            starter_ids.push(player_id);
-            let Some(live_code) = game_plan_code(&member.position) else {
-                continue;
-            };
-            let registered = registered_position(player_id).map(Position::code);
-            if registered != Some(live_code) {
-                overrides.insert(player_id, member.position.clone());
-            }
-        }
-
-        let mut bench_ids: Vec<u32> = Vec::new();
-        for member in &snapshot.sub_members {
-            let Some(player_id) = resolve(member) else {
-                continue;
-            };
-            if starter_ids.contains(&player_id) || bench_ids.contains(&player_id) {
-                continue;
-            }
-            bench_ids.push(player_id);
-        }
-
-        // Keep a key even when no XI identity resolved: the team is still
-        // aligned to its current formation roles.
-        preferences.starters.insert(team_id, starter_ids);
-        preferences.bench.insert(team_id, bench_ids);
-        if overrides.is_empty() {
-            preferences.position_overrides.remove(&team_id);
-        } else {
-            preferences.position_overrides.insert(team_id, overrides);
-        }
-    }
-    preferences
+) -> HashSet<u32> {
+    snapshots
+        .iter()
+        .filter(|snapshot| snapshot.complete)
+        .filter_map(|snapshot| fotmob_team_map.get(&snapshot.team_id_fotmob).copied())
+        .filter(|team_id| club_ids.contains(team_id))
+        .collect()
 }

@@ -1,14 +1,13 @@
 //! Stage 4: apply the plan to the in-memory save.
 //!
-//! Order: formations → tactics → live-XI hints →
-//! roster actions (shirt numbers per team in one batch) → game-plan repair →
-//! captains. Nothing touches disk here.
+//! Order: formations → tactics → roster actions (shirt numbers per team in
+//! one batch) → game-plan repair (XI and bench by native rating) → captains.
+//! Nothing touches disk here.
 
 use std::collections::{HashMap, HashSet};
 
 use fl_save::edit_file::EditFile;
 use fl_save::layout::TacticalField;
-use fl_save::model::Position;
 use fl_save::roster::{AddRequest, MoveRequest, RepairOptions, RosterErrorKind};
 use fl_sources::model::ScrapeResult;
 
@@ -20,7 +19,7 @@ use crate::log::LogRecord;
 use crate::native::NativeData;
 use crate::planning::{
     Plan, PlayerMatcher, RosterAction, ShirtStatus, SkippedTransfer, plan_captain_updates,
-    plan_gameplan_preferences, plan_shirt_batch,
+    plan_lineup_clubs, plan_shirt_batch,
 };
 
 /// Refusals that skip one event instead of failing the run: the save state
@@ -123,7 +122,6 @@ fn display_name(matched: &crate::planning::MatchedTransfer) -> &str {
 pub(crate) fn apply(
     edit: &mut EditFile,
     input: &ApplyInput<'_>,
-    initial_rosters: &crate::planning::RosterMap,
     cancel: &CancelToken,
     reporter: &mut Reporter<'_>,
 ) -> Result<Applied, UpdateError> {
@@ -131,19 +129,6 @@ pub(crate) fn apply(
     let plan = input.plan;
     let mut applied = Applied::default();
     let counts = &mut applied.counts;
-
-    let preferences = |edit: &EditFile, rosters: &crate::planning::RosterMap| {
-        plan_gameplan_preferences(
-            &input.scrape.squad_snapshots,
-            input.matcher,
-            rosters,
-            input.club_ids,
-            &plan.fotmob_team_map,
-            input.threshold,
-            &plan.fotmob_player_ids,
-            &|id| edit.player_position(id),
-        )
-    };
 
     for (team_id, formation) in &plan.formations {
         cancel.check(stage)?;
@@ -188,12 +173,6 @@ pub(crate) fn apply(
             stage,
             format!("Tactical settings changed: {}", counts.tactics),
         );
-    }
-
-    // Removal backfills prefer the live XI of the pre-transfer roster.
-    if !input.scrape.squad_snapshots.is_empty() {
-        let starters = preferences(edit, initial_rosters).starters;
-        edit.set_game_plan_preferred_starters(starters);
     }
 
     let mut touched: HashSet<u32> = HashSet::new();
@@ -391,7 +370,7 @@ pub(crate) fn apply(
         ));
     }
 
-    applied.gameplan_changed = align_game_plans(edit, input, &touched, &preferences, reporter);
+    applied.gameplan_changed = align_game_plans(edit, input, &touched, reporter);
     let counts = &mut applied.counts;
 
     let current_rosters = roster_map(&edit.rosters());
@@ -491,47 +470,25 @@ fn sorted_batch_update(
     edit.update_player_shirt_numbers(team, &updates)
 }
 
-/// Resolve the live matchday against post-transfer rosters and align every
-/// game plan. Returns whether any game plan's bytes changed.
+/// Re-pick the XI and bench of every club with a live squad snapshot or a
+/// roster change by native rating, and repair every game plan. Returns
+/// whether any game plan's bytes changed.
 fn align_game_plans(
     edit: &mut EditFile,
     input: &ApplyInput<'_>,
     touched: &HashSet<u32>,
-    preferences: &dyn Fn(
-        &EditFile,
-        &crate::planning::RosterMap,
-    ) -> crate::planning::GameplanPreferences,
     reporter: &mut Reporter<'_>,
 ) -> bool {
-    let mut options = RepairOptions {
+    let mut align_teams = plan_lineup_clubs(
+        &input.scrape.squad_snapshots,
+        input.club_ids,
+        &input.plan.fotmob_team_map,
+    );
+    align_teams.extend(touched);
+    let options = RepairOptions {
         preserve_existing_primary: true,
-        ..RepairOptions::default()
+        align_teams,
     };
-    let has_snapshots = !input.scrape.squad_snapshots.is_empty();
-    if has_snapshots || !touched.is_empty() || !input.plan.formations.is_empty() {
-        let prefs = if has_snapshots {
-            preferences(edit, &roster_map(&edit.rosters()))
-        } else {
-            crate::planning::GameplanPreferences::default()
-        };
-        let mut starters: HashMap<u32, Vec<u32>> =
-            touched.iter().map(|&team| (team, Vec::new())).collect();
-        starters.extend(prefs.starters);
-        options.preferred_starters = Some(starters);
-        options.preferred_bench = prefs.bench;
-        options.position_overrides = prefs
-            .position_overrides
-            .into_iter()
-            .map(|(team, players)| {
-                let converted: HashMap<u32, Position> = players
-                    .into_iter()
-                    .filter_map(|(player, label)| Some((player, Position::from_label(&label)?)))
-                    .collect();
-                (team, converted)
-            })
-            .collect();
-        options.align_positions = true;
-    }
     let metrics = edit.repair_game_plans(&options);
     if metrics.changed_game_plans == 0 {
         return false;
@@ -574,7 +531,6 @@ mod tests {
         let matcher = NameMatcher::new(std::iter::empty(), HashMap::new(), std::iter::empty());
         let native = NativeData::default();
         let club_ids: HashSet<u32> = edit.club_team_ids().iter().copied().collect();
-        let initial = roster_map(&edit.rosters());
         let input = ApplyInput {
             plan: &plan,
             scrape: &scrape,
@@ -586,13 +542,7 @@ mod tests {
             dry_run: false,
         };
         let mut sink = |_: Progress| {};
-        apply(
-            edit,
-            &input,
-            &initial,
-            cancel,
-            &mut Reporter::new(&mut sink),
-        )
+        apply(edit, &input, cancel, &mut Reporter::new(&mut sink))
     }
 
     /// A move of a player who is not on the planned source club.

@@ -33,7 +33,7 @@ mod parity_tests;
 #[cfg(test)]
 mod tests;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 pub use error::{RosterError, RosterErrorKind};
 pub use ops::{AddRequest, MoveRequest, Placement};
@@ -51,6 +51,4 @@ pub(crate) struct MutationState {
     /// Players signed or moved in this session: protected from overflow
     /// release, and ordered onto the bench by `repair_game_plans`.
     pub(crate) transferred_player_ids: HashSet<u32>,
-    /// Live-XI player ids per team, used to rank removal backfills.
-    pub(crate) preferred_starters: HashMap<u32, Vec<u32>>,
 }

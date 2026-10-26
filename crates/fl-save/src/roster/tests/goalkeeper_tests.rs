@@ -77,28 +77,9 @@ impl Fixture {
     }
 
     fn repair_options(&self) -> RepairOptions {
-        let repair = &self.doc["repair"];
-        let team = self.team();
         RepairOptions {
             preserve_existing_primary: true,
-            preferred_starters: Some([(team, ids_of(&repair["preferred_starters"]))].into()),
-            preferred_bench: [(team, ids_of(&repair["preferred_bench"]))].into(),
-            position_overrides: [(
-                team,
-                repair["position_overrides"]
-                    .as_object()
-                    .unwrap()
-                    .iter()
-                    .map(|(id, label)| {
-                        (
-                            id.parse().unwrap(),
-                            Position::from_label(label.as_str().unwrap()).unwrap(),
-                        )
-                    })
-                    .collect(),
-            )]
-            .into(),
-            align_positions: true,
+            align_teams: [self.team()].into(),
         }
     }
 
@@ -158,10 +139,6 @@ fn live_squad_releases_never_remove_the_last_goalkeeper() {
             return;
         };
         let team = fixture.team();
-        let preferred = fixture.doc["preferred_starters"].clone();
-        fixture
-            .file
-            .set_game_plan_preferred_starters([(team, ids_of(&preferred))].into());
 
         let mut refused = Vec::new();
         for player in ids_of(&fixture.doc["releases"]) {

@@ -4,9 +4,8 @@
 //! [`Plan`]: matched events, the chronological roster actions (skips with
 //! reasons included), skipped rows, FotMob identity maps, formations and
 //! tactics. Things that depend on the roster *after* this run's changes
-//! (shirt batches, captains, lineup hints) are separate pure functions the
-//! pipeline calls with the live state: [`plan_shirt_batch`],
-//! [`plan_captain_updates`], [`plan_gameplan_preferences`].
+//! (shirt batches, captains) are separate pure functions the pipeline calls
+//! with the live state: [`plan_shirt_batch`], [`plan_captain_updates`].
 //!
 //! Stages: [`history`] replays the transfer log; [`identity`] binds FotMob
 //! players to save players from live squads; [`matching`] binds events to
@@ -14,7 +13,7 @@
 //! [`snapshots`] derives moves/releases from live squads; [`roster_actions`]
 //! decides and simulates the mutation per event; [`shirts`] dedupes and
 //! batches shirt numbers; [`gameplan`] resolves formations, tactics, captains
-//! and lineups.
+//! and the clubs whose lineup is re-picked.
 
 mod gameplan;
 mod history;
@@ -41,8 +40,8 @@ use fl_save::model::TeamData;
 use fl_sources::model::ScrapeResult;
 
 pub use gameplan::{
-    GameplanPreferences, PlannedCaptainUpdate, plan_captain_updates, plan_gameplan_formations,
-    plan_gameplan_preferences, plan_gameplan_tactics,
+    PlannedCaptainUpdate, plan_captain_updates, plan_gameplan_formations, plan_gameplan_tactics,
+    plan_lineup_clubs,
 };
 pub use history::{History, LoanLedger, replay_history};
 pub use identity::{

@@ -449,9 +449,6 @@ pub struct SquadSnapshot {
     pub members: Vec<SquadMember>,
     pub source_url: String,
     pub complete: bool,
-    /// Last-lineup starters in FotMob order (squad metadata merged in).
-    pub starter_members: Vec<SquadMember>,
-    pub sub_members: Vec<SquadMember>,
     pub primary_league_id: Option<i64>,
     pub formation: Option<String>,
     pub formation_source_url: String,

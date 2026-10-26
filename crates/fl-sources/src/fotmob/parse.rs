@@ -5,7 +5,7 @@
 //! never aborts the batch (a shifted payload never kills the whole club
 //! gather).
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use chrono::{DateTime, NaiveDate, Utc};
@@ -339,115 +339,6 @@ pub(crate) fn extract_squad_members(
     members
 }
 
-/// FotMob `positionId → label` learned from this payload's own squad pairs
-/// (`positionIds` / `positionIdsDesc`); ambiguous ids are dropped.
-fn payload_position_labels(data: &Value) -> HashMap<i64, String> {
-    let mut observed: HashMap<i64, BTreeSet<String>> = HashMap::new();
-    for section in squad_sections(data) {
-        let Some(raw_members) = section.get("members").and_then(Value::as_array) else {
-            continue;
-        };
-        for raw_member in raw_members {
-            let (Some(Value::String(raw_ids)), Some(Value::String(raw_labels))) = (
-                raw_member.get("positionIds"),
-                raw_member.get("positionIdsDesc"),
-            ) else {
-                continue;
-            };
-            let ids: Vec<&str> = raw_ids.split(',').collect();
-            let labels: Vec<&str> = raw_labels.split(',').collect();
-            if ids.len() != labels.len() {
-                continue;
-            }
-            for (raw_id, raw_label) in ids.into_iter().zip(labels) {
-                let position_id = raw_id.trim().parse::<i64>().ok().filter(|id| *id > 0);
-                let label = raw_label.trim().to_uppercase();
-                if let (Some(id), false) = (position_id, label.is_empty()) {
-                    observed.entry(id).or_default().insert(label);
-                }
-            }
-        }
-    }
-    observed
-        .into_iter()
-        .filter_map(|(id, labels)| {
-            (labels.len() == 1).then(|| (id, labels.into_iter().next().expect("one label")))
-        })
-        .collect()
-}
-
-/// One last-lineup group (`"starters"` or `"subs"`) enriched with squad
-/// metadata. Positions are the match-day detailed labels when resolvable.
-pub(crate) fn extract_last_lineup_members(
-    data: &Value,
-    members: &[SquadMember],
-    group: &str,
-) -> Vec<SquadMember> {
-    let Some(raw_group) = data
-        .get("overview")
-        .and_then(|o| o.get("lastLineupStats"))
-        .and_then(|l| l.get(group))
-        .and_then(Value::as_array)
-    else {
-        return Vec::new();
-    };
-    let position_labels = payload_position_labels(data);
-    // Later duplicates win.
-    let by_id: HashMap<i64, &SquadMember> = members
-        .iter()
-        .filter_map(|m| m.player_id_fotmob.map(|id| (id, m)))
-        .collect();
-    let by_name: HashMap<String, &SquadMember> = members
-        .iter()
-        .map(|m| (fl_text::casefold(&m.player_name), m))
-        .collect();
-
-    let mut lineup = Vec::new();
-    let mut seen: HashSet<(bool, i64, String)> = HashSet::new();
-    for raw_member in raw_group {
-        if !raw_member.is_object() {
-            continue;
-        }
-        let name = trimmed(raw_member.get("name"));
-        if name.is_empty() {
-            continue;
-        }
-        let player_id = optional_positive_int(raw_member.get("id"));
-        if !seen.insert(member_identity(player_id, &name)) {
-            continue;
-        }
-        let match_position = optional_positive_int(raw_member.get("positionId"))
-            .and_then(|id| position_labels.get(&id))
-            .cloned()
-            .unwrap_or_default();
-        let squad_member = match player_id {
-            Some(id) => by_id.get(&id).copied(),
-            None => by_name.get(&fl_text::casefold(&name)).copied(),
-        };
-        if let Some(squad_member) = squad_member {
-            let mut member = squad_member.clone();
-            if !match_position.is_empty() && match_position != member.position {
-                member.position = match_position;
-            }
-            lineup.push(member);
-            continue;
-        }
-        lineup.push(SquadMember {
-            player_name: name,
-            player_id_fotmob: player_id,
-            position: if match_position.is_empty() {
-                primary_squad_position(raw_member)
-            } else {
-                match_position
-            },
-            nationality: trimmed(raw_member.get("countryName")),
-            age: non_negative_u32(int_or_zero(raw_member.get("age"))),
-            shirt_number: None,
-        });
-    }
-    lineup
-}
-
 /// `\d+(-\d+){2,3}` not embedded in a longer digit run (the regex crate has
 /// no lookaround, so the boundaries are checked by hand).
 pub(crate) fn formation_label(value: &Value) -> Option<String> {
@@ -485,8 +376,6 @@ pub(crate) fn formation_label(value: &Value) -> Option<String> {
 /// Current-squad snapshot; undersized payloads are marked incomplete.
 pub(crate) fn extract_squad_snapshot(data: &Value, team_id: i64, team_name: &str) -> SquadSnapshot {
     let members = extract_squad_members(data, team_id, team_name);
-    let starter_members = extract_last_lineup_members(data, &members, "starters");
-    let sub_members = extract_last_lineup_members(data, &members, "subs");
     let formation = data
         .get("overview")
         .and_then(|o| o.get("lastLineupStats"))
@@ -509,8 +398,6 @@ pub(crate) fn extract_squad_snapshot(data: &Value, team_id: i64, team_name: &str
             String::new()
         },
         source_url,
-        starter_members,
-        sub_members,
         primary_league_id,
         formation,
     }

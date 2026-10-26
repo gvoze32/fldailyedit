@@ -3,11 +3,11 @@
 //! The position arrays of a game plan are formation slots: they decide where
 //! a role renders on the Game Plan screen and are never rewritten from a
 //! player's registered position. Only the lineup permutation changes. Roles
-//! are filled by one optimal assignment over role fit (exact position vs same
-//! line), incumbency and live-XI rank. When every squad member has native
-//! abilities, the rating at the role's position joins the score, a native B/A
-//! playable grade counts as a line match, and every active player competes;
-//! live-XI players still win.
+//! are filled by one optimal assignment. When every squad member has native
+//! abilities, every active player competes and the score is the player's
+//! rating at the role's position alone (a native B/A playable grade counts as
+//! a line match); the current XI only breaks ties. Without full ratings the
+//! score is role fit (exact position vs same line) plus incumbency.
 
 use std::collections::HashMap;
 
@@ -19,36 +19,31 @@ use super::game_plan::GamePlanEntry;
 use super::hungarian::max_weight_assignment;
 use super::squad::{PositionOverrides, Squad};
 
-/// With native ratings, starter scoring adds this multiple of the player's
-/// rating at the role's position: a candidate about 7 rating points better
-/// beats the incumbent (+20).
+/// With native ratings, starter scoring is this multiple of the player's
+/// rating at the role's position, so the CB strong-foot bonus is worth about
+/// 13 rating points when it permutes the chosen starters.
 const ROLE_RATING_WEIGHT: i64 = 3;
-/// With native ratings the exact-position (100) / same-line (55) fit bonus is
-/// divided by this, since the rating already includes position fit.
-const RATED_FIT_DIVISOR: i64 = 5;
-/// Bonus that lets any position-compatible live-XI player beat the incumbent,
-/// the exact-position and CB strong-foot bonuses and the full role-rating
-/// spread.
-const LIVE_STARTER_BONUS: i64 = 400;
 const EXACT_FIT: i64 = 100;
 const LINE_FIT: i64 = 55;
 /// Native playable grade without a line match, and the save's own choice for
-/// its incumbent: both lose to any line match of similar rating.
+/// its incumbent: both only make the player eligible for the role.
 const PLAYABLE_FIT: i64 = 55;
 const INCUMBENT_FIT: i64 = 30;
+/// Without ratings, a current starter keeps the XI over an equal fit.
 const INCUMBENT_BONUS: i64 = 8;
 const INCUMBENT_ROLE_BONUS: i64 = 12;
 const STRONG_FOOT_BONUS: i64 = 40;
-const GOALKEEPER_INCUMBENT_BONUS: i64 = 20;
-/// Weights are scaled so the tie-break (live rank, incumbent role, slot) fits
-/// below one score point.
+/// Weights are scaled so the summed tie-breaks of all 11 roles (incumbent
+/// keeps its role, then current starter, then slot) stay below one score
+/// point.
 const SCORE_SCALE: i64 = 100_000;
 const SLOT_RADIX: i64 = 41;
 
 /// Everything the XI alignment ranks on.
 struct Problem<'a> {
     squad: &'a Squad,
-    overrides: &'a PositionOverrides,
+    /// Always empty: positions come from the save and Player.bin only.
+    overrides: PositionOverrides,
     active_slots: Vec<usize>,
     starter_count: usize,
     /// Slot per role in the current lineup (the first `starter_count`).
@@ -57,8 +52,6 @@ struct Problem<'a> {
     target_codes: Vec<u8>,
     /// The side a CB role prefers (formation-specific).
     cb_side: HashMap<usize, PreferredFoot>,
-    preferred_slots: Vec<usize>,
-    preferred_rank: HashMap<usize, usize>,
     use_ratings: bool,
     candidate_slots: Vec<usize>,
 }
@@ -70,7 +63,7 @@ impl Problem<'_> {
     }
 
     fn player_code(&self, slot: usize) -> Option<u8> {
-        self.squad.position_code(slot, self.overrides)
+        self.squad.position_code(slot, &self.overrides)
     }
 
     /// How well the player in `slot` fits the formation role, if at all.
@@ -104,48 +97,42 @@ impl Problem<'_> {
     }
 
     fn score(&self, role: usize, slot: usize, foot: bool) -> Option<i64> {
-        let mut value = self.compatibility(role, slot)?;
-        if self.use_ratings {
-            value /= RATED_FIT_DIVISOR;
-        }
-        if let Some(&index) = self.preferred_rank.get(&slot) {
-            // A compatible live-XI player always beats a non-live incumbent;
-            // live order only ranks live players.
-            value += LIVE_STARTER_BONUS + (24 - index as i64).max(0);
-        }
-        let current = self.current_role(slot);
-        if current.is_some() {
-            value += INCUMBENT_BONUS;
-        }
-        if current == Some(role) {
-            value += INCUMBENT_ROLE_BONUS;
-        }
-        value += ROLE_RATING_WEIGHT * self.role_rating(role, slot);
+        let fit = self.compatibility(role, slot)?;
+        let mut value = if self.use_ratings {
+            // Best at the role wins; fit only gates eligibility.
+            ROLE_RATING_WEIGHT * self.role_rating(role, slot)
+        } else {
+            let current = self.current_role(slot);
+            fit + if current.is_some() {
+                INCUMBENT_BONUS
+            } else {
+                0
+            } + if current == Some(role) {
+                INCUMBENT_ROLE_BONUS
+            } else {
+                0
+            }
+        };
         if foot
             && let Some(&side) = self.cb_side.get(&role)
             && self.player_code(slot) == Some(Position::Cb.code())
             && self.squad.member(slot).and_then(|m| m.foot) == Some(side)
         {
-            // Strong-foot alignment wins over incumbent/live-XI tie-breaks,
-            // while unknown or opposite-foot CBs remain valid fallbacks.
+            // Strong-foot alignment wins over incumbent tie-breaks, while
+            // unknown or opposite-foot CBs remain valid fallbacks.
             value += STRONG_FOOT_BONUS;
         }
         Some(value)
     }
 
-    /// Assignment weight: score first; ties prefer live rank, then the
-    /// incumbent role, then the lower slot.
+    /// Assignment weight: score first; ties keep an incumbent in its own role,
+    /// then prefer current starters, then the lower slot.
     fn weight(&self, role: usize, slot: usize, foot: bool) -> Option<i64> {
         let score = self.score(role, slot, foot)?;
-        let no_rank = self.preferred_slots.len() as i64 + 1;
-        let rank = self
-            .preferred_rank
-            .get(&slot)
-            .map_or(no_rank, |&r| r as i64);
-        let current = self
-            .current_role(slot)
-            .map_or(TP_MAX_PLAYERS as i64, |r| r as i64);
-        let tie_break = rank * SLOT_RADIX * SLOT_RADIX + current * SLOT_RADIX + slot as i64;
+        let current_role = self.current_role(slot);
+        let moved = i64::from(current_role != Some(role));
+        let current = current_role.map_or(TP_MAX_PLAYERS as i64, |r| r as i64);
+        let tie_break = (moved * SLOT_RADIX + current) * SLOT_RADIX + slot as i64;
         Some(score * SCORE_SCALE - tie_break)
     }
 
@@ -164,42 +151,23 @@ impl Problem<'_> {
         Some(columns.into_iter().map(|column| slots[column]).collect())
     }
 
-    /// The keeper for role 0: the live XI's first keeper, else (when role 0
-    /// holds a known player) the best-rated registered keeper with an
-    /// incumbent bonus, else the incumbent.
+    /// The keeper for role 0: when role 0 holds a known player, the
+    /// best-rated registered keeper (the incumbent wins ties), else the
+    /// incumbent.
     fn primary_slot(&self) -> usize {
         let incumbent = self.current_slots[0];
-        if let Some(&live) = self
-            .preferred_slots
-            .iter()
-            .find(|&&slot| self.player_code(slot) == Some(Position::Gk.code()))
-        {
-            return live;
-        }
         if self.player_code(incumbent).is_none() {
             return incumbent;
         }
         let key = |slot: usize| {
             let rating = if self.use_ratings {
-                i64::from(
-                    self.squad
-                        .role_rating(slot, Some(Position::Gk.code()))
-                        .unwrap_or(0),
-                )
+                self.squad
+                    .role_rating(slot, Some(Position::Gk.code()))
+                    .unwrap_or(0)
             } else {
                 0
             };
-            let is_incumbent = slot == incumbent;
-            (
-                ROLE_RATING_WEIGHT * rating
-                    + if is_incumbent {
-                        GOALKEEPER_INCUMBENT_BONUS
-                    } else {
-                        0
-                    },
-                is_incumbent,
-                -(slot as i64),
-            )
+            (rating, slot == incumbent, -(slot as i64))
         };
         self.active_slots
             .iter()
@@ -251,12 +219,7 @@ fn cb_sides(target_codes: &[u8]) -> HashMap<usize, PreferredFoot> {
     sides
 }
 
-fn build_problem<'a>(
-    entry: &GamePlanEntry,
-    squad: &'a Squad,
-    overrides: &'a PositionOverrides,
-    preferred_starters: &[u32],
-) -> Option<Problem<'a>> {
+fn build_problem<'a>(entry: &GamePlanEntry, squad: &'a Squad) -> Option<Problem<'a>> {
     let active_slots = squad.active_slots();
     let starter_count = FIRST_TEAM_SLOT_COUNT.min(active_slots.len());
     if starter_count == 0 {
@@ -272,34 +235,15 @@ fn build_problem<'a>(
         .collect();
     let cb_side = cb_sides(&target_codes);
 
-    let slot_by_player: HashMap<u32, usize> = active_slots
-        .iter()
-        .map(|&slot| (squad.id_at(slot), slot))
-        .collect();
-    let mut preferred_slots = Vec::new();
-    let mut preferred_rank = HashMap::new();
-    for player_id in preferred_starters {
-        let Some(&slot) = slot_by_player.get(player_id) else {
-            continue;
-        };
-        if preferred_rank.contains_key(&slot) {
-            continue;
-        }
-        preferred_rank.insert(slot, preferred_slots.len());
-        preferred_slots.push(slot);
-    }
-
     let use_ratings = squad.all_rated(active_slots.iter().copied());
     let mut problem = Problem {
         squad,
-        overrides,
+        overrides: PositionOverrides::new(),
         active_slots,
         starter_count,
         current_slots,
         target_codes,
         cb_side,
-        preferred_slots,
-        preferred_rank,
         use_ratings,
         candidate_slots: Vec::new(),
     };
@@ -307,13 +251,13 @@ fn build_problem<'a>(
     Some(problem)
 }
 
-/// Who may start: live-XI players and the current XI first; with native
-/// ratings every active player; otherwise exact formation-role players (so a
-/// winger, defender or reserve keeper cannot occupy an unrelated slot when
-/// the live XI scraper returns nothing) and then anyone to fill the XI.
+/// Who may start: the current XI first; with native ratings every active
+/// player; otherwise exact formation-role players (so a winger, defender or
+/// reserve keeper cannot occupy an unrelated slot) and then anyone to fill
+/// the XI.
 fn candidates(problem: &Problem<'_>) -> Vec<usize> {
     let mut slots: Vec<usize> = Vec::new();
-    for &slot in problem.preferred_slots.iter().chain(&problem.current_slots) {
+    for &slot in &problem.current_slots {
         if !slots.contains(&slot) {
             slots.push(slot);
         }
@@ -349,13 +293,8 @@ fn candidates(problem: &Problem<'_>) -> Vec<usize> {
 
 /// Align the XI with the existing formation roles. Returns whether the lineup
 /// changed. Nothing is written when no complete safe assignment exists.
-pub(crate) fn repair_starter_assignments(
-    entry: &mut GamePlanEntry,
-    squad: &Squad,
-    overrides: &PositionOverrides,
-    preferred_starters: &[u32],
-) -> bool {
-    let Some(problem) = build_problem(entry, squad, overrides, preferred_starters) else {
+pub(crate) fn repair_starter_assignments(entry: &mut GamePlanEntry, squad: &Squad) -> bool {
+    let Some(problem) = build_problem(entry, squad) else {
         return false;
     };
     let starter_count = problem.starter_count;

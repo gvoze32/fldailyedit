@@ -94,14 +94,9 @@ struct Effective {
 }
 
 impl EditFile {
-    /// Register the live-XI player ids used to rank removal backfills.
-    pub fn set_game_plan_preferred_starters(&mut self, preferred: HashMap<u32, Vec<u32>>) {
-        self.mutation.preferred_starters = preferred;
-    }
-
     /// Forget the session: players moved or signed so far lose their overflow
-    /// protection and bench priority, and the live-XI hints are dropped, so
-    /// the next batch of mutations behaves like one on a freshly opened save.
+    /// protection and bench priority, so the next batch of mutations behaves
+    /// like one on a freshly opened save.
     pub fn reset_session(&mut self) {
         self.mutation = super::MutationState::default();
     }
@@ -606,11 +601,6 @@ impl EditFile {
         remap_roles_after_removal(&mut plan, removed_idx, replacement_idx);
         if let Some(roster) = self.roster(team_id) {
             let squad = Squad::build(self, roster);
-            let preferred = self
-                .mutation
-                .preferred_starters
-                .get(&team_id)
-                .map_or(&[][..], Vec::as_slice);
             compact_lineup_after_removal(
                 &mut plan,
                 &squad,
@@ -618,7 +608,6 @@ impl EditFile {
                     removed_idx,
                     replacement_idx,
                     removed_position: self.player_position(removed_player_id),
-                    preferred_starters: preferred,
                 },
             );
         }

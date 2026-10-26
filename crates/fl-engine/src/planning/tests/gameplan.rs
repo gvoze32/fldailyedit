@@ -1,15 +1,14 @@
-//! Captains, formations, tactics, lineup hints and pending-event reporting.
+//! Captains, formations, tactics and pending-event reporting.
 
 use std::collections::HashMap;
 
 use chrono::NaiveDate;
-use fl_save::model::Position;
-use fl_sources::model::{CaptainUpdate, SquadMember, TacticalUpdate, Transfer};
+use fl_sources::model::{CaptainUpdate, TacticalUpdate, Transfer};
 
 use super::support::*;
 use crate::planning::{
     RosterMap, SaveClubs, pending_skipped, plan_captain_updates, plan_gameplan_formations,
-    plan_gameplan_preferences, plan_gameplan_tactics, sort_skipped,
+    plan_gameplan_tactics, sort_skipped,
 };
 
 fn captain(club: &str, fotmob_team: i64, name: &str, fotmob_player: Option<i64>) -> CaptainUpdate {
@@ -36,13 +35,6 @@ fn tactic(fotmob_team: i64, settings: &[(&str, i32)]) -> TacticalUpdate {
             .collect(),
         sample_matches: 0,
         source_urls: Vec::new(),
-    }
-}
-
-fn positioned(name: &str, fotmob_id: i64, position: &str) -> SquadMember {
-    SquadMember {
-        position: position.to_owned(),
-        ..member(name, Some(fotmob_id))
     }
 }
 
@@ -205,50 +197,6 @@ fn pending_provider_events_are_reported_with_reason_and_relevance() {
             .map(|item| item.player_name.as_str())
             .collect::<Vec<_>>(),
         ["Future Player", "Undated Player"]
-    );
-}
-
-// py: test_gameplan_overrides_come_from_snapshot_positions_not_names
-#[test]
-fn gameplan_overrides_come_from_snapshot_positions_not_names() {
-    let winger = positioned("Example Winger", 9001, "RW");
-    let back = positioned("Example Back", 9002, "LB");
-    let sub = positioned("Example Sub", 9003, "CM");
-    let mut snapshot = snapshot(
-        "Example FC",
-        42,
-        vec![winger.clone(), back.clone(), sub.clone()],
-    );
-    snapshot.starter_members = vec![winger, back];
-    snapshot.sub_members = vec![sub];
-    let matcher = matcher(&[("Example Back", 1002), ("Example Sub", 1003)], &[]);
-    let registered = |player_id: u32| match player_id {
-        1001 | 1003 => Some(Position::Cmf),
-        1002 => Some(Position::Lb),
-        _ => None,
-    };
-
-    let preferences = plan_gameplan_preferences(
-        &[snapshot],
-        &matcher,
-        &RosterMap::from([(101, vec![1001, 1002, 1003])]),
-        &club_set(&[101]),
-        &HashMap::from([(42, 101)]),
-        80.0,
-        // The winger resolves by FotMob identity even with no name match.
-        &HashMap::from([(9001, 1001)]),
-        &registered,
-    );
-
-    assert_eq!(
-        preferences.starters,
-        HashMap::from([(101, vec![1001, 1002])])
-    );
-    assert_eq!(preferences.bench, HashMap::from([(101, vec![1003])]));
-    // Only the starter whose live position disagrees with Player.bin moves.
-    assert_eq!(
-        preferences.position_overrides,
-        HashMap::from([(101, HashMap::from([(1001, "RW".to_owned())]))])
     );
 }
 

@@ -179,15 +179,13 @@ fn repair_position_arrays(
 // ── removal ──────────────────────────────────────────────────────────────
 
 /// A vacated roster slot.
-pub(crate) struct Removal<'a> {
+pub(crate) struct Removal {
     /// The slot that was vacated (it may now hold the copied last player).
     pub(crate) removed_idx: usize,
     /// The slot whose player was copied into `removed_idx`, if any.
     pub(crate) replacement_idx: Option<usize>,
     /// Registered position of the removed player, if known.
     pub(crate) removed_position: Option<Position>,
-    /// Live-XI ids used to rank backfills.
-    pub(crate) preferred_starters: &'a [u32],
 }
 
 /// Keep roles attached to players after roster compaction.
@@ -199,7 +197,7 @@ pub(crate) struct Removal<'a> {
 pub(crate) fn compact_lineup_after_removal(
     entry: &mut GamePlanEntry,
     squad: &Squad,
-    removal: &Removal<'_>,
+    removal: &Removal,
 ) -> LineupUpdate {
     let lineup = entry.lineup();
     let new_active: BTreeSet<usize> = squad.active_slots().into_iter().collect();
@@ -253,7 +251,6 @@ pub(crate) fn compact_lineup_after_removal(
         select_promotion_slot(
             squad,
             &Promotion {
-                preferred_starters: removal.preferred_starters,
                 removed_position: removal.removed_position,
                 removed_role,
                 target_position_code,
@@ -321,8 +318,7 @@ pub(crate) fn remap_roles_after_removal(
 // ── promotion ────────────────────────────────────────────────────────────
 
 /// What role is being backfilled.
-pub(crate) struct Promotion<'a> {
-    pub(crate) preferred_starters: &'a [u32],
+pub(crate) struct Promotion {
     pub(crate) removed_position: Option<Position>,
     pub(crate) removed_role: usize,
     /// Raw formation code of the vacated role, when it carries one.
@@ -339,12 +335,12 @@ fn line_of(code: Option<u8>) -> Option<PositionLine> {
 ///
 /// Exact formation-role players win, then same-line players, then any other
 /// outfield player, so the vacated role is backfilled in place. Within one
-/// tier: live-XI players, then the highest native rating at the vacated
-/// role, then offline usage, then the existing bench order. `None` only when
-/// no candidate can legally take the role.
+/// tier: the highest native rating at the vacated role, then offline usage,
+/// then the existing bench order. `None` only when no candidate can legally
+/// take the role.
 fn select_promotion_slot(
     squad: &Squad,
-    promotion: &Promotion<'_>,
+    promotion: &Promotion,
     candidate_slots: &[usize],
 ) -> Option<usize> {
     let removed_code = promotion.removed_position.map(Position::code);
@@ -355,12 +351,6 @@ fn select_promotion_slot(
             && promotion.removed_role == 0);
     let target_line = line_of(role_code);
 
-    let preferred: HashMap<u32, usize> = promotion
-        .preferred_starters
-        .iter()
-        .enumerate()
-        .map(|(rank, &id)| (id, rank))
-        .collect();
     let rated = squad.all_rated(
         candidate_slots
             .iter()
@@ -378,7 +368,7 @@ fn select_promotion_slot(
     // original player, not the copied last-slot player after compaction.
     let native_slot_zero = promotion.copied_slot != Some(0);
 
-    type Key = (u8, usize, i64, i64, i64, usize);
+    type Key = (u8, i64, i64, i64, usize);
     let mut best: Option<(Key, usize)> = None;
     for (order, &slot) in candidate_slots.iter().enumerate() {
         let Some(member) = squad.member(slot) else {
@@ -410,17 +400,7 @@ fn select_promotion_slot(
         let (starts, minutes) = member
             .usage
             .map_or((0, 0), |usage| (usage.starts as i64, usage.minutes as i64));
-        let key = (
-            tier,
-            preferred
-                .get(&member.id)
-                .copied()
-                .unwrap_or(preferred.len()),
-            -i64::from(rating),
-            -starts,
-            -minutes,
-            order,
-        );
+        let key = (tier, -i64::from(rating), -starts, -minutes, order);
         if best.as_ref().is_none_or(|(best_key, _)| key < *best_key) {
             best = Some((key, slot));
         }
@@ -488,17 +468,11 @@ pub(crate) fn insert_after_addition(
 
 // ── bench order ──────────────────────────────────────────────────────────
 
-/// Order roles 11+ as live substitutes, signings, then highest native overall
-/// (when every remaining reserve is rated; otherwise the current order). A
-/// second goalkeeper is guaranteed inside the matchday 18 when one is
-/// registered. Starter roles are never touched. Returns whether the lineup
-/// changed.
-pub(crate) fn order_bench(
-    entry: &mut GamePlanEntry,
-    squad: &Squad,
-    live_bench: &[u32],
-    signings: &[u32],
-) -> bool {
+/// Order roles 11+ as signings, then highest native overall (when every
+/// remaining reserve is rated; otherwise the current order). A second
+/// goalkeeper is guaranteed inside the matchday 18 when one is registered.
+/// Starter roles are never touched. Returns whether the lineup changed.
+pub(crate) fn order_bench(entry: &mut GamePlanEntry, squad: &Squad, signings: &[u32]) -> bool {
     let active_count = squad.roster_size();
     if active_count <= FIRST_TEAM_SLOT_COUNT {
         return false;
@@ -512,7 +486,7 @@ pub(crate) fn order_bench(
     let bench_slots: HashSet<usize> = bench.iter().map(|&s| usize::from(s)).collect();
 
     let mut ordered: Vec<u8> = Vec::with_capacity(bench.len());
-    for player_id in live_bench.iter().chain(signings) {
+    for player_id in signings {
         if let Some(&slot) = slot_by_player.get(player_id)
             && bench_slots.contains(&slot)
             && !ordered.contains(&(slot as u8))

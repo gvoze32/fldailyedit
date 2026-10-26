@@ -272,8 +272,6 @@ fn snapshot(squad: &Value) -> SquadSnapshot {
             .collect(),
         source_url: squad["source_url"].as_str().unwrap().to_owned(),
         complete: squad["complete"].as_bool().unwrap(),
-        starter_members: Vec::new(),
-        sub_members: Vec::new(),
         primary_league_id: None,
         formation: None,
         formation_source_url: String::new(),

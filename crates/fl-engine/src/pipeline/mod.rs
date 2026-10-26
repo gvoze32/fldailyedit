@@ -189,13 +189,7 @@ impl Run {
                     allow_overflow_release: request.allow_overflow_release,
                     dry_run: request.dry_run,
                 };
-                apply::apply(
-                    &mut self.prepared.edit,
-                    &input,
-                    &self.context.rosters,
-                    cancel,
-                    reporter,
-                )
+                apply::apply(&mut self.prepared.edit, &input, cancel, reporter)
             };
             let this_round = match result {
                 Ok(this_round) => this_round,

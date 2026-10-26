@@ -192,8 +192,6 @@ pub fn snapshot(club: &str, fotmob_team_id: i64, members: Vec<SquadMember>) -> S
         members,
         source_url: format!("https://www.fotmob.com/api/data/teams?id={fotmob_team_id}"),
         complete: true,
-        starter_members: Vec::new(),
-        sub_members: Vec::new(),
         primary_league_id: None,
         formation: None,
         formation_source_url: String::new(),

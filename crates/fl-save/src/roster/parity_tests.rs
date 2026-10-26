@@ -28,7 +28,6 @@ use crate::cpk::Cpk;
 use crate::crypto;
 use crate::edit_file::EditFile;
 use crate::layout::*;
-use crate::model::Position;
 use crate::native::PlayerBinDatabase;
 use crate::release_policy::{PlayerUsage, ReleasePolicy};
 
@@ -147,17 +146,6 @@ fn id_list(value: &Value) -> Vec<u32> {
 
 fn opt_id_list(value: &Value) -> Option<Vec<u32>> {
     (!value.is_null()).then(|| id_list(value))
-}
-
-fn team_map(value: &Value) -> Option<HashMap<u32, Vec<u32>>> {
-    (!value.is_null()).then(|| {
-        value
-            .as_object()
-            .expect("object")
-            .iter()
-            .map(|(team, ids)| (team.parse().expect("team id"), id_list(ids)))
-            .collect()
-    })
 }
 
 fn ok_result(result: Result<(), super::RosterError>, with_error: bool) -> Value {
@@ -310,39 +298,14 @@ fn apply(file: &mut EditFile, op: &Value) -> Value {
                 .unwrap_or(0);
             json!({"changed": changed})
         }
-        "preferred_starters" => {
-            file.set_game_plan_preferred_starters(team_map(&op["starters"]).unwrap_or_default());
-            Value::Null
-        }
+        // The live-XI backfill hint is gone; an empty hint was a no-op.
+        "preferred_starters" => Value::Null,
         "repair" => {
-            let overrides = (!op["position_overrides"].is_null()).then(|| {
-                op["position_overrides"]
-                    .as_object()
-                    .expect("overrides")
-                    .iter()
-                    .map(|(team, labels)| {
-                        let map: HashMap<u32, Position> = labels
-                            .as_object()
-                            .expect("labels")
-                            .iter()
-                            .map(|(player, label)| {
-                                let position = Position::from_label(label.as_str().expect("label"))
-                                    .expect("oracle overrides name known positions");
-                                (player.parse().expect("player"), position)
-                            })
-                            .collect();
-                        (team.parse::<u32>().expect("team"), map)
-                    })
-                    .collect::<HashMap<_, _>>()
-            });
             let options = RepairOptions {
                 preserve_existing_primary: op["preserve_existing_primary"]
                     .as_bool()
                     .unwrap_or(false),
-                preferred_starters: team_map(&op["preferred_starters"]),
-                position_overrides: overrides.unwrap_or_default(),
-                align_positions: op["align_positions"].as_bool().unwrap_or(false),
-                preferred_bench: team_map(&op["preferred_bench"]).unwrap_or_default(),
+                ..RepairOptions::default()
             };
             let metrics = file.repair_game_plans(&options);
             Value::Object(
@@ -506,6 +469,27 @@ fn without_names(value: &Value) -> Value {
     }
 }
 
+/// Python picked the XI and bench from live-lineup hints; Rust picks them by
+/// native rating alone (see `testdata/DEVIATIONS.md`), so a sequence parts
+/// ways at the first step that carries a hint or aligns an XI.
+fn departs_from_python(op: &Value) -> bool {
+    let non_empty = |map: &Value| {
+        map.as_object().is_some_and(|teams| {
+            teams
+                .values()
+                .any(|ids| ids.as_array().is_some_and(|ids| !ids.is_empty()))
+        })
+    };
+    match op["op"].as_str() {
+        Some("preferred_starters") => non_empty(&op["starters"]),
+        Some("repair") => {
+            (op["align_positions"].as_bool() == Some(true) && !op["preferred_starters"].is_null())
+                || non_empty(&op["preferred_bench"])
+        }
+        _ => false,
+    }
+}
+
 fn replay_sequence(
     save: &Save,
     label: &str,
@@ -535,6 +519,10 @@ fn replay_sequence(
             .as_array()
             .map_or(vec![], |f| f.iter().filter_map(Value::as_str).collect());
         if flags.contains(&"raised") {
+            break;
+        }
+        if departs_from_python(op) {
+            eprintln!("{label}/{name}: stopped at step {index} (rating-only XI and bench)");
             break;
         }
         let fallback = overflow_fallback_applies(&file, op);

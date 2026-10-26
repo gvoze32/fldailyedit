@@ -10,7 +10,7 @@
 //!   from zero bytes), so tests that rank by rating keep unrated players out
 //!   of the save.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::support::*;
 use crate::edit_file::EditFile;
@@ -145,13 +145,11 @@ fn add(file: &mut EditFile, player_id: u32, position: &str) -> crate::roster::Pl
     .expect("add")
 }
 
-/// `repair_game_plans(preferred_starters={TEAM: starters}, align_positions=True)`.
-fn aligned(starters: Vec<u32>, preserve_existing_primary: bool) -> RepairOptions {
+/// `repair_game_plans` re-picking `TEAM`'s XI and bench.
+fn aligned(preserve_existing_primary: bool) -> RepairOptions {
     RepairOptions {
         preserve_existing_primary,
-        preferred_starters: Some(HashMap::from([(TEAM, starters)])),
-        align_positions: true,
-        ..RepairOptions::default()
+        align_teams: HashSet::from([TEAM]),
     }
 }
 
@@ -501,20 +499,13 @@ fn position_aware_gameplan_repair_promotes_exact_roles() {
     let target = [0u8, 1, 1, 3, 2, 4, 5, 10, 9, 8, 12];
     set_position_arrays(&mut file, TEAM, &target);
 
-    let options = RepairOptions {
-        preferred_starters: Some(HashMap::from([(TEAM, vec![1011, 1012])])),
-        position_overrides: HashMap::from([(
-            TEAM,
-            HashMap::from([(1011, pos("RW")), (1012, pos("LW"))]),
-        )]),
-        align_positions: true,
-        ..RepairOptions::default()
-    };
-    let metrics = file.repair_game_plans(&options);
+    let metrics = file.repair_game_plans(&aligned(false));
 
     let starters = starter_ids(&file);
-    assert!(starters.contains(&1011));
-    assert!(starters.contains(&1012));
+    // The RWF moves from the LWF role into the RWF role the LB held; the
+    // reserve LWF takes the LWF role.
+    assert_eq!(starters[7], 1008);
+    assert_eq!(starters[8], 1012);
     assert!(!starters.contains(&1007));
     assert_eq!(metrics.repaired_lineups, 1);
     assert_eq!(metrics.repaired_position_bytes, 0);
@@ -539,14 +530,14 @@ fn cb_roles_prefer_matching_strong_foot_by_side() {
     set_position_arrays(&mut file, TEAM, &[0, 1, 1, 1, 3, 2, 4, 5, 8, 10, 12]);
     set_lineup(&mut file, TEAM, &(0..11).collect::<Vec<u8>>());
 
-    file.repair_game_plans(&aligned(vec![], false));
+    file.repair_game_plans(&aligned(false));
 
     assert_eq!(starter_ids(&file)[1..4], [4001, 4003, 4002]);
 
     set_position_arrays(&mut file, TEAM, &[0, 1, 1, 3, 2, 4, 5, 8, 10, 9, 12]);
     set_lineup(&mut file, TEAM, &[0, 2, 3, 4, 5, 6, 7, 8, 11, 9, 10]);
 
-    file.repair_game_plans(&aligned(vec![], false));
+    file.repair_game_plans(&aligned(false));
 
     assert_eq!(starter_ids(&file)[1..3], [4003, 4002]);
 }
@@ -564,7 +555,7 @@ fn position_aware_repair_rejects_cross_line_and_opposite_wing_players() {
     set_position_arrays(&mut file, TEAM, &[0, 1, 1, 3, 2, 4, 5, 10, 9, 8, 12]);
     set_lineup(&mut file, TEAM, &[0, 1, 2, 3, 4, 5, 6, 11, 12, 7, 10, 8, 9]);
 
-    file.repair_game_plans(&aligned(vec![], false));
+    file.repair_game_plans(&aligned(false));
 
     let repaired: Vec<&str> = starter_ids(&file)
         .into_iter()
@@ -591,7 +582,7 @@ fn position_aware_repair_moves_goalkeeper_out_of_cf_role() {
     set_position_arrays(&mut file, TEAM, &[0, 1, 1, 3, 2, 4, 5, 10, 9, 8, 12]);
     set_lineup(&mut file, TEAM, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 10]);
 
-    file.repair_game_plans(&aligned(vec![], true));
+    file.repair_game_plans(&aligned(true));
 
     let starters: Vec<&str> = starter_ids(&file)
         .into_iter()
@@ -1056,11 +1047,10 @@ fn captain_stays_empty_without_any_metadata() {
     assert_eq!(game_plan_byte(&file, TEAM, GP_CAPTAIN), EMPTY_ROLE);
 }
 
-// ── bench, live starters and ratings ─────────────────────────────────────
+// ── bench and ratings ────────────────────────────────────────────────────
 
-// test_signing_joins_bench_and_preferred_bench_orders_matchday_squad
 #[test]
-fn signing_joins_bench_and_preferred_bench_orders_matchday_squad() {
+fn signing_leads_bench_and_reserve_keeper_joins_matchday_squad() {
     let positions = squad(&["CB", "CB", "CB", "CB", "CB", "CB", "CB", "CB", "GK"]);
     let (mut file, ids) = game_plan_team(&positions, Spec::default());
 
@@ -1078,18 +1068,12 @@ fn signing_joins_bench_and_preferred_bench_orders_matchday_squad() {
     assert_eq!(matchday.bench[0], 9999);
     assert_eq!(matchday.bench.len(), 7);
 
-    let live_sub = ids[15];
-    let options = RepairOptions {
-        preferred_bench: HashMap::from([(TEAM, vec![live_sub])]),
-        ..RepairOptions::default()
-    };
-    let metrics = file.repair_game_plans(&options);
+    let metrics = file.repair_game_plans(&RepairOptions::default());
 
     let updated = lineup(&file, TEAM);
     assert_eq!(metrics.reordered_benches, 1);
     assert_eq!(updated[..11], (0..11).collect::<Vec<u8>>()[..]);
-    assert_eq!(usize::from(updated[11]), 15);
-    assert_eq!(updated[12], signing_slot);
+    assert_eq!(updated[11], signing_slot);
     // The only reserve goalkeeper (roster slot 19) is pulled into role 17.
     assert_eq!(updated[17], 19);
     assert_valid(&file);
@@ -1104,53 +1088,15 @@ fn removing_last_slot_starter_backfills_role_without_shift() {
     let mut head: Vec<u8> = vec![0, 1, 2, 3, 4, 17, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 5];
     head.extend(18..40);
     set_lineup(&mut file, TEAM, &head);
-    file.set_game_plan_preferred_starters(HashMap::from([(TEAM, vec![ids[14]])]));
 
     file.release_player(ids[17], TEAM).expect("release");
 
     let updated = lineup(&file, TEAM);
-    // Two bench CBs exist (slots 12, 14); the live starter (slot 14) wins
-    // and takes the departed role index; no other starter role moves.
-    assert_eq!(updated[..11], [0, 1, 2, 3, 4, 14, 6, 7, 8, 9, 10]);
-    assert_eq!(updated[11..17], [11, 12, 13, 15, 16, 5]);
+    // Two unrated bench CBs exist (slots 12, 14); the first in bench order
+    // takes the departed role index; no other starter role moves.
+    assert_eq!(updated[..11], [0, 1, 2, 3, 4, 12, 6, 7, 8, 9, 10]);
+    assert_eq!(updated[11..17], [11, 13, 14, 15, 16, 5]);
     assert_valid(&file);
-}
-
-// test_live_goalkeeper_replaces_incumbent_primary
-#[test]
-fn live_goalkeeper_replaces_incumbent_primary() {
-    let (mut file, ids) = game_plan_team(
-        &squad(&["GK", "CB", "CB", "CB", "CB", "CB"]),
-        Spec::default(),
-    );
-    file.set_team_formation(TEAM, "4-3-3").expect("formation");
-
-    let live: Vec<u32> = [ids[11]]
-        .into_iter()
-        .chain(ids[1..11].iter().copied())
-        .collect();
-    file.repair_game_plans(&aligned(live, true));
-
-    let updated = lineup(&file, TEAM);
-    assert_eq!(updated[0], 11);
-    assert_eq!(updated[11], 0);
-    assert_valid(&file);
-}
-
-// test_live_starter_beats_exact_position_incumbent
-#[test]
-fn live_starter_beats_exact_position_incumbent() {
-    let (mut file, ids) = game_plan_team(&squad(&["CB", "LWF"]), Spec::default());
-    file.set_team_formation(TEAM, "4-3-3").expect("formation");
-    let live_cb_for_rb = ids[11];
-
-    file.repair_game_plans(&aligned(vec![live_cb_for_rb], false));
-
-    let starters = starter_ids(&file);
-    // A same-line live CB displaces a non-live defender incumbent.
-    assert!(starters.contains(&live_cb_for_rb));
-    assert_eq!(ids[0], starters[0]);
-    assert!(!starters.contains(&ids[12]));
 }
 
 // test_better_rated_reserve_replaces_weak_same_role_incumbent
@@ -1168,7 +1114,7 @@ fn better_rated_reserve_replaces_weak_same_role_incumbent() {
     );
     file.set_team_formation(TEAM, "4-3-3").expect("formation");
 
-    file.repair_game_plans(&aligned(vec![], true));
+    file.repair_game_plans(&aligned(true));
 
     let starters = starter_ids(&file);
     assert!(starters.contains(&ids[11]));
@@ -1191,7 +1137,7 @@ fn lineup_ignores_ratings_when_a_player_is_unrated() {
     );
     file.set_team_formation(TEAM, "4-3-3").expect("formation");
 
-    file.repair_game_plans(&aligned(vec![], true));
+    file.repair_game_plans(&aligned(true));
 
     let starters = starter_ids(&file);
     assert!(starters.contains(&ids[5]));
@@ -1199,10 +1145,9 @@ fn lineup_ignores_ratings_when_a_player_is_unrated() {
     assert!(!starters.contains(&ids[11]));
 }
 
-// test_small_rating_edge_keeps_incumbent_starter
 #[test]
-fn small_rating_edge_keeps_incumbent_starter() {
-    // 70 vs 72 abilities is a 4-point rating gap: below the incumbent bonus.
+fn small_rating_edge_beats_incumbent_starter() {
+    // 70 vs 72 abilities: the incumbent gets no bonus, the better player starts.
     let mut abilities = rated(12);
     abilities.extend([(5006, 70), (5007, 85), (5011, 72)]);
     let (mut file, ids) = game_plan_team(
@@ -1214,30 +1159,11 @@ fn small_rating_edge_keeps_incumbent_starter() {
     );
     file.set_team_formation(TEAM, "4-3-3").expect("formation");
 
-    file.repair_game_plans(&aligned(vec![], true));
+    file.repair_game_plans(&aligned(true));
 
     let starters = starter_ids(&file);
-    assert!(starters.contains(&ids[6]));
-    assert!(!starters.contains(&ids[11]));
-}
-
-// test_live_starter_still_beats_much_better_rated_reserve
-#[test]
-fn live_starter_still_beats_much_better_rated_reserve() {
-    let mut abilities = rated(12);
-    abilities.extend([(5006, 85), (5007, 85), (5011, 45)]);
-    let (mut file, ids) = game_plan_team(
-        &squad(&["CMF"]),
-        Spec {
-            abilities,
-            ..Spec::default()
-        },
-    );
-    file.set_team_formation(TEAM, "4-3-3").expect("formation");
-
-    file.repair_game_plans(&aligned(vec![ids[11]], true));
-
-    assert!(starter_ids(&file).contains(&ids[11]));
+    assert!(starters.contains(&ids[11]));
+    assert!(!starters.contains(&ids[6]));
 }
 
 // test_best_rated_goalkeeper_takes_role_zero
@@ -1254,7 +1180,7 @@ fn best_rated_goalkeeper_takes_role_zero() {
     );
     file.set_team_formation(TEAM, "4-3-3").expect("formation");
 
-    file.repair_game_plans(&aligned(vec![], true));
+    file.repair_game_plans(&aligned(true));
 
     let starters = starter_ids(&file);
     assert_eq!(starters[0], ids[11]);
@@ -1287,7 +1213,7 @@ fn rated_winger_needs_playable_grade_for_wide_midfield_role() {
         native.attach(&mut file);
         file.set_team_formation(TEAM, "4-4-2").expect("formation");
 
-        file.repair_game_plans(&aligned(vec![], true));
+        file.repair_game_plans(&aligned(true));
 
         let starters = starter_ids(&file);
         // LWF -> LMF crosses lines; only a native B/A grade at LMF allows it.
@@ -1307,18 +1233,13 @@ fn bench_orders_remaining_reserves_by_overall() {
             ..Spec::default()
         },
     );
-    let options = RepairOptions {
-        preferred_bench: HashMap::from([(TEAM, vec![ids[12]])]),
-        ..RepairOptions::default()
-    };
-
-    file.repair_game_plans(&options);
+    file.repair_game_plans(&aligned(false));
 
     let roster = roster_ids(&file);
     let bench: Vec<u32> = lineup(&file, TEAM)[11..15]
         .iter()
         .map(|&slot| roster[usize::from(slot)])
         .collect();
-    // Live sub first, then highest overall; the GK is already in the 18.
-    assert_eq!(bench, [ids[12], ids[13], ids[14], ids[11]]);
+    // Highest overall first; the GK is already in the 18.
+    assert_eq!(bench, [ids[13], ids[14], ids[11], ids[12]]);
 }

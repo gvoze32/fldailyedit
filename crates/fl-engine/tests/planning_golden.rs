@@ -25,11 +25,11 @@ use fl_engine::planning::{
     HistoryEntry, MatchInput, MatchedTransfer, PlanInput, PlannedRosterAction, RosterAction,
     RosterPlanInput, RosterReader, Side, build_superseded_loan_sources,
     dedupe_shirt_number_matches, match_transfers_statefully, plan_captain_updates,
-    plan_gameplan_preferences, plan_roster_actions, plan_shirt_batch, plan_transfers,
+    plan_roster_actions, plan_shirt_batch, plan_transfers,
 };
 use fl_save::crypto;
 use fl_save::edit_file::EditFile;
-use fl_save::model::{NativePlayers, Position, TeamData};
+use fl_save::model::{NativePlayers, TeamData};
 use fl_sources::model::{CaptainUpdate, ScrapeResult, SquadSnapshot, TacticalUpdate, Transfer};
 use fl_sources::team_index::{TeamEntry, parse_catalog};
 use serde_json::{Value, json};
@@ -475,10 +475,6 @@ impl RosterReader for Reader {
     }
 }
 
-fn position_of(label: &Value) -> Option<Position> {
-    label.as_str().and_then(Position::from_label)
-}
-
 fn run_scenario(scenario: &str, scenario_dir: &Path, local_dir: &Path, plan_path: &Path) {
     if existing(plan_path.to_path_buf()).is_none() {
         return;
@@ -802,62 +798,6 @@ fn run_scenario(scenario: &str, scenario_dir: &Path, local_dir: &Path, plan_path
     }
 
     lap("captains compared");
-    // Lineup preferences.
-    let mut preference_rows: Vec<[Value; 3]> = Vec::new();
-    for (index, call) in doc["preferences"].as_array().unwrap().iter().enumerate() {
-        let registered: HashMap<u32, Option<Position>> = call["registered_positions"]
-            .as_object()
-            .unwrap()
-            .iter()
-            .map(|(k, v)| (k.parse().unwrap(), position_of(v)))
-            .collect();
-        let preferences = plan_gameplan_preferences(
-            &scrape.squad_snapshots,
-            &world.matcher,
-            &roster_map(&call["team_player_map"]),
-            &id_set(&call["club_ids"]),
-            &id_map(&call["fotmob_team_map"]),
-            call["threshold"].as_f64().unwrap(),
-            &id_map(&call["fotmob_player_ids"]),
-            &|player| registered.get(&player).copied().flatten(),
-        );
-        let ids_of = |map: &HashMap<u32, Vec<u32>>| -> Value {
-            let sorted: BTreeMap<String, &Vec<u32>> =
-                map.iter().map(|(k, v)| (k.to_string(), v)).collect();
-            serde_json::to_value(sorted).unwrap()
-        };
-        let overrides: BTreeMap<String, BTreeMap<String, &String>> = preferences
-            .position_overrides
-            .iter()
-            .map(|(t, m)| {
-                (
-                    t.to_string(),
-                    m.iter().map(|(p, l)| (p.to_string(), l)).collect(),
-                )
-            })
-            .collect();
-        let rust = [
-            ids_of(&preferences.starters),
-            ids_of(&preferences.bench),
-            serde_json::to_value(overrides).unwrap(),
-        ];
-        if baseline.rewrite {
-            preference_rows.push(rust);
-            continue;
-        }
-        assert!(
-            json_eq(&rust[0], &sorted_object(&call["starters"])),
-            "{scenario}: starters {index}"
-        );
-        assert!(
-            json_eq(&rust[1], &sorted_object(&call["bench"])),
-            "{scenario}: bench {index}"
-        );
-        assert!(
-            json_eq(&rust[2], &sorted_object(&call["position_overrides"])),
-            "{scenario}: position overrides {index}"
-        );
-    }
     let _ = RosterAction::Skip;
 
     if baseline.rewrite {
@@ -867,6 +807,8 @@ fn run_scenario(scenario: &str, scenario_dir: &Path, local_dir: &Path, plan_path
             .as_object_mut()
             .unwrap()
             .remove("player_names");
+        // The engine no longer reads match lineups.
+        rewritten.as_object_mut().unwrap().remove("preferences");
         for (call, rows) in rewritten["captains"]
             .as_array_mut()
             .unwrap()
@@ -874,16 +816,6 @@ fn run_scenario(scenario: &str, scenario_dir: &Path, local_dir: &Path, plan_path
             .zip(captain_rows)
         {
             call["result"] = rows;
-        }
-        for (call, [starters, bench, overrides]) in rewritten["preferences"]
-            .as_array_mut()
-            .unwrap()
-            .iter_mut()
-            .zip(preference_rows)
-        {
-            call["starters"] = starters;
-            call["bench"] = bench;
-            call["position_overrides"] = overrides;
         }
         let mut encoder = flate2::GzBuilder::new().write(Vec::new(), flate2::Compression::best());
         std::io::Write::write_all(&mut encoder, rewritten.to_string().as_bytes()).unwrap();

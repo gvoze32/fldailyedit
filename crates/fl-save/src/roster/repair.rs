@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::edit_file::{EditFile, read_u32};
 use crate::layout::*;
-use crate::model::{Position, TeamData};
+use crate::model::TeamData;
 
 use super::game_plan::{EMPTY, GamePlanEntry, all_role_offsets};
 use super::lineup::{order_bench, repair_goalkeeper_positions};
@@ -17,16 +17,10 @@ use super::starters::repair_starter_assignments;
 pub struct RepairOptions {
     /// Never replace a role-0 goalkeeper that is already a known keeper.
     pub preserve_existing_primary: bool,
-    /// Live-XI player ids per team. With `align_positions`, candidates can be
-    /// promoted into the existing formation roles (the position arrays stay
-    /// untouched except for goalkeeper invariants) and a live goalkeeper takes
-    /// role zero. `None` disables XI alignment.
-    pub preferred_starters: Option<HashMap<u32, Vec<u32>>>,
-    /// Live-lineup positions that replace a player's registered one, per team.
-    pub position_overrides: HashMap<u32, HashMap<u32, Position>>,
-    pub align_positions: bool,
-    /// Live substitutes per team, ordered onto the matchday bench first.
-    pub preferred_bench: HashMap<u32, Vec<u32>>,
+    /// Teams whose XI is re-picked for the existing formation roles (best
+    /// native rating per role; the position arrays stay untouched except for
+    /// goalkeeper invariants) and whose bench is reordered by native overall.
+    pub align_teams: HashSet<u32>,
 }
 
 /// Counters of one repair run.
@@ -62,15 +56,14 @@ impl RepairMetrics {
 }
 
 impl EditFile {
-    /// Repair roster mappings in every game plan and optionally reconcile the
-    /// current starters.
+    /// Repair roster mappings in every game plan and re-pick the XI and bench
+    /// of `align_teams`.
     ///
-    /// Valid roster-slot references keep their relative order. Teams with
-    /// `preferred_bench` entries or signings from this session get their
-    /// matchday bench (roles 11-17) ordered live substitutes first, then
-    /// signings, then highest native overall, with a second goalkeeper
-    /// guaranteed. Empty captain, set-piece and attack-player roles are
-    /// filled from save data for every team.
+    /// Valid roster-slot references keep their relative order. Aligned teams
+    /// and teams with signings from this session get their matchday bench
+    /// (roles 11-17) ordered signings first, then highest native overall,
+    /// with a second goalkeeper guaranteed. Empty captain, set-piece and
+    /// attack-player roles are filled from save data for every team.
     pub fn repair_game_plans(&mut self, options: &RepairOptions) -> RepairMetrics {
         // A repeated team entry resolves to the last one.
         let rosters: HashMap<u32, TeamData> = self
@@ -123,54 +116,28 @@ impl EditFile {
                 metrics.repaired_lineups += 1;
             }
 
-            let team_preferred: &[u32] = options
-                .preferred_starters
-                .as_ref()
-                .and_then(|map| map.get(&team_id))
-                .map_or(&[], Vec::as_slice);
-            if options.align_positions && options.preferred_starters.is_some() {
-                let overrides: PositionOverrides = options
-                    .position_overrides
-                    .get(&team_id)
-                    .map(|map| {
-                        map.iter()
-                            .map(|(&id, &position)| (id, Some(position)))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                if repair_starter_assignments(&mut entry, &squad, &overrides, team_preferred) {
-                    metrics.repaired_lineups += 1;
-                }
+            let align = options.align_teams.contains(&team_id);
+            if align && repair_starter_assignments(&mut entry, &squad) {
+                metrics.repaired_lineups += 1;
             }
 
-            // A live first-choice keeper placed in role zero must not be
-            // swapped back for the lowest-slot goalkeeper.
-            let role0_slot = usize::from(entry.lineup()[0]);
-            let live_primary = options.align_positions
-                && squad.id_at(role0_slot) != 0
-                && team_preferred.contains(&squad.id_at(role0_slot))
-                && squad.position(role0_slot, &no_overrides) == Some(Position::Gk);
             let (role_repairs, position_repairs) = repair_goalkeeper_positions(
                 &mut entry,
                 &squad,
                 &no_overrides,
-                options.preserve_existing_primary || live_primary,
+                options.preserve_existing_primary,
             );
             metrics.repaired_goalkeeper_roles += role_repairs;
             metrics.repaired_position_bytes += position_repairs;
 
-            let team_bench: &[u32] = options
-                .preferred_bench
-                .get(&team_id)
-                .map_or(&[], Vec::as_slice);
             let team_signings: Vec<u32> = roster
                 .player_ids
                 .iter()
                 .copied()
                 .filter(|id| *id != 0 && signings.contains(id))
                 .collect();
-            if (!team_bench.is_empty() || !team_signings.is_empty())
-                && order_bench(&mut entry, &squad, team_bench, &team_signings)
+            if (align || !team_signings.is_empty())
+                && order_bench(&mut entry, &squad, &team_signings)
             {
                 metrics.reordered_benches += 1;
             }

@@ -275,8 +275,6 @@ async fn tactics_match_expected() {
             members: vec![],
             source_url: String::new(),
             complete: true,
-            starter_members: vec![],
-            sub_members: vec![],
             primary_league_id: s["primary_league_id"].as_i64(),
             formation: None,
             formation_source_url: String::new(),

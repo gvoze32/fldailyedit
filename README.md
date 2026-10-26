@@ -8,6 +8,8 @@ What it updates:
 - **Transfers:** signings, releases, loans and loan returns.
 - **Squads:** shirt numbers and captains.
 - **Tactics and formations** based on how each club really plays.
+- **Lineups:** the best-rated player for each position in the formation
+  starts; injuries, rotation and recent match lineups are ignored.
 
 The app updates itself when a new version is available.
 
