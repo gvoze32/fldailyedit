@@ -1,6 +1,7 @@
 pub mod api;
 pub mod backup;
 pub mod club_identity;
+pub mod game_coverage;
 pub mod locations;
 pub mod lock;
 pub mod log;

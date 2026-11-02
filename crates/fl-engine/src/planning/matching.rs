@@ -35,6 +35,9 @@ pub struct MatchInput<'a> {
     pub squad_snapshots: &'a [SquadSnapshot],
     pub player_names: &'a HashMap<u32, String>,
     pub team_shirt_numbers: Option<&'a ShirtNumbers>,
+    /// Derive moves and releases from complete live squads (a transfer
+    /// source). Off: snapshots only identify players.
+    pub squad_moves: bool,
 }
 
 /// Matching-stage diagnostics.
@@ -595,18 +598,20 @@ pub fn match_transfers_statefully(input: &MatchInput<'_>) -> MatchOutput {
         input.club_identity,
         input.team_shirt_numbers,
     );
-    append_current_squad_moves(
-        &mut matched,
-        matcher,
-        &mut sim,
-        input.club_ids,
-        &identity_map,
-        &live,
-        input.club_identity,
-        &coverage,
-        &mut report.skipped,
-    );
-    append_current_squad_releases(&mut matched, &sim, &coverage, input.player_names);
+    if input.squad_moves {
+        append_current_squad_moves(
+            &mut matched,
+            matcher,
+            &mut sim,
+            input.club_ids,
+            &identity_map,
+            &live,
+            input.club_identity,
+            &coverage,
+            &mut report.skipped,
+        );
+        append_current_squad_releases(&mut matched, &sim, &coverage, input.player_names);
+    }
     report.fotmob_player_ids = book.fotmob_to_pes;
     MatchOutput { matched, report }
 }

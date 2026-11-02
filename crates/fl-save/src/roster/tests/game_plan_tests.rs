@@ -150,6 +150,7 @@ fn aligned(preserve_existing_primary: bool) -> RepairOptions {
     RepairOptions {
         preserve_existing_primary,
         align_teams: HashSet::from([TEAM]),
+        only_teams: None,
     }
 }
 

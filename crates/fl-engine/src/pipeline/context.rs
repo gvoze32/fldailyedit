@@ -13,6 +13,7 @@ use super::prepare::{Prepared, fail};
 use super::verify::baseline_keys;
 use crate::api::{CancelToken, ErrorCode, Stage, UpdateError, UpdateRequest};
 use crate::club_identity::{ClubIdentityIndex, IdentityCache};
+use crate::game_coverage::GameCoverage;
 use crate::match_db::build_match_database;
 use crate::matcher::{MATCH_THRESHOLD_PLAYER, NameMatcher};
 use crate::native::{NativeData, load_native};
@@ -66,6 +67,21 @@ fn native_missing(problem: String, game_root: Option<&Path>, warnings: &[String]
     )
 }
 
+/// The failure when no game archive holds a `Player.bin` that knows the save's
+/// players; the text names the folder, each archive and what to install.
+fn coverage_failure(coverage: &GameCoverage, warnings: &[String]) -> UpdateError {
+    let details = if warnings.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", warnings.join("; "))
+    };
+    fail(
+        ErrorCode::NativeDatabaseMissing,
+        Stage::Validating,
+        format!("{}{details}", coverage.problem()),
+    )
+}
+
 /// (Re)load the save's player catalog: the players edited in the save plus
 /// the native metadata of the players currently rostered.
 fn load_catalog(prepared: &mut Prepared) -> fl_save::catalog::PlayerCatalogReport {
@@ -103,8 +119,15 @@ pub(crate) fn load(
 ) -> Result<Context, UpdateError> {
     let stage = Stage::Validating;
     reporter.say(stage, "Reading the selected save database");
-    let native = load_native(request.game_root.as_deref(), &services.native_files);
+    let native = load_native(
+        request.game_root.as_deref(),
+        &services.native_files,
+        &prepared.edit.roster_ids_needing_native(),
+    );
     let mut warnings = native.warnings.clone();
+    if let Some(coverage) = native.coverage.as_ref().filter(|c| !c.is_complete()) {
+        return Err(coverage_failure(coverage, &native.warnings));
+    }
     let Some(player_bin) = &native.player_bin else {
         return Err(native_missing(
             "The game's Player.bin was not found.".to_owned(),

@@ -5,6 +5,7 @@ pub mod crypto;
 pub mod edit_file;
 pub mod header;
 pub mod layout;
+pub mod league;
 pub mod model;
 pub mod native;
 #[cfg(test)]

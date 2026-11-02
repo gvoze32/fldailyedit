@@ -3,14 +3,17 @@
 //! Everything is resolved from explicit inputs (the request's game root plus
 //! optional file overrides); there is no process-wide configuration.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use fl_save::native::{
     DatabaseSource, LoadOutcome, NativeDatabase, NativeLocations, PlayerAssignmentDatabase,
-    PlayerBinDatabase, TeamBinDatabase, load_database,
+    PlayerBinDatabase, TeamBinDatabase, load_database, scan_player_bins,
 };
 use serde_json::{Map, Value, json};
+
+use crate::game_coverage::GameCoverage;
 
 /// Files that beat the game archives (tests, power users).
 #[derive(Debug, Clone, Default)]
@@ -33,12 +36,16 @@ pub struct NativeData {
     pub player_bin: Option<Native<PlayerBinDatabase>>,
     pub team_bin: Option<Native<TeamBinDatabase>>,
     pub player_assignment: Option<Native<PlayerAssignmentDatabase>>,
+    /// How each game archive covers the save's players; set when `Player.bin`
+    /// was looked up in the game folder.
+    pub coverage: Option<GameCoverage>,
     pub warnings: Vec<String>,
 }
 
 fn load<D: NativeDatabase>(
     game_root: Option<&Path>,
     explicit: Option<&Path>,
+    preferred_archive: Option<&Path>,
     warnings: &mut Vec<String>,
 ) -> Option<Native<D>> {
     let LoadOutcome {
@@ -48,6 +55,7 @@ fn load<D: NativeDatabase>(
         explicit: explicit.map(Path::to_path_buf),
         configured: None,
         game_root: game_root.map(Path::to_path_buf),
+        preferred_archive: preferred_archive.map(Path::to_path_buf),
     });
     warnings.extend(found);
     loaded.map(|loaded| Native {
@@ -56,16 +64,74 @@ fn load<D: NativeDatabase>(
     })
 }
 
-/// Load the three databases for a run.
-pub fn load_native(game_root: Option<&Path>, files: &NativeFiles) -> NativeData {
+/// `Player.bin`: an explicit file first, else the game archive that knows the
+/// most of the save's `needed` players (ties keep the archive precedence).
+fn load_player_bin(
+    game_root: Option<&Path>,
+    explicit: Option<&Path>,
+    needed: &HashSet<u32>,
+    warnings: &mut Vec<String>,
+    coverage: &mut Option<GameCoverage>,
+) -> Option<Native<PlayerBinDatabase>> {
+    if explicit.is_some() {
+        let from_file = load::<PlayerBinDatabase>(None, explicit, None, warnings);
+        if from_file.is_some() {
+            return from_file;
+        }
+    }
+    let root = game_root?;
+    let mut scan = scan_player_bins(root, needed);
+    warnings.append(&mut scan.warnings);
+    *coverage = Some(GameCoverage::from_scan(root, &scan));
+    let best = scan.best()?;
+    let chosen = scan.candidates.into_iter().nth(best)?;
+    Some(Native {
+        database: Arc::new(chosen.database),
+        source: DatabaseSource::Archive {
+            cpk: chosen.cpk,
+            label: PlayerBinDatabase::LABEL,
+        },
+    })
+}
+
+/// Load the three databases for a run. `needed` are the rostered players the
+/// save itself cannot describe; they decide which game archive's `Player.bin`
+/// is used, and `Team.bin` follows that archive when it has one.
+pub fn load_native(
+    game_root: Option<&Path>,
+    files: &NativeFiles,
+    needed: &HashSet<u32>,
+) -> NativeData {
     let mut warnings = Vec::new();
-    let player_bin = load(game_root, files.player_bin.as_deref(), &mut warnings);
-    let team_bin = load(game_root, files.team_bin.as_deref(), &mut warnings);
-    let player_assignment = load(game_root, files.player_assignment.as_deref(), &mut warnings);
+    let mut coverage = None;
+    let player_bin = load_player_bin(
+        game_root,
+        files.player_bin.as_deref(),
+        needed,
+        &mut warnings,
+        &mut coverage,
+    );
+    let player_archive = match player_bin.as_ref().map(|loaded| &loaded.source) {
+        Some(DatabaseSource::Archive { cpk, .. }) => Some(cpk.as_path()),
+        _ => None,
+    };
+    let team_bin = load(
+        game_root,
+        files.team_bin.as_deref(),
+        player_archive,
+        &mut warnings,
+    );
+    let player_assignment = load(
+        game_root,
+        files.player_assignment.as_deref(),
+        None,
+        &mut warnings,
+    );
     NativeData {
         player_bin,
         team_bin,
         player_assignment,
+        coverage,
         warnings,
     }
 }
@@ -131,7 +197,7 @@ mod tests {
 
     #[test]
     fn nothing_found_yields_empty_metadata() {
-        let data = load_native(None, &NativeFiles::default());
+        let data = load_native(None, &NativeFiles::default(), &HashSet::new());
         assert!(data.player_bin.is_none() && data.team_bin.is_none());
         assert_eq!(data.transfer_metadata(1), json!({}));
     }
@@ -147,6 +213,7 @@ mod tests {
                 player_bin: Some(bad),
                 ..NativeFiles::default()
             },
+            &HashSet::new(),
         );
         assert!(data.player_bin.is_none());
         assert_eq!(data.warnings.len(), 1);

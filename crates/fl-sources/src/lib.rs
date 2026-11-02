@@ -4,6 +4,7 @@ pub mod besoccer;
 pub mod dates;
 pub mod fotmob;
 pub mod http;
+pub mod leagues;
 mod lenient;
 pub mod model;
 pub mod reconcile;

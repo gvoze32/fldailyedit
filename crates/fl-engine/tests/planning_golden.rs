@@ -424,6 +424,7 @@ fn world(scenario_dir: &Path, local_dir: &Path, snapshots: &[SquadSnapshot]) -> 
             team_bin: Some(team_bin),
             ..NativeFiles::default()
         },
+        &HashSet::new(),
     );
     let native_players: Option<Arc<dyn NativePlayers>> = native
         .player_bin
@@ -564,6 +565,7 @@ fn run_scenario(scenario: &str, scenario_dir: &Path, local_dir: &Path, plan_path
         squad_snapshots: &scrape.squad_snapshots,
         player_names: dump_names,
         team_shirt_numbers: Some(&shirt_numbers),
+        squad_moves: true,
     });
     let mut baseline = Baseline::new();
     let rust: Vec<Value> = out.matched.iter().map(match_json).collect();
@@ -672,6 +674,7 @@ fn run_scenario(scenario: &str, scenario_dir: &Path, local_dir: &Path, plan_path
         overflow: &world.edit,
         allow_overflow_release: allow_overflow,
         today: plan["today"].as_str().unwrap().parse().unwrap(),
+        squad_moves: true,
     });
     let rust: Vec<Value> = planned
         .skipped

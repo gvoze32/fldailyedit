@@ -26,7 +26,7 @@ pub struct PlayerCatalogReport {
 }
 
 /// `1234567` -> `"1,234,567"`.
-pub(crate) fn with_separators(value: usize) -> String {
+pub fn with_separators(value: usize) -> String {
     let digits = value.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     for (index, c) in digits.chars().enumerate() {

@@ -231,6 +231,7 @@ fn ambiguous_shirt_numbers_are_reported_as_skipped_rows() {
         overflow: &NoOverflow,
         allow_overflow_release: true,
         today: chrono::NaiveDate::from_ymd_opt(2026, 10, 24).unwrap(),
+        squad_moves: true,
     });
     assert_eq!(plan.counts.duplicate_shirt_dropped, 2);
     assert!(plan.roster_actions.is_empty());

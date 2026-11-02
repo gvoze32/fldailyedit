@@ -76,7 +76,7 @@ fn updated_result() -> UpdateResult {
         outcome: Outcome::Updated,
         backup_path: Some(r"C:\Users\Player\AppData\Local\FLDailyEdit\backups\EDIT00000000-2026-10-25.bak".into()),
         written_sha256: Some("9f2c1a7d0b6e44f1a3c58e90d2b7a6c4f1e83d5a0b9c7e2f4d6a8b1c3e5f7092".into()),
-        counts: ChangeCounts { transfers: 4, shirt_numbers: 3, captains: 1, formations: 2, tactics: 0, unchanged: 311, safety_skipped: 0 },
+        counts: ChangeCounts { transfers: 4, shirt_numbers: 3, captains: 1, formations: 2, tactics: 0, unchanged: 311, safety_skipped: 0, league_moves: 0 },
         report_paths: vec![r"C:\Users\Player\AppData\Local\FLDailyEdit\reports\transfer_summary.md".into()],
         skipped: vec![
             skipped("Kamaldeen Sulemana", "Southampton", "Atalanta", "player_not_in_save", "no player with this name in the save", false),

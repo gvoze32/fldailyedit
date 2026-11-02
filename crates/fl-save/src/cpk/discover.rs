@@ -60,22 +60,30 @@ fn matches_pattern(name: &str, stem: Option<&str>) -> bool {
     stem.is_none_or(|stem| base.contains(stem))
 }
 
-/// Database archives below one game root in precedence order: the named
-/// archives first, then liveupd, datapack and any other `.cpk` files, each
-/// group sorted by case-folded path. Missing roots yield an empty list.
-pub fn find_game_cpks(game_root: &Path) -> Vec<PathBuf> {
+/// The `download` folder the archives of `game_root` are looked up in: the
+/// root itself when it is named `download` or has no `download` child.
+pub fn download_folder(game_root: &Path) -> PathBuf {
     let root = expand_user(game_root);
     let is_download = root
         .file_name()
         .is_some_and(|name| name.to_string_lossy().to_lowercase() == "download");
-    let mut download = if is_download {
+    let download = if is_download {
         root.clone()
     } else {
         root.join("download")
     };
     if !download.is_dir() && root.is_dir() {
-        download = root;
+        root
+    } else {
+        download
     }
+}
+
+/// Database archives below one game root in precedence order: the named
+/// archives first, then liveupd, datapack and any other `.cpk` files, each
+/// group sorted by case-folded path. Missing roots yield an empty list.
+pub fn find_game_cpks(game_root: &Path) -> Vec<PathBuf> {
+    let download = download_folder(game_root);
 
     let mut candidates: Vec<PathBuf> = Vec::new();
     let mut seen = std::collections::HashSet::new();

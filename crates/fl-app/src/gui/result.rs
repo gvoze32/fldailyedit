@@ -195,8 +195,8 @@ impl ResultView {
                 lines.push(format!("Outcome: {:?}", result.outcome));
                 let c = &result.counts;
                 lines.push(format!(
-                    "Counts: transfers={} shirt_numbers={} captains={} formations={} tactics={} unchanged={} safety_skipped={} not_applied={}",
-                    c.transfers, c.shirt_numbers, c.captains, c.formations, c.tactics, c.unchanged, c.safety_skipped, result.skipped.len()
+                    "Counts: transfers={} shirt_numbers={} captains={} formations={} tactics={} league_moves={} unchanged={} safety_skipped={} not_applied={}",
+                    c.transfers, c.shirt_numbers, c.captains, c.formations, c.tactics, c.league_moves, c.unchanged, c.safety_skipped, result.skipped.len()
                 ));
                 lines.push(format!("Target: {}", result.target_path.display()));
                 if let Some(backup) = &result.backup_path {
@@ -270,14 +270,17 @@ fn headline(ui: &mut Ui, view: &ResultView) {
 fn counts(ui: &mut Ui, view: &ResultView) {
     let Some(result) = view.result() else { return };
     let c = &result.counts;
-    let tiles = [
+    let mut tiles = vec![
         ("Transfers", c.transfers),
         ("Shirt numbers", c.shirt_numbers),
         ("Captains", c.captains),
         ("Formations", c.formations),
         ("Tactics", c.tactics),
-        ("Not applied", view.not_applied() as u32),
     ];
+    if c.league_moves > 0 {
+        tiles.push(("League moves", c.league_moves));
+    }
+    tiles.push(("Not applied", view.not_applied() as u32));
     ui.columns(tiles.len(), |columns| {
         for (column, (label, value)) in columns.iter_mut().zip(tiles) {
             theme::card(column, |ui| {
@@ -537,6 +540,7 @@ mod tests {
             allow_overflow_release: true,
             release_policy: None,
             dry_run: false,
+            parts: fl_engine::api::UpdateParts::FULL,
         }
     }
 

@@ -13,6 +13,7 @@ pub use team_bin::{TeamBinDatabase, TeamBinRecord};
 use crate::cpk::{Cpk, CpkError, discover};
 use crate::rating::RatingError;
 use crate::wesys::WesysError;
+use std::collections::HashSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -112,6 +113,9 @@ pub struct NativeLocations {
     pub configured: Option<PathBuf>,
     /// Game installation root whose CPK archives hold the databases.
     pub game_root: Option<PathBuf>,
+    /// Archive tried before the others when it holds the database (Team.bin
+    /// follows the archive the chosen Player.bin came from).
+    pub preferred_archive: Option<PathBuf>,
 }
 
 /// A database together with its origin.
@@ -142,7 +146,7 @@ pub fn load_database<D: NativeDatabase>(locations: &NativeLocations) -> LoadOutc
 
     let from_archives = |warnings: &mut Vec<String>| {
         let root = locations.game_root.as_deref()?;
-        load_from_archives::<D>(root, warnings)
+        load_from_archives::<D>(root, locations.preferred_archive.as_deref(), warnings)
     };
     let from_file =
         |warnings: &mut Vec<String>| file.and_then(|path| load_from_file::<D>(path, warnings));
@@ -180,40 +184,113 @@ fn load_from_file<D: NativeDatabase>(path: &Path, warnings: &mut Vec<String>) ->
 
 fn load_from_archives<D: NativeDatabase>(
     game_root: &Path,
+    preferred: Option<&Path>,
     warnings: &mut Vec<String>,
 ) -> Option<Loaded<D>> {
-    for cpk_path in discover::discover_game_cpks(Some(game_root)) {
-        let payload = Cpk::open(&cpk_path).and_then(|mut cpk| cpk.read_file(D::CPK_MEMBER));
-        let payload = match payload {
-            Ok(payload) => payload,
-            Err(CpkError::NotFound(_)) => continue,
-            Err(error) => {
-                warnings.push(format!(
-                    "Ignoring unreadable {} metadata in {}: {error}",
-                    D::LABEL,
-                    cpk_path.display()
-                ));
-                continue;
-            }
-        };
-        match D::from_bytes(&payload) {
-            Ok(database) => {
-                return Some(Loaded {
-                    database,
-                    source: DatabaseSource::Archive {
-                        cpk: cpk_path,
-                        label: D::LABEL,
-                    },
-                });
-            }
-            Err(error) => warnings.push(format!(
+    let mut cpk_paths = discover::discover_game_cpks(Some(game_root));
+    if let Some(position) =
+        preferred.and_then(|preferred| cpk_paths.iter().position(|path| path == preferred))
+    {
+        let first = cpk_paths.remove(position);
+        cpk_paths.insert(0, first);
+    }
+    cpk_paths
+        .iter()
+        .find_map(|cpk_path| load_from_archive::<D>(cpk_path, warnings))
+}
+
+/// `D` from one archive; a missing member is skipped silently, an unreadable
+/// or invalid one with a warning.
+fn load_from_archive<D: NativeDatabase>(
+    cpk_path: &Path,
+    warnings: &mut Vec<String>,
+) -> Option<Loaded<D>> {
+    let payload = Cpk::open(cpk_path).and_then(|mut cpk| cpk.read_file(D::CPK_MEMBER));
+    let payload = match payload {
+        Ok(payload) => payload,
+        Err(CpkError::NotFound(_)) => return None,
+        Err(error) => {
+            warnings.push(format!(
+                "Ignoring unreadable {} metadata in {}: {error}",
+                D::LABEL,
+                cpk_path.display()
+            ));
+            return None;
+        }
+    };
+    match D::from_bytes(&payload) {
+        Ok(database) => Some(Loaded {
+            database,
+            source: DatabaseSource::Archive {
+                cpk: cpk_path.to_path_buf(),
+                label: D::LABEL,
+            },
+        }),
+        Err(error) => {
+            warnings.push(format!(
                 "Ignoring invalid {} metadata in {}: {error}",
                 D::LABEL,
                 cpk_path.display()
-            )),
+            ));
+            None
         }
     }
-    None
+}
+
+/// One game archive that carries a `Player.bin`, scored against the players a
+/// save needs.
+#[derive(Debug)]
+pub struct PlayerBinCandidate {
+    pub cpk: PathBuf,
+    pub database: PlayerBinDatabase,
+    /// Needed player ids this archive's `Player.bin` does not know.
+    pub missing: usize,
+}
+
+/// Every archive below a game root with a readable `Player.bin`, in discovery
+/// precedence order, plus the archives skipped as unreadable or invalid.
+#[derive(Debug, Default)]
+pub struct PlayerBinScan {
+    pub candidates: Vec<PlayerBinCandidate>,
+    pub warnings: Vec<String>,
+}
+
+impl PlayerBinScan {
+    /// The candidate that misses the fewest needed players; ties keep
+    /// discovery order.
+    pub fn best(&self) -> Option<usize> {
+        best_by_coverage(self.candidates.iter().map(|candidate| candidate.missing))
+    }
+}
+
+/// Index of the smallest count; the first one wins a tie.
+pub fn best_by_coverage(missing: impl IntoIterator<Item = usize>) -> Option<usize> {
+    missing
+        .into_iter()
+        .enumerate()
+        .min_by_key(|&(_, missing)| missing)
+        .map(|(index, _)| index)
+}
+
+/// Read the `Player.bin` of every archive below `game_root` and count how many
+/// of the `needed` player ids each one lacks.
+pub fn scan_player_bins(game_root: &Path, needed: &HashSet<u32>) -> PlayerBinScan {
+    let mut scan = PlayerBinScan::default();
+    for cpk in discover::discover_game_cpks(Some(game_root)) {
+        let Some(loaded) = load_from_archive::<PlayerBinDatabase>(&cpk, &mut scan.warnings) else {
+            continue;
+        };
+        let missing = needed
+            .iter()
+            .filter(|&&id| !loaded.database.contains(id))
+            .count();
+        scan.candidates.push(PlayerBinCandidate {
+            cpk,
+            database: loaded.database,
+            missing,
+        });
+    }
+    scan
 }
 
 #[cfg(test)]

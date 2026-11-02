@@ -33,11 +33,69 @@ pub struct UpdateRequest {
     pub release_policy: Option<PathBuf>,
     /// Plan and report without writing anything (no save, log, cache, backup).
     pub dry_run: bool,
+    /// Which parts of the save to update; [`UpdateParts::FULL`] by default.
+    pub parts: UpdateParts,
 }
 
 impl UpdateRequest {
     pub fn target_path(&self) -> &std::path::Path {
         self.output_path.as_deref().unwrap_or(&self.edit_path)
+    }
+}
+
+/// The parts of a save an update may change. Disabled parts are neither
+/// fetched, planned nor written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UpdateParts {
+    /// Transfers, releases, loans and loan returns.
+    pub transfers: bool,
+    /// Squad numbers from the live squads.
+    pub shirt_numbers: bool,
+    pub captains: bool,
+    /// Main-preset formation from the latest lineup.
+    pub formations: bool,
+    /// League-relative tactics.
+    pub tactics: bool,
+    /// Starting XI and bench re-picked by native rating.
+    pub lineups: bool,
+    /// Promoted and relegated clubs moved to their current-season division.
+    pub leagues: bool,
+}
+
+impl UpdateParts {
+    /// Everything.
+    pub const FULL: Self = Self {
+        transfers: true,
+        shirt_numbers: true,
+        captains: true,
+        formations: true,
+        tactics: true,
+        lineups: true,
+        leagues: true,
+    };
+
+    pub fn is_full(&self) -> bool {
+        *self == Self::FULL
+    }
+
+    /// At least one part is enabled.
+    pub fn any(&self) -> bool {
+        let Self {
+            transfers,
+            shirt_numbers,
+            captains,
+            formations,
+            tactics,
+            lineups,
+            leagues,
+        } = *self;
+        transfers || shirt_numbers || captains || formations || tactics || lineups || leagues
+    }
+}
+
+impl Default for UpdateParts {
+    fn default() -> Self {
+        Self::FULL
     }
 }
 
@@ -139,6 +197,9 @@ pub struct ChangeCounts {
     pub tactics: u32,
     pub unchanged: u32,
     pub safety_skipped: u32,
+    /// Clubs moved to another league division (promoted and relegated clubs
+    /// both count).
+    pub league_moves: u32,
 }
 
 /// A transfer event that was not applied, with a stable reason code.

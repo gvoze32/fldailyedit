@@ -408,6 +408,101 @@ fn archives_are_searched_in_overlay_order_and_skip_missing_members() {
     assert!(loaded.database.contains(1) && !loaded.database.contains(2));
 }
 
+fn player_bin_of(ids: &[u32]) -> Vec<u8> {
+    ids.iter()
+        .flat_map(|&id| player_bin_with(id, &format!("Player {id}")))
+        .collect()
+}
+
+#[test]
+fn the_archive_that_knows_most_of_the_save_players_wins_and_ties_keep_precedence() {
+    // Older s2526 lacks players 3 and 4 that the newer data_extra has.
+    let root = game_root_with(&[
+        (
+            "data_extra.cpk",
+            cpk_with_player_bin(&player_bin_of(&[1, 2, 3, 4])),
+        ),
+        (
+            "data_s2526.cpk",
+            cpk_with_player_bin(&player_bin_of(&[1, 2])),
+        ),
+        (
+            "z_more.cpk",
+            cpk_with_player_bin(&player_bin_of(&[1, 2, 3])),
+        ),
+    ]);
+    let needed: HashSet<u32> = [1, 2, 3, 4].into();
+    let scan = scan_player_bins(root.path(), &needed);
+    let missing: Vec<usize> = scan.candidates.iter().map(|c| c.missing).collect();
+    assert_eq!(missing, [0, 2, 1]);
+    assert!(
+        scan.candidates[scan.best().unwrap()]
+            .cpk
+            .ends_with("data_extra.cpk")
+    );
+
+    // Only the older archive is installed and it lacks players: still reported, never panics.
+    let old_only = game_root_with(&[(
+        "data_s2526.cpk",
+        cpk_with_player_bin(&player_bin_of(&[1, 2])),
+    )]);
+    let scan = scan_player_bins(old_only.path(), &needed);
+    assert_eq!(scan.candidates[scan.best().unwrap()].missing, 2);
+
+    // The newest archive only wins when it is not worse: the old one fully covers the save here.
+    let needed: HashSet<u32> = [1, 2].into();
+    let root = game_root_with(&[
+        ("data_extra.cpk", cpk_with_player_bin(&player_bin_of(&[1]))),
+        (
+            "data_s2526.cpk",
+            cpk_with_player_bin(&player_bin_of(&[1, 2])),
+        ),
+    ]);
+    let scan = scan_player_bins(root.path(), &needed);
+    assert!(
+        scan.candidates[scan.best().unwrap()]
+            .cpk
+            .ends_with("data_s2526.cpk")
+    );
+    let tie: HashSet<u32> = [1].into();
+    let scan = scan_player_bins(root.path(), &tie);
+    assert!(
+        scan.candidates[scan.best().unwrap()]
+            .cpk
+            .ends_with("data_extra.cpk")
+    );
+
+    assert_eq!(best_by_coverage([5, 2, 2, 9]), Some(1));
+    assert_eq!(best_by_coverage(std::iter::empty()), None);
+}
+
+#[test]
+fn a_preferred_archive_is_tried_first_and_missing_members_fall_back() {
+    let root = game_root_with(&[
+        ("data_extra.cpk", cpk_with_player_bin(&player_bin_of(&[1]))),
+        ("data_s2526.cpk", cpk_with_player_bin(&player_bin_of(&[2]))),
+    ]);
+    let preferred = root.path().join("download").join("data_s2526.cpk");
+    let locations = NativeLocations {
+        game_root: Some(root.path().to_path_buf()),
+        preferred_archive: Some(preferred),
+        ..Default::default()
+    };
+    let loaded = load_database::<PlayerBinDatabase>(&locations)
+        .loaded
+        .unwrap();
+    assert!(loaded.database.contains(2) && !loaded.database.contains(1));
+
+    let missing_preferred = NativeLocations {
+        preferred_archive: Some(root.path().join("download").join("absent.cpk")),
+        ..locations
+    };
+    let loaded = load_database::<PlayerBinDatabase>(&missing_preferred)
+        .loaded
+        .unwrap();
+    assert!(loaded.database.contains(1));
+}
+
 #[test]
 fn explicit_file_beats_archives_but_configured_file_does_not() {
     let root = game_root_with(&[(
@@ -424,6 +519,7 @@ fn explicit_file_beats_archives_but_configured_file_does_not() {
         explicit: Some(explicit.clone()),
         configured: Some(configured.clone()),
         game_root: Some(root.path().to_path_buf()),
+        ..Default::default()
     };
     let loaded = load_database::<PlayerBinDatabase>(&locations)
         .loaded

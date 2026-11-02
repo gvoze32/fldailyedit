@@ -136,6 +136,8 @@ struct Index {
     team_player_offsets: HashMap<u32, usize>,
     game_plan_offsets: HashMap<u32, usize>,
     divisions: Vec<Vec<u32>>,
+    /// First competition-block slot of each division in `divisions`.
+    division_starts: Vec<usize>,
     club_ids: BTreeSet<u32>,
 }
 
@@ -190,26 +192,40 @@ impl Index {
                 .or_insert(offset);
         }
 
-        // League membership: a division is a run of non-zero known team ids.
+        index.scan_divisions(data);
+        index
+    }
+
+    /// League membership: a division is a run of non-zero known team ids
+    /// in the competition block. Rebuilds `divisions`, `division_starts` and
+    /// `club_ids` from `data`.
+    fn scan_divisions(&mut self, data: &[u8]) {
+        self.divisions.clear();
+        self.division_starts.clear();
         let mut current: Vec<u32> = Vec::new();
+        let mut start = 0;
         for slot in 0..COMPETITION_SLOT_COUNT {
             let offset = COMPETITION_ENTRY_START + slot * 4;
-            if offset + 4 > len {
+            if offset + 4 > data.len() {
                 break;
             }
             let team_id = read_u32(data, offset);
-            if team_id != 0 && team_id != COMPETITION_SEPARATOR && index.team_ids.contains(&team_id)
+            if team_id != 0 && team_id != COMPETITION_SEPARATOR && self.team_ids.contains(&team_id)
             {
+                if current.is_empty() {
+                    start = slot;
+                }
                 current.push(team_id);
             } else if !current.is_empty() {
-                index.divisions.push(std::mem::take(&mut current));
+                self.divisions.push(std::mem::take(&mut current));
+                self.division_starts.push(start);
             }
         }
         if !current.is_empty() {
-            index.divisions.push(current);
+            self.divisions.push(current);
+            self.division_starts.push(start);
         }
-        index.club_ids = index.divisions.iter().flatten().copied().collect();
-        index
+        self.club_ids = self.divisions.iter().flatten().copied().collect();
     }
 }
 
@@ -285,9 +301,10 @@ impl EditFile {
 
     /// Mutable view of the whole buffer for mutation modules.
     ///
-    /// Writers must not change player ids, team ids, table order, header counts
-    /// or the competition block: the lookup indexes are built once and are not
-    /// refreshed.
+    /// Writers must not change player ids, team ids, table order or header
+    /// counts, and must change the competition block only through
+    /// [`EditFile::set_league_divisions`]: the lookup indexes are built once
+    /// and are not refreshed.
     pub(crate) fn data_mut(&mut self) -> &mut [u8] {
         &mut self.data
     }
@@ -303,6 +320,8 @@ impl EditFile {
     pub fn restore(&mut self, snapshot: Snapshot) {
         debug_assert_eq!(snapshot.0.len(), self.data.len());
         self.data = snapshot.0;
+        // League membership is the one index that mutations may change.
+        self.index.scan_divisions(&self.data);
     }
 
     // ── attached metadata ────────────────────────────────────────────────
@@ -410,6 +429,20 @@ impl EditFile {
         players
     }
 
+    /// Distinct players registered on any roster.
+    pub fn roster_player_ids(&self) -> HashSet<u32> {
+        self.rosters().iter().flat_map(TeamData::roster).collect()
+    }
+
+    /// Rostered players only the game's `Player.bin` can describe: those the
+    /// save carries no edited-player entry for.
+    pub fn roster_ids_needing_native(&self) -> HashSet<u32> {
+        let edited = self.edited_players();
+        let mut ids = self.roster_player_ids();
+        ids.retain(|id| !edited.contains_key(id));
+        ids
+    }
+
     /// Build the full player catalog: the players edited inside the save, then
     /// native Player.bin metadata for rostered players.
     ///
@@ -419,7 +452,7 @@ impl EditFile {
     /// `missing_roster_ids`.
     pub fn build_catalog(&self) -> PlayerCatalog {
         let edited = self.edited_players();
-        let roster_ids: HashSet<u32> = self.rosters().iter().flat_map(TeamData::roster).collect();
+        let roster_ids = self.roster_player_ids();
         let Some(native) = &self.native else {
             let (players, report) = build_player_catalog(&edited, &roster_ids);
             return PlayerCatalog { players, report };
@@ -647,6 +680,39 @@ impl EditFile {
     /// League divisions (runs of team ids in the competition-membership block).
     pub fn league_divisions(&self) -> &[Vec<u32>] {
         &self.index.divisions
+    }
+
+    /// Replace the league membership: `divisions` lists the team ids of each
+    /// division in slot order, in the same order as
+    /// [`league_divisions`](Self::league_divisions). Every division keeps its
+    /// size and the set of clubs stays exactly the same (no club is created,
+    /// dropped or listed twice); only which division a club sits in, and its
+    /// slot, may change. Returns the number of slots written differently.
+    /// Nothing is written when the proposal is rejected.
+    pub fn set_league_divisions(
+        &mut self,
+        divisions: &[Vec<u32>],
+    ) -> Result<usize, crate::league::LeagueError> {
+        crate::league::check_membership(&self.index.divisions, divisions)?;
+        let mut changed = 0;
+        for ((start, old), new) in self
+            .index
+            .division_starts
+            .iter()
+            .zip(&self.index.divisions)
+            .zip(divisions)
+        {
+            for (position, (previous, team_id)) in old.iter().zip(new).enumerate() {
+                if previous == team_id {
+                    continue;
+                }
+                let at = COMPETITION_ENTRY_START + (start + position) * 4;
+                self.data[at..at + 4].copy_from_slice(&team_id.to_le_bytes());
+                changed += 1;
+            }
+        }
+        self.index.divisions = divisions.to_vec();
+        Ok(changed)
     }
 
     /// Ids of all club teams: every member of a league division. National
@@ -947,6 +1013,61 @@ mod tests {
         assert!(file.club_team_ids().is_empty());
         // Without any classification nothing is filtered out.
         assert_eq!(file.find_player_teams(1001, true), vec![100]);
+    }
+
+    fn two_division_mock() -> Mock {
+        Mock {
+            teams: 5,
+            team_entries: (101..106).map(|id| (id, format!("Club {id}"))).collect(),
+            // Division one: 101-103; division two starts after filler slots.
+            league: vec![101, 102, 103, COMPETITION_SEPARATOR, 0, 104, 105],
+            ..Mock::default()
+        }
+    }
+
+    #[test]
+    fn league_membership_round_trips_through_the_block() {
+        let mut file = EditFile::from_bytes(two_division_mock().build()).unwrap();
+        assert_eq!(
+            file.league_divisions(),
+            &[vec![101, 102, 103], vec![104, 105]]
+        );
+        let before = file.snapshot();
+
+        // 102 goes down and 105 comes up, each into the other's slot.
+        let swapped = [vec![101, 105, 103], vec![104, 102]];
+        assert_eq!(file.set_league_divisions(&swapped), Ok(2));
+        assert_eq!(file.league_divisions(), &swapped);
+        // The bytes agree with the cached view, filler slots included.
+        let reread = EditFile::from_bytes(file.bytes().to_vec()).unwrap();
+        assert_eq!(reread.league_divisions(), &swapped);
+        let slot = |slot: usize| read_u32(file.bytes(), COMPETITION_ENTRY_START + slot * 4);
+        assert_eq!(
+            (slot(1), slot(3), slot(4), slot(5), slot(6)),
+            (105, COMPETITION_SEPARATOR, 0, 104, 102)
+        );
+        assert_eq!(file.club_team_ids().len(), 5);
+
+        file.restore(before);
+        assert_eq!(
+            file.league_divisions(),
+            &[vec![101, 102, 103], vec![104, 105]]
+        );
+    }
+
+    #[test]
+    fn a_rejected_membership_proposal_writes_nothing() {
+        let mut file = EditFile::from_bytes(two_division_mock().build()).unwrap();
+        let original = file.bytes().to_vec();
+        for proposal in [
+            vec![vec![101, 102], vec![103, 104, 105]],
+            vec![vec![101, 102, 103], vec![104, 104]],
+            vec![vec![101, 102, 103], vec![104, 999]],
+            vec![vec![101, 102, 103]],
+        ] {
+            assert!(file.set_league_divisions(&proposal).is_err());
+        }
+        assert_eq!(file.bytes(), original);
     }
 
     #[test]

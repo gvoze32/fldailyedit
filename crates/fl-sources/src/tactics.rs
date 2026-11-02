@@ -150,7 +150,7 @@ fn league_stat_urls(payload: &Value) -> (String, Vec<(&'static str, String)>) {
     (season, urls)
 }
 
-async fn get_object(client: &HttpClient, url: &str) -> Result<Value, FotmobError> {
+pub(crate) async fn get_object(client: &HttpClient, url: &str) -> Result<Value, FotmobError> {
     let request = Request::get(url)
         .headers(DEFAULT_HEADERS)
         .timeout(REQUEST_TIMEOUT);

@@ -4,9 +4,10 @@
 //! run's not-applied rows are passed in.
 
 use chrono::{DateTime, Duration, NaiveDate, Utc};
-use fl_sources::dates::{self, previous_window_start};
+use fl_sources::dates::{self, parse_iso_datetime, previous_window_start};
 
 use crate::api::Window;
+use crate::log::LogRecord;
 
 /// Re-scan a little before the last applied run so events published late
 /// (backdated announcements) are still seen.
@@ -98,6 +99,17 @@ pub fn resolve_scope(
     }
 }
 
+/// Times of the log records that count as "the save was last updated" for
+/// the window: real (not dry-run) changes of a run that checked transfers.
+/// Records of a run without transfers (`window_neutral`) never move it.
+pub fn applied_times(records: &[LogRecord]) -> Vec<DateTime<Utc>> {
+    records
+        .iter()
+        .filter(|record| !record.dry_run && !record.window_neutral)
+        .filter_map(|record| parse_iso_datetime(&record.timestamp))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,6 +121,29 @@ mod tests {
 
     fn at(y: i32, m: u32, d: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(y, m, d, 23, 30, 0).unwrap()
+    }
+
+    fn record(timestamp: &str, dry_run: bool, window_neutral: bool) -> LogRecord {
+        serde_json::from_value(serde_json::json!({
+            "timestamp": timestamp,
+            "dry_run": dry_run,
+            "window_neutral": window_neutral,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn records_of_a_run_without_transfers_do_not_move_the_window() {
+        let today = day(2026, 10, 24);
+        let full_run = record("2026-10-01T10:00:00+00:00", false, false);
+        let before = save_since_date(&applied_times(std::slice::from_ref(&full_run)), &[], today);
+        let log = [
+            full_run,
+            record("2026-10-20T10:00:00+00:00", false, true),
+            record("2026-10-22T10:00:00+00:00", true, false),
+        ];
+        assert_eq!(save_since_date(&applied_times(&log), &[], today), before);
+        assert_eq!(before, day(2026, 10, 1) - Duration::days(7));
     }
 
     #[test]

@@ -4,7 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, RichText, TextEdit, Ui, vec2};
-use fl_engine::api::{UpdateRequest, Window};
+use fl_engine::api::{UpdateParts, UpdateRequest, Window};
+use fl_engine::game_coverage::{self, GameCoverage};
 use fl_engine::locations::{self, SaveCandidate, SaveInfo};
 
 use super::Action;
@@ -24,8 +25,15 @@ pub enum SaveStatus {
 pub enum GameStatus {
     Empty,
     Checking,
-    Usable { archives: Vec<PathBuf> },
+    /// Archives with game data; the one the app reads first leads.
+    Usable {
+        archives: Vec<PathBuf>,
+    },
     Unusable,
+    /// The folder holds game data, but it lacks players the save needs.
+    Mismatch {
+        coverage: GameCoverage,
+    },
 }
 
 /// Why the action buttons are disabled.
@@ -36,6 +44,8 @@ pub enum Blocker {
     SaveInvalid(String),
     ChooseGameFolder,
     GameFolderInvalid,
+    GameFilesMismatch,
+    NothingSelected,
 }
 
 impl Blocker {
@@ -52,6 +62,10 @@ impl Blocker {
                 "The game folder has no data_extra.cpk or data_s2526.cpk in its download folder."
                     .into()
             }
+            Self::GameFilesMismatch => {
+                "The game files do not match this save. See the game folder above.".into()
+            }
+            Self::NothingSelected => "Tick at least one thing to update.".into(),
         }
     }
 }
@@ -70,6 +84,8 @@ pub struct SetupState {
     pub generation: u64,
     /// Scroll the game-folder card into view on the next frame.
     pub focus_game_folder: bool,
+    /// What to update; everything by default.
+    pub parts: UpdateParts,
 }
 
 impl SetupState {
@@ -89,6 +105,7 @@ impl SetupState {
             game: GameStatus::Empty,
             generation: 0,
             focus_game_folder: false,
+            parts: UpdateParts::FULL,
         }
     }
 
@@ -120,7 +137,11 @@ impl SetupState {
             GameStatus::Empty => blockers.push(Blocker::ChooseGameFolder),
             GameStatus::Checking => blockers.push(Blocker::Checking),
             GameStatus::Unusable => blockers.push(Blocker::GameFolderInvalid),
+            GameStatus::Mismatch { .. } => blockers.push(Blocker::GameFilesMismatch),
             GameStatus::Usable { .. } => {}
+        }
+        if !self.parts.any() {
+            blockers.push(Blocker::NothingSelected);
         }
         blockers.dedup();
         blockers
@@ -152,14 +173,16 @@ impl SetupState {
             allow_overflow_release: true,
             release_policy: None,
             dry_run,
+            parts: self.parts,
         })
     }
 }
 
 /// Check the chosen paths. Reads the save (decrypting it in memory) and
-/// looks at the game folder; never writes.
+/// looks at the game folder; with both usable it also checks that the game's
+/// player list knows the save's players. Never writes.
 pub fn probe(save: Option<&Path>, game: Option<&Path>) -> (SaveStatus, GameStatus) {
-    let game_status = match game {
+    let mut game_status = match game {
         None => GameStatus::Empty,
         Some(path) => {
             let folder = locations::check_game_folder(path);
@@ -188,6 +211,25 @@ pub fn probe(save: Option<&Path>, game: Option<&Path>) -> (SaveStatus, GameStatu
             },
         },
     };
+    if let (SaveStatus::Ready { resolved, .. }, GameStatus::Usable { archives }, Some(game)) =
+        (&save_status, &mut game_status, game)
+    {
+        // Only a readable player list can prove players missing; an archive
+        // that cannot be read at all is left to the update, which reports it.
+        if let Ok(coverage) = game_coverage::check_game_coverage(resolved, game) {
+            if coverage.is_complete() {
+                // The archive in use first, so the chip names it.
+                if let Some(chosen) = coverage.chosen_archive()
+                    && let Some(position) = archives.iter().position(|a| *a == chosen.archive)
+                {
+                    let first = archives.remove(position);
+                    archives.insert(0, first);
+                }
+            } else if !coverage.archives.is_empty() {
+                game_status = GameStatus::Mismatch { coverage };
+            }
+        }
+    }
     (save_status, game_status)
 }
 
@@ -210,6 +252,8 @@ pub fn ui(ui: &mut Ui, state: &mut SetupState, actions: &mut Vec<Action>) {
     save_card(ui, state, actions);
     ui.add_space(12.0);
     game_card(ui, state, actions);
+    ui.add_space(12.0);
+    options_card(ui, state);
     ui.add_space(16.0);
 
     let blockers = state.blockers();
@@ -318,10 +362,80 @@ fn save_status(ui: &mut Ui, state: &SetupState) {
                 "{} save · {} clubs · {} players",
                 info.kind.game_name(),
                 info.clubs,
-                info.players
+                fl_save::catalog::with_separators(info.players)
             ),
         ),
     }
+}
+
+fn options_card(ui: &mut Ui, state: &mut SetupState) {
+    theme::card(ui, |ui| {
+        theme::step_title(ui, 3, "What to update", None);
+        ui.add_space(4.0);
+        let mut full = state.parts.is_full();
+        if ui
+            .checkbox(
+                &mut full,
+                RichText::new("Full update (everything)").strong(),
+            )
+            .on_hover_text("Tick everything below. Recommended.")
+            .changed()
+        {
+            state.parts = if full {
+                UpdateParts::FULL
+            } else {
+                UpdateParts {
+                    transfers: false,
+                    shirt_numbers: false,
+                    captains: false,
+                    formations: false,
+                    tactics: false,
+                    lineups: false,
+                    leagues: false,
+                }
+            };
+        }
+        ui.add_space(2.0);
+        let parts = &mut state.parts;
+        let options: [(&mut bool, &str, &str); 7] = [
+            (
+                &mut parts.transfers,
+                "Transfers",
+                "Signings, releases, loans and loan returns.",
+            ),
+            (
+                &mut parts.shirt_numbers,
+                "Shirt numbers",
+                "Squad numbers from the clubs' current squads.",
+            ),
+            (&mut parts.captains, "Captains", "Club captains."),
+            (
+                &mut parts.formations,
+                "Formations",
+                "Each club's formation from its latest match.",
+            ),
+            (
+                &mut parts.tactics,
+                "Tactics",
+                "Attacking and defensive style based on how each club plays.",
+            ),
+            (
+                &mut parts.lineups,
+                "Starting XI and bench",
+                "The best-rated player for each position starts.",
+            ),
+            (
+                &mut parts.leagues,
+                "League teams",
+                "Move promoted and relegated clubs to their current league. Start a new career afterwards.",
+            ),
+        ];
+        ui.horizontal_wrapped(|ui| {
+            for (value, label, hint) in options {
+                ui.checkbox(value, label).on_hover_text(hint);
+            }
+        });
+    });
 }
 
 fn game_card(ui: &mut Ui, state: &mut SetupState, actions: &mut Vec<Action>) {
@@ -379,6 +493,9 @@ fn game_card(ui: &mut Ui, state: &mut SetupState, actions: &mut Vec<Action>) {
                     .map(|name| name.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 theme::chip(ui, Tone::Ok, format!("Game files found ({first})"));
+            }
+            GameStatus::Mismatch { coverage } => {
+                theme::chip(ui, Tone::Error, coverage.problem());
             }
         }
     });
@@ -455,5 +572,38 @@ mod tests {
         assert!(matches!(save, SaveStatus::Invalid(text) if text.contains("does not exist")));
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
         assert_eq!(probe(None, None), (SaveStatus::Empty, GameStatus::Empty));
+    }
+
+    #[test]
+    fn a_game_folder_that_lacks_the_save_players_blocks_the_update() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let save = std::env::var_os("FL_TEST_BASE_SAVE").map_or_else(
+            || root.join("testdata/local/base/EDIT00000000"),
+            PathBuf::from,
+        );
+        let older = root.join("reference/data_s2526.cpk");
+        if !save.is_file() || !older.is_file() {
+            eprintln!("skipping: base save or reference/data_s2526.cpk not present");
+            return;
+        }
+        let game = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(game.path().join("download")).unwrap();
+        std::fs::copy(&older, game.path().join("download/data_s2526.cpk")).unwrap();
+
+        let (save_status, game_status) = probe(Some(&save), Some(game.path()));
+        let SaveStatus::Ready { info, .. } = &save_status else {
+            panic!("{save_status:?}");
+        };
+        assert!(info.players > 1000);
+        let GameStatus::Mismatch { coverage } = &game_status else {
+            panic!("{game_status:?}");
+        };
+        assert!(coverage.problem().contains("data_extra.cpk was not found"));
+
+        let mut state = SetupState::new(Some(save), Some(game.path().to_path_buf()));
+        state.save = save_status;
+        state.game = game_status;
+        assert_eq!(state.blockers(), [Blocker::GameFilesMismatch]);
+        assert!(state.request(true).is_none());
     }
 }

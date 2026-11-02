@@ -10,6 +10,7 @@
 pub(crate) mod apply;
 pub(crate) mod commit;
 pub(crate) mod context;
+mod leagues;
 pub(crate) mod prepare;
 mod records;
 pub(crate) mod verify;
@@ -27,7 +28,7 @@ use self::context::Context;
 use self::prepare::{Prepared, fail};
 use crate::api::{
     CancelToken, ChangeCounts, Environment, ErrorCode, Outcome, Progress, SkippedTransfer, Stage,
-    UpdateError, UpdateRequest, UpdateResult,
+    UpdateError, UpdateParts, UpdateRequest, UpdateResult,
 };
 use crate::club_identity::NameResolution;
 use crate::log::{LogRecord, TransferLog};
@@ -36,7 +37,7 @@ use crate::planning::{
     self, HistoryEntry, Plan, PlanInput, SkippedTransfer as PlannedSkip, sort_events,
 };
 use crate::report::{self, SkippedRow, read_skipped, sort_skipped};
-use crate::scrape::{Emit, ScrapePlan, Scraped, scrape};
+use crate::scrape::{Emit, ScrapePlan, Scraped, needs_club_pages, scrape};
 use crate::services::Services;
 
 /// Rounds of planning and applying one run may take before it stops and asks
@@ -102,6 +103,30 @@ struct Run {
     context: Context,
 }
 
+/// The first progress line of the fetch stage, naming what is fetched.
+fn fetch_label(parts: &UpdateParts) -> String {
+    if parts.transfers {
+        return "Fetching transfers".to_owned();
+    }
+    let named = [
+        (parts.formations, "formations"),
+        (parts.tactics, "tactics"),
+        (parts.shirt_numbers, "shirt numbers"),
+        (parts.captains, "captains"),
+    ];
+    let wanted: Vec<&str> = named
+        .iter()
+        .filter(|(on, _)| *on)
+        .map(|(_, name)| *name)
+        .collect();
+    match wanted.as_slice() {
+        [] if parts.lineups => "Fetching squads for lineups".to_owned(),
+        [] => "Fetching league data".to_owned(),
+        [only] => format!("Fetching {only}"),
+        [rest @ .., last] => format!("Fetching {} and {last}", rest.join(", ")),
+    }
+}
+
 fn failure(code: ErrorCode, stage: Stage, message: impl Into<String>) -> UpdateError {
     fail(code, stage, message)
 }
@@ -133,7 +158,7 @@ impl Run {
         let mut warnings = std::mem::take(&mut self.context.warnings);
 
         // Fetch.
-        reporter.say(Stage::Fetching, "Fetching transfers");
+        reporter.say(Stage::Fetching, fetch_label(&request.parts));
         let Scraped {
             result: mut scraped,
             warnings: scrape_warnings,
@@ -160,10 +185,12 @@ impl Run {
             }
             reporter.say(
                 Stage::Matching,
-                if round == 1 {
-                    "Matching transfers with roster-aware identity verification".to_owned()
-                } else {
-                    format!("Matching again on the updated rosters (round {round})")
+                match (round, request.parts.transfers) {
+                    (1, true) => {
+                        "Matching transfers with roster-aware identity verification".to_owned()
+                    }
+                    (1, false) => "Planning the selected updates from the live squads".to_owned(),
+                    (_, _) => format!("Matching again on the updated rosters (round {round})"),
                 },
             );
             let plan = self.plan(
@@ -188,10 +215,11 @@ impl Run {
                     threshold: self.context.threshold,
                     allow_overflow_release: request.allow_overflow_release,
                     dry_run: request.dry_run,
+                    parts: request.parts,
                 };
                 apply::apply(&mut self.prepared.edit, &input, cancel, reporter)
             };
-            let this_round = match result {
+            let mut this_round = match result {
                 Ok(this_round) => this_round,
                 Err(error) => {
                     self.rollback();
@@ -199,6 +227,13 @@ impl Run {
                 }
             };
             warnings.extend(this_round.warnings.iter().cloned());
+            if !request.parts.transfers {
+                // Without a transfer check these records must not move the
+                // next automatic window.
+                for entry in &mut this_round.entries {
+                    entry.window_neutral = true;
+                }
+            }
             cancel.check(Stage::Applying)?;
 
             let settled = !this_round.is_effective();
@@ -232,7 +267,38 @@ impl Run {
             );
         }
 
-        let skipped = self.skipped_rows(&plan, &applied);
+        // Promotion and relegation: the save's league structure, independent of
+        // the transfer rounds above. Trouble reaching FotMob only warns.
+        let mut league_moves = Vec::new();
+        if request.parts.leagues {
+            match leagues::run(
+                &mut self.prepared.edit,
+                &self.context.identity,
+                services,
+                reporter,
+                cancel,
+                request.dry_run,
+            ) {
+                Ok(moved) => {
+                    warnings.extend(moved.warnings);
+                    applied.counts.league_moves =
+                        u32::try_from(moved.moves.len()).unwrap_or(u32::MAX);
+                    league_moves = moved.moves;
+                }
+                Err(error) => {
+                    self.rollback();
+                    return Err(error);
+                }
+            }
+            cancel.check(Stage::Applying)?;
+        }
+
+        let skipped = if request.parts.transfers {
+            self.skipped_rows(&plan, &applied)
+        } else {
+            // No transfer was checked, so nothing was skipped.
+            Vec::new()
+        };
         let counts = applied.counts;
 
         if !applied.is_effective() {
@@ -271,6 +337,8 @@ impl Run {
             &applied.entries,
             &skipped,
             services.clock.now(),
+            &request.parts,
+            &league_moves,
         );
         warnings.extend(publish_warnings);
         Ok(UpdateResult {
@@ -328,14 +396,21 @@ impl Run {
             Vec::new()
         } else {
             let now = services.clock.now();
-            commit::write_reports(paths, &self.prepared.scope, &[], &skipped, now).unwrap_or_else(
-                |error| {
-                    let warning = format!("Could not write the not-applied report: {error}");
-                    reporter.say(Stage::Complete, format!("⚠ {warning}"));
-                    warnings.push(warning);
-                    Vec::new()
-                },
+            commit::write_reports(
+                paths,
+                &self.prepared.scope,
+                &[],
+                &skipped,
+                now,
+                &request.parts,
+                &[],
             )
+            .unwrap_or_else(|error| {
+                let warning = format!("Could not write the not-applied report: {error}");
+                reporter.say(Stage::Complete, format!("⚠ {warning}"));
+                warnings.push(warning);
+                Vec::new()
+            })
         };
         Ok(UpdateResult {
             target_path: request.target_path().to_path_buf(),
@@ -393,7 +468,7 @@ impl Run {
             .collect();
         bound.sort_unstable();
         bound.dedup();
-        if club_filter.is_none() && bound.is_empty() {
+        if club_filter.is_none() && bound.is_empty() && needs_club_pages(&request.parts) {
             return Err(failure(
                 ErrorCode::FetchFailed,
                 stage,
@@ -427,6 +502,7 @@ impl Run {
             now,
             team_cache_dir: Some(team_cache_dir),
             tactics_cache: Some(tactics_cache),
+            parts: request.parts,
         };
         run_scrape(&plan, services, reporter, cancel)
     }
@@ -474,12 +550,8 @@ impl Run {
     /// The save's own history decides where an automatic scrape starts.
     fn save_since_date(&self, paths: &StatePaths, today: NaiveDate) -> NaiveDate {
         let scope = &self.prepared.scope;
-        let applied: Vec<_> = TransferLog::new(paths.transfer_log())
-            .read(Some(scope), false)
-            .iter()
-            .filter(|record| !record.dry_run)
-            .filter_map(|record| parse_iso_datetime(&record.timestamp))
-            .collect();
+        let applied =
+            window::applied_times(&TransferLog::new(paths.transfer_log()).read(Some(scope), false));
         let skipped_path = paths
             .reports_dir(scope)
             .join(report::SKIPPED_TRANSFERS_FILENAME);
@@ -556,28 +628,31 @@ impl Run {
             overflow: &self.prepared.edit,
             allow_overflow_release: request.allow_overflow_release,
             today: services.clock.today(),
+            squad_moves: request.parts.transfers,
         });
-        let counts = plan.counts;
-        reporter.say(
-            stage,
-            format!(
-                "Fully actionable: {} (club transfers: {}, departures: {}, signings: {}, shirt-number checks: {}); unmatched: {}",
-                counts.fully_actionable,
-                counts.club_transfers,
-                counts.departures,
-                counts.signings,
-                counts.shirt_checks,
-                counts.unmatched
-            ),
-        );
-        let relevant = plan.skipped.iter().filter(|item| item.relevant).count();
-        reporter.say(
-            stage,
-            format!(
-                "Not applied: {} transfers ({relevant} touch this save)",
-                plan.skipped.len()
-            ),
-        );
+        if request.parts.transfers {
+            let counts = plan.counts;
+            reporter.say(
+                stage,
+                format!(
+                    "Fully actionable: {} (club transfers: {}, departures: {}, signings: {}, shirt-number checks: {}); unmatched: {}",
+                    counts.fully_actionable,
+                    counts.club_transfers,
+                    counts.departures,
+                    counts.signings,
+                    counts.shirt_checks,
+                    counts.unmatched
+                ),
+            );
+            let relevant = plan.skipped.iter().filter(|item| item.relevant).count();
+            reporter.say(
+                stage,
+                format!(
+                    "Not applied: {} transfers ({relevant} touch this save)",
+                    plan.skipped.len()
+                ),
+            );
+        }
         Ok(plan)
     }
 }

@@ -61,6 +61,7 @@ pub(crate) fn transfer_entry(
         source_urls: transfer.source_urls.clone(),
         proof_urls: transfer.proof_urls.clone(),
         native_metadata,
+        window_neutral: false,
     }
 }
 
@@ -104,6 +105,7 @@ pub(crate) fn captain_entry(
         },
         proof_urls: Vec::new(),
         native_metadata: json!({ "previous_captain_player_id": previous_captain }),
+        window_neutral: false,
     }
 }
 

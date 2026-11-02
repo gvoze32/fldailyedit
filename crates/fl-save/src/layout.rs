@@ -112,10 +112,11 @@ pub const MATCHDAY_SQUAD_SLOT_COUNT: usize = 18;
 
 // ── competition (league membership) section ──────────────────────────────
 
-/// u32 slots in the section; a division is a run of non-zero team ids.
+/// u32 slots in the section; a division is a run of known team ids.
 pub const COMPETITION_SLOT_COUNT: usize = COMPETITION_SECTION_SIZE / 4;
-/// Separator value that never names a team.
-pub const COMPETITION_SEPARATOR: u32 = 0xFFFF_0300;
+/// Filler value that never names a team (stored as the bytes `FF FF 03 00`,
+/// the wiki's "0xFFFF0300"). Zero and any unknown id end a division as well.
+pub const COMPETITION_SEPARATOR: u32 = 0x0003_FFFF;
 
 // ── game plan entry fields ───────────────────────────────────────────────
 

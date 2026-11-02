@@ -46,13 +46,20 @@ fn inspect_summarizes_the_reference_save() {
     assert_eq!(code, 0, "{text}");
     for expected in [
         "Game version:",
-        "Players:",
+        "Edited players:",
+        "Roster players:",
         "Integrity: PASS",
         "Division",
         "Total clubs:",
     ] {
         assert!(text.contains(expected), "{expected} missing in\n{text}");
     }
+    let roster_players: usize = text
+        .lines()
+        .find_map(|line| line.strip_prefix("Roster players:"))
+        .and_then(|value| value.trim().parse().ok())
+        .expect("a roster player count");
+    assert!(roster_players > 0, "{text}");
 }
 
 #[test]

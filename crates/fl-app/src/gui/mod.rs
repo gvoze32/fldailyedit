@@ -146,7 +146,10 @@ impl App {
             engine: services.engine,
             env: services.env,
             platform: services.platform,
-            setup: SetupState::new(settings.save_path.clone(), settings.game_root.clone()),
+            setup: SetupState {
+                parts: settings.parts.into(),
+                ..SetupState::new(settings.save_path.clone(), settings.game_root.clone())
+            },
             log_open: settings.log_open,
             settings,
             screen: Screen::Setup,
@@ -448,6 +451,7 @@ impl App {
     fn remember(&mut self) {
         self.settings.save_path = self.setup.save_path.clone();
         self.settings.game_root = self.setup.game_path.clone();
+        self.settings.parts = self.setup.parts.into();
         self.save_settings();
     }
 

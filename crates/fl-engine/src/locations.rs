@@ -306,6 +306,8 @@ pub struct SaveInfo {
     pub game_version: String,
     pub teams: usize,
     pub clubs: usize,
+    /// Distinct players registered on the save's rosters (not the header's
+    /// edited-player count, which is 0 on Football Life saves).
     pub players: usize,
     /// Integrity findings that make the save unusable (empty = valid).
     pub problems: Vec<String>,
@@ -339,7 +341,7 @@ pub fn inspect_save(path: &Path) -> Result<SaveInfo, InspectError> {
         game_version: header.game_version,
         teams: edit.teams().len(),
         clubs: edit.club_team_ids().len(),
-        players: usize::from(edit.counts().players),
+        players: edit.roster_player_ids().len(),
         problems: report.error_messages(),
     })
 }
@@ -590,5 +592,15 @@ mod tests {
             inspect_save(&dir.path().join("missing")),
             Err(InspectError::Read(_))
         ));
+    }
+
+    #[test]
+    fn inspect_counts_the_players_on_the_rosters() {
+        let Some(save) = crate::test_support::base_save_path() else {
+            return;
+        };
+        let info = inspect_save(&save).unwrap();
+        // The header's edited-player count is 0 on Football Life saves.
+        assert!(info.players > 1000, "{info:?}");
     }
 }

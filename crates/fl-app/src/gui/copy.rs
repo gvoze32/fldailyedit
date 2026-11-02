@@ -61,8 +61,8 @@ pub fn error_copy(code: ErrorCode, stage: Option<Stage>) -> ErrorCopy {
             title: "Game folder needed",
             explanation: "The app could not read the player and club lists from your game, or they do not belong to this save.",
             next_steps: &[
-                "Choose the folder where the game is installed (the one that contains the download folder).",
-                "The folder must hold data_extra.cpk or data_s2526.cpk, from the same game as the save.",
+                "Choose the folder where the game you play is installed (the one that contains the download folder).",
+                "If data_extra.cpk is missing from its download folder, install the latest Football Life update there.",
             ],
             needs_game_folder: true,
             save_untouched: true,

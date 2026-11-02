@@ -274,6 +274,7 @@ impl<'a> MatchRun<'a> {
             squad_snapshots: &self.snapshots,
             player_names: &self.player_names,
             team_shirt_numbers: self.shirt_numbers.as_ref(),
+            squad_moves: true,
         })
     }
 }

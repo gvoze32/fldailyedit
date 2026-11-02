@@ -21,6 +21,8 @@ pub struct RepairOptions {
     /// native rating per role; the position arrays stay untouched except for
     /// goalkeeper invariants) and whose bench is reordered by native overall.
     pub align_teams: HashSet<u32>,
+    /// Repair only these teams' game plans; `None` repairs every team.
+    pub only_teams: Option<HashSet<u32>>,
 }
 
 /// Counters of one repair run.
@@ -78,6 +80,13 @@ impl EditFile {
 
         for offset in offsets {
             let team_id = read_u32(self.bytes(), offset + GP_TEAM_ID);
+            if options
+                .only_teams
+                .as_ref()
+                .is_some_and(|only| !only.contains(&team_id))
+            {
+                continue;
+            }
             let Some(roster) = rosters.get(&team_id) else {
                 continue;
             };

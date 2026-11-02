@@ -66,6 +66,15 @@ Want to see the changes first? Click **Preview changes**. Nothing is saved.
 Run it again whenever you like, for example once a week. Each run picks up
 where the last one stopped.
 
+Only want fresh formations, tactics and lineups, without checking any
+transfers? Under **What to update**, untick **Full update (everything)**,
+then tick only **Formations**, **Tactics** and **Starting XI and bench**.
+That is much faster: the app only reads each club's latest lineup and the
+league statistics, and it does not touch transfers, squad numbers or captains.
+It also does not move the transfer window, so your next full update still
+picks up every transfer you haven't applied yet. From the command line use
+`FLDailyEdit run --only formations,tactics,lineups`.
+
 ## Good to know
 
 - **Supported:** Football Life 2027, Football Life 2026 and PES 2021. Saves
@@ -73,8 +82,24 @@ where the last one stopped.
 - **The game folder is required for every save.** The app reads the player and
   club lists from your own game installation; it does not ship any. Choose the
   game that matches your save, or the update stops before anything is written.
+  The app checks that the game knows every player in your save: if the
+  `download` folder only has `data_s2526.cpk` and your save came from a later
+  Football Life update, it tells you how many players are missing and that
+  `data_extra.cpk` was not found. Install the latest update there, or choose the
+  folder of the game you actually play. When several game files are present, the
+  app uses the one that knows the most of your save's players.
 - **New players are never created.** If a player isn't in your save, his
   transfer is skipped and counted under **Not applied**.
+- **Promoted and relegated clubs move to their current league.** A full update
+  also checks FotMob for the leagues of this season and, when the save has the
+  club, swaps it into the right division: a club now in the Premier League
+  trades places with one that dropped to the Championship, so every league keeps
+  its size. Clubs the save does not have are never added, and a pair of leagues
+  that FotMob does not match clearly is left alone and listed as a warning.
+  This changes how the game builds its leagues, so start a **new** Master
+  League or Become a Legend career afterwards: careers you already started keep
+  their own data. It is the **League teams** option under **What to update**
+  (`--only leagues` from the command line).
 - **The result screen shows a summary.** Every change and every skipped
   transfer is listed in the full report: click **Open report**.
 - **Your save is checked before and after every update.** If anything looks

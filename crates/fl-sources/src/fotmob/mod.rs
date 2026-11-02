@@ -135,6 +135,9 @@ pub struct FeedRequest {
 pub struct ClubsRequest {
     pub since: Option<SinceDate>,
     pub window: Window,
+    /// Do not open a finished match page when the team payload has no last
+    /// lineup (callers that never use formations).
+    pub skip_match_formations: bool,
 }
 
 /// Progress callback: `(message, index, total)`.
@@ -167,6 +170,7 @@ struct ClubRun<'a> {
     /// Clubs whose payload has been processed so far (progress counter).
     done: AtomicUsize,
     progress: Option<ProgressFn<'a>>,
+    skip_match_formations: bool,
 }
 
 impl FotmobScraper {
@@ -422,12 +426,13 @@ impl FotmobScraper {
             extract_transfers_from_team_data(&data, run.range.0, run.range.1, today);
         let roster_updates = extract_shirt_number_updates(&data, team_id, &team_name);
         let mut snapshot = extract_squad_snapshot(&data, team_id, &team_name);
-        let found_formation = if snapshot.complete && snapshot.formation.is_none() {
-            self.fetch_latest_team_formation(&data, team_id, &snapshot.club_name, run.cache)
-                .await?
-        } else {
-            None
-        };
+        let found_formation =
+            if snapshot.complete && snapshot.formation.is_none() && !run.skip_match_formations {
+                self.fetch_latest_team_formation(&data, team_id, &snapshot.club_name, run.cache)
+                    .await?
+            } else {
+                None
+            };
         if let Some((formation, source_url)) = found_formation {
             snapshot.formation = Some(formation);
             snapshot.formation_source_url = source_url;
@@ -485,6 +490,7 @@ impl FotmobScraper {
             total: targets.len(),
             done: AtomicUsize::new(0),
             progress,
+            skip_match_formations: request.skip_match_formations,
         };
         let results = try_join_all(
             targets

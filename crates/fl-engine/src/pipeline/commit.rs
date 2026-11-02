@@ -9,11 +9,11 @@ use chrono::{DateTime, Utc};
 use fl_save::crypto;
 
 use super::prepare::{Prepared, fail, sha256_file};
-use crate::api::{CancelToken, ErrorCode, Stage, UpdateError};
+use crate::api::{CancelToken, ErrorCode, Stage, UpdateError, UpdateParts};
 use crate::backup;
 use crate::log::{LogRecord, TransferLog, isoformat_utc};
 use crate::paths::StatePaths;
-use crate::report::{self, SkippedRow};
+use crate::report::{self, LeagueMove, SkippedRow};
 
 /// What the commit stage produced.
 #[derive(Debug, Default)]
@@ -112,6 +112,8 @@ pub(crate) fn publish_records(
     entries: &[LogRecord],
     skipped: &[SkippedRow],
     now: DateTime<Utc>,
+    parts: &UpdateParts,
+    league_moves: &[LeagueMove],
 ) -> (Vec<PathBuf>, Vec<String>) {
     let mut warnings = Vec::new();
     let log = TransferLog::new(paths.transfer_log());
@@ -120,26 +122,80 @@ pub(crate) fn publish_records(
             "Save published, but the transfer log could not be updated: {error}"
         ));
     }
-    let reports = write_reports(paths, scope, entries, skipped, now).unwrap_or_else(|error| {
-        warnings.push(format!(
-            "Save published, but report generation failed: {error}"
-        ));
-        Vec::new()
-    });
+    let reports = write_reports(paths, scope, entries, skipped, now, parts, league_moves)
+        .unwrap_or_else(|error| {
+            warnings.push(format!(
+                "Save published, but report generation failed: {error}"
+            ));
+            Vec::new()
+        });
     (reports, warnings)
 }
 
-/// Write the three report files of a run (also used for runs that changed
+/// Write the report files of a run (also used for runs that changed
 /// nothing, so the not-applied report and the next run's window stay current).
+/// A run without transfers leaves the skipped-transfer file alone: it has
+/// checked no transfer, and that file seeds the next run's window.
 pub(crate) fn write_reports(
     paths: &StatePaths,
     scope: &str,
     entries: &[LogRecord],
     skipped: &[SkippedRow],
     now: DateTime<Utc>,
+    parts: &UpdateParts,
+    league_moves: &[LeagueMove],
 ) -> Result<Vec<PathBuf>, report::ReportError> {
-    let written = report::write_reports(&paths.reports_dir(scope), entries, skipped, now)?;
-    Ok(vec![written.markdown, written.html, written.skipped])
+    let rows = parts.transfers.then_some(skipped);
+    let note = parts_note(parts);
+    let written = report::write_reports_noted(
+        &paths.reports_dir(scope),
+        entries,
+        rows,
+        league_moves,
+        note.as_deref(),
+        now,
+    )?;
+    let mut files = vec![written.markdown, written.html];
+    if parts.transfers {
+        files.push(written.skipped);
+    }
+    Ok(files)
+}
+
+/// The report line naming what a partial run updated. `None` when every part
+/// the transfer reports describe ran (league moves have their own section).
+fn parts_note(parts: &UpdateParts) -> Option<String> {
+    let named = [
+        (parts.transfers, "transfers"),
+        (parts.shirt_numbers, "shirt numbers"),
+        (parts.captains, "captains"),
+        (parts.formations, "formations"),
+        (parts.tactics, "tactics"),
+        (parts.lineups, "lineups"),
+        (parts.leagues, "league moves"),
+    ];
+    if named[..6].iter().all(|(on, _)| *on) {
+        return None;
+    }
+    let mut ran: Vec<&str> = named
+        .iter()
+        .filter(|(on, _)| *on)
+        .map(|(_, name)| *name)
+        .collect();
+    let last = ran.pop().unwrap_or("nothing");
+    let list = if ran.is_empty() {
+        last.to_owned()
+    } else {
+        format!("{} and {last}", ran.join(", "))
+    };
+    let unchecked = if parts.transfers {
+        ""
+    } else {
+        " Transfers were not checked."
+    };
+    Some(format!(
+        "Partial update: only {list} were updated.{unchecked} Formation, tactics and lineup changes are not itemised in this report."
+    ))
 }
 
 #[cfg(test)]
@@ -162,5 +218,57 @@ mod tests {
         assert_eq!(rows[0].confidence, 81.5);
         assert_eq!(rows[1].confidence, 100.0);
         assert_eq!(rows[0].save_scope, "/s/EDIT");
+    }
+
+    fn lineups_only() -> UpdateParts {
+        UpdateParts {
+            transfers: false,
+            shirt_numbers: false,
+            captains: false,
+            leagues: false,
+            ..UpdateParts::FULL
+        }
+    }
+
+    #[test]
+    fn the_note_names_the_parts_that_ran() {
+        assert_eq!(parts_note(&UpdateParts::FULL), None);
+        let without_leagues = UpdateParts {
+            leagues: false,
+            ..UpdateParts::FULL
+        };
+        assert_eq!(parts_note(&without_leagues), None);
+        let note = parts_note(&lineups_only()).unwrap();
+        assert!(
+            note.starts_with("Partial update: only formations, tactics and lineups were updated. Transfers were not checked."),
+            "{note}"
+        );
+    }
+
+    #[test]
+    fn a_run_without_transfers_keeps_the_skipped_transfer_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = StatePaths::new(dir.path());
+        let reports = paths.reports_dir("/s/EDIT");
+        std::fs::create_dir_all(&reports).unwrap();
+        let skipped_file = reports.join(report::SKIPPED_TRANSFERS_FILENAME);
+        std::fs::write(&skipped_file, "kept\n").unwrap();
+        let now = Utc.with_ymd_and_hms(2026, 10, 24, 22, 25, 55).unwrap();
+
+        let written =
+            write_reports(&paths, "/s/EDIT", &[], &[], now, &lineups_only(), &[]).unwrap();
+        assert_eq!(written.len(), 2, "no skipped-transfer file reported");
+        assert_eq!(std::fs::read_to_string(&skipped_file).unwrap(), "kept\n");
+        let markdown = std::fs::read_to_string(&written[0]).unwrap();
+        assert!(markdown.contains("> Partial update: only"), "{markdown}");
+        assert!(
+            !markdown.contains("No save changes were needed"),
+            "{markdown}"
+        );
+
+        let written =
+            write_reports(&paths, "/s/EDIT", &[], &[], now, &UpdateParts::FULL, &[]).unwrap();
+        assert_eq!(written.len(), 3);
+        assert_eq!(std::fs::read_to_string(&skipped_file).unwrap(), "");
     }
 }

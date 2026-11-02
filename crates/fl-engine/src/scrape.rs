@@ -6,6 +6,12 @@
 //! FotMob fetch aborts the run; supplemental sources are best-effort.
 //! Cancellation is observed inside every request and backoff wait (through the
 //! HTTP client's token) and between providers.
+//!
+//! [`UpdateParts`] narrows the work: without `transfers` the feed and every
+//! supplemental source are skipped and the club pages' transfers dropped;
+//! shirt numbers, captains and tactics are likewise only kept or fetched
+//! when enabled. The club pages themselves carry squads and last lineups, so
+//! they are fetched whenever any club-level part is on.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -27,7 +33,7 @@ use fl_sources::transfermarkt::{TransfermarktRequest, fetch_transfermarkt_transf
 use fl_sources::{besoccer, sofascore, sortitoutsi, wikipedia};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::api::{CancelToken, ErrorCode, Progress, Stage, UpdateError};
+use crate::api::{CancelToken, ErrorCode, Progress, Stage, UpdateError, UpdateParts};
 use crate::pipeline::window::ScrapeScope;
 
 /// What to fetch.
@@ -43,6 +49,8 @@ pub struct ScrapePlan {
     pub team_cache_dir: Option<PathBuf>,
     /// FotMob league-tactics cache file; `None` disables caching (dry runs).
     pub tactics_cache: Option<PathBuf>,
+    /// Parts of the save this run updates; disabled parts fetch nothing.
+    pub parts: UpdateParts,
 }
 
 /// Outcome of the fetch stage; transfers are reconciled but not yet ordered.
@@ -158,6 +166,17 @@ fn since(scope: &ScrapeScope) -> Option<SinceDate> {
     scope.since.map(SinceDate::Date)
 }
 
+/// Whether any enabled part reads FotMob club pages (squads, last lineups,
+/// captains, shirt numbers). Only a leagues-only run needs none.
+pub fn needs_club_pages(parts: &UpdateParts) -> bool {
+    parts.transfers
+        || parts.shirt_numbers
+        || parts.captains
+        || parts.formations
+        || parts.tactics
+        || parts.lineups
+}
+
 /// Run the fetch stage.
 pub async fn scrape(
     http: &HttpClient,
@@ -167,6 +186,10 @@ pub async fn scrape(
 ) -> Result<Scraped, UpdateError> {
     let today: NaiveDate = plan.now.date_naive();
     let scope = &plan.scope;
+    let parts = plan.parts;
+    if !needs_club_pages(&parts) {
+        return Ok(Scraped::default());
+    }
     let cutoff = scope.describe(today);
     let mut warnings = Vec::new();
     let check = || cancel.check(Stage::Fetching);
@@ -181,6 +204,7 @@ pub async fn scrape(
     let clubs_request = ClubsRequest {
         since: since(scope),
         window: scope.window,
+        skip_match_formations: !parts.formations,
     };
 
     let mut batches: Vec<Vec<Transfer>> = Vec::new();
@@ -196,9 +220,14 @@ pub async fn scrape(
             "Fetching FotMob transfers for {} requested clubs ({cutoff})",
             club_ids.len()
         ));
-    } else {
+    } else if parts.transfers {
         emit.say(format!(
             "Fetching FotMob transfers and squads for {} save clubs ({cutoff})",
+            club_ids.len()
+        ));
+    } else {
+        emit.say(format!(
+            "Fetching FotMob squads for {} save clubs",
             club_ids.len()
         ));
     }
@@ -215,15 +244,21 @@ pub async fn scrape(
         club_batch.squad_snapshots.len(),
         club_batch.captain_updates.len()
     ));
-    batches.push(without_roster_observations(club_batch.transfers));
-    roster_updates.extend(club_batch.roster_updates);
+    if parts.transfers {
+        batches.push(without_roster_observations(club_batch.transfers));
+        pending.extend(club_batch.pending_transfers);
+    }
+    if parts.shirt_numbers {
+        roster_updates.extend(club_batch.roster_updates);
+    }
     snapshots.extend(club_batch.squad_snapshots);
-    captains.extend(club_batch.captain_updates);
-    pending.extend(club_batch.pending_transfers);
+    if parts.captains {
+        captains.extend(club_batch.captain_updates);
+    }
 
     let mut fast_signals: Vec<Transfer> = Vec::new();
     let mut corroborators: Vec<Transfer> = Vec::new();
-    if plan.club_filter.is_none() {
+    if plan.club_filter.is_none() && parts.transfers {
         check()?;
         emit.say(format!("Fetching the live FotMob transfer feed ({cutoff})"));
         let feed = fotmob
@@ -362,11 +397,13 @@ pub async fn scrape(
     } else {
         merge_transfers(batches.into_iter().flatten().collect())
     };
-    emit.say(format!("{} unique transfers to process", transfers.len()));
+    if parts.transfers {
+        emit.say(format!("{} unique transfers to process", transfers.len()));
+    }
     let roster_updates = merge_transfers(roster_updates);
 
     let mut tactical_updates = Vec::new();
-    if !snapshots.is_empty() {
+    if parts.tactics && !snapshots.is_empty() {
         check()?;
         emit.say("Preparing evidence-gated tactical settings from FotMob");
         if let Some(cache) = &plan.tactics_cache {

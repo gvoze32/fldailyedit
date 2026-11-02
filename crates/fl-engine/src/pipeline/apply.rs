@@ -14,7 +14,7 @@ use fl_sources::model::ScrapeResult;
 use super::Reporter;
 use super::prepare::fail;
 use super::records::{captain_entry, roster_map, transfer_entry};
-use crate::api::{CancelToken, ChangeCounts, ErrorCode, Progress, Stage, UpdateError};
+use crate::api::{CancelToken, ChangeCounts, ErrorCode, Progress, Stage, UpdateError, UpdateParts};
 use crate::log::LogRecord;
 use crate::native::NativeData;
 use crate::planning::{
@@ -51,6 +51,8 @@ pub(crate) struct ApplyInput<'a> {
     pub threshold: f64,
     pub allow_overflow_release: bool,
     pub dry_run: bool,
+    /// Parts of the save this run may change.
+    pub parts: UpdateParts,
 }
 
 /// What applying the plan changed.
@@ -91,6 +93,7 @@ impl Applied {
             || counts.captains > 0
             || counts.tactics > 0
             || counts.formations > 0
+            || counts.league_moves > 0
             || self.gameplan_changed
     }
 }
@@ -130,10 +133,19 @@ pub(crate) fn apply(
     let mut applied = Applied::default();
     let counts = &mut applied.counts;
 
-    for (team_id, formation) in &plan.formations {
+    let mut changed_teams: HashSet<u32> = HashSet::new();
+    let formations: &[(u32, String)] = if input.parts.formations {
+        &plan.formations
+    } else {
+        &[]
+    };
+    for (team_id, formation) in formations {
         cancel.check(stage)?;
         match edit.set_team_formation(*team_id, formation) {
-            Ok(changed) if changed > 0 => counts.formations += 1,
+            Ok(changed) if changed > 0 => {
+                counts.formations += 1;
+                changed_teams.insert(*team_id);
+            }
             Ok(_) => {}
             Err(error) => applied.warnings.push(format!(
                 "Formation {formation} not applied to team {team_id}: {error}"
@@ -147,7 +159,12 @@ pub(crate) fn apply(
         );
     }
 
-    for (team_id, settings) in &plan.tactics {
+    let tactics: &[(u32, Vec<(String, i32)>)] = if input.parts.tactics {
+        &plan.tactics
+    } else {
+        &[]
+    };
+    for (team_id, settings) in tactics {
         cancel.check(stage)?;
         let fields: Option<Vec<(TacticalField, u8)>> = settings
             .iter()
@@ -213,7 +230,11 @@ pub(crate) fn apply(
             continue;
         }
         let native_metadata = input.native.transfer_metadata(player_id);
-        let preferred_shirt = transfer.shirt_number;
+        let preferred_shirt = input
+            .parts
+            .shirt_numbers
+            .then_some(transfer.shirt_number)
+            .flatten();
         let mut previous_shirt = None;
 
         let outcome: Result<(), (RosterErrorKind, String)> = match planned.action {
@@ -354,6 +375,11 @@ pub(crate) fn apply(
             counts.shirt_numbers += 1;
         } else {
             counts.transfers += 1;
+            changed_teams.extend(
+                [planned.current_team_id, matched.from.team(), to_team]
+                    .into_iter()
+                    .flatten(),
+            );
             touched.extend(
                 [planned.current_team_id, matched.from.team(), to_team]
                     .into_iter()
@@ -370,11 +396,11 @@ pub(crate) fn apply(
         ));
     }
 
-    applied.gameplan_changed = align_game_plans(edit, input, &touched, reporter);
+    applied.gameplan_changed = align_game_plans(edit, input, &touched, &changed_teams, reporter);
     let counts = &mut applied.counts;
 
     let current_rosters = roster_map(&edit.rosters());
-    let captains = if input.scrape.captain_updates.is_empty() {
+    let captains = if !input.parts.captains || input.scrape.captain_updates.is_empty() {
         Vec::new()
     } else {
         plan_captain_updates(
@@ -477,17 +503,34 @@ fn align_game_plans(
     edit: &mut EditFile,
     input: &ApplyInput<'_>,
     touched: &HashSet<u32>,
+    changed_teams: &HashSet<u32>,
     reporter: &mut Reporter<'_>,
 ) -> bool {
-    let mut align_teams = plan_lineup_clubs(
-        &input.scrape.squad_snapshots,
-        input.club_ids,
-        &input.plan.fotmob_team_map,
-    );
-    align_teams.extend(touched);
-    let options = RepairOptions {
-        preserve_existing_primary: true,
-        align_teams,
+    // Lineups on: every game plan is repaired, the aligned clubs re-picked.
+    // Lineups off: only the clubs this run changed (roster moves, a new
+    // formation) are repaired, as far as their integrity needs; no XI or
+    // bench is re-picked and no other club is touched.
+    let options = if input.parts.lineups {
+        let mut align_teams = plan_lineup_clubs(
+            &input.scrape.squad_snapshots,
+            input.club_ids,
+            &input.plan.fotmob_team_map,
+        );
+        align_teams.extend(touched);
+        RepairOptions {
+            preserve_existing_primary: true,
+            align_teams,
+            only_teams: None,
+        }
+    } else {
+        if changed_teams.is_empty() {
+            return false;
+        }
+        RepairOptions {
+            preserve_existing_primary: true,
+            align_teams: HashSet::new(),
+            only_teams: Some(changed_teams.clone()),
+        }
     };
     let metrics = edit.repair_game_plans(&options);
     if metrics.changed_game_plans == 0 {
@@ -540,6 +583,7 @@ mod tests {
             threshold: 80.0,
             allow_overflow_release: true,
             dry_run: false,
+            parts: UpdateParts::FULL,
         };
         let mut sink = |_: Progress| {};
         apply(edit, &input, cancel, &mut Reporter::new(&mut sink))

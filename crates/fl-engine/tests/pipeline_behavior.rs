@@ -6,7 +6,9 @@ mod common;
 use std::fs;
 
 use common::{Scenario, Workdir, run, tree};
-use fl_engine::api::{CancelToken, ErrorCode, Outcome, Progress, Stage, UpdateRequest};
+use fl_engine::api::{
+    CancelToken, ErrorCode, Outcome, Progress, Stage, UpdateParts, UpdateRequest,
+};
 use fl_engine::native::NativeFiles;
 
 fn small() -> Option<(Scenario, Workdir)> {
@@ -229,6 +231,86 @@ fn in_place_rerun_backs_up_the_previous_save_and_extends_the_log() {
     let edit = fl_save::edit_file::EditFile::from_bytes(blocks.data).unwrap();
     assert!(edit.validate_integrity().is_valid());
     assert!(!workdir.output.with_file_name(".EDIT00000000.lock").exists());
+}
+
+/// A run that checks no transfers must leave everything the next automatic
+/// transfer window is derived from exactly as it was: the transfer log and
+/// the skipped-transfer file of the last full run.
+#[test]
+fn a_lineups_only_run_leaves_the_transfer_window_inputs_alone() {
+    let Some((scenario, workdir)) = small() else {
+        return;
+    };
+    let first = run(
+        &workdir,
+        &scenario,
+        &workdir.request(&scenario),
+        &CancelToken::new(),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(first.outcome, Outcome::Updated);
+
+    let reports = fs::read_dir(workdir.state.join("reports"))
+        .unwrap()
+        .next()
+        .expect("the full run wrote its reports")
+        .unwrap()
+        .path();
+    let skipped_file = reports.join("skipped_transfers.jsonl");
+    // A retryable row of the last full run, as it would seed the next window.
+    let sentinel = r#"{"player_name": "Sentinel", "from_team": "A", "to_team": "B", "date": "2026-10-01", "source": "s", "reason": "r", "detail": "", "relevant": true, "fotmob_player_id": null, "candidates": [], "retryable": true, "save_scope": "x"}"#;
+    fs::write(&skipped_file, format!("{sentinel}\n")).unwrap();
+    let log_file = workdir.state.join("transfer_log.jsonl");
+    let (log_before, skipped_before) = (
+        fs::read(&log_file).unwrap(),
+        fs::read(&skipped_file).unwrap(),
+    );
+
+    let mut lineups = workdir.request(&scenario);
+    lineups.edit_path = workdir.output.clone();
+    lineups.output_path = None;
+    lineups.parts = UpdateParts {
+        transfers: false,
+        shirt_numbers: false,
+        captains: false,
+        leagues: false,
+        ..UpdateParts::FULL
+    };
+    let mut fetching = Vec::new();
+    let second = run(&workdir, &scenario, &lineups, &CancelToken::new(), |p| {
+        if p.stage == Stage::Fetching {
+            fetching.push(p.message.clone());
+        }
+    })
+    .unwrap();
+
+    assert_eq!(fetching[0], "Fetching formations and tactics");
+    assert!(
+        fetching.iter().all(|line| !line.contains("transfer feed")
+            && !line.contains("Wikipedia")
+            && !line.contains("Transfermarkt")),
+        "{fetching:?}"
+    );
+    let counts = second.counts;
+    assert_eq!(
+        (counts.transfers, counts.shirt_numbers, counts.captains),
+        (0, 0, 0)
+    );
+    assert!(second.skipped.is_empty());
+    assert_eq!(fs::read(&log_file).unwrap(), log_before, "transfer log");
+    assert_eq!(
+        fs::read(&skipped_file).unwrap(),
+        skipped_before,
+        "skipped-transfer file"
+    );
+    let summary = fs::read_to_string(reports.join("transfer_summary.md")).unwrap();
+    assert!(summary.contains("Transfers were not checked"), "{summary}");
+
+    let raw = fs::read(&workdir.output).unwrap();
+    let blocks = fl_save::crypto::decrypt(&raw).unwrap();
+    let edit = fl_save::edit_file::EditFile::from_bytes(blocks.data).unwrap();
+    assert!(edit.validate_integrity().is_valid());
 }
 
 /// Run the small scenario with the native database files `native` instead of

@@ -87,6 +87,8 @@ pub struct PlanInput<'a> {
     pub allow_overflow_release: bool,
     /// Today in UTC; separates future-dated pending events from stale ones.
     pub today: NaiveDate,
+    /// Derive moves and releases from complete live squads.
+    pub squad_moves: bool,
 }
 
 /// Counts for the run summary.
@@ -170,6 +172,7 @@ pub fn plan_transfers(input: &PlanInput<'_>) -> Plan {
         squad_snapshots: &scrape.squad_snapshots,
         player_names: input.player_names,
         team_shirt_numbers: Some(&shirt_numbers),
+        squad_moves: input.squad_moves,
     });
     let MatchOutput { matched, report } = matched_out;
 

@@ -80,6 +80,7 @@ impl Fixture {
         RepairOptions {
             preserve_existing_primary: true,
             align_teams: [self.team()].into(),
+            only_teams: None,
         }
     }
 

@@ -65,6 +65,18 @@ pub struct SkippedRow {
     pub save_scope: String,
 }
 
+/// A club moved to another league division (promotion or relegation). Shown
+/// in the reports only; league moves are not transfers and are not logged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeagueMove {
+    pub club: String,
+    /// League the club played in before.
+    pub from: String,
+    /// League the club plays in now.
+    pub to: String,
+    pub dry_run: bool,
+}
+
 /// Paths written by [`write_reports`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReportPaths {
@@ -103,13 +115,28 @@ pub fn write_reports(
     skipped: &[SkippedRow],
     generated: DateTime<Utc>,
 ) -> Result<ReportPaths, ReportError> {
+    write_reports_noted(dir, entries, Some(skipped), &[], None, generated)
+}
+
+/// [`write_reports`] for a run that updated only some parts of the save:
+/// `note` names them at the top of both reports. `skipped: None` means the
+/// run did not check transfers, so the existing skipped-transfer file (the
+/// next run's window input) is left exactly as it is.
+pub fn write_reports_noted(
+    dir: &Path,
+    entries: &[LogRecord],
+    skipped: Option<&[SkippedRow]>,
+    league_moves: &[LeagueMove],
+    note: Option<&str>,
+    generated: DateTime<Utc>,
+) -> Result<ReportPaths, ReportError> {
     fs::create_dir_all(dir)?;
-    let markdown = render_markdown(entries, skipped, generated);
-    let html = render_html(entries, skipped, generated);
-    let mut jsonl = String::new();
-    for row in skipped {
-        jsonl.push_str(&to_json_line(row)?);
-        jsonl.push('\n');
+    let rows = skipped.unwrap_or_default();
+    let mut markdown = render_markdown_with_leagues(entries, rows, league_moves, generated);
+    let mut html = render_html_with_leagues(entries, rows, league_moves, generated);
+    if let Some(note) = note {
+        markdown = markdown_with_note(&markdown, note);
+        html = html_with_note(&html, note);
     }
     let paths = ReportPaths {
         markdown: dir.join(MARKDOWN_FILENAME),
@@ -118,8 +145,44 @@ pub fn write_reports(
     };
     write_atomic(&paths.markdown, markdown.as_bytes())?;
     write_atomic(&paths.html, html.as_bytes())?;
-    write_atomic(&paths.skipped, jsonl.as_bytes())?;
+    if skipped.is_some() {
+        let mut jsonl = String::new();
+        for row in rows {
+            jsonl.push_str(&to_json_line(row)?);
+            jsonl.push('\n');
+        }
+        write_atomic(&paths.skipped, jsonl.as_bytes())?;
+    }
     Ok(paths)
+}
+
+/// The empty-state sentence of a report with nothing to list.
+const NO_CHANGES_TEXT: &str = "No save changes were needed in this run.";
+/// What a partial run says instead: formations, tactics and lineups are
+/// never itemised, so "no save changes" would be wrong.
+const NOTHING_LISTED_TEXT: &str = "Nothing to list for the parts that were updated.";
+
+/// The note goes right under the "Generated" line.
+fn markdown_with_note(markdown: &str, note: &str) -> String {
+    let mut lines: Vec<&str> = markdown.lines().collect();
+    let generated = lines
+        .iter()
+        .position(|line| line.starts_with("**Generated:**"))
+        .unwrap_or(0);
+    let quoted = format!("> {note}");
+    lines.splice(generated + 1..generated + 1, ["", quoted.as_str()]);
+    format!("{}\n", lines.join("\n")).replace(NO_CHANGES_TEXT, NOTHING_LISTED_TEXT)
+}
+
+/// The note goes at the end of the masthead.
+fn html_with_note(html: &str, note: &str) -> String {
+    let paragraph = format!("<p class=\"generated\">{}</p>", escape(note));
+    html.replacen("</header>", &format!("{paragraph}</header>"), 1)
+        .replace(
+            "<strong>Everything already current.</strong>",
+            "<strong>Nothing to list.</strong>",
+        )
+        .replace(NO_CHANGES_TEXT, NOTHING_LISTED_TEXT)
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +392,33 @@ fn cell_value(value: Option<&Value>) -> String {
     }
 }
 
+fn league_markdown(moves: &[LeagueMove]) -> Vec<String> {
+    if moves.is_empty() {
+        return Vec::new();
+    }
+    let mut md = vec![
+        format!("### League changes ({})", moves.len()),
+        String::new(),
+        "| Status | Club | From | To |".to_owned(),
+        "|:---:|---|---|---|".to_owned(),
+    ];
+    for entry in moves {
+        let status = if entry.dry_run {
+            "🧪 Dry-run"
+        } else {
+            "🔁 Moved"
+        };
+        md.push(format!(
+            "| {status} | **{}** | {} | {} |",
+            cell(&entry.club),
+            cell(&entry.from),
+            cell(&entry.to),
+        ));
+    }
+    md.push(String::new());
+    md
+}
+
 fn skipped_markdown(skipped: &[SkippedRow]) -> Vec<String> {
     if skipped.is_empty() {
         return Vec::new();
@@ -375,6 +465,16 @@ pub fn render_markdown(
     skipped: &[SkippedRow],
     generated: DateTime<Utc>,
 ) -> String {
+    render_markdown_with_leagues(entries, skipped, &[], generated)
+}
+
+/// [`render_markdown`] with the league changes of the run.
+pub fn render_markdown_with_leagues(
+    entries: &[LogRecord],
+    skipped: &[SkippedRow],
+    league_moves: &[LeagueMove],
+    generated: DateTime<Utc>,
+) -> String {
     let now = generated_label(generated);
     let sections = Sections::new(entries);
     let skipped_lines = skipped_markdown(skipped);
@@ -384,8 +484,12 @@ pub fn render_markdown(
             String::new(),
             format!("**Generated:** `{now}`"),
             String::new(),
-            "> No save changes were needed in this run.".to_owned(),
         ];
+        if league_moves.is_empty() {
+            lines.push("> No save changes were needed in this run.".to_owned());
+        } else {
+            lines.extend(league_markdown(league_moves));
+        }
         if !skipped_lines.is_empty() {
             lines.push(String::new());
             lines.extend(skipped_lines);
@@ -515,6 +619,7 @@ pub fn render_markdown(
         md.push(String::new());
     }
 
+    md.extend(league_markdown(league_moves));
     md.extend(skipped_lines);
     format!("{}\n", md.join("\n"))
 }
@@ -602,6 +707,37 @@ fn html_section(
     )
 }
 
+fn league_html(moves: &[LeagueMove]) -> String {
+    if moves.is_empty() {
+        return String::new();
+    }
+    let rows: String = moves
+        .iter()
+        .map(|entry| {
+            let badge = if entry.dry_run {
+                "<span class=\"badge badge-dry\">Dry-run</span>"
+            } else {
+                "<span class=\"badge badge-number\">League changed</span>"
+            };
+            format!(
+                "<tr><td>{badge}</td><td><strong>{}</strong></td><td>{}</td><td>{}</td></tr>",
+                value(&entry.club, "Unknown"),
+                value(&entry.from, "-"),
+                value(&entry.to, "-"),
+            )
+        })
+        .collect();
+    html_section(
+        "report-section number-section",
+        "League changes",
+        "Clubs moved to the division they play in this season. Start a new Master League or BAL career to use them.",
+        moves.len(),
+        "League change details",
+        "<th>Status</th><th>Club</th><th>From</th><th>To</th>",
+        &rows,
+    )
+}
+
 fn skipped_html(skipped: &[SkippedRow]) -> String {
     if skipped.is_empty() {
         return String::new();
@@ -647,6 +783,16 @@ fn skipped_html(skipped: &[SkippedRow]) -> String {
 pub fn render_html(
     entries: &[LogRecord],
     skipped: &[SkippedRow],
+    generated: DateTime<Utc>,
+) -> String {
+    render_html_with_leagues(entries, skipped, &[], generated)
+}
+
+/// [`render_html`] with the league changes of the run.
+pub fn render_html_with_leagues(
+    entries: &[LogRecord],
+    skipped: &[SkippedRow],
+    league_moves: &[LeagueMove],
     generated: DateTime<Utc>,
 ) -> String {
     let now = generated_label(generated);
@@ -764,11 +910,13 @@ pub fn render_html(
             &captain_rows,
         )
     };
-    let empty_state = if sections.all.is_empty() {
+    let empty_state = if sections.all.is_empty() && league_moves.is_empty() {
         "<section class=\"empty\"><strong>Everything already current.</strong><p>No save changes were needed in this run.</p></section>"
     } else {
         ""
     };
+    // League changes follow the captain changes in the page.
+    let captain_section = format!("{captain_section}{}", league_html(league_moves));
     let skipped_section = skipped_html(skipped);
 
     format!(
@@ -1074,6 +1222,58 @@ mod tests {
         assert_eq!(read_skipped(&paths.skipped), skipped);
         let leftovers = fs::read_dir(&out).unwrap().count();
         assert_eq!(leftovers, 3, "no temp files left behind");
+    }
+
+    #[test]
+    fn league_changes_get_their_own_section_without_touching_the_rest() {
+        let generated = Utc.with_ymd_and_hms(2026, 10, 24, 22, 25, 55).unwrap();
+        let moves = vec![
+            LeagueMove {
+                club: "Hull City".into(),
+                from: "Championship".into(),
+                to: "Premier League".into(),
+                dry_run: false,
+            },
+            LeagueMove {
+                club: "Burnley <FC>".into(),
+                from: "Premier League".into(),
+                to: "Championship".into(),
+                dry_run: true,
+            },
+        ];
+        // No moves: the established layout, byte for byte.
+        assert_eq!(
+            render_markdown_with_leagues(&[], &[], &[], generated),
+            render_markdown(&[], &[], generated)
+        );
+        assert_eq!(
+            render_html_with_leagues(&[], &[], &[], generated),
+            render_html(&[], &[], generated)
+        );
+
+        let markdown = render_markdown_with_leagues(&[], &[], &moves, generated);
+        assert!(markdown.contains("### League changes (2)"), "{markdown}");
+        assert!(
+            markdown.contains("| 🔁 Moved | **Hull City** | Championship | Premier League |"),
+            "{markdown}"
+        );
+        assert!(
+            markdown.contains("| 🧪 Dry-run | **Burnley <FC>** |"),
+            "{markdown}"
+        );
+        assert!(
+            !markdown.contains("No save changes were needed"),
+            "a league-only run did change the save"
+        );
+
+        let html = render_html_with_leagues(&[], &[], &moves, generated);
+        assert!(html.contains("League changes"), "{html}");
+        assert!(html.contains("<strong>Hull City</strong>"), "{html}");
+        assert!(
+            html.contains("Burnley &lt;FC&gt;"),
+            "club names are escaped"
+        );
+        assert!(!html.contains("Everything already current"), "{html}");
     }
 
     #[test]

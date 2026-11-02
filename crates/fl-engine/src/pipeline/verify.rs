@@ -31,6 +31,7 @@ pub(crate) fn error_key(error: &IntegrityError) -> String {
         E::ShirtAboveMax { team_id } => format!("shirt_above_max:{team_id}"),
         E::DuplicateShirts { team_id } => format!("duplicate_shirts:{team_id}"),
         E::NoClubs => "no_clubs".into(),
+        E::DuplicateLeagueMember { team_id } => format!("duplicate_league_member:{team_id}"),
         E::ClubUndersized { team_id, .. } => format!("club_undersized:{team_id}"),
         E::MultiClubPlayer { player_id, .. } => format!("multi_club_player:{player_id}"),
         E::GamePlanEntryOutOfBounds { index } => format!("game_plan_oob:{index}"),

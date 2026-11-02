@@ -59,6 +59,10 @@ pub enum IntegrityError {
         team_id: u32,
     },
     NoClubs,
+    /// A club is listed in the competition block more than once.
+    DuplicateLeagueMember {
+        team_id: u32,
+    },
     ClubUndersized {
         team_id: u32,
         size: usize,
@@ -205,6 +209,12 @@ impl fmt::Display for IntegrityError {
                 )
             }
             Self::NoClubs => f.write_str("Competition membership does not identify any clubs"),
+            Self::DuplicateLeagueMember { team_id } => {
+                write!(
+                    f,
+                    "Club {team_id} is listed more than once in the league divisions"
+                )
+            }
             Self::ClubUndersized { team_id, size } => write!(
                 f,
                 "Club {team_id} roster has {size} players; minimum is {MIN_CLUB_ROSTER_SIZE}"
@@ -521,6 +531,12 @@ impl EditFile {
         if club_ids.is_empty() {
             errors.push(IntegrityError::NoClubs);
         }
+        let mut league_members = HashSet::new();
+        for &team_id in self.league_divisions().iter().flatten() {
+            if !league_members.insert(team_id) {
+                errors.push(IntegrityError::DuplicateLeagueMember { team_id });
+            }
+        }
         let mut undersized = 0;
         for &team_id in club_ids {
             let size = rosters.get(team_id).map_or(0, TeamData::roster_size);
@@ -835,6 +851,17 @@ mod tests {
         assert_eq!(
             messages(&r),
             ["Competition membership does not identify any clubs"]
+        );
+    }
+
+    #[test]
+    fn a_club_listed_in_two_divisions_is_rejected() {
+        let mut mock = club(1001..1017);
+        mock.league = vec![101, 0, 101];
+        let r = report(&mock, |_| {});
+        assert_eq!(
+            messages(&r),
+            ["Club 101 is listed more than once in the league divisions"]
         );
     }
 

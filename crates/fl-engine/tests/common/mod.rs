@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use fl_engine::api::{CancelToken, Environment, Progress, UpdateRequest, UpdateResult, Window};
+use fl_engine::api::{
+    CancelToken, Environment, Progress, UpdateParts, UpdateRequest, UpdateResult, Window,
+};
 use fl_engine::native::NativeFiles;
 use fl_engine::{FixedClock, Services};
 use fl_sources::http::ReplayTransport;
@@ -178,6 +180,11 @@ impl Workdir {
             allow_overflow_release: true,
             release_policy: None,
             dry_run: false,
+            // The recorded goldens predate league moves (no league data in the cassettes).
+            parts: UpdateParts {
+                leagues: false,
+                ..UpdateParts::FULL
+            },
         }
     }
 

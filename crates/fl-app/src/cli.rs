@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use chrono::NaiveDate;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use fl_engine::api::{
-    CancelToken, Environment, ErrorCode, Outcome, Progress, Stage, UpdateError, UpdateRequest,
-    UpdateResult, Window,
+    CancelToken, Environment, ErrorCode, Outcome, Progress, Stage, UpdateError, UpdateParts,
+    UpdateRequest, UpdateResult, Window,
 };
 use fl_engine::locations;
 
@@ -86,6 +86,41 @@ pub enum WindowArg {
     Winter,
 }
 
+/// One part of the save `--only` may select.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum PartArg {
+    /// Transfers, releases, loans and loan returns
+    Transfers,
+    /// Squad numbers
+    ShirtNumbers,
+    /// Captains
+    Captains,
+    /// Formations from the latest lineup
+    Formations,
+    /// Tactics
+    Tactics,
+    /// Starting XI and bench
+    Lineups,
+    /// Promoted and relegated clubs moved to their current league
+    Leagues,
+}
+
+fn parts_of(only: &[PartArg]) -> UpdateParts {
+    if only.is_empty() {
+        return UpdateParts::FULL;
+    }
+    let has = |part| only.contains(&part);
+    UpdateParts {
+        transfers: has(PartArg::Transfers),
+        shirt_numbers: has(PartArg::ShirtNumbers),
+        captains: has(PartArg::Captains),
+        formations: has(PartArg::Formations),
+        tactics: has(PartArg::Tactics),
+        lineups: has(PartArg::Lineups),
+        leagues: has(PartArg::Leagues),
+    }
+}
+
 #[derive(Debug, Args)]
 pub struct RunArgs {
     /// Save to update (default: the only save found in your Documents folder)
@@ -118,6 +153,9 @@ pub struct RunArgs {
     /// Plan and report without writing anything
     #[arg(long)]
     pub dry_run: bool,
+    /// Update only these parts, comma separated (default: everything)
+    #[arg(long, value_enum, value_name = "PARTS", value_delimiter = ',')]
+    pub only: Vec<PartArg>,
 }
 
 fn parse_date(text: &str) -> Result<NaiveDate, String> {
@@ -156,6 +194,7 @@ impl RunArgs {
             allow_overflow_release: !self.no_overflow_release,
             release_policy: self.release_policy.clone(),
             dry_run: self.dry_run,
+            parts: parts_of(&self.only),
         }
     }
 }
@@ -363,6 +402,13 @@ fn print_result(
                 counts.tactics,
                 counts.formations
             )?;
+            if counts.league_moves > 0 {
+                writeln!(
+                    out,
+                    "  {} clubs would move between league divisions.",
+                    counts.league_moves
+                )?;
+            }
         }
         Outcome::NoChanges => {
             writeln!(
@@ -382,6 +428,13 @@ fn print_result(
                 counts.tactics,
                 counts.formations
             )?;
+            if counts.league_moves > 0 {
+                writeln!(
+                    out,
+                    "  {} clubs moved between league divisions.",
+                    counts.league_moves
+                )?;
+            }
             if same_file(&result.target_path, &request.edit_path) {
                 writeln!(out, "  Updated file:  {}", result.target_path.display())?;
             } else {
@@ -553,14 +606,15 @@ fn cmd_inspect(edit_file: &Path, out: &mut dyn Write) -> io::Result<i32> {
         }
     };
     let counts = file.counts();
-    writeln!(out, "\nGame version:  {game_version}")?;
-    writeln!(out, "Players:       {}", counts.players)?;
-    writeln!(out, "Teams:         {}", counts.teams)?;
-    writeln!(out, "Managers:      {}", counts.managers)?;
-    writeln!(out, "Stadiums:      {}", counts.stadiums)?;
-    writeln!(out, "Competitions:  {}", counts.competitions)?;
-    writeln!(out, "Rosters:       {}", counts.team_players)?;
-    writeln!(out, "Game plans:    {}", counts.game_plans)?;
+    writeln!(out, "\nGame version:    {game_version}")?;
+    writeln!(out, "Edited players:  {}", counts.players)?;
+    writeln!(out, "Roster players:  {}", file.roster_player_ids().len())?;
+    writeln!(out, "Teams:           {}", counts.teams)?;
+    writeln!(out, "Managers:        {}", counts.managers)?;
+    writeln!(out, "Stadiums:        {}", counts.stadiums)?;
+    writeln!(out, "Competitions:    {}", counts.competitions)?;
+    writeln!(out, "Rosters:         {}", counts.team_players)?;
+    writeln!(out, "Game plans:      {}", counts.game_plans)?;
 
     let report = file.validate_integrity();
     writeln!(

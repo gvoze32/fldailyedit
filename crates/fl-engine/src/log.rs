@@ -31,6 +31,10 @@ fn empty_object() -> Value {
     Value::Object(serde_json::Map::new())
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// One audit line. Fields serialize in declaration order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LogRecord {
@@ -90,6 +94,10 @@ pub struct LogRecord {
     pub proof_urls: Vec<String>,
     #[serde(default = "empty_object")]
     pub native_metadata: Value,
+    /// Written by a run that did not check transfers (it updated only other
+    /// parts of the save). The auto transfer window ignores such records.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub window_neutral: bool,
 }
 
 impl LogRecord {
@@ -494,6 +502,7 @@ mod tests {
             source_urls: Vec::new(),
             proof_urls: Vec::new(),
             native_metadata: empty_object(),
+            window_neutral: false,
         }
     }
 

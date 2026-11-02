@@ -254,6 +254,7 @@ fn match_and_plan_retains_partial_matches_for_safety_accounting() {
         overflow: &NoOverflow,
         allow_overflow_release: false,
         today: NaiveDate::from_ymd_opt(2026, 10, 24).unwrap(),
+        squad_moves: true,
     });
 
     assert!(out.fully_matched.is_empty());
