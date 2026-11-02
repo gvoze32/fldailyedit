@@ -1,9 +1,10 @@
-//! Port of the pesXdecrypter C implementation (see THIRD_PARTY_NOTICES.md; PES 2021 master key) operating on memory.
+//! Port of the pesXdecrypter C implementation (see THIRD_PARTY_NOTICES.md) operating on memory.
 //!
 //! An EDIT file is `encryption header (320) | file header (208) | description |
 //! logo | data | serial`, each part stream-encrypted with an MT19937 keystream.
-//! [`decrypt`] splits a file into [`Blocks`]; [`encrypt`] is its exact inverse
-//! and is deterministic (no randomness anywhere in the scheme), so
+//! [`decrypt`] splits a file into [`Blocks`] and detects which [`MasterKey`]
+//! wrote it; [`encrypt`] is its exact inverse with that same key and is
+//! deterministic (no randomness anywhere in the scheme), so
 //! `encrypt(decrypt(f)) == f` for an untouched file.
 
 mod mt19937;
@@ -20,13 +21,43 @@ pub const ENCRYPTION_HEADER_SIZE: usize = 320;
 const KEY_SIZE: usize = 64;
 const PREFIX_SIZE: usize = ENCRYPTION_HEADER_SIZE + FILE_HEADER_SIZE;
 
-/// PES 2021 regular edition master key (`MasterKeyPes21`).
-const MASTER_KEY: [u8; KEY_SIZE] = [
+/// PES 2021 regular edition master key (`MasterKeyPes21`); also Football Life 2026.
+const MASTER_KEY_PES21: [u8; KEY_SIZE] = [
     0x90, 0x61, 0xD8, 0x66, 0x43, 0x77, 0x24, 0xF8, 0x92, 0xBA, 0xB8, 0x71, 0x21, 0xC7, 0x60, 0x63,
     0xF0, 0x91, 0x9A, 0x7D, 0xED, 0x47, 0x80, 0xDE, 0x51, 0xF5, 0xDD, 0xD1, 0x08, 0xFE, 0x32, 0x84,
     0xF5, 0x09, 0x92, 0x00, 0xB2, 0x3E, 0x88, 0x9F, 0xEB, 0x24, 0x43, 0x05, 0x58, 0x76, 0x00, 0x22,
     0x9B, 0xFE, 0xEC, 0xF6, 0x50, 0x00, 0x29, 0xD3, 0x42, 0x75, 0x50, 0xB9, 0xEC, 0xD2, 0xF6, 0x75,
 ];
+
+/// SP Football Life 2027 master key (`FL_key.bin`, published by SmokePatch).
+const MASTER_KEY_FL27: [u8; KEY_SIZE] = [
+    0xCE, 0xF7, 0x98, 0xB8, 0x71, 0x82, 0x31, 0xB5, 0x32, 0x5D, 0xFB, 0xC7, 0x30, 0x1B, 0xA4, 0xAD,
+    0xF8, 0x4F, 0xD4, 0xD8, 0x5C, 0x4B, 0x0E, 0x6B, 0x4F, 0x3E, 0xAC, 0x61, 0xF2, 0x28, 0x15, 0xC9,
+    0x0C, 0x43, 0x10, 0x55, 0x97, 0xC1, 0x3F, 0x00, 0xD3, 0x67, 0x4F, 0x3B, 0x63, 0x73, 0x1F, 0x9D,
+    0x28, 0xE4, 0x79, 0xB7, 0x33, 0x33, 0x13, 0x66, 0xB8, 0x71, 0x09, 0x92, 0x5E, 0x90, 0x2C, 0x05,
+];
+
+/// The master key a save was encrypted with. A save is re-encrypted with the
+/// key it was read with, or its game cannot load it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MasterKey {
+    /// Vanilla PES 2021 and SP Football Life 2026.
+    Pes2021,
+    /// SP Football Life 2027.
+    FootballLife2027,
+}
+
+impl MasterKey {
+    /// Detection order of [`decrypt`].
+    const ALL: [Self; 2] = [Self::Pes2021, Self::FootballLife2027];
+
+    fn bytes(self) -> &'static [u8; KEY_SIZE] {
+        match self {
+            Self::Pes2021 => &MASTER_KEY_PES21,
+            Self::FootballLife2027 => &MASTER_KEY_FL27,
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum CryptoError {
@@ -47,6 +78,8 @@ pub enum CryptoError {
 /// untouched.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Blocks {
+    /// Master key the file was encrypted with; [`encrypt`] reuses it.
+    pub key: MasterKey,
     /// `encryptHeader.dat`: key material for the remaining parts.
     pub encryption_header: [u8; ENCRYPTION_HEADER_SIZE],
     /// `header.dat`; its size fields are rewritten from the block lengths on
@@ -65,6 +98,7 @@ pub struct Blocks {
 impl std::fmt::Debug for Blocks {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Blocks")
+            .field("key", &self.key)
             .field("description", &self.description.len())
             .field("logo", &self.logo.len())
             .field("data", &self.data.len())
@@ -103,7 +137,9 @@ impl Blocks {
     }
 }
 
-/// Decrypt a whole EDIT file.
+/// Decrypt a whole EDIT file with whichever known master key fits it: a wrong
+/// key turns the file header's block sizes into noise that overruns the input.
+/// When no key fits, the error is the PES 2021 key's.
 pub fn decrypt(input: &[u8]) -> Result<Blocks, CryptoError> {
     if input.len() < PREFIX_SIZE {
         return Err(CryptoError::Truncated {
@@ -111,9 +147,23 @@ pub fn decrypt(input: &[u8]) -> Result<Blocks, CryptoError> {
             actual: input.len(),
         });
     }
+    let mut first_error = None;
+    for key in MasterKey::ALL {
+        match decrypt_with(key, input) {
+            Ok(blocks) => return Ok(blocks),
+            Err(error) => {
+                first_error.get_or_insert(error);
+            }
+        }
+    }
+    Err(first_error.expect("at least one master key"))
+}
+
+/// [`decrypt`] with a fixed key; `input` holds at least the prefix.
+fn decrypt_with(key: MasterKey, input: &[u8]) -> Result<Blocks, CryptoError> {
     let (encrypted_header, rest) = input.split_at(ENCRYPTION_HEADER_SIZE);
 
-    let encryption_header = crypt_header(encrypted_header);
+    let encryption_header = crypt_header(key, encrypted_header);
     let rolling = rolling_key(&encryption_header);
 
     let (encrypted_file_header, mut rest) = rest.split_at(FILE_HEADER_SIZE);
@@ -153,6 +203,7 @@ pub fn decrypt(input: &[u8]) -> Result<Blocks, CryptoError> {
     let serial = part(3, serial_size);
 
     Ok(Blocks {
+        key,
         encryption_header,
         header,
         description,
@@ -173,7 +224,7 @@ pub fn encrypt(blocks: &Blocks) -> Result<Vec<u8>, CryptoError> {
     let mut output = vec![0u8; total];
 
     let (header_out, mut rest) = output.split_at_mut(ENCRYPTION_HEADER_SIZE);
-    header_out.copy_from_slice(&crypt_header(&blocks.encryption_header));
+    header_out.copy_from_slice(&crypt_header(blocks.key, &blocks.encryption_header));
 
     let rolling = rolling_key(&blocks.encryption_header);
     let (file_header_out, tail) = std::mem::take(&mut rest).split_at_mut(FILE_HEADER_SIZE);
@@ -209,7 +260,8 @@ pub fn encrypt_verified(blocks: &Blocks) -> Result<Vec<u8>, CryptoError> {
 pub fn verify_round_trip(blocks: &Blocks, encrypted: &[u8]) -> Result<(), CryptoError> {
     let back = decrypt(encrypted)?;
     let header = blocks.synced_header()?;
-    let checks: [(&'static str, bool); 6] = [
+    let checks: [(&'static str, bool); 7] = [
+        ("master key", back.key == blocks.key),
         (
             "encryptHeader.dat",
             back.encryption_header == blocks.encryption_header,
@@ -237,12 +289,12 @@ pub fn encrypt_to_file(blocks: &Blocks, path: &Path) -> Result<(), CryptoError> 
 /// Decrypt the 320-byte encryption header (also its own inverse): bytes
 /// 256..320 stay in clear and, mixed with the master key, seed the keystream
 /// for the rest.
-fn crypt_header(input: &[u8]) -> [u8; ENCRYPTION_HEADER_SIZE] {
+fn crypt_header(key: MasterKey, input: &[u8]) -> [u8; ENCRYPTION_HEADER_SIZE] {
     debug_assert_eq!(input.len(), ENCRYPTION_HEADER_SIZE);
     let mut header_key = [0u8; KEY_SIZE];
     header_key.copy_from_slice(&input[256..]);
     // reverseLongs(masterKey): reverse the bytes of every 8-byte group.
-    let mut shuffled = MASTER_KEY;
+    let mut shuffled = *key.bytes();
     for group in shuffled.as_chunks_mut::<8>().0 {
         group.reverse();
     }

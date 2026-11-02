@@ -28,8 +28,8 @@ const SUBCOMMANDS: [&str; 5] = ["run", "validate", "inspect", "log", "help"];
 #[command(
     name = "FLDailyEdit",
     version,
-    about = "FL Daily Edit: bring a Football Life 2026 / PES 2021 save up to date.",
-    long_about = "FL Daily Edit: bring a Football Life 2026 / PES 2021 save up to date.\n\n\
+    about = "FL Daily Edit: bring a Football Life 2027 / 2026 or PES 2021 save up to date.",
+    long_about = "FL Daily Edit: bring a Football Life 2027 / 2026 or PES 2021 save up to date.\n\n\
         Run without arguments to open the app. `FLDailyEdit --edit-file PATH` is \
         shorthand for `FLDailyEdit run --edit-file PATH`."
 )]

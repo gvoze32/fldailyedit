@@ -16,6 +16,10 @@ original licenses and attribution.
   no external binaries.
 - License: public domain dedication, except the Mersenne Twister generator
   (see next section). The full license text is reproduced below.
+- The SP Football Life 2027 master key (FL27 saves use their own key) is the
+  `FL_key.bin` published by SmokePatch on
+  <https://www.pessmokepatch.com/p/customizations-and-mods.html> for
+  compatibility of editing tools.
 
 ```text
 This is free and unencumbered software released into the public domain.
@@ -96,7 +100,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ## Game data
 
 - The updater works on your own save and game files and includes none of them.
-  Football Life 2026, SmokePatch, and the game databases belong to their
+  Football Life 2027, Football Life 2026, SmokePatch, and the game databases belong to their
   respective authors. Vanilla PES 2021 `Player.bin`, `Team.bin`, and
   `PlayerAssignment.bin` are read from your own installation at run time.
 - Football Life player and team names are read from your game folder's

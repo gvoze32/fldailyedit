@@ -15,6 +15,7 @@ use fl_save::cpk::discover;
 pub const SAVE_FILE_NAME: &str = "EDIT00000000";
 
 const STATE_DIR_NAME: &str = "FLDailyEdit";
+const FL27_RELATIVE: [&str; 5] = ["Documents", "SPGAME", "Football Life", "2027", "save"];
 const FL26_RELATIVE: [&str; 5] = [
     "Documents",
     "KONAMI",
@@ -59,8 +60,10 @@ pub fn state_dir_with(env: Env<'_>) -> Option<PathBuf> {
 
 /// Game family a save folder belongs to, judged from where it lives.
 /// The authoritative answer is [`inspect_save`] (the container header).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Ordered newest game first (discovery order).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SaveFamily {
+    FootballLife27,
     FootballLife26,
     Pes2021,
 }
@@ -68,6 +71,7 @@ pub enum SaveFamily {
 impl SaveFamily {
     pub fn game_name(self) -> &'static str {
         match self {
+            Self::FootballLife27 => "Football Life 2027",
             Self::FootballLife26 => "Football Life 2026",
             Self::Pes2021 => "PES 2021",
         }
@@ -82,9 +86,9 @@ pub struct SaveCandidate {
     pub family: SaveFamily,
 }
 
-/// Saves of Football Life 2026 and vanilla PES 2021 below the user's
-/// Documents folders, Football Life first, then in the order `USERPROFILE`,
-/// `OneDrive`, `OneDriveConsumer` and ascending folder name.
+/// Saves of Football Life 2027, Football Life 2026 and vanilla PES 2021 below
+/// the user's Documents folders, newest game first, then in the order
+/// `USERPROFILE`, `OneDrive`, `OneDriveConsumer` and ascending folder name.
 pub fn discover_saves() -> Vec<SaveCandidate> {
     discover_saves_with(&process_env)
 }
@@ -103,6 +107,10 @@ pub fn discover_saves_with(env: Env<'_>) -> Vec<SaveCandidate> {
         let Some(root) = env(variable).map(PathBuf::from) else {
             continue;
         };
+        add(
+            SaveFamily::FootballLife27,
+            FL27_RELATIVE.iter().fold(root.clone(), |p, c| p.join(c)),
+        );
         add(
             SaveFamily::FootballLife26,
             FL26_RELATIVE.iter().fold(root.clone(), |p, c| p.join(c)),
@@ -129,10 +137,7 @@ pub fn discover_saves_with(env: Env<'_>) -> Vec<SaveCandidate> {
     }
 
     // Stable: within a family, `USERPROFILE` results precede the OneDrive ones.
-    found.sort_by_key(|c| match c.family {
-        SaveFamily::FootballLife26 => 0,
-        SaveFamily::Pes2021 => 1,
-    });
+    found.sort_by_key(|c| c.family);
     found
 }
 
@@ -277,7 +282,9 @@ fn starts_with_fold(path: &Path, prefix: &Path) -> bool {
 /// Which game wrote the save, from the container header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveKind {
-    /// Football Life 2026 (and other non-vanilla patches).
+    /// Football Life 2027 (its own encryption key).
+    FootballLife27,
+    /// Football Life 2026 (and other non-vanilla PES 2021 patches).
     FootballLife26,
     /// Vanilla PES 2021.
     Pes2021,
@@ -286,6 +293,7 @@ pub enum SaveKind {
 impl SaveKind {
     pub fn game_name(self) -> &'static str {
         match self {
+            Self::FootballLife27 => "Football Life 2027",
             Self::FootballLife26 => "Football Life 2026",
             Self::Pes2021 => "PES 2021",
         }
@@ -321,7 +329,9 @@ pub fn inspect_save(path: &Path) -> Result<SaveInfo, InspectError> {
     let edit = fl_save::edit_file::EditFile::from_bytes(blocks.data)?;
     let report = edit.validate_integrity();
     Ok(SaveInfo {
-        kind: if header.is_pes21() {
+        kind: if blocks.key == fl_save::crypto::MasterKey::FootballLife2027 {
+            SaveKind::FootballLife27
+        } else if header.is_pes21() {
             SaveKind::Pes2021
         } else {
             SaveKind::FootballLife26
@@ -397,7 +407,7 @@ mod tests {
     }
 
     #[test]
-    fn discovers_fl26_and_vanilla_saves_including_onedrive_without_writing() {
+    fn discovers_fl27_fl26_and_vanilla_saves_including_onedrive_without_writing() {
         let home = tempfile::tempdir().unwrap();
         let onedrive = tempfile::tempdir().unwrap();
         let konami = "Documents/KONAMI/eFootball PES 2021 SEASON UPDATE";
@@ -429,6 +439,13 @@ mod tests {
                 .join("abc/save")
                 .join(SAVE_FILE_NAME),
         );
+        // FL27 lives outside the KONAMI folder; newest game sorts first even from OneDrive.
+        touch(
+            &onedrive
+                .path()
+                .join("Documents/SPGAME/Football Life/2027/save")
+                .join(SAVE_FILE_NAME),
+        );
         // A save folder without the file is not a save.
         fs::create_dir_all(home.path().join(konami).join("0555/save")).unwrap();
 
@@ -445,12 +462,18 @@ mod tests {
             .iter()
             .map(|c| (c.family, c.edit_file.to_string_lossy().replace('\\', "/")))
             .collect();
-        assert_eq!(summary.len(), 3);
-        assert_eq!(summary[0].0, SaveFamily::FootballLife26);
-        assert!(summary[0].1.ends_with("2026/save/EDIT00000000"));
-        assert_eq!(summary[1].0, SaveFamily::Pes2021);
-        assert!(summary[1].1.ends_with("0123/save/EDIT00000000"));
-        assert!(summary[2].1.ends_with("0999/save/EDIT00000000"));
+        assert_eq!(summary.len(), 4);
+        assert_eq!(summary[0].0, SaveFamily::FootballLife27);
+        assert!(
+            summary[0]
+                .1
+                .ends_with("Football Life/2027/save/EDIT00000000")
+        );
+        assert_eq!(summary[1].0, SaveFamily::FootballLife26);
+        assert!(summary[1].1.ends_with("2026/save/EDIT00000000"));
+        assert_eq!(summary[2].0, SaveFamily::Pes2021);
+        assert!(summary[2].1.ends_with("0123/save/EDIT00000000"));
+        assert!(summary[3].1.ends_with("0999/save/EDIT00000000"));
     }
 
     fn walk(root: &Path) -> Vec<PathBuf> {

@@ -145,6 +145,7 @@ fn synthetic_odd_sizes_match_c_oracle() {
             (0..len).map(|i| ((i * 31 + seed) % 256) as u8).collect()
         };
         let blocks = Blocks {
+            key: MasterKey::Pes2021,
             encryption_header: b64(&case["encryption_header_b64"]).try_into().unwrap(),
             header: b64(&case["header_b64"]).try_into().unwrap(),
             description: pattern(sizes[0], 1),
@@ -170,6 +171,7 @@ fn small_blocks() -> Option<Blocks> {
     let fixtures = fixtures()?;
     let case = &fixtures["synthetic"][0];
     Some(Blocks {
+        key: MasterKey::Pes2021,
         encryption_header: b64(&case["encryption_header_b64"]).try_into().unwrap(),
         header: b64(&case["header_b64"]).try_into().unwrap(),
         description: vec![1; 7],
@@ -236,6 +238,29 @@ fn round_trip_verification_reports_the_failing_block() {
         verify_round_trip(&blocks, &encrypted),
         Err(CryptoError::RoundTripMismatch("data.dat"))
     ));
+}
+
+#[test]
+fn each_master_key_is_detected_and_kept_on_re_encrypt() {
+    let pattern = |len: usize, seed: usize| -> Vec<u8> {
+        (0..len).map(|i| ((i * 31 + seed) % 256) as u8).collect()
+    };
+    for key in MasterKey::ALL {
+        let mut blocks = Blocks {
+            key,
+            encryption_header: pattern(ENCRYPTION_HEADER_SIZE, 7).try_into().unwrap(),
+            header: [0; FILE_HEADER_SIZE],
+            description: pattern(9, 1),
+            logo: pattern(13, 2),
+            data: pattern(1001, 3),
+            serial: pattern(6, 4),
+        };
+        blocks.header = blocks.synced_header().unwrap();
+        let encrypted = encrypt_verified(&blocks).unwrap();
+        let back = decrypt(&encrypted).unwrap();
+        assert_eq!(back, blocks, "{key:?}");
+        assert_eq!(encrypt(&back).unwrap(), encrypted, "{key:?}");
+    }
 }
 
 #[test]

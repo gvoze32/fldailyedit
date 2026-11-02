@@ -48,7 +48,7 @@ pub fn error_copy(code: ErrorCode, stage: Option<Stage>) -> ErrorCopy {
         },
         ErrorCode::InvalidSave => ErrorCopy {
             title: "This save isn't supported",
-            explanation: "The file is not a valid Football Life 2026 / PES 2021 save, or it is damaged.",
+            explanation: "The file is not a valid Football Life 2027 / 2026 or PES 2021 save, or it is damaged.",
             next_steps: &[
                 "Make sure you chose EDIT00000000, not another file.",
                 "Try a recent backup of the save.",

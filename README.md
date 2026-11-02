@@ -1,7 +1,7 @@
 # FL Daily Edit
 
-A simple Windows app that brings your **Football Life** or **PES 2021**
-save up to date with real-world football.
+A simple Windows app that brings your **Football Life 2027**, **Football Life
+2026** or **PES 2021** save up to date with real-world football.
 
 What it updates:
 
@@ -47,9 +47,11 @@ Windows may show "Windows protected your PC" the first time. Click
 ## How to use
 
 1. **Close the game.**
-2. Open `FLDailyEdit.exe`. It finds your save by itself. Saves are in
-   `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\<folder>\save\` and are
-   named `EDIT00000000`. If the app can't find yours, click **Browse…**.
+2. Open `FLDailyEdit.exe`. It finds your save by itself. Saves are named
+   `EDIT00000000`: Football Life 2027 keeps it in
+   `Documents\SPGAME\Football Life\2027\save\`, Football Life 2026 and PES 2021
+   in `Documents\KONAMI\eFootball PES 2021 SEASON UPDATE\<folder>\save\`. If
+   the app can't find yours, click **Browse…**.
 3. Choose your **game folder**: the folder where the game is installed, the
    one that contains the `download` folder. The app often finds it by itself.
    It is required for every save: the app reads the player and club lists from
@@ -66,8 +68,8 @@ where the last one stopped.
 
 ## Good to know
 
-- **Supported:** Football Life and PES 2021. Saves from patches that change
-  the database a lot (such as UML) may not work.
+- **Supported:** Football Life 2027, Football Life 2026 and PES 2021. Saves
+  from patches that change the database a lot (such as UML) may not work.
 - **The game folder is required for every save.** The app reads the player and
   club lists from your own game installation; it does not ship any. Choose the
   game that matches your save, or the update stops before anything is written.

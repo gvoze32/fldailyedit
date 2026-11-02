@@ -13,7 +13,13 @@ const ARCHIVE_STEM_FILTERS: [Option<&str>; 3] = [Some("liveupd"), Some("datapack
 
 const GAME_ROOT_VARIABLES: [&str; 3] = ["FL_GAME_ROOT", "FOOTBALL_LIFE_ROOT", "PES_GAME_ROOT"];
 const GAME_ROOT_PARENT_VARIABLES: [&str; 3] = ["PROGRAMFILES(X86)", "PROGRAMFILES", "LOCALAPPDATA"];
-const GAME_ROOT_NAMES: [&str; 3] = ["SP Football Life 2026", "Football Life 2026", "PES 2021"];
+const GAME_ROOT_NAMES: [&str; 5] = [
+    "SP Football Life 2027",
+    "Football Life 2027",
+    "SP Football Life 2026",
+    "Football Life 2026",
+    "PES 2021",
+];
 
 fn dedup_key(path: &Path) -> String {
     path.to_string_lossy().to_lowercase()

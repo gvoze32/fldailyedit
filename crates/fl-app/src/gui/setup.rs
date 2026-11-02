@@ -196,7 +196,7 @@ pub fn ui(ui: &mut Ui, state: &mut SetupState, actions: &mut Vec<Action>) {
     ui.label(RichText::new("Update your save").heading().strong());
     ui.label(
         RichText::new(
-            "Bring your Football Life 2026 or PES 2021 save up to date with real-world transfers.",
+            "Bring your Football Life 2027, Football Life 2026 or PES 2021 save up to date with real-world transfers.",
         )
         .color(theme::muted(ui)),
     );
@@ -343,7 +343,7 @@ fn game_card(ui: &mut Ui, state: &mut SetupState, actions: &mut Vec<Action>) {
             let edit = ui.add(
                 TextEdit::singleline(&mut state.game_text)
                     .desired_width(width)
-                    .hint_text("e.g. D:\\Games\\Football Life 2026")
+                    .hint_text("e.g. D:\\Games\\Football Life 2027")
                     .margin(vec2(8.0, 6.0)),
             );
             if edit.lost_focus() && edit.changed() {
@@ -412,7 +412,11 @@ mod tests {
         );
         assert!(state.request(false).is_none());
 
-        for kind in [SaveKind::FootballLife26, SaveKind::Pes2021] {
+        for kind in [
+            SaveKind::FootballLife27,
+            SaveKind::FootballLife26,
+            SaveKind::Pes2021,
+        ] {
             state.save = ready(kind);
             state.game = GameStatus::Empty;
             assert_eq!(state.blockers(), [Blocker::ChooseGameFolder]);
