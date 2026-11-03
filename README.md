@@ -66,9 +66,11 @@ Want to see the changes first? Click **Preview changes**. Nothing is saved.
 Run it again whenever you like, for example once a week. Each run picks up
 where the last one stopped.
 
-Only want fresh formations, tactics and lineups, without checking any
-transfers? Under **What to update**, untick **Full update (everything)**,
-then tick only **Formations**, **Tactics** and **Starting XI and bench**.
+**Full update** (above the buttons) is ticked by default and updates
+everything. Untick it to choose what to update: transfers, shirt numbers,
+captains, league teams, formations, tactics, or the starting XI and bench.
+For example, to refresh only formations, tactics and lineups, tick
+**Formations**, **Tactics** and **Starting XI and bench**.
 That is much faster: the app only reads each club's latest lineup and the
 league statistics, and it does not touch transfers, squad numbers or captains.
 It also does not move the transfer window, so your next full update still
@@ -98,8 +100,8 @@ picks up every transfer you haven't applied yet. From the command line use
   that FotMob does not match clearly is left alone and listed as a warning.
   This changes how the game builds its leagues, so start a **new** Master
   League or Become a Legend career afterwards: careers you already started keep
-  their own data. It is the **League teams** option under **What to update**
-  (`--only leagues` from the command line).
+  their own data. It is the **League teams** option once **Full update** is
+  unticked (`--only leagues` from the command line).
 - **The result screen shows a summary.** Every change and every skipped
   transfer is listed in the full report: click **Open report**.
 - **Your save is checked before and after every update.** If anything looks

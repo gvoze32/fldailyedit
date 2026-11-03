@@ -18,7 +18,8 @@ use fl_engine::api::{
 };
 use fl_engine::locations::{SaveCandidate, SaveFamily, SaveInfo, SaveKind};
 
-const SIZE: egui::Vec2 = vec2(780.0, 860.0);
+/// The app's default window size (`gui::run`), so screens show what users see.
+const SIZE: egui::Vec2 = vec2(780.0, 780.0);
 
 fn harness(app: App, theme_choice: Theme) -> Harness<'static, App> {
     Harness::builder()
@@ -157,6 +158,21 @@ fn setup_dark() {
     let mut harness = harness(fx.app, Theme::Dark);
     settle(&mut harness);
     harness.snapshot_options("setup_dark", &options());
+}
+
+#[test]
+fn setup_custom_parts_dark() {
+    if skip_without_baselines() {
+        return;
+    }
+    let mut fx = ready_setup(ScriptedEngine::new(Vec::new(), Ok(UpdateResult::default())));
+    let setup = fx.app.setup_mut();
+    setup.custom = true;
+    setup.parts.transfers = false;
+    setup.parts.leagues = false;
+    let mut harness = harness(fx.app, Theme::Dark);
+    settle(&mut harness);
+    harness.snapshot_options("setup_custom_parts_dark", &options());
 }
 
 #[test]

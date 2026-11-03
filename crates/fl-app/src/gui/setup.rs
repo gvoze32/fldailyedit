@@ -84,7 +84,9 @@ pub struct SetupState {
     pub generation: u64,
     /// Scroll the game-folder card into view on the next frame.
     pub focus_game_folder: bool,
-    /// What to update; everything by default.
+    /// The user picks the parts below instead of a full update.
+    pub custom: bool,
+    /// The parts picked when `custom` (kept while a full update is chosen).
     pub parts: UpdateParts,
 }
 
@@ -105,6 +107,7 @@ impl SetupState {
             game: GameStatus::Empty,
             generation: 0,
             focus_game_folder: false,
+            custom: false,
             parts: UpdateParts::FULL,
         }
     }
@@ -140,11 +143,20 @@ impl SetupState {
             GameStatus::Mismatch { .. } => blockers.push(Blocker::GameFilesMismatch),
             GameStatus::Usable { .. } => {}
         }
-        if !self.parts.any() {
+        if self.custom && !self.parts.any() {
             blockers.push(Blocker::NothingSelected);
         }
         blockers.dedup();
         blockers
+    }
+
+    /// What the next run updates.
+    pub fn chosen_parts(&self) -> UpdateParts {
+        if self.custom {
+            self.parts
+        } else {
+            UpdateParts::FULL
+        }
     }
 
     pub fn ready(&self) -> bool {
@@ -173,7 +185,7 @@ impl SetupState {
             allow_overflow_release: true,
             release_policy: None,
             dry_run,
-            parts: self.parts,
+            parts: self.chosen_parts(),
         })
     }
 }
@@ -242,19 +254,23 @@ pub fn ui(ui: &mut Ui, state: &mut SetupState, actions: &mut Vec<Action>) {
         )
         .color(theme::muted(ui)),
     );
-    ui.add_space(10.0);
+    ui.add_space(8.0);
     theme::callout(ui, Tone::Warn, |ui| {
-        ui.label(RichText::new("Close the game first").strong());
-        ui.label("FL Daily Edit changes your save file directly. A backup is made before anything is written.");
+        ui.label(
+            RichText::new(
+                "Close the game first. A backup of your save is made before anything is written.",
+            )
+            .strong(),
+        );
     });
-    ui.add_space(12.0);
+    ui.add_space(8.0);
 
     save_card(ui, state, actions);
-    ui.add_space(12.0);
+    ui.add_space(8.0);
     game_card(ui, state, actions);
-    ui.add_space(12.0);
-    options_card(ui, state);
-    ui.add_space(16.0);
+    ui.add_space(10.0);
+    update_choice(ui, state);
+    ui.add_space(10.0);
 
     let blockers = state.blockers();
     let enabled = blockers.is_empty();
@@ -291,27 +307,23 @@ fn save_card(ui: &mut Ui, state: &mut SetupState, actions: &mut Vec<Action>) {
     theme::card(ui, |ui| {
         theme::step_title(ui, 1, "Your save", None);
         ui.add_space(4.0);
-        ui.label(RichText::new("The EDIT00000000 file the game loads.").color(theme::muted(ui)));
 
         if !state.detected.is_empty() {
-            ui.add_space(2.0);
-            ui.label(
-                RichText::new("Found on this PC")
-                    .small()
-                    .color(theme::muted(ui)),
-            );
             let selected = state.save_path.clone();
-            for candidate in state.detected.clone() {
-                let is_selected = selected.as_deref() == Some(candidate.edit_file.as_path());
-                let label = format!(
-                    "{}   {}",
-                    candidate.family.game_name(),
-                    candidate.edit_file.display()
-                );
-                if ui.radio(is_selected, label).clicked() && !is_selected {
-                    actions.push(Action::SaveChosen(candidate.edit_file.clone()));
+            let detected = state.detected.clone();
+            let labels = candidate_labels(&detected);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new("Found on this PC:").color(theme::muted(ui)));
+                for (candidate, label) in detected.iter().zip(labels) {
+                    let is_selected = selected.as_deref() == Some(candidate.edit_file.as_path());
+                    let radio = ui
+                        .radio(is_selected, label)
+                        .on_hover_text(candidate.edit_file.display().to_string());
+                    if radio.clicked() && !is_selected {
+                        actions.push(Action::SaveChosen(candidate.edit_file.clone()));
+                    }
                 }
-            }
+            });
             ui.add_space(2.0);
         }
 
@@ -343,6 +355,42 @@ fn save_card(ui: &mut Ui, state: &mut SetupState, actions: &mut Vec<Action>) {
     });
 }
 
+/// Short radio labels for the detected saves: the game, plus the save folder
+/// for PES 2021 (which allows several), plus a counter for any repeat.
+fn candidate_labels(detected: &[SaveCandidate]) -> Vec<String> {
+    let bases: Vec<String> = detected
+        .iter()
+        .map(|candidate| {
+            let name = candidate.family.game_name();
+            let folder = (candidate.family == locations::SaveFamily::Pes2021)
+                .then(|| {
+                    candidate
+                        .edit_file
+                        .parent()
+                        .and_then(Path::parent)
+                        .and_then(Path::file_name)
+                })
+                .flatten();
+            match folder {
+                Some(folder) => format!("{name} ({})", folder.to_string_lossy()),
+                None => name.to_owned(),
+            }
+        })
+        .collect();
+    bases
+        .iter()
+        .enumerate()
+        .map(|(index, base)| {
+            let earlier = bases[..index].iter().filter(|b| *b == base).count();
+            if earlier == 0 {
+                base.clone()
+            } else {
+                format!("{base} ({})", earlier + 1)
+            }
+        })
+        .collect()
+}
+
 fn save_status(ui: &mut Ui, state: &SetupState) {
     match &state.save {
         SaveStatus::Empty => {
@@ -368,73 +416,69 @@ fn save_status(ui: &mut Ui, state: &SetupState) {
     }
 }
 
-fn options_card(ui: &mut Ui, state: &mut SetupState) {
-    theme::card(ui, |ui| {
-        theme::step_title(ui, 3, "What to update", None);
-        ui.add_space(4.0);
-        let mut full = state.parts.is_full();
-        if ui
-            .checkbox(
-                &mut full,
-                RichText::new("Full update (everything)").strong(),
-            )
-            .on_hover_text("Tick everything below. Recommended.")
-            .changed()
-        {
-            state.parts = if full {
-                UpdateParts::FULL
-            } else {
-                UpdateParts {
-                    transfers: false,
-                    shirt_numbers: false,
-                    captains: false,
-                    formations: false,
-                    tactics: false,
-                    lineups: false,
-                    leagues: false,
+/// "Full update" by default; unticking it reveals the individual parts.
+fn update_choice(ui: &mut Ui, state: &mut SetupState) {
+    let mut full = !state.custom;
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut full, RichText::new("Full update").strong());
+        let note = if full {
+            "recommended: transfers, numbers, captains, formations, tactics, lineups and leagues"
+        } else {
+            "choose what to update"
+        };
+        ui.label(RichText::new(note).small().color(theme::muted(ui)));
+    });
+    state.custom = !full;
+    if full {
+        return;
+    }
+
+    let parts = &mut state.parts;
+    let options: [(&mut bool, &str, &str); 7] = [
+        (
+            &mut parts.transfers,
+            "Transfers",
+            "Signings, releases, loans and loan returns.",
+        ),
+        (
+            &mut parts.shirt_numbers,
+            "Shirt numbers",
+            "Squad numbers from the clubs' current squads.",
+        ),
+        (&mut parts.captains, "Captains", "Club captains."),
+        (
+            &mut parts.leagues,
+            "League teams",
+            "Move promoted and relegated clubs to their current league. Start a new career afterwards.",
+        ),
+        (
+            &mut parts.formations,
+            "Formations",
+            "Each club's formation from its latest match.",
+        ),
+        (
+            &mut parts.tactics,
+            "Tactics",
+            "Attacking and defensive style based on how each club plays.",
+        ),
+        (
+            &mut parts.lineups,
+            "Starting XI and bench",
+            "The best-rated player for each position starts.",
+        ),
+    ];
+    ui.indent("update_parts", |ui| {
+        egui::Grid::new("update_parts_grid")
+            .num_columns(4)
+            .spacing(vec2(24.0, 4.0))
+            .show(ui, |ui| {
+                for (index, (value, label, hint)) in options.into_iter().enumerate() {
+                    ui.checkbox(value, label).on_hover_text(hint);
+                    if index == 3 {
+                        ui.end_row();
+                    }
                 }
-            };
-        }
-        ui.add_space(2.0);
-        let parts = &mut state.parts;
-        let options: [(&mut bool, &str, &str); 7] = [
-            (
-                &mut parts.transfers,
-                "Transfers",
-                "Signings, releases, loans and loan returns.",
-            ),
-            (
-                &mut parts.shirt_numbers,
-                "Shirt numbers",
-                "Squad numbers from the clubs' current squads.",
-            ),
-            (&mut parts.captains, "Captains", "Club captains."),
-            (
-                &mut parts.formations,
-                "Formations",
-                "Each club's formation from its latest match.",
-            ),
-            (
-                &mut parts.tactics,
-                "Tactics",
-                "Attacking and defensive style based on how each club plays.",
-            ),
-            (
-                &mut parts.lineups,
-                "Starting XI and bench",
-                "The best-rated player for each position starts.",
-            ),
-            (
-                &mut parts.leagues,
-                "League teams",
-                "Move promoted and relegated clubs to their current league. Start a new career afterwards.",
-            ),
-        ];
-        ui.horizontal_wrapped(|ui| {
-            for (value, label, hint) in options {
-                ui.checkbox(value, label).on_hover_text(hint);
-            }
-        });
+            });
     });
 }
 
@@ -447,7 +491,7 @@ fn game_card(ui: &mut Ui, state: &mut SetupState, actions: &mut Vec<Action>) {
         ui.add_space(4.0);
         ui.label(
             RichText::new(
-                "Choose the folder where the game is installed (the one that contains the download folder). The app reads the player and club lists from your game.",
+                "Where the game is installed (the folder with the download folder). Player and club lists are read from it.",
             )
             .color(theme::muted(ui)),
         );
@@ -558,6 +602,27 @@ mod tests {
             request.output_path.is_none(),
             "the app always updates in place"
         );
+    }
+
+    #[test]
+    fn full_update_ignores_the_stored_custom_choice_and_custom_needs_one_part() {
+        let mut state = SetupState::new(None, None);
+        state.save = ready(SaveKind::FootballLife26);
+        state.game_path = Some("D:/Games/FL".into());
+        state.game = GameStatus::Usable {
+            archives: vec!["D:/Games/FL/download/data_extra.cpk".into()],
+        };
+        state.parts = UpdateParts {
+            captains: true,
+            ..UpdateParts::NONE
+        };
+        assert_eq!(state.request(false).unwrap().parts, UpdateParts::FULL);
+
+        state.custom = true;
+        assert_eq!(state.request(false).unwrap().parts, state.parts);
+        state.parts.captains = false;
+        assert_eq!(state.blockers(), [Blocker::NothingSelected]);
+        assert!(state.request(false).is_none());
     }
 
     #[test]

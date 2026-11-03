@@ -16,7 +16,9 @@ pub struct Settings {
     pub game_root: Option<PathBuf>,
     /// Whether the progress log pane was left open.
     pub log_open: bool,
-    /// The parts of the save chosen last time (everything by default).
+    /// The user picked parts instead of a full update last time.
+    pub custom_parts: bool,
+    /// The parts picked last time (all by default).
     pub parts: PartsSetting,
 }
 
@@ -114,6 +116,7 @@ mod tests {
             save_path: Some("C:/save/EDIT00000000".into()),
             game_root: Some("D:/Games/PES 2021".into()),
             log_open: true,
+            custom_parts: true,
             parts: PartsSetting {
                 leagues: false,
                 ..PartsSetting::default()

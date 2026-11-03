@@ -74,6 +74,17 @@ impl UpdateParts {
         leagues: true,
     };
 
+    /// Nothing; a base for picking single parts.
+    pub const NONE: Self = Self {
+        transfers: false,
+        shirt_numbers: false,
+        captains: false,
+        formations: false,
+        tactics: false,
+        lineups: false,
+        leagues: false,
+    };
+
     pub fn is_full(&self) -> bool {
         *self == Self::FULL
     }
